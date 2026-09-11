@@ -42,8 +42,8 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
                     // One multi-row statement carries the whole set, so walk the flattened
                     // params in groups of five rather than destructuring a single row.
                     let inserted = 0;
-                    for (let i = 0; i + 4 < params.length; i += 5) {
-                        let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+                    for (let i = 0; i + 5 < params.length; i += 6) {
+                        let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 6);
                         let dup = rows.some(r => r.snapshot_block === snapshot_block && r.capability === capability
                             && r.signing_pubkey === signing_pubkey && r.source === source);
                         if (!dup) { rows.push({ id: rows.length + 1, snapshot_block, capability, signing_pubkey, amount, source }); inserted++; }

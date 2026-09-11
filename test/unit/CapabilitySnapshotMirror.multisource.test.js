@@ -44,8 +44,8 @@ function memDb() {
                 // The whole set arrives as ONE multi-row statement (that is what makes the
                 // mirror write all-or-nothing), so walk the flattened params in groups of
                 // five instead of destructuring a single row.
-                for (let i = 0; i + 4 < params.length; i += 5) {
-                    let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+                for (let i = 0; i + 5 < params.length; i += 6) {
+                    let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 6);
                     source = source != null ? source : '';
                     if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability &&
                                              r.signing_pubkey === signing_pubkey && r.source === source))

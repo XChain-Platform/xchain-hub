@@ -32,6 +32,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
         XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
+const ocr               = require('./oracle_clamp_reference_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const eq                = require('./equivocation_header.js');
@@ -143,6 +144,15 @@ class OracleConsensus extends EventEmitter {
         // Surfaced as abandoned_rounds through OracleRound.getSubmissionsInfo, so
         // "this hub keeps losing rounds" is legible without a DB query.
         this._abandonedRounds    = 0;
+
+        // Rounds whose PROPOSE was judged against a clamp reference this hub's own
+        // database had not caught up to, counted after the round-aligned re-read
+        // still came back behind. Same counter convention as _roundTimeouts.
+        this._staleClampReference = 0;
+
+        // Round of the last re-read ATTEMPT, so a hub whose database is genuinely
+        // behind reads at most once per round instead of once per PROPOSE.
+        this._lastFinalizedRefreshRound = null;
         this._lastAbandonedRound = null;
 
         // When each round became ready to finalize (Date.now() at finalizeRound's
@@ -728,6 +738,18 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
+        // Before ANY path aggregates, bootstrap included: a hub clamping against an
+        // older round emits a median its peers will not co-sign. After every skip
+        // guard, so a skipped round costs no read.
+        //
+        // GATED on oracle_clamp_reference_activation.js, keyed on the round's own BTC
+        // block height (the value that locked this round's snapshot above). Below it
+        // the reference keeps its pre-alignment writers only, so a mixed-version fleet
+        // never judges one round against two different references.
+        if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+            await this._refreshLastFinalizedForRound(round);
+        }
+
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
             : this._getQuorum();
@@ -1100,6 +1122,19 @@ class OracleConsensus extends EventEmitter {
         if (computedDigest !== digest) {
             console.warn('Oracle: PROPOSE digest mismatch from ' + envelope.sender + ' for round ' + round);
             return;
+        }
+
+        // Align the clamp reference to THIS round before the co-sign gate below reads
+        // it. Placed after the digest and known-sender checks so an unsigned or forged
+        // PROPOSE cannot make a hub query its database.
+        //
+        // GATED on oracle_clamp_reference_activation.js, keyed on the envelope's own
+        // btcBlockHeight: the same field that becomes `blockHeight` for the
+        // weighted-quorum gate below, so the follower and the leader evaluate one round
+        // against one height. The header records why reading it ahead of the freshness
+        // bound is safe.
+        if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+            await this._refreshLastFinalizedForRound(round);
         }
 
         // Resolve the round's locked snapshot BEFORE validating the proposer
@@ -2225,13 +2260,18 @@ class OracleConsensus extends EventEmitter {
             }
         } else {
             let snap = await capSnapshot.getSnapshot(capability, block);
-            if (snap && Array.isArray(snap.validators))
+            if (snap && Array.isArray(snap.validators)) {
                 validators = snap.validators.map(v => ({
                     pubkey: v.pubkey,
                     source: '',
                     weight: String(v.amount != null ? v.amount : '0'),
                     amount: String(v.amount != null ? v.amount : '0')
                 }));
+                // getSnapshot marks an over-cap COUNT set truncated too, and the persist
+                // guard reads the marker off this array, so carry it in both modes or the
+                // mirror takes a partial set below the stake-weighted flag day.
+                if (snap.truncated === true) validators.truncated = true;
+            }
         }
         return validators;
     }
@@ -2489,6 +2529,41 @@ class OracleConsensus extends EventEmitter {
         if (!this._lastFinalizedRounds) return null;
         let r = this._lastFinalizedRounds.get(coinPair);
         return Number.isFinite(r) ? r : null;
+    }
+
+    // Highest round any cached reference came from, or null when nothing is
+    // stamped. This is the cache's position, which is what "behind the round being
+    // judged" is measured against.
+    _maxCachedFinalizedRound() {
+        if (!this._lastFinalizedRounds || this._lastFinalizedRounds.size === 0) return null;
+        let max = null;
+        for (const r of this._lastFinalizedRounds.values()) {
+            if (Number.isFinite(r) && (max === null || r > max)) max = r;
+        }
+        return max;
+    }
+
+    // Make the reference a function of the round, not of when this process booted:
+    // the timed reseed bounds staleness per hub clock, so two hubs can judge one
+    // PROPOSE against different rounds and co-sign differently.
+
+    // Fail-soft and monotonic like the seed it delegates to: carries the reference
+    // FORWARD only, never clears it, never throws on the consensus path.
+    async _refreshLastFinalizedForRound(round) {
+        if (!Number.isInteger(round)) return;
+        if (this._lastFinalizedRefreshRound === round) return;
+        this._lastFinalizedRefreshRound = round;
+
+        // The reference for round N is round N-1; anything at or past that is current.
+        const cached = this._maxCachedFinalizedRound();
+        if (cached !== null && cached >= round - 1) return;
+
+        await this._seedLastFinalizedPrices({ quiet: true });
+
+        // Still behind after a read means this hub's own database never received the
+        // previous round. Diagnostic only; nothing gates on it.
+        const after = this._maxCachedFinalizedRound();
+        if (after === null || after < round - 1) this._staleClampReference++;
     }
 
     // Record one pair's finalized price, newest round wins. Returns true when the

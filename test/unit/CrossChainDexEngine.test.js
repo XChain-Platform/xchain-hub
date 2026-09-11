@@ -1345,6 +1345,32 @@ describe('CrossChainDexEngine', function () {
             let inserted = await eng._insertMatchRow(reviveRow());
             expect(inserted).to.be.false;
         });
+
+        // The INSERT names its columns, so a column added to one side only fails
+        // at runtime on the venue rather than here. The chain-identity stamp (btc_chain_id)
+        // is the newest of them; the assertion is the general rule, not that one column.
+        it('names only columns the cross_chain_matches DDL declares', async function () {
+            let hub = makeDexHub();
+            let q = sinon.stub().resolves({ affectedRows: 1 });
+            hub.db.doQuery = q;
+            hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 131, blockTime: 1, chainId: 'a'.repeat(64) });
+            let eng = new CrossChainDexEngine(hub);
+            await eng._insertMatchRow(reviveRow());
+
+            let sql  = String(q.getCall(0).args[0]);
+            let cols = sql.match(/\(([^)]*)\) VALUES/)[1].split(',').map(s => s.trim());
+            let ddl  = require('fs').readFileSync(
+                require('path').join(__dirname, '..', '..', 'src', 'sql', 'cross_chain_matches.sql'), 'utf8');
+            let declared = new Set();
+            for (let line of ddl.split('\n')) {
+                let m = line.match(/^\s{4}([a-z_]+)\s+[A-Z]/);
+                if (m) declared.add(m[1]);
+            }
+            for (let c of cols)
+                expect(declared.has(c), 'INSERT names a column the DDL does not declare: ' + c).to.be.true;
+            expect(cols).to.include('btc_chain_id');
+            expect(q.getCall(0).args[1]).to.have.lengthOf(cols.length);
+        });
     });
 
     // ── stop() ────────────────────────────────────────────────────────────────

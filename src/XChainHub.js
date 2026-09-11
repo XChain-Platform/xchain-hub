@@ -48,6 +48,7 @@ const presence           = require('./lib/oracle_round_presence.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
+const StakeWeightFeed    = require('./StakeWeightFeed.js');
 const StakeShareWatcher  = require('./StakeShareWatcher.js');
 const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
@@ -84,16 +85,23 @@ const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXP
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
 class XChainHub {
-    constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) {
+    constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig, opts) {
         this.dbHost    = dbHost;
         this.dbPort    = dbPort;
         this.dbName    = dbName;
         this.dbUser    = dbUser;
         this.dbPass    = dbPass;
         this.p2pConfig = p2pConfig || null;
-        // Consensus activation gating (notably STAKE_WEIGHTED_QUORUM). Set in validator
-        // mode, validated in api.js; '' in standalone, where no consensus runs.
-        this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK) : '';
+        // Activation gating (notably STAKE_WEIGHTED_QUORUM). In validator mode it comes
+        // from p2pConfig, validated in api.js. A STANDALONE hub runs no consensus but
+        // still INGESTS network-keyed content (PriceAggregator.receiveValidatedBatch
+        // resolves the EQUIV wrap, the quorum mode, the sig-tally order and the pair-name
+        // bound off this string), so it takes the network api.js validated the same way
+        // for HUB_NETWORK there. Unset stays '', the pre-existing behaviour of every
+        // single-host deployment. p2pConfig === null, never emptiness here, remains the
+        // standalone-mode signal for startP2P and everything gated behind it.
+        this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK)
+                       : ((opts && opts.network) ? String(opts.network) : '');
         // Seeded HERE, not in startCapabilities: startP2P constructs
         // FullNodeChallengeRound first and it snapshots cfg.FULLNODE at construction.
         // Never creates p2pConfig; a null one is startP2P's standalone-mode signal.
@@ -117,6 +125,12 @@ class XChainHub {
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
+        // The federation's stake view for a hub that serves no capability of its own.
+        // Built here for the same reason as the snapshot above: it answers the
+        // threshold question the snapshot asks on its very first fetch, which happens
+        // before startCapabilities decides what this hub can serve. Inert on a hub
+        // whose capability registry carries its own thresholds.
+        this.stakeWeightFeed         = new StakeWeightFeed(this);
         this.stakeShareWatcher       = null;  // minted in startCapabilities(); watches our own stake share vs the weighted quorum gate
         this.providerRegistry        = null;
         this.attestationRound        = null;
@@ -165,6 +179,15 @@ class XChainHub {
         this.priceAggregator.on('row:deleted', (event) => {
             this.hubDbBroadcaster.broadcastDeletion(event);
         });
+        // Arm the derived `price` capability snapshot pass. Armed here, beside the
+        // aggregator and BEFORE startP2P/startOracle, because it must run on a hub that
+        // never reaches either: without it nothing writes a `price` capability snapshot
+        // on a non-consensus hub, its mirror stays empty, and its indexer records every
+        // on-chain PRICE batch `invalid: insufficient signer stake`. The pass itself
+        // disarms on a hub that DOES run oracle consensus, whose round-finalization
+        // writer already owns those rows; see PriceAggregator._runsOracleConsensus for
+        // why that decision is deferred to the first pass rather than taken here.
+        this.priceAggregator.startPriceCapabilityDerivation();
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
@@ -363,9 +386,12 @@ class XChainHub {
         this.oraclePublisher = new OraclePublisher(this);
         // The single wiring point for ALL on-chain DOGE publishing: StateAnchorPublisher
         // borrows these hooks via _resolveSigner(). Throws on a broken module.
+        //
+        // Every applySignerHooks call below names the rail its publisher settles on.
+        // The operator signer holds ONE key; the loader refuses to wire it into a
+        // publisher whose chain the module does not declare.
         let signerHooks = loadSignerHooks();
-        if(signerHooks){
-            applySignerHooks(this.oraclePublisher, signerHooks);
+        if(signerHooks && applySignerHooks(this.oraclePublisher, signerHooks, 'DOGE')){
             console.log('OraclePublisher: operator signer wired (' + signerHooks.source + ')');
         }
         await this.oraclePublisher.start();
@@ -397,9 +423,12 @@ class XChainHub {
         this.attestationPublisher  = new AttestationPublisher(this);
         // Mirrors startOracle's signer wiring: without it a validator finalizes ATTEST
         // responses but never broadcasts them and the queue grows forever.
+        // Wired on the DOGE rail it has always used. Its response leg is retired in
+        // practice by AttestationResponseMirror, and the leg's own chain
+        // declaration belongs with that retirement, not with this change; the
+        // AttestationPublisher/AttestationRelay files are owned elsewhere right now.
         let attestationSignerHooks = loadSignerHooks();
-        if(attestationSignerHooks){
-            applySignerHooks(this.attestationPublisher, attestationSignerHooks);
+        if(attestationSignerHooks && applySignerHooks(this.attestationPublisher, attestationSignerHooks, 'DOGE')){
             console.log('AttestationPublisher: operator signer wired (' + attestationSignerHooks.source + ')');
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
@@ -419,15 +448,18 @@ class XChainHub {
         // on a network whose mirror activation entry is null.
         this.attestationBatchPublisher = new AttestationBatchPublisher(this);
         if(attestationSignerHooks){
-            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks);
+            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks, 'DOGE');
         }
 
         // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
         // broadcasts on BTC and takes the publisher's signer; its v4 response leg
         // broadcasts on the ORIGIN chain, so it is wired separately per chain.
+        // Wired on DOGE, unchanged: the relay owns its own per-chain rails
+        // (setChainWalletSignHook) and its file is owned elsewhere right now, so its
+        // home-leg chain declaration is deliberately left to that owner.
         this.attestationRelay = new AttestationRelay(this);
         if(attestationSignerHooks){
-            applySignerHooks(this.attestationRelay, attestationSignerHooks);
+            applySignerHooks(this.attestationRelay, attestationSignerHooks, 'DOGE');
         }
 
         await this.attestationConsensus.start();
@@ -472,9 +504,12 @@ class XChainHub {
         // A hub running this tier without startOracle still needs a SlashDetector.
         if(!this.slashDetector) this.slashDetector = new SlashDetector(this);
         this.fullNodeChallenge = new FullNodeChallengeRound(this);
+        // NODEPROOF verdicts settle on BTC. A DOGE-only operator module (every module
+        // written before the `chains` declaration) is refused here and the round stays
+        // observe-only with a warn line, instead of signing a BTC payload with the DOGE
+        // key and burning a DOGE fee on it.
         let fnSignerHooks = loadSignerHooks();
-        if(fnSignerHooks){
-            applySignerHooks(this.fullNodeChallenge, fnSignerHooks);
+        if(fnSignerHooks && applySignerHooks(this.fullNodeChallenge, fnSignerHooks, 'BTC')){
             console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
         }
         await this.fullNodeChallenge.start();
@@ -489,8 +524,7 @@ class XChainHub {
         // construction does not depend on startOracle having run.
         this.rollcallRound = new RollcallRound(this);
         let rcSignerHooks = loadSignerHooks();
-        if(rcSignerHooks){
-            applySignerHooks(this.rollcallRound, rcSignerHooks);
+        if(rcSignerHooks && applySignerHooks(this.rollcallRound, rcSignerHooks, 'DOGE')){
             console.log('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
         }
         await this.rollcallRound.start();
@@ -1676,10 +1710,12 @@ class XChainHub {
         return true;
     }
 
-    // Which BTC network this hub talks to. In validator mode the answer is this.network
-    // and nothing else; the configs table only confirms that network has an indexer, and
-    // a tree carrying only OTHER networks throws. The old first-found order let a mainnet
-    // validator anchor to the REGTEST tip. Standalone hubs keep the order for dev loops.
+    // Which BTC network this hub talks to. For a hub that DECLARED one (every validator,
+    // and a standalone hub whose operator set HUB_NETWORK) the answer is this.network and
+    // nothing else; the configs table only confirms that network has an indexer, and a
+    // tree carrying only OTHER networks throws. The old first-found order let a mainnet
+    // validator anchor to the REGTEST tip. A hub with no declared network keeps the
+    // regtest>testnet>mainnet order for dev loops.
     async _resolveBtcNetwork(){
         // A hub told which network it is never guesses: with no configs, its own is the answer.
         if(!this.db) return this.network || 'mainnet';
@@ -1797,9 +1833,10 @@ class XChainHub {
             let port = (nested && nested['port']) || netConfig['INDEXER_API_PORT'];
             return (host && port) ? ('http://' + host + ':' + port) : null;
         };
-        // A validator hub reads ONLY its own network's indexer. The preference order
-        // below is a dev-loop convenience that, on a multi-network tree, silently handed
-        // a mainnet-gated hub the regtest indexer.
+        // A hub that declared its network (any validator, and a standalone hub whose
+        // operator set HUB_NETWORK) reads ONLY that network's indexer. The preference
+        // order below is a dev-loop convenience for a hub that declared none, and on a
+        // multi-network tree it silently handed a mainnet-gated hub the regtest indexer.
         if(this.network) return urlFor(cc[this.network]);
         // Standalone/dev: prefer regtest > testnet > mainnet so dev loops Just Work.
         // Production should set <COIN>_INDEXER_API_URL explicitly.
@@ -2028,6 +2065,10 @@ class XChainHub {
         if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
         if(this._transportSetTimer){ clearInterval(this._transportSetTimer); this._transportSetTimer = null; }
         if(this.stakeShareWatcher){ this.stakeShareWatcher.stop(); }
+        // Disarmed with the other timers, and for the same reason the attestation batch
+        // publisher is: its pass ends in a DB write, so leaving it armed past db.close()
+        // would run one against a dead pool.
+        if(this.priceAggregator) this.priceAggregator.stopPriceCapabilityDerivation();
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();

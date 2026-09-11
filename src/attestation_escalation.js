@@ -24,7 +24,9 @@
  *      a request until deadline expiry. The leader index advances one slot
  *      down the responsible set per `rotationWindowBlocks` of elapsed chain
  *      time, capped at MAX_LEADER_ROTATIONS (spec §8.2: "rotation count
- *      capped at 3").
+ *      capped at 3"). Slots whose member the CALLER has proven silent are
+ *      stepped over for free, so the cap counts live rotations only; see
+ *      effectiveLeaderSlot.
  *
  *   2. MODEL FALLBACK - a provider whose primary model/vendor is down must
  *      not burn the whole deadline window re-trying the same dead endpoint.
@@ -62,16 +64,90 @@ function escalationStep(latestBlock, requestBlock, confirmations, rotationWindow
     return Math.floor(blocksElapsed(latestBlock, requestBlock, confirmations) / win);
 }
 
-// Leader slot for a given escalation step. Rotates down the hash-ordered
-// responsible set one slot per step, stopping at the rotation cap (or the
-// end of the set for small sets). Never wraps: wrapping back to a leader
-// already proven silent buys nothing and makes the audit trail ambiguous.
-function leaderIndex(step, responsibleCount){
+// Membership test over the caller's silent-slot collection, which may be a Set,
+// an Array or absent. Absent means "nothing proven silent", i.e. the plain
+// pre-skip ladder.
+function isSilentSlot(silentSlots, i){
+    if(!silentSlots) return false;
+    if(typeof silentSlots.has === 'function') return !!silentSlots.has(i);
+    return !!silentSlots[i];
+}
+
+// First slot at or after `from` that is not proven silent, or -1 when the set
+// runs out.
+function nextLiveSlot(from, count, silentSlots){
+    for(let i = from; i < count; i++){
+        if(!isSilentSlot(silentSlots, i)) return i;
+    }
+    return -1;
+}
+
+// EFFECTIVE leader slot for a given escalation step, given the slots the caller
+// has proven silent (ledger P60). Rotates down the hash-ordered responsible set
+// one slot per step, stepping OVER a silent slot instead of stopping on it.
+//
+// Three properties this has to hold, and the reason for each:
+//
+//   - A skip is free. Only a rotation onto a LIVE slot counts against
+//     MAX_LEADER_ROTATIONS, so a set whose first slots are dead still gets the
+//     full three live attempts the cap promises.
+//   - It never wraps. A slot already proven silent is never returned to: the
+//     walk only ever moves forward, so the audit trail stays unambiguous and no
+//     round re-elects a member the fleet has already watched say nothing.
+//   - A dead end HOLDS. When no live slot remains ahead, the walk stays on the
+//     last live slot it reached rather than falling off the end, so the round
+//     still names a leader (a leaderless round has no canonical stamp to settle
+//     on and times out forever, which is the defect this whole path exists for).
+//
+// `silentSlots` is an OBSERVATION supplied by the caller, not something derived
+// here: this function stays pure and block-deterministic, and two callers
+// holding the same observation always agree on the slot.
+function effectiveLeaderSlot(step, responsibleCount, silentSlots){
     let count = Number(responsibleCount);
     if(!Number.isFinite(count) || count <= 1) return 0;
     let s = Number(step);
     if(!Number.isFinite(s) || s < 0) s = 0;
-    return Math.min(s, MAX_LEADER_ROTATIONS, count - 1);
+    let rotations = Math.min(s, MAX_LEADER_ROTATIONS);
+
+    let idx = nextLiveSlot(0, count, silentSlots);
+    // Every slot is silent: hold the LAST one rather than wrapping to slot 0,
+    // which the set has already proven mute.
+    if(idx < 0) return count - 1;
+
+    for(let r = 0; r < rotations; r++){
+        let next = nextLiveSlot(idx + 1, count, silentSlots);
+        if(next < 0) break;   // dead end: hold `idx`, the last live slot reached
+        idx = next;
+    }
+    return idx;
+}
+
+// Leader slot for a given escalation step with nothing proven silent: the plain
+// spec §8.2 ladder. Retained as its own name because that ladder is the contract
+// the round's opening line and the publisher's failover rank are written
+// against; it is effectiveLeaderSlot's empty-observation case, not a second rule.
+function leaderIndex(step, responsibleCount){
+    return effectiveLeaderSlot(step, responsibleCount, null);
+}
+
+// Has a leader held its slot long enough to be PROVEN silent? True once a full
+// rotation window of chain time has passed since `sinceBlock`, the height at
+// which the caller first observed this member holding the slot.
+//
+// A full window is the bar because it is the same span the ladder gives a live
+// leader to answer in: anything shorter would convict a leader whose PROPOSE is
+// merely in flight, and a wrongly-skipped live leader costs the round a slot it
+// could have finalized on.
+function isProvenSilent(latestBlock, sinceBlock, rotationWindowBlocks){
+    let win = Number(rotationWindowBlocks);
+    if(!Number.isFinite(win) || win < 1) win = DEFAULT_ROTATION_WINDOW_BLOCKS;
+    // null/'' coerce to 0 and would convict on the very first poll, so screen the
+    // empty spellings before the numeric guard rather than after it.
+    if(latestBlock === null || latestBlock === undefined || sinceBlock === null || sinceBlock === undefined) return false;
+    let now   = Number(latestBlock);
+    let since = Number(sinceBlock);
+    if(!Number.isFinite(now) || !Number.isFinite(since)) return false;
+    return (now - since) >= win;
 }
 
 // Model slot for the current chain height: the request's serviceable span
@@ -97,5 +173,7 @@ module.exports = {
     blocksElapsed,
     escalationStep,
     leaderIndex,
+    effectiveLeaderSlot,
+    isProvenSilent,
     modelIndex
 };

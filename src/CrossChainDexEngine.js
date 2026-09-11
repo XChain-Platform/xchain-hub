@@ -880,14 +880,35 @@ class CrossChainDexEngine extends EventEmitter {
         return raw;
     }
 
+    // The chain instance this hub's matches belong to: the hash of BTC block 1 on the chain
+    // its Bitcoin indexer follows, reported through pushchaintip. Stamped on the row so a
+    // mirror that survived a re-genesis can refuse a match minted on the dead chain instead
+    // of re-evaluating it at every block forever. Unknown reads as NULL, which every mirror
+    // accepts, and a lookup failure must never fail a finalized match, so it degrades to NULL.
+    async _resolveBtcChainId(network){
+        try {
+            if(!this.db || typeof this.db.getChainTip !== 'function') return null;
+            let tip = await this.db.getChainTip('bitcoin', network || this.network || '');
+            return (tip && tip.chainId) ? tip.chainId : null;
+        } catch(e){
+            return null;
+        }
+    }
+
     // Returns true iff the row was actually inserted (false on INSERT IGNORE dedupe), so the
     // caller only updates the committed ledger once per fill.
     async _insertMatchRow(row){
         let cols = ['match_id','snapshot_block','network',
                     'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr','a_payout_legs',
                     'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr','b_payout_legs',
-                    'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation'];
-        let vals = cols.map(c => row[c]);
+                    'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation',
+                    'btc_chain_id'];
+        // Resolved into the value list rather than onto `row`: the row object is what the
+        // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
+        // never consensus. _canonicalMatch enumerates its fields explicitly, so this value has
+        // no path into a signed preimage.
+        let btcChainId = await this._resolveBtcChainId(row.network);
+        let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
         let res = await this.db.doQuery(
@@ -968,8 +989,13 @@ class CrossChainDexEngine extends EventEmitter {
                 }
             } else {
                 let snap = await this.capSnapshot.getSnapshot(capability, block);
-                if(snap && Array.isArray(snap.validators))
+                if(snap && Array.isArray(snap.validators)){
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
+                    // getSnapshot marks an over-cap COUNT set truncated too, and the persist
+                    // guard reads the marker off this array, so carry it in both modes or the
+                    // mirror takes a partial set below the stake-weighted flag day.
+                    if(snap.truncated === true) validators.truncated = true;
+                }
             }
         }
         if(validators.length === 0 && this._seedLocalValidator && this.identity){
@@ -1011,7 +1037,12 @@ class CrossChainDexEngine extends EventEmitter {
         // single INSERT throw, and a partial set has no completeness marker so a verifier
         // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
         // StateCheckpointEngine and the other four writers.
-        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        //
+        // The chain identity is passed rather than left to the writer's own lookup: this
+        // engine knows the row's network, so the snapshot a match is verified against carries
+        // the same identity the match row does, even on a hub whose HUB_NETWORK is unset.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(
+            this.db, capability, block, validators, await this._resolveBtcChainId(network));
         for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap

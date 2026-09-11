@@ -287,6 +287,21 @@ class AttestationConsensus extends EventEmitter {
         this.tornDownMax    = positiveIntConfig(this.config.ATTESTATION_TORNDOWN_MAX, 10000,
             'ATTESTATION_TORNDOWN_MAX');
 
+        // Which responsible members have been OBSERVED proposing, per request
+        // (ledger P60). `pending.proposals` already holds this for a LIVE round,
+        // but a round timeout deletes `pending` outright while the request lives on
+        // across retries, so the one question AttestationRound's leader rotation
+        // has to answer - "has this member ever spoken for this request?" - had no
+        // record that outlived a single attempt. Membership only; the proposals
+        // themselves stay on `pending`, since a torn-down round must not be able to
+        // hand a stale body to its successor (item 2640).
+        // Map<rid, Set<pubkey>>, ring-bounded FIFO on the same rule as `tornDown`
+        // so requestId flooding cannot grow it without bound.
+        this.proposerSeen       = new Map();
+        this._proposerSeenOrder = [];
+        this.proposerSeenMax    = positiveIntConfig(this.config.ATTESTATION_PROPOSER_SEEN_MAX, 10000,
+            'ATTESTATION_PROPOSER_SEEN_MAX');
+
         this._messageHandler = null;
         // Same rule as the ring caps above, and its sharpest instance: setTimeout with a
         // NEGATIVE delay fires on the next tick, so a negative here tears every round
@@ -352,6 +367,8 @@ class AttestationConsensus extends EventEmitter {
         this._nonOkPublishedOrder = [];
         this.tornDown.clear();
         this._tornDownOrder = [];
+        this.proposerSeen.clear();
+        this._proposerSeenOrder = [];
     }
 
     // Mark a round id as torn down without finalization (timeout / non-ok
@@ -368,6 +385,40 @@ class AttestationConsensus extends EventEmitter {
             let oldest = this._tornDownOrder.shift();
             this.tornDown.delete(oldest);
         }
+    }
+
+    // Record that `pubkey` proposed for `rid`. Called for every PROPOSE this hub
+    // ACCEPTS (sig verified, sender responsible, payload within cap) and for this
+    // hub's own proposal at the moment it enters the round. A proposal this hub
+    // refuses to make or to accept is deliberately not recorded: the peers judging
+    // that slot see silence either way, and the whole point of the record is that
+    // every hub reaches the same verdict from what crossed the wire.
+    _recordProposer(rid, pubkey){
+        let key = String(rid || '').toLowerCase();
+        let pk  = String(pubkey || '').toLowerCase();
+        if(!key || !pk) return;
+        let set = this.proposerSeen.get(key);
+        if(!set){
+            set = new Set();
+            this.proposerSeen.set(key, set);
+            this._proposerSeenOrder.push(key);
+            if(this._proposerSeenOrder.length > this.proposerSeenMax){
+                let oldest = this._proposerSeenOrder.shift();
+                this.proposerSeen.delete(oldest);
+            }
+        }
+        set.add(pk);
+    }
+
+    // Has `pubkey` proposed for `rid` at any point in the request's life, across
+    // every retry round? Read by AttestationRound._resolveLeader to tell a leader
+    // slot that is silent from one that is merely slow. An evicted (or never
+    // recorded) rid reads false, which costs the round one more rotation window of
+    // patience before it skips - the safe direction, since a wrongly skipped LIVE
+    // leader loses a slot that could have finalized.
+    hasProposedFor(rid, pubkey){
+        let set = this.proposerSeen.get(String(rid || '').toLowerCase());
+        return !!(set && set.has(String(pubkey || '').toLowerCase()));
     }
 
     // True while a consensus round for `rid` is live (pending, not yet
@@ -677,6 +728,9 @@ class AttestationConsensus extends EventEmitter {
 
         if(myPubkey && myBody && mySig && !myBodyOverCap){
             pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus, effectiveTime: myEffective });
+            // Same record the wire path keeps for peers, so this hub never proves
+            // ITSELF silent as leader on a retry round after its own round timed out.
+            this._recordProposer(rid, myPubkey);
         }
 
         pending.timer = setTimeout(() => {
@@ -845,6 +899,12 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
 
+        // This member has now spoken for this request. Recorded outside `pending`
+        // so it survives the round teardown a timeout performs, and recorded even
+        // when the proposal itself is a duplicate: the leader-rotation question is
+        // whether the slot answered at all, not how many times.
+        this._recordProposer(rid, senderPubkey);
+
         // Store (idempotent; dedup by sender pubkey). Status is trusted only
         // because the sig was just verified over a canonical that binds it.
         if(!pending.proposals.has(senderPubkey)){
@@ -1002,10 +1062,11 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = winner;
         pending.status = 'ok';
 
-        // Settle the round's single effective_time on the leader's, before any
-        // canonical below is built from it. Every hub that reaches this line holds
-        // the same proposals, so every hub settles on the same bytes.
-        this._resolveRoundEffectiveTime(pending);
+        // Settle the round's single effective_time, before any canonical below is
+        // built from it. Which value that is depends on the strategy; see
+        // _settleWinnerEffectiveTime for the rule and why judge_model cannot take
+        // the same one byte_equality does.
+        this._settleWinnerEffectiveTime(pending, pending.status);
 
         // Walk back through the proposals and collect any sigs that match the winner.
         // Proposals that diverge from the winner are slash candidates for
@@ -1152,10 +1213,13 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = { body: Buffer.alloc(0), meta: '' };
         pending.status = status;
 
-        // Same leader-settling as the ok path, for the same reason. A non-ok
-        // outcome is derivable by every hub independently, so every hub reaches
-        // this line on its own and would otherwise stamp its own clock.
-        this._resolveRoundEffectiveTime(pending);
+        // Same settling as the ok path, and the status is what decides which value
+        // it takes: provider_error is derivable by every hub independently, so
+        // every hub reaches this line on its own and must converge on a stamp
+        // already on the wire, while a judge_model no_quorum is only ever reached
+        // behind the leader gate and carries the judge call's latency with it. See
+        // _settleWinnerEffectiveTime.
+        this._settleWinnerEffectiveTime(pending, status);
 
         // Error PROPOSEs were signed over this exact canonical (empty body,
         // empty meta, same status), so their sigs transfer directly - in the LEGACY
@@ -2061,6 +2125,44 @@ class AttestationConsensus extends EventEmitter {
         if(leaderProposal && leaderProposal.effectiveTime != null)
             pending.effectiveTime = leaderProposal.effectiveTime;
         return pending.effectiveTime;
+    }
+
+    // Settle the round's single effective_time at winner establishment, choosing
+    // between the two rules the two consensus strategies need.
+    //
+    // BYTE_EQUALITY CONVERGES ON THE LEADER'S PROPOSAL STAMP; JUDGE_MODEL STAMPS AT
+    // ESTABLISHMENT BECAUSE THE JUDGE CALL AGES THE PROPOSAL STAMP PAST THE FOLLOWER
+    // FLOOR. Under byte_equality every hub runs its own agree() and establishes its
+    // own winner locally, so the only value they can all arrive at without a round
+    // trip is one that is already on the wire - which is the whole argument in
+    // _resolveRoundEffectiveTime's header, unchanged. Under judge_model only the
+    // elected leader establishes a winner and every follower adopts the stamp off
+    // the leader's PREPARE (_handlePrepare's winner-establishing blocks), so the
+    // leader is free to pick a fresh value here, and has to: agree() is an LLM
+    // round trip that runs for as long as it runs, and a stamp chosen back at
+    // proposal time has aged by that whole latency before any follower sees it.
+    // Once the ageing exceeds ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S the
+    // PREPARE fails _effectiveTimeWithinFollowerWindow at every follower and the
+    // round times out on a body all of them agree with, every cycle, forever.
+    // Widening that slack is not the repair: the low guard is a propagation floor
+    // (see the constants), so a stamp that has aged that close to the fleet's
+    // clocks is genuinely unsafe to publish, not merely inconvenient.
+    //
+    // PROVIDER_ERROR KEEPS THE PROPOSAL STAMP EVEN UNDER JUDGE_MODEL. That outcome
+    // is derivable with no judge call, so _maybeAdvanceFromProposals reaches it
+    // ahead of the leader gate and EVERY responsible hub establishes it locally.
+    // The adoption branch that would carry a leader's fresh stamp to a follower
+    // only runs while that follower has no winner of its own, so a leader stamping
+    // freshly there would sign bytes no peer ever adopts and break the one path
+    // that converges today. It also has nothing to gain: with no judge in it, the
+    // proposal stamp has aged by one gossip hop rather than by a model call.
+    _settleWinnerEffectiveTime(pending, status){
+        if(!pending.mirrorEra) return null;
+        if(pending.pinnedConsensusStrategy === 'judge_model' && status !== 'provider_error'){
+            pending.effectiveTime = this._chooseEffectiveTime();
+            return pending.effectiveTime;
+        }
+        return this._resolveRoundEffectiveTime(pending);
     }
 
     // Outbound wire fields carrying the round's effective_time. Empty in the legacy

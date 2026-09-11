@@ -48,7 +48,29 @@ const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
 const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';
 const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
 
+// Every module in this service that subscribes to the PeerManager 'message'
+// fan-out, one entry each. The ceiling below is derived from this roster instead
+// of being a hand-picked number, so it cannot drift away from what actually
+// subscribes; PeerManagerListenerCeiling.test.js re-derives the roster from the
+// sources and fails when the two disagree.
+const MESSAGE_SUBSCRIBERS = Object.freeze([
+    'AttestationBatchPublisher', 'AttestationConsensus', 'AttestationResponseMirror',
+    'Consensus', 'CrossChainDexConsensus', 'CrossChainEngine', 'FullNodeChallengeRound',
+    'Governance', 'OracleBatchSigner', 'OracleConsensus', 'OracleRound', 'ReorgHandler',
+    'RetractionConsensus', 'RollcallRound', 'StateAnchorPublisher', 'StateCheckpointEngine'
+]);
+
+// Node's default of 10 sits below that count, so every hub logged a
+// MaxListenersExceededWarning at boot and a genuine listener leak had nowhere left
+// to announce itself. Sized to the roster exactly rather than to Infinity: one
+// subscriber that registers twice is still one listener too many, and still warns.
+const MAX_MESSAGE_LISTENERS = MESSAGE_SUBSCRIBERS.length;
+
 class PeerManager extends EventEmitter {
+    // The 'message' subscriber roster and the listener ceiling derived from it.
+    static get MESSAGE_SUBSCRIBERS()   { return MESSAGE_SUBSCRIBERS; }
+    static get MAX_MESSAGE_LISTENERS() { return MAX_MESSAGE_LISTENERS; }
+
     // Default seed list for a network, or [] when there is none to offer
     // (regtest is a local venue and must never dial public seeds).
     static bootstrapSeeds(network) {
@@ -75,6 +97,7 @@ class PeerManager extends EventEmitter {
 
     constructor(config, db) {
         super();
+        this.setMaxListeners(MAX_MESSAGE_LISTENERS);
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;

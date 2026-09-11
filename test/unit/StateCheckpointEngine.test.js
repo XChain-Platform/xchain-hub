@@ -100,8 +100,8 @@ describe('StateCheckpointEngine', function () {
                 if (sql.startsWith('INSERT IGNORE INTO capability_snapshots')) {
                     // One multi-row statement carries the whole set, so walk the flattened
                     // params in groups of five rather than destructuring a single row.
-                    for (let i = 0; i + 4 < params.length; i += 5) {
-                        let [snapshot_block, capability, signing_pubkey, amount] = params.slice(i, i + 5);
+                    for (let i = 0; i + 5 < params.length; i += 6) {
+                        let [snapshot_block, capability, signing_pubkey, amount] = params.slice(i, i + 6);
                         if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability && r.signing_pubkey === signing_pubkey))
                             snapshots.push({ id: snapshots.length + 1, snapshot_block, capability, signing_pubkey, amount });
                     }

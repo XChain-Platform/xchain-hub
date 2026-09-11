@@ -40,6 +40,10 @@ const wid    = require('./attest_responsible_widening_activation.js');
 // request (confirmationsFor) and carries the boot-time ordering assertion the
 // constructor runs; keyed on the REQUEST's own block, never on the tip.
 const zc     = require('./attest_zero_conf_activation.js');
+// The leader-rotation silent-slot skip flag day. Keyed on the REQUEST's own block
+// like the two above, so every hub flips the leader arithmetic on the same request
+// rather than on whichever tip it happened to poll.
+const lss    = require('./attest_leader_silence_skip_activation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
@@ -82,6 +86,16 @@ class AttestationRound {
         // suppressed for the whole process lifetime. Also bounds memory;
         // a plain Set grew monotonically with historical request volume.
         this.seen = new Map();
+
+        // Leader-silence observation, keyed by requestId. One entry per request
+        // this hub has run a round for:
+        //   { silent: Set<pubkey>, watchPubkey, watchBlock,
+        //     heldLogged: bool, updatedAt: ms }
+        // It has to live HERE rather than on a round or a consensus `pending`,
+        // because both of those are torn down and rebuilt on every retry while the
+        // question it answers ("has this member ever spoken for this request?")
+        // spans the request's whole life. Evicted on the `rounds` TTL.
+        this.leaderSilence = new Map();
 
         // Keyset cursor for paging through pending requests across poll cycles.
         // null = start a fresh sweep from the oldest pending request.
@@ -220,6 +234,7 @@ class AttestationRound {
         }
         this.rounds.clear();
         this.seen.clear();
+        this.leaderSilence.clear();
         this.pollCursor = null;
         this.observedTip = null;
         this._pollRunning = false;
@@ -253,6 +268,9 @@ class AttestationRound {
         // Drop `rounds` entries older than the round TTL so completed/abandoned
         // round state doesn't accumulate for the process lifetime.
         this._evictStaleRounds();
+
+        // Same TTL, same reason, for the per-request leader-silence observation.
+        this._evictStaleLeaderSilence();
 
         // Page forward from where the last poll left off. When the cursor is
         // null this requests the oldest page; otherwise it asks the indexer for
@@ -417,6 +435,116 @@ class AttestationRound {
         }
     }
 
+    _evictStaleLeaderSilence(){
+        let cutoff = Date.now() - this.roundsTtlMs;
+        for(let [rid, rec] of this.leaderSilence){
+            if(rec && typeof rec.updatedAt === 'number' && rec.updatedAt < cutoff){
+                this.leaderSilence.delete(rid);
+            }
+        }
+    }
+
+    // The EFFECTIVE leader for this poll: the escalation ladder's slot, with
+    // slots whose member this hub has proven silent stepped over.
+    //
+    // WHY A SKIP RATHER THAN A STOP (ledger P60, measured on testnet4). The bare
+    // ladder caps at MAX_LEADER_ROTATIONS and never wraps, so for a request at
+    // block R the slot froze at 3 from R+9 onward. A frozen slot holding a member
+    // that never sends a PROPOSE is terminal: with no leader proposal,
+    // AttestationConsensus._resolveRoundEffectiveTime falls back to each hub's own
+    // wall clock, the hubs stamp tens of seconds apart, no two PREPAREs share a
+    // canonical, and the round times out on every retry for the rest of the
+    // request's life (request 233: 28 consecutive rounds at leaderSlot=3 with
+    // every llm-capable hub seated and proposing status=ok).
+    //
+    // Silence is OBSERVED here and never derived, which is what keeps the
+    // arithmetic in attestation_escalation.js pure: a member is proven silent only
+    // once it has held the slot for a full rotation window of chain time with no
+    // PROPOSE from it for this request. A silent key sends nothing to ANY hub, so
+    // every hub reaches the same set from its own local observation; a hub that
+    // gets there a window later runs the pre-skip ladder for one more poll, which
+    // is the same transient skew the escalation module's header already tolerates.
+    //
+    // GATED on attest_leader_silence_skip_activation.js, keyed on `requestBlock`
+    // (the request's own block_index, the same anchor the widening and zero-conf
+    // gates use). Below the height this returns the bare spec §8.2 ladder and
+    // touches nothing else: no silent set is consulted, no watch is armed and no
+    // skip warning is emitted, so a mixed-version fleet cannot disagree about the
+    // leader of a request admitted below the flag day. `esc.leaderIndex` is the
+    // empty-observation case of `esc.effectiveLeaderSlot`, which is what makes the
+    // gated-off path the pre-skip result rather than a reimplementation of it.
+    //
+    // `latestBlock` is the poll's indexer tip and `step` the ladder step already
+    // derived from it. Returns { index, pubkey } for the slot the round should run.
+    _resolveLeader(rid, responsible, step, latestBlock, requestBlock){
+        let pubkeyOf = (i) => (responsible[i] ? responsible[i].pubkey : (responsible[0] ? responsible[0].pubkey : null));
+
+        if(!lss.isLeaderSilenceSkipActive(requestBlock, this.hub ? this.hub.network : undefined)){
+            let plain = esc.leaderIndex(step, responsible.length);
+            return { index: plain, pubkey: pubkeyOf(plain) };
+        }
+
+        let rec = this.leaderSilence.get(rid);
+        if(!rec){
+            rec = { silent: new Set(), watchPubkey: null, watchBlock: null, heldLogged: false, updatedAt: 0 };
+            this.leaderSilence.set(rid, rec);
+        }
+        rec.updatedAt = Date.now();
+
+        // Slot indices are recomputed from pubkeys on every call: the responsible
+        // set can widen mid-request (attest_responsible_widening_activation.js), so
+        // a slot NUMBER is not stable across polls while the pubkey in it is.
+        let silentSlots = () => {
+            let s = new Set();
+            for(let i = 0; i < responsible.length; i++){
+                if(rec.silent.has(responsible[i].pubkey)) s.add(i);
+            }
+            return s;
+        };
+        let idx    = esc.effectiveLeaderSlot(step, responsible.length, silentSlots());
+        let pubkey = pubkeyOf(idx);
+
+        // Has this member proposed for this request at any point, across every
+        // retry round? Consensus owns that record because it owns the PROPOSE
+        // wire; typeof-guarded so a hub wired to a consensus without the accessor
+        // simply never skips, i.e. degrades to the pre-skip ladder.
+        let hasProposed = (pk) => !!(pk && this.consensus
+            && typeof this.consensus.hasProposedFor === 'function'
+            && this.consensus.hasProposedFor(rid, pk));
+
+        if(pubkey && rec.watchPubkey === pubkey && !hasProposed(pubkey)
+           && esc.isProvenSilent(latestBlock, rec.watchBlock, this.leaderRotationBlocks)){
+            rec.silent.add(pubkey);
+            console.warn('AttestationRound: leader slot ' + idx + ' skipped for ' + rid.substring(0,16) +
+                         '... (' + pubkey.substring(0,16) + '... held the slot from block ' + rec.watchBlock +
+                         ' to ' + latestBlock + ' with no PROPOSE for this request; the skip does not spend a rotation)');
+            let skippedIdx = idx;
+            idx    = esc.effectiveLeaderSlot(step, responsible.length, silentSlots());
+            pubkey = pubkeyOf(idx);
+
+            // Rule: when no live slot remains AHEAD, the ladder holds the last live
+            // slot it reached instead of running off the end. The tell is that the
+            // walk could not get past the slot just proven silent. Say so once per
+            // request, so an operator reading a stalled request sees the fleet is
+            // out of leaders rather than that rotation quietly stopped working.
+            if(idx <= skippedIdx && !rec.heldLogged){
+                rec.heldLogged = true;
+                console.warn('AttestationRound: no live leader slot remains for ' + rid.substring(0,16) +
+                             '... (' + rec.silent.size + ' of ' + responsible.length +
+                             ' responsible members proven silent); holding slot ' + idx);
+            }
+        }
+
+        // Arm (or re-arm) the window on whoever holds the slot now. The watch
+        // block is the height this hub FIRST saw this member holding it, so the
+        // full-window test above measures a held slot rather than a poll gap.
+        if(pubkey !== rec.watchPubkey){
+            rec.watchPubkey = pubkey;
+            rec.watchBlock  = Number(latestBlock);
+        }
+        return { index: idx, pubkey: pubkey };
+    }
+
     // Idempotent: repeat calls for the same requestId are dropped.
     // `latestBlock` is the indexer tip observed by the poll that surfaced this
     // request; it drives the deterministic leader-rotation + model-fallback
@@ -520,11 +648,19 @@ class AttestationRound {
         // membership, never on leadership), only the slot that runs agree() and
         // broadcasts first moves. Falls back to slot 0 when the poll couldn't
         // resolve a tip height.
+        //
+        // _resolveLeader layers the silent-slot skip (ledger P60) over that
+        // arithmetic: the ladder stopping ON a mute member, rather than stepping
+        // over it, is what pinned request 233 at leaderSlot=3 forever. The skip is
+        // gated on the request's own block (attest_leader_silence_skip_activation.js),
+        // so a request admitted below the flag day gets the bare ladder on every hub
+        // whatever build it runs.
         let step = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
             ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmationsFor(snapshotBlk), this.leaderRotationBlocks)
             : 0;
-        let leaderIdx    = esc.leaderIndex(step, responsible.length);
-        let leaderPubkey = responsible[leaderIdx] ? responsible[leaderIdx].pubkey : (responsible[0] ? responsible[0].pubkey : null);
+        let leader       = this._resolveLeader(rid, responsible, step, latestBlock, snapshotBlk);
+        let leaderIdx    = leader.index;
+        let leaderPubkey = leader.pubkey;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
             // Not in the responsible set; log so operators can distinguish "saw and skipped" from "never polled".

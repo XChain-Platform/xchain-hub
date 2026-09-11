@@ -14,6 +14,10 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const EventEmitter   = require('events');
+// The flag day the silent-slot leader skip rides. Read rather than re-spelled, so
+// a height change moves the cases with it instead of leaving them asserting a
+// literal the code no longer uses.
+const lssMod         = require('../../src/attest_leader_silence_skip_activation.js');
 
 const LICENSE_HEADER = ''; // Only needed for file comment; tests use it below
 
@@ -1254,6 +1258,262 @@ describe('AttestationRound', function () {
             expect(state.myProposal.body.length).to.equal(0);
             expect(state.myProposal.meta).to.equal('');
             expect(ar.rounds.get('rid0001').error).to.equal('provider_error');
+        });
+    });
+
+    // ── silent-slot leader skip (ledger P60) ─────────────────────────────────
+    //
+    // The live defect: the ladder caps at MAX_LEADER_ROTATIONS and never wraps,
+    // so a request at block R froze at slot 3 from R+9 onward. With a mute member
+    // in that slot no PROPOSE ever established the round's canonical stamp and
+    // every retry timed out (testnet4 request 233, 28 consecutive rounds).
+
+    describe('_startRound() silent-slot leader skip (P60)', function () {
+
+        const ME = 'aa'.repeat(32);   // slot 0, this hub, proposes
+        const BB = 'bb'.repeat(32);   // slot 1
+        const CC = 'cc'.repeat(32);   // slot 2
+        const DD = 'dd'.repeat(32);   // slot 3, the frozen slot; never proposes
+        const EE = 'ee'.repeat(32);   // slot 4, live
+
+        function makeRequest(overrides) {
+            return {
+                request_id:     'rid0060',
+                provider_id:    'llm',
+                redundancy:     2,
+                // Regtest serves at the tip (zero-conf is armed there from genesis),
+                // so the ladder starts at the request block itself rather than a
+                // confirmation lag above it. 103 keeps every tip literal below on
+                // the step it was written for.
+                block_index:    103,
+                action_index:   1,
+                deadline_block: 200,
+                payload:        JSON.stringify({ prompt: 'hi' }),
+                ...overrides
+            };
+        }
+
+        // A consensus stand-in with the two seams AttestationRound uses: propose()
+        // (which records this hub's own proposal, as the real one does) and the
+        // cross-round proposer record hasProposedFor() reads.
+        function makeConsensus() {
+            let seen = new Map();
+            return {
+                proposers: seen,
+                propose: sinon.stub().callsFake(async function (rid, state) {
+                    if(!seen.has(rid)) seen.set(rid, new Set());
+                    seen.get(rid).add(ME);
+                }),
+                hasProposedFor: (rid, pk) => !!(seen.get(rid) && seen.get(rid).has(pk))
+            };
+        }
+
+        // The skip is flag-day gated (attest_leader_silence_skip_activation.js) on
+        // the request's own block_index, so a hub with no network resolves the gate
+        // OFF and every case below would assert the pre-skip ladder. These cases are
+        // about the skip's behaviour once it is armed, so they run on regtest, where
+        // the gate is 0 and the request block used here is above it. The gate itself
+        // has its own suite further down.
+        function setup(network) {
+            let validators = [ME, BB, CC, DD, EE].map(pubkey => ({ pubkey }));
+            let capSS = {
+                getSnapshot:       sinon.stub().resolves({ validators }),
+                getWeightSnapshot: sinon.stub().resolves({ validators })
+            };
+            let hub = makeHub({ capabilitySnapshot: capSS });
+            hub.network = network || 'regtest';
+            hub.getIdentity = () => makeIdentity(ME);
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({
+                    fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: 'claude-sonnet-4-6' })
+                })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns(
+                [ME, BB, CC, DD, EE].map((pubkey, i) => ({ pubkey, hash: String(i) })));
+            let consensus = makeConsensus();
+            ar.setConsensus(consensus);
+            return { ar, consensus };
+        }
+
+        // Serviceable from block 103 (the request's own block, served at the tip),
+        // rotation window 2 blocks: tip 104 is step 0, tip 110 is step 3 (the
+        // capped, frozen slot).
+        it('moves the leader past a slot that held a full window without proposing', async function () {
+            let { ar, consensus } = setup();
+
+            await ar._startRound(makeRequest(), 104);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 0 leads at slot 0').to.equal(ME);
+
+            // Step 3: the bare ladder's terminal slot. DD holds it from here.
+            await ar._startRound(makeRequest(), 110);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
+
+            // A full rotation window later DD still has not proposed, so the slot
+            // is proven silent and the round steps over it instead of freezing.
+            await ar._startRound(makeRequest(), 112);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
+            expect(ar.leaderSilence.get('rid0060').silent.has(DD)).to.be.true;
+        });
+
+        it('never re-elects a live leader from an earlier slot', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 104);   // ME leads and proposes
+            await ar._startRound(makeRequest(), 110);   // DD seated
+            await ar._startRound(makeRequest(), 112);   // DD proven silent -> EE
+            consensus.proposers.get('rid0060').add(EE);  // EE answers, so it stays live
+            await ar._startRound(makeRequest(), 118);
+            await ar._startRound(makeRequest(), 124);
+
+            for(let call of consensus.propose.getCalls().slice(2)){
+                expect(call.args[1].leaderPubkey, 'rotation went backwards').to.equal(EE);
+            }
+            // ME is live and proposed in the first round; the skip must not make
+            // it eligible again.
+            expect(ar.leaderSilence.get('rid0060').silent.has(ME)).to.be.false;
+        });
+
+        it('does not skip a leader that proposed inside its window', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 110);   // DD seated at step 3
+            consensus.proposers.get('rid0060').add(DD);  // DD answers
+            await ar._startRound(makeRequest(), 112);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
+            expect(ar.leaderSilence.get('rid0060').silent.size).to.equal(0);
+        });
+
+        it('prints the EFFECTIVE slot in the round opening line', async function () {
+            let { ar } = setup();
+            await ar._startRound(makeRequest(), 110);
+            let log = sinon.spy(console, 'log');
+            await ar._startRound(makeRequest(), 112);
+            let line = log.getCalls().map(c => String(c.args[0])).find(s => s.indexOf('leaderSlot=') !== -1);
+            expect(line).to.be.a('string');
+            expect(line).to.contain('leaderSlot=4');
+        });
+
+        it('logs one line naming the request, the skipped key and the slot', async function () {
+            let { ar } = setup();
+            await ar._startRound(makeRequest(), 110);
+            let warn = sinon.spy(console, 'warn');
+            await ar._startRound(makeRequest(), 112);
+            let lines = warn.getCalls().map(c => String(c.args[0]))
+                .filter(s => s.indexOf('leader slot 3 skipped') !== -1);
+            expect(lines).to.have.lengthOf(1);
+            expect(lines[0]).to.contain('rid0060');
+            expect(lines[0]).to.contain(DD.substring(0, 16));
+            expect(lines[0]).to.contain('no PROPOSE');
+        });
+
+        it('holds the last live slot, logging once, when nothing live remains ahead', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 110);   // DD seated
+            await ar._startRound(makeRequest(), 112);   // DD silent -> EE seated
+            let warn = sinon.spy(console, 'warn');
+            await ar._startRound(makeRequest(), 114);   // EE silent -> nothing ahead
+            // Slot 2 (CC) is the last live slot the walk reached; the round still
+            // names a leader rather than running off the end of the set.
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(CC);
+            expect(ar.leaderSilence.get('rid0060').silent.has(EE)).to.be.true;
+
+            // CC then goes silent too and the ladder degrades one more slot, but
+            // the "out of live slots" line is a once-per-request explanation.
+            await ar._startRound(makeRequest(), 116);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(BB);
+            let held = warn.getCalls().map(c => String(c.args[0]))
+                .filter(s => s.indexOf('no live leader slot remains') !== -1);
+            expect(held).to.have.lengthOf(1);
+        });
+
+        it('evicts the silence record on the rounds TTL', function () {
+            let { ar } = setup();
+            ar.leaderSilence.set('old', { silent: new Set(), updatedAt: Date.now() - ar.roundsTtlMs - 1 });
+            ar.leaderSilence.set('new', { silent: new Set(), updatedAt: Date.now() });
+            ar._evictStaleLeaderSilence();
+            expect(ar.leaderSilence.has('old')).to.be.false;
+            expect(ar.leaderSilence.has('new')).to.be.true;
+        });
+
+        // ── the skip's activation gate ───────────────────────────────────────
+        //
+        // Why the skip needs a height at all: a hub that can skip and a hub that
+        // cannot elect DIFFERENT leaders for the same request, and a round whose
+        // members disagree about the leader has no leader proposal to take its
+        // canonical effective_time from, so it times out on every retry. Under one
+        // height the whole fleet changes leader arithmetic on the same request,
+        // whatever order the binaries land in during a roll.
+        //
+        // Both cases run on testnet with zero-conf already active at the request
+        // block, so the effective confirmation count is 0 on both sides of the
+        // height and the two ladders differ only in the skip.
+        describe('activation gate', function () {
+
+            const ARMED = lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.testnet;
+
+            // Request at R, confirmations 0, rotation window 2 blocks: tip R+7 is
+            // step 3, the bare ladder's terminal slot, and tip R+9 is a full window
+            // later with the slot still unanswered.
+            function gateRequest(requestBlock, rid) {
+                return makeRequest({
+                    request_id:     rid,
+                    block_index:    requestBlock,
+                    deadline_block: requestBlock + 100
+                });
+            }
+
+            it('holds the frozen slot for a request admitted below the height', async function () {
+                let { ar, consensus } = setup('testnet');
+                let below = ARMED - 1;
+                let warn  = sinon.spy(console, 'warn');
+
+                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 7);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
+
+                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 9);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey,
+                    'the pre-skip ladder freezes on the mute slot').to.equal(DD);
+
+                // Nothing about the skip path ran: no observation was recorded and
+                // no skip line was printed, so a peer on the pre-skip build reaches
+                // the same slot from the same request.
+                expect(ar.leaderSilence.has('ridgatelo')).to.be.false;
+                expect(warn.getCalls().map(c => String(c.args[0]))
+                    .filter(s => s.indexOf('skipped for') !== -1)).to.have.lengthOf(0);
+            });
+
+            it('skips to the next live slot for a request admitted at the height', async function () {
+                let { ar, consensus } = setup('testnet');
+
+                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 7);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
+
+                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 9);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
+                expect(ar.leaderSilence.get('ridgatehi').silent.has(DD)).to.be.true;
+            });
+
+            it('reads the per-network table the fleet flips on', function () {
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED - 1, 'testnet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED, 'testnet')).to.be.true;
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED + 1, 'testnet')).to.be.true;
+
+                // mainnet carries the unratified sentinel, which must read as OFF at
+                // every height rather than coercing `blk >= null` into `blk >= 0`.
+                expect(lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.mainnet).to.equal(null);
+                expect(lssMod.isLeaderSilenceSkipActive(0, 'mainnet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, 'mainnet')).to.be.false;
+
+                expect(lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.regtest).to.equal(0);
+                expect(lssMod.isLeaderSilenceSkipActive(0, 'regtest')).to.be.true;
+
+                // A network with no entry is a misconfiguration, not a posture.
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, 'signet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, undefined)).to.be.false;
+
+                // An unusable height never arms the skip either.
+                expect(lssMod.isLeaderSilenceSkipActive(NaN, 'regtest')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(null, 'regtest')).to.be.false;
+            });
         });
     });
 

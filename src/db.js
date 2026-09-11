@@ -65,6 +65,17 @@ function isDriverNativeArg(value){
     return Buffer.isBuffer(value) || ArrayBuffer.isView(value);
 }
 
+// Column names carried by an index spec such as "(a, b, c)", lowercased, with
+// backticks and any prefix length stripped, so they can be matched against
+// information_schema.columns before a key that names them is built.
+function indexSpecColumns(spec){
+    return String(spec == null ? '' : spec)
+        .replace(/^\s*\(/, '').replace(/\)\s*$/, '')
+        .split(',')
+        .map(s => s.trim().replace(/`/g, '').replace(/\(\s*\d+\s*\)$/, '').toLowerCase())
+        .filter(Boolean);
+}
+
 // Render a Date as the UTC datetime literal MariaDB should store.
 //
 // Two separate defects met on this line. First, the safety net above
@@ -484,36 +495,133 @@ class Database {
         }
     }
 
-    // Add a column to an existing UNIQUE KEY in place (drop + re-add the wider key).
-    // Unlike _migrateUniqueKey (which no-ops as soon as the index NAME exists), this
-    // reconciles a same-named key whose COLUMN SET changed. Only ever used to WIDEN a
-    // key (add a column): a wider UNIQUE key is a strict superset constraint, so an
-    // already-unique table cannot collide on it and no row dedup is required.
-    // Idempotent: a no-op once the live key already covers `requiredColumn`, and it
-    // simply adds the key when it is absent entirely.
+    // Columns a live index actually covers, lowercased, in key order. [] when the
+    // index is absent. Read back after every DDL step in _widenUniqueKey, because a
+    // statement that did not throw is not proof that the key is there.
+    async _liveIndexColumns(db, table, indexName){
+        let rows = await db.query(
+            "SELECT column_name AS col FROM information_schema.statistics " +
+            "WHERE table_schema = ? AND table_name = ? AND index_name = ? ORDER BY seq_in_index",
+            [this.dbName, table, indexName]
+        );
+        return (rows || []).map(r => String(r.col != null ? r.col : '').toLowerCase()).filter(Boolean);
+    }
+
+    // Columns named by an index spec that the table does not have. This is the errno
+    // 1072 case ("key column doesn't exist in table") read one statement early, which
+    // is what lets the widen refuse before it has touched the existing key.
+    async _missingIndexColumns(db, table, indexColumns){
+        let wanted = indexSpecColumns(indexColumns);
+        if(wanted.length === 0) return [];
+        let rows = await db.query(
+            "SELECT column_name AS col FROM information_schema.columns " +
+            "WHERE table_schema = ? AND table_name = ?",
+            [this.dbName, table]
+        );
+        let have = new Set((rows || []).map(r => String(r.col != null ? r.col : '').toLowerCase()));
+        // An empty column read means information_schema told us nothing about the
+        // table, not that the table has no columns; treat it as "cannot judge" and
+        // let the ADD speak, rather than blocking a widen on a bad read.
+        if(have.size === 0) return [];
+        return wanted.filter(c => !have.has(c));
+    }
+
+    // Add a column to an existing UNIQUE KEY in place.
+    //
+    // ADD-THEN-DROP, never drop-then-add. MariaDB DDL is not transactional, so the
+    // old order had a window where a failed ADD left the table with NO unique key
+    // and only a log line to say so: a duplicate then inserted cleanly, and for the
+    // capability snapshot key that reaches the validator set. Here the wider key is
+    // built first under a temporary name, so every failure point leaves the table
+    // holding a unique key on these columns, and each step is confirmed by re-reading
+    // information_schema instead of trusting that the statement did not throw. If the
+    // sequence ever ends with no such key at all, the error thrown here takes hub boot
+    // down with it, because serving an unconstrained table is the worse outcome.
+    // Widening only (add a column), so no row dedup is required.
     async _widenUniqueKey(table, indexName, requiredColumn, indexColumns){
+        const tempName = indexName + '_widening';
+        const byHand   = 'ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns;
         let db = await this.getConnection();
+        let dropped = false;   // set once the original key is gone, which is what arms the guard
         try {
-            let cols = await db.query(
-                "SELECT column_name AS col FROM information_schema.statistics " +
-                "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-                [this.dbName, table, indexName]
-            );
-            let present = (cols || []).map(r => String(r.col != null ? r.col : '').toLowerCase());
+            let present = await this._liveIndexColumns(db, table, indexName);
+
+            // A temporary key means an earlier run died mid-sequence. Finish that run
+            // first: promote it to the real name if the real name is free, then retire it.
+            if((await this._liveIndexColumns(db, table, tempName)).length > 0){
+                if(present.length === 0){
+                    dropped = true;
+                    await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
+                    present = await this._liveIndexColumns(db, table, indexName);
+                }
+                if(present.length > 0){
+                    await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
+                    console.log('Migration: completed an interrupted widen of ' + indexName + ' on ' + table);
+                }
+            }
+
             if(present.length === 0){
                 await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
                 console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
                 return;
             }
             if(present.indexOf(String(requiredColumn).toLowerCase()) !== -1) return;   // already widened
+
+            let missing = await this._missingIndexColumns(db, table, indexColumns);
+            if(missing.length > 0){
+                // The existing key is untouched, so the table is exactly as constrained as
+                // it was; the widen simply does not happen on this boot.
+                console.error('MIGRATION SKIPPED: UNIQUE KEY ' + indexName + ' on ' + table +
+                    ' cannot be widened because the table has no ' + missing.join(', ') +
+                    ' column. The narrower key is left in place. Add the column, then run: ' + byHand);
+                return;
+            }
+
+            await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + tempName + ' ' + indexColumns);
+            if((await this._liveIndexColumns(db, table, tempName)).length === 0)
+                throw new Error('the wider key did not appear after ADD ' + tempName);
+
+            dropped = true;
             await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + indexName);
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
+            if((await this._liveIndexColumns(db, table, indexName)).indexOf(String(requiredColumn).toLowerCase()) === -1)
+                throw new Error('the widened key did not appear under its own name');
+
+            await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
             console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
         } catch(e){
             console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
+            if(dropped) await this._assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand);
         } finally {
             await db.release();
         }
+    }
+
+    // Boot guard for a widen that failed after the original key was dropped. Passes as
+    // soon as either the final or the temporary key is live AND unique, since either one
+    // still constrains the same columns. Anything else, a failed probe included, refuses
+    // the boot: an unconstrained table admits duplicates no later read can tell apart.
+    async _assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand){
+        let enforcing = null;
+        try {
+            for(const name of [indexName, tempName]){
+                let rows = await db.query(
+                    "SELECT non_unique AS nu FROM information_schema.statistics " +
+                    "WHERE table_schema = ? AND table_name = ? AND index_name = ? LIMIT 1",
+                    [this.dbName, table, name]
+                );
+                if(rows && rows[0] && Number(rows[0].nu) === 0){ enforcing = name; break; }
+            }
+        } catch(probeError){
+            console.error('Could not read the index state of ' + table + ':', probeError);
+        }
+        if(enforcing === tempName)
+            console.error('WARNING: ' + table + ' is constrained by the temporary key ' + tempName +
+                ' rather than ' + indexName + '. The next boot completes the rename; nothing is lost meanwhile.');
+        if(enforcing) return;
+        throw new Error('Refusing to start: the UNIQUE KEY ' + indexName + ' on ' + table +
+            ' was dropped and could not be rebuilt, so the table now accepts duplicate rows. ' +
+            'Restore it by hand before starting the hub again: ' + byHand);
     }
 
     // Stamp the archive-leg round qualifier onto reward rows written before the column
@@ -837,17 +945,26 @@ class Database {
     }
 
     // Network defaults to 'mainnet' for back-compat with older indexers.
-    async setChainTip(coin, network, blockHeight, blockTime){
+    //
+    // `chainId` (optional) identifies the chain INSTANCE the pushing indexer follows:
+    // the hash of its block 1, not of block 0, because the regtest genesis hash is a
+    // chainparams constant that survives every re-genesis while block 1 commits to the
+    // moment the new chain started. Omitted (older indexer, or a chain whose block 1 is
+    // not mined yet) leaves the stored value alone rather than clearing it, so a single
+    // push that has not learned the id cannot erase an identity the mirrors are filtering on.
+    async setChainTip(coin, network, blockHeight, blockTime, chainId){
         let net = network || 'mainnet';
         // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
         // appears as an abbreviation-keyed phantom coin in the served config tree.
         let key = normalizeCoin(coin);
         await this.setParam(key, net, 'chain_tips', 'block_height', String(blockHeight));
         await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
+        if(typeof chainId === 'string' && chainId)
+            await this.setParam(key, net, 'chain_tips', 'chain_id', chainId);
     }
 
     // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.
-    // Returns: { blockHeight, blockTime } or null if not set.
+    // Returns: { blockHeight, blockTime, chainId } or null if not set.
     async getChainTip(coin, network){
         let net = network || 'mainnet';
         // Prefer the canonical full-name key (setChainTip writes there now). Fall
@@ -859,7 +976,12 @@ class Database {
         if(!cfg.block_height) return null;
         return {
             blockHeight: parseInt(cfg.block_height),
-            blockTime:   parseInt(cfg.block_time) || 0
+            blockTime:   parseInt(cfg.block_time) || 0,
+            // Explicitly null, never undefined, when no indexer has reported one: every
+            // consumer (the row stamps, the snapshot envelopes) treats null as "identity
+            // unknown", which the mirrors accept, so a hub that has not learned its chain
+            // keeps behaving exactly as it did before the column existed.
+            chainId:     (typeof cfg.chain_id === 'string' && cfg.chain_id) ? cfg.chain_id : null
         };
     }
 

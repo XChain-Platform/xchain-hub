@@ -158,7 +158,7 @@ const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg',
+    'pushpricereorg', 'pushxcallreorg', 'retractattestbatch',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -176,7 +176,13 @@ const WRITE_METHODS  = new Set([
 // same role pushpriceround already plays outside the retraction tier. Its own
 // retraction path is pushpricereorg below; a batch push carries no
 // destructive row:deleted broadcast of its own.
-const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
+//
+// retractattestbatch (ATTEST v5/v6, spec section 6.3 / frontier row 55) IS in this
+// set even though it deletes nothing and only clears a display link: it is issued by
+// the same rollback.js retraction block as its siblings and travels on the same
+// HubClient credential, so leaving it in the bulk tier would mean an operator who
+// scoped HUB_REORG_API_KEY had one retraction rail still answering to the bulk key.
+const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch']);
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
@@ -188,7 +194,7 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
@@ -253,6 +259,28 @@ function validateChain(chain) {
     if (!ALLOWED_CHAINS.has(chain))
         return { error: 'chain must be one of: BTC, LTC, DOGE' };
     return null;
+}
+
+// Turn a refusal into a JSON-RPC TRANSPORT error rather than a method result.
+//
+// express-json-rpc-router puts whatever a handler RETURNS into the envelope's
+// `result` slot and only what it THROWS into the `error` slot. So a refusal
+// returned as `{ error: '...' }` arrives as `{ result: { error: '...' } }`, and a
+// caller that checks the envelope's `error` field alone reads a refused call as an
+// accepted one. Throwing this puts the refusal where such a caller looks.
+//
+// -32602 (Invalid params) is the correct code: every use here rejects the CALL's
+// arguments, not the hub's ability to serve it.
+//
+// Adding a call site is WIRE-VISIBLE for external callers, and for the queueing
+// callers in this mesh it also changes the retry verdict: an in-envelope refusal is
+// classified terminal and drops the queued row, while a thrown error reads as a
+// transport failure and is retried. Convert a handler only after checking what its
+// callers do with the two shapes.
+function rpcParamError(message) {
+    let err = new Error(message);
+    err.code = -32602;
+    return err;
 }
 
 // Strict, because parseInt admits anything with an integer PREFIX: '50junk' passed as
@@ -326,8 +354,23 @@ if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
 // (no silent default: a wrong/blank value would mis-gate the quorum rule). Must
 // match the INDEXER_NETWORK of the chains this hub federates.
 const HUB_NETWORK = (process.env.HUB_NETWORK || '').toLowerCase();
-if (P2P_VALIDATOR_ADDR && !['mainnet', 'testnet', 'regtest'].includes(HUB_NETWORK)) {
+const HUB_NETWORKS = ['mainnet', 'testnet', 'regtest'];
+if (P2P_VALIDATOR_ADDR && !HUB_NETWORKS.includes(HUB_NETWORK)) {
     console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
+    process.exit(1);
+}
+// A STANDALONE hub (no P2P_VALIDATOR_ADDR) runs no consensus of its own, but its
+// INGEST path is gated by the same network-keyed flag days a validator's is:
+// PriceAggregator.receiveValidatedBatch resolves the EQUIV wrap, the quorum mode,
+// the sig-tally order and the pair-name bound off hub.network. Left '', every one of
+// those failed closed, so a chain-only node pushing on-chain PRICE batches to its own
+// hub had every testnet batch refused (its signatures verify against an unwrapped
+// canonical, and 4-of-7 misses the count quorum the widened rule does not apply).
+// OPTIONAL here, unlike validator mode: unset stays '' so every existing single-host
+// deployment behaves exactly as before. SET must still name a real network, because a
+// typo would mis-gate the same rules that being blank mis-gated.
+if (!P2P_VALIDATOR_ADDR && HUB_NETWORK && !HUB_NETWORKS.includes(HUB_NETWORK)) {
+    console.error('Invalid optional environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for ingest activation gating on a standalone hub; leave it unset for a hub that judges no network-keyed content)');
     process.exit(1);
 }
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
@@ -431,7 +474,11 @@ async function startApi(){
         process.env.HUB_DB_NAME,
         process.env.HUB_DB_USER,
         HUB_DB_SECRET,
-        p2pConfig
+        p2pConfig,
+        // Standalone-mode network. Inert in validator mode, where p2pConfig.HUB_NETWORK
+        // carries the identical value and wins; this is the only path by which a hub with
+        // no p2pConfig at all can learn which network its ingest gates should resolve on.
+        { network: HUB_NETWORK }
     );
     await hub.start();
 
@@ -960,10 +1007,21 @@ async function startApi(){
         },
 
         // Network is optional for back-compat with older indexers; defaults to 'mainnet'.
-        async pushchaintip({coin, network, block_height, block_time}){
+        // chain_id is optional too: only a Bitcoin indexer sends it (the hash of ITS block 1),
+        // and it is what lets a mirror refuse cross-chain rows written by a hub that followed a
+        // different chain instance. Absent leaves the stored identity untouched.
+        async pushchaintip({coin, network, block_height, block_time, chain_id}){
             if(!coin) return {error: "coin is required"};
+            // THROWN, not returned: an unknown coin is a refusal, and returned it landed
+            // in the envelope's result slot where a caller checking only `error` read it
+            // as a stored tip. The chain tip gates staleness checks fleet-wide, so a
+            // silently-refused push is worse here than a noisy one. Its only mesh caller is
+            // fire-and-forget (the indexer's hub client logs and moves on), and the four
+            // durable push handlers below now throw the same code, which their client
+            // classifies terminal off the code rather than off an in-envelope message. Same
+            // wording either way, so logs and operator runbooks are unchanged.
             let chainErr = validateChain(coin);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(block_height === undefined || block_height === null)
                 return {error: "block_height is required"};
             if(block_time === undefined || block_time === null)
@@ -976,8 +1034,17 @@ async function startApi(){
             let time = strictInt(block_time);
             if (time === null || time < 0)
                 return {error: "invalid block_time"};
+            // Reject before the write, not after: a malformed identity stored on the tip
+            // would be stamped onto every later match and call row and would make every
+            // mirror refuse rows this hub is authoritative for.
+            let chainId = undefined;
+            if (chain_id !== undefined && chain_id !== null) {
+                if (typeof chain_id !== 'string' || !/^[0-9a-f]{64}$/.test(chain_id))
+                    return {error: "invalid chain_id"};
+                chainId = chain_id;
+            }
             try {
-                await hub.db.setChainTip(coin, network, height, time);
+                await hub.db.setChainTip(coin, network, height, time, chainId);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};
@@ -987,8 +1054,23 @@ async function startApi(){
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
         async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // THROWN, not returned, on this handler and the three durable push siblings below
+            // (pushpricebatch, pushattestbatch, pushoracleprice). Returned, the refusal landed
+            // in the envelope's result slot, where a caller that checks only the envelope's
+            // `error` field read a refused push as an accepted one. An unknown chain is a
+            // property of the payload, so it is the one refusal a replay can never clear: the
+            // queued row carries the same source_chain into the same verdict forever.
+            //
+            // Only the remaining in-envelope guards below stay returned. They describe the
+            // HUB's state (an aggregator still booting, a DB error), which a later attempt can
+            // clear, and the push client must go on reading those as retryable.
+            //
+            // The refusal is only bounded on the caller's side once its push client treats
+            // -32602 as terminal, which is why that change ships in the same release as this
+            // one; on its own, this half turns every unknown-chain push into a row that
+            // retries forever. The message text is unchanged in both directions.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(round === undefined || round === null) return {error: "round is required"};
             if(!Array.isArray(pairs)) return {error: "pairs must be an array"};
             if(!hub.priceAggregator) return {error: "price aggregator not ready"};
@@ -1022,8 +1104,9 @@ async function startApi(){
         // re-verifies once via receiveValidatedBatch, then dedupes per round.
         async pushpricebatch({source_chain, first_round, last_round, btc_block_height, rounds, block_time, sigs, action_index, block_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(first_round === undefined || first_round === null) return {error: "first_round is required"};
             if(last_round === undefined || last_round === null) return {error: "last_round is required"};
             if(!Array.isArray(rounds)) return {error: "rounds must be an array"};
@@ -1063,8 +1146,9 @@ async function startApi(){
         // batch carries it (batching widens the hub/chain clock skew).
         async pushattestbatch({source_chain, network, window_start, window_end, row_count, btc_block_height, rows, sigs, action_index, block_index, block_time, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(!Array.isArray(rows)) return {error: "rows must be an array"};
             if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
             try {
@@ -1089,10 +1173,43 @@ async function startApi(){
             }
         },
 
-        async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index, push_generation}){
+        // Retract the batch LINK after a reorg un-landed an ATTEST v5/v6 batch on the
+        // pushing indexer's chain (spec section 6.3, frontier row 55). The indexer names
+        // the batch by its key, the window bounds that key is derived from, and the
+        // action index the landing push carried; the hub clears `batch_action_index` on
+        // the rows that link names and re-broadcasts them. NOTHING IS DELETED here: a
+        // signed mirror row is legitimate whichever batch carried it, so the reorg
+        // invalidates the link and not the response (AttestationResponseMirror
+        // .retractBatchLink says why at length).
+        //
+        // The parameter list IS the interface, and the indexer's HubClient pins exactly
+        // these names.
+        async retractattestbatch({source_chain, network, batch_key, window_start, window_end, action_index}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
+            if(!batch_key) return {error: "batch_key is required"};
+            if(action_index === undefined || action_index === null)
+                return {error: "action_index is required"};
+            if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
+            try {
+                return await hub.attestationResponseMirror.retractBatchLink(source_chain, {
+                    network:      network,
+                    batch_key:    batch_key,
+                    window_start: window_start,
+                    window_end:   window_end,
+                    action_index: action_index
+                });
+            } catch (err) {
+                return {error: err.message || "error retracting the attestation batch link"};
+            }
+        },
+
+        async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index, push_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
+            let chainErr = validateChain(source_chain);
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(!source_address) return {error: "source_address is required"};
             if(!coin || !tick || !fiat || !value)
                 return {error: "coin, tick, fiat, value are required"};
@@ -1824,6 +1941,22 @@ async function startApi(){
         }
     });
 
+    // The identity of the Bitcoin chain this hub follows (hash of that chain's block 1),
+    // learned from the Bitcoin indexer's pushchaintip. It rides the three cross-chain
+    // envelopes because a DOGE/LTC mirror cannot derive it locally: the envelope is the
+    // only place it can learn which chain the rows it is being handed belong to. Never
+    // fails a snapshot: an unreadable identity is served as "unknown" (null), which every
+    // mirror accepts exactly as it accepted rows before the column existed.
+    async function btcChainIdForSnapshot() {
+        try {
+            if (!hub.db || typeof hub.db.getChainTip !== 'function') return null;
+            let tip = await hub.db.getChainTip('bitcoin', (hub && hub.network) ? hub.network : HUB_NETWORK);
+            return (tip && tip.chainId) ? tip.chainId : null;
+        } catch (err) {
+            return null;
+        }
+    }
+
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1840,7 +1973,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1857,7 +1990,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1870,6 +2003,9 @@ async function startApi(){
     // finalizing_view (signed into the EQUIV canonical) and push_generation (source-chain
     // reorg fence, item 5308) ARE mirror-consumed and MUST be included, or a freshly
     // bootstrapped mirror rebuilds the wrong EQUIV view and mis-fences reorg retractions.
+    // btc_chain_id is mirror-consumed for the same reason: it is what the mirror's
+    // chain-identity filter reads, so omitting it would silently disarm that filter for
+    // every bootstrapped row while the streamed (SELECT *) path kept it.
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1883,11 +2019,11 @@ async function startApi(){
                 'SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, ' +
                 'source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, ' +
                 'cross_hops, effective_time, status, finalizing_view, push_generation, result_status, ' +
-                "return_payload_b64, validator_signatures, created_at " +
+                "return_payload_b64, validator_signatures, btc_chain_id, created_at " +
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });

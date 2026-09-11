@@ -524,7 +524,44 @@ class CapabilitySnapshot {
         let reg = this.hub.capabilityRegistry;
         if (!reg || typeof reg.getMinStake !== 'function') return null;
         let v = reg.getMinStake(capability, blockIndex);
-        return (v === null || v === undefined) ? null : String(v);
+        if (v !== null && v !== undefined) return String(v);
+        return this._feedMinStake(capability);
+    }
+
+    // Second and last place a threshold can come from: the hub's stake-weight feed.
+    // A hub that serves no capability of its own carries no HUB_CAPABILITY_CONFIG,
+    // so its live registry resolves null for every name and the guards above refused
+    // EVERY snapshot it ever asked for. That is not the fork the refusal exists to
+    // stop: the fork case is omitting min_stake and letting each indexer apply its
+    // own local threshold, and the feed omits nothing. It answers with the canonical
+    // floor from the pinned staking bundle, which is the value
+    // XChainHub._assertCanonicalMinStakes refuses to let a configured hub diverge
+    // from, so the request formed here is the request every peer forms.
+    //
+    // A configured threshold always wins (this is only reached once the registry
+    // answered null), and a hub with no feed keeps the refusal byte for byte.
+    _feedMinStake(capability) {
+        let feed = this.hub && this.hub.stakeWeightFeed;
+        if (!feed || typeof feed.minStake !== 'function') return null;
+        let v;
+        try { v = feed.minStake(capability); }
+        catch (e) { return null; }
+        if (v === null || v === undefined) return null;
+        this._noteFeedFloor(capability, v);
+        return String(v);
+    }
+
+    // Say once per capability that this hub is reading the federation's floor
+    // rather than its own, so the operator can tell a deliberate config-free hub
+    // from one whose capability file failed to load.
+    _noteFeedFloor(capability, value) {
+        if (!this._feedFloorNoted) this._feedFloorNoted = new Set();
+        if (this._feedFloorNoted.has(capability)) return;
+        this._feedFloorNoted.add(capability);
+        console.log('CapabilitySnapshot: no configured MIN_STAKE for "' + capability +
+            '"; using the canonical federation floor ' + value + ' from the stake-weight feed. ' +
+            'Set CAPABILITY_' + String(capability).toUpperCase() + '_MIN_STAKE in HUB_CAPABILITY_CONFIG ' +
+            'to pin it locally.');
     }
 
     // True once the capability registry is wired (post-startCapabilities). The

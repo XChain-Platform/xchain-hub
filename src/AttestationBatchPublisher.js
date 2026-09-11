@@ -91,7 +91,7 @@ const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { forwardableUtxos }  = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const { isAmbiguousSendError }   = require('./lib/idempotent_broadcast.js');
+const { isAmbiguousSendError, isNeverSentError } = require('./lib/idempotent_broadcast.js');
 const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('./attest_response_mirror_activation.js');
 const snapWrite = require('./lib/capability_snapshot_write.js');
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./lib/attest_response_timing.js');
@@ -176,6 +176,16 @@ class AttestationBatchPublisher {
                                       cfg.ORACLE_BATCH_SIGN_TIMEOUT_MS || '15000', 10);
         if(!Number.isFinite(this.signTimeoutMs) || this.signTimeoutMs <= 0) this.signTimeoutMs = 15000;
 
+        // How many times one window may be rebuilt after a PROVABLY-UNSENT head refusal
+        // before it latches like any other broadcast failure. Bounded rather than endless
+        // because a refusal that never clears (a wire the encoder rejects on its content,
+        // not on its funding) would otherwise re-propose and re-collect a signing quorum
+        // every window forever, and the federation's signing capacity is the scarce thing.
+        this.maxRefusalAttempts = parseInt(process.env.ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS ||
+                                           cfg.ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS || '3', 10);
+        if(!Number.isFinite(this.maxRefusalAttempts) || this.maxRefusalAttempts < 1)
+            this.maxRefusalAttempts = 3;
+
         this._windowTimer = null;
         this._peerHandler = null;
         this._signRound   = null;
@@ -191,6 +201,11 @@ class AttestationBatchPublisher {
         // their durable marker is intent-only. Logged once each rather than once per
         // sweep, which on a short regtest window is once every few seconds.
         this._quarantined = new Set();
+        // windowStart -> how many times a provably-unsent head refusal has sent this
+        // window back for a rebuild. In memory only, deliberately: the durable record of
+        // such an attempt is the ABSENCE of a marker, and a restart that re-tried a
+        // refused window from zero costs nothing because nothing was ever sent or spent.
+        this._refusalAttempts = new Map();
         // Why the last anchor read came back null, and which reason has already been
         // logged. Both null while the anchor resolves.
         this._anchorFailure = null;
@@ -201,7 +216,7 @@ class AttestationBatchPublisher {
 
         this.stats = {
             windowsPublished: 0, windowsEmpty: 0, windowsDeferred: 0,
-            windowsDeadLettered: 0, windowsQuarantined: 0,
+            windowsDeadLettered: 0, windowsQuarantined: 0, windowsRefusalRetried: 0,
             wiresBroadcast: 0, rowsPublished: 0,
             signRounds: 0, signQuorums: 0, signTimeouts: 0,
             signaturesProvided: 0, signRefusals: 0, signRefusalsNoChainTip: 0,
@@ -686,7 +701,7 @@ class AttestationBatchPublisher {
         // A truncated weight snapshot under-counts total stake, so the 2/3 bar could
         // pass a batch the full set would refuse. Same fail-closed reading the PRICE
         // rails carry.
-        if(weighted && snap.truncated === true) return null;
+        if(snap.truncated === true) return null;
         let set = snap.validators.map(v => ({
             pubkey: String(v.pubkey).toLowerCase(),
             weight: String((weighted ? v.weight : v.amount) != null ? (weighted ? v.weight : v.amount) : '0'),
@@ -1084,9 +1099,18 @@ class AttestationBatchPublisher {
             try {
                 result = await broadcaster(encoded.wires[i]);
             } catch(e){
+                let ambiguous = isAmbiguousSendError(e);
+                // THE HEAD IS THE ONLY WIRE WHOSE FAILURE CAN PROVE THE WINDOW IS UNTOUCHED.
+                // Wire 1 is the first send, so a provably-unsent failure there means no byte
+                // of this window reached the encoder, no fee was paid, and nothing sits in a
+                // mempool: the intent marker is a record of an attempt that did not happen,
+                // and keeping it costs the window its chain coverage for good (an hourly
+                // testnet window dropped by one transient encoder refusal). A failure on a LATER wire leaves the head on chain and is
+                // handled by the latch below unchanged, as is every ambiguous failure.
+                if(i === 0 && !ambiguous && isNeverSentError(e) &&
+                   await this._retryRefusedHead(window, e, tokens)) return false;
                 this.spendGuard.commit(tokens[i]);   // a send that may have left the process is a spend
                 for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                let ambiguous = isAmbiguousSendError(e);
                 console.error('AttestationBatchPublisher: CRITICAL - wire ' + (i + 1) + '/' +
                     encoded.wires.length + ' of window ' + window.window_start + '-' + window.window_end +
                     ' failed to broadcast' + (ambiguous ? ' AMBIGUOUSLY (it may still have landed)' : '') +
@@ -1100,6 +1124,7 @@ class AttestationBatchPublisher {
         }
 
         await this._markSent(window.window_start, headTxid, window.row_count);
+        this._refusalAttempts.delete(window.window_start);   // the window is paid for; its attempt history is spent
         this.stats.windowsPublished++;
         this.stats.rowsPublished += window.row_count;
         if(window.row_count === 0) this.stats.windowsEmpty++;
@@ -1108,6 +1133,52 @@ class AttestationBatchPublisher {
         console.log('AttestationBatchPublisher: published window ' + window.window_start + '-' +
             window.window_end + ' (' + window.row_count + ' row(s), ' + encoded.wires.length +
             ' wire(s), anchor ' + window.btc_block_height + ', txid ' + (headTxid || '<none>') + ')');
+        return true;
+    }
+
+    // Hand a window whose HEAD was provably never sent back to the sweep, or decline to
+    // and let the caller latch it. True means "released, unmarked, retry next cycle".
+    //
+    // WHY DELETING THE INTENT ROW IS SAFE HERE, AND ONLY HERE. The marker's whole job is
+    // to stop a SECOND fee being paid for a window that may already carry a transaction.
+    // On this branch the head is wire 1, it threw, and the error shape proves it never
+    // left the process, so there is no transaction, no fee and no mempool entry the
+    // marker could be protecting: it records an attempt that did not happen. The DELETE
+    // is guarded on status = 'intent', so a `sent`, `landed` or `deadletter` row written
+    // by the landing path or by another hub's batch arriving between the send and this
+    // line is never touched, and a delete that removes no row leaves the window exactly
+    // as the latch below expects it. Rebuilt content is byte-identical (the rows are
+    // unchanged in the mirror), which is the same property the no-quorum retry relies on.
+    async _retryRefusedHead(window, e, tokens){
+        let attempt = (this._refusalAttempts.get(window.window_start) || 0) + 1;
+        this._refusalAttempts.set(window.window_start, attempt);
+        // At the bound the window latches like any other failure, exactly once: the
+        // intent marker it keeps is what makes the next sweep quarantine it instead of
+        // proposing it again.
+        if(attempt >= this.maxRefusalAttempts) return false;
+
+        try {
+            await this._clearIntent(window.window_start);
+        } catch(err){
+            // The marker survives, so the window quarantines on the next sweep. Latching
+            // now is the honest outcome, and the caller's CRITICAL line is the one an
+            // operator should see.
+            console.error('AttestationBatchPublisher: window ' + window.window_start +
+                ' was refused before sending but its publish-intent marker could not be ' +
+                'removed (' + (err && err.message) + '); it will quarantine rather than retry.');
+            return false;
+        }
+
+        // Nothing was spent, so every reservation goes back, the head's included: this is
+        // the one broadcast failure where committing the head's token would charge the
+        // window's ceiling for a transaction that does not exist.
+        for(let t of tokens) this.spendGuard.release(t);
+        this.stats.windowsRefusalRetried++;
+        console.warn('AttestationBatchPublisher: window ' + window.window_start + '-' +
+            window.window_end + ' was refused before its head could be sent (' + (e && e.message) +
+            '); nothing left this process, so its publish-intent marker is withdrawn and the ' +
+            'window is rebuilt on the next sweep (attempt ' + attempt + ' of ' +
+            this.maxRefusalAttempts + ').');
         return true;
     }
 
@@ -1209,6 +1280,17 @@ class AttestationBatchPublisher {
             [this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent']);
     }
 
+    // Withdraw an intent-only marker. The status guard is the whole safety of the
+    // statement: it can only ever remove a row that says "no outcome recorded", so it
+    // cannot erase evidence of a window this hub or the federation has paid for.
+    async _clearIntent(windowStart){
+        let db = this._db();
+        if(!db || typeof db.doQuery !== 'function') return;
+        await db.doQuery(
+            'DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND status = ?',
+            [this.network, windowStart, 'intent']);
+    }
+
     // The DOGE is already spent by the time this runs, so a failure here is logged
     // rather than thrown: the intent row means a restart quarantines the window instead
     // of paying for it twice.
@@ -1298,6 +1380,11 @@ class AttestationBatchPublisher {
             enabled:       this.enabled,
             armed:         this.isArmedNetwork(),
             quarantinedWindows: this._quarantined.size,
+            // Windows currently mid-retry after a provably-unsent head refusal, and the
+            // bound they latch at. A count that sits at the bound is a refusal that is not
+            // transient, and the CRITICAL line names it.
+            refusalRetryWindows: this._refusalAttempts.size,
+            maxRefusalAttempts:  this.maxRefusalAttempts,
             // Null unless the last anchor read failed. A rising windowsDeferred with a
             // reason here is a configuration gap, not a busy federation.
             anchorFailure: this._anchorFailure || null,

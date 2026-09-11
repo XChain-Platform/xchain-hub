@@ -38,11 +38,11 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../src/price_pair_activation
 describe('XCHAIN/USD composition gate @regression', function () {
 
     describe('the activation map', function () {
-        it('is UNARMED on mainnet, at a sentinel rather than a schedule', function () {
-            // D6 (the pre-launch arming instant) is an open operator decision. This
-            // asserting a far-future value is the point: nothing composes the pair on
-            // mainnet until someone deliberately edits it.
-            expect(XCHAIN_PRICE_ACTIVATION.mainnet).to.equal(9999999999);
+        it('is ARMED at genesis on mainnet by the 2026-09-09 ruling', function () {
+            // 0 PRICE actions have ever been indexed on any mainnet chain (measured
+            // 2026-09-09), so composing the derived pair from block 0 reinterprets no
+            // signed round, and native-coin fees are payable from the first block.
+            expect(XCHAIN_PRICE_ACTIVATION.mainnet).to.equal(0);
         });
 
         it('is genesis-on for testnet and regtest', function () {
@@ -80,11 +80,20 @@ describe('XCHAIN/USD composition gate @regression', function () {
 
     describe('isXchainPriceActive()', function () {
         it('is inclusive at the threshold instant', function () {
-            expect(isXchainPriceActive(9999999999, 'mainnet')).to.equal(true);
-            expect(isXchainPriceActive(9999999998, 'mainnet')).to.equal(false);
+            // Every shipped network is genesis-on since 2026-09-09, so the >= boundary is
+            // driven through a temporary key rather than through whichever map entry
+            // happened to carry a future instant.
+            const NET = 'boundarynet';
+            XCHAIN_PRICE_ACTIVATION[NET] = 1790000000;
+            try {
+                expect(isXchainPriceActive(1790000000, NET)).to.equal(true);
+                expect(isXchainPriceActive(1789999999, NET)).to.equal(false);
+            } finally { delete XCHAIN_PRICE_ACTIVATION[NET]; }
         });
 
-        it('is active from genesis on the test networks', function () {
+        it('is active from genesis on every shipped network, mainnet included', function () {
+            expect(isXchainPriceActive(0, 'mainnet')).to.equal(true);
+            expect(isXchainPriceActive(1750000000, 'mainnet')).to.equal(true);
             expect(isXchainPriceActive(0, 'regtest')).to.equal(true);
             expect(isXchainPriceActive(1750000000, 'testnet')).to.equal(true);
         });
@@ -129,8 +138,8 @@ describe('XCHAIN/USD composition gate @regression', function () {
             // Regression. OracleRound reads ORACLE_ROUND_INTERVAL straight from config
             // without parsing, so it is the string '600000' in every real deployment.
             // A strict Number.isFinite() check rejected that and held the gate shut on
-            // EVERY network - invisible on mainnet, which is shut anyway, and caught
-            // only because regtest is genesis-on and should have been open.
+            // EVERY network. It was invisible back when mainnet was shut anyway, and was
+            // caught only because regtest is genesis-on and should have been open.
             expect(roundStartSeconds(1, EPOCH, '600000')).to.equal(1785000600);
             expect(roundStartSeconds(1, String(EPOCH), '600000')).to.equal(1785000600);
         });

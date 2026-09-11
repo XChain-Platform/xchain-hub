@@ -67,18 +67,19 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./price_pair_activation.js');
 // Per-network activation TIME, Unix seconds, matching the unit the wire-format gate
 // uses so the two are directly comparable.
 //
-// UNARMED on mainnet: 9999999999 is a far-future sentinel (year 2286), NOT a
-// scheduled flag-day. The arming instant is D6, an open operator decision,
-// and it is the same decision that arms PRICE_PAIR_WIDEN_ACTIVATION - the two are
-// armed together, this one at or after that one. The usual contract-era stamp
-// 1786060800 (2026-08-07) is unusable because it postdates the early-September
-// launch target and would leave LTC/DOGE native-coin fees unpayable through launch.
+// ARMED at genesis on mainnet by the 2026-09-09 ruling, together with
+// PRICE_PAIR_WIDEN_ACTIVATION and at the same instant, which satisfies the
+// at-or-after ordering the header states. No PRICE action has ever been indexed on any
+// mainnet chain (measured 2026-09-09), so composing the derived pair from block 0
+// reinterprets no signed round, and the from-genesis OLD-vs-ON replay is the witness.
+// Arming at 0 rather than at the contract-era stamp 1786060800 (2026-08-07) is what
+// keeps LTC/DOGE native-coin fees payable from the first mainnet block onward.
 //
 // testnet/regtest are genesis-on, so the pair is composed on every test venue and
 // in the suites today. §8 notes testnet is EXPECTED to be steerable (free public
 // MINT plus open venues), so monitoring must not alert on testnet price excursions.
 const XCHAIN_PRICE_ACTIVATION = {
-    mainnet: 9999999999,  // UNARMED sentinel, not a scheduled flag-day
+    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 PRICE actions, measured 2026-09-09)
     testnet: 0,
     regtest: 0,
 };
@@ -118,8 +119,8 @@ function roundStartSeconds(round, epochStartMs, roundIntervalMs) {
     // from config without parsing, so in a real deployment it arrives as the STRING
     // '600000' and Number.isFinite('600000') is false. A strict type check here
     // therefore returned null for every hub with a configured interval and silently
-    // held the gate shut on every network - which reads as correct on mainnet (also
-    // shut) and is why this needs a genesis-on network to catch.
+    // held the gate shut on every network. It read as correct back when mainnet was
+    // also shut, which is why this needs a genesis-on network to catch.
     //
     // Number() is safe for the empty-ish values that matter: '' and null both map to
     // 0, and an interval of 0 is rejected below, so neither can produce a bogus

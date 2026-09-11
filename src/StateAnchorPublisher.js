@@ -532,6 +532,25 @@ class StateAnchorPublisher {
         // lists to this set before anything is stamped. Recorded ONLY where the body was
         // already parsed, so no hub decompresses an extra archive on the p2p path.
         this._observedArchiveContents = new Map();
+        // Highest batch_seq this hub has learned the FEDERATION already consumed, from
+        // evidence other than its own rows: an authenticated XANC_FINALIZED, a co-sign
+        // refusal naming the refuser's own consumed seq, or an archive head resolved
+        // on-chain. -1 means "nothing beyond what our tables show".
+        //
+        // _getNextBatchSeq is MAX(batch_seq)+1 over THIS hub's rows, which equals the
+        // federation's next seq only while every back-fill has landed. A hub that missed
+        // one (a withheld/dropped XANC_FINALIZED) draws a seq the federation already
+        // spent and rebuilds rows it already archived. This floor carries that knowledge
+        // until the missed back-fill actually arrives, so the stale hub converges on the
+        // leader's seq without a schema change (there is no table to persist it in, so it
+        // is deliberately process-local and re-learned after a restart from the next
+        // FINALIZED, refusal or on-chain adopt).
+        this._observedConsumedBatchSeq = -1;
+        // Sanity bound on that floor. A Byzantine (but signature-verified) member could
+        // otherwise announce an absurd seq and permanently skip the numbering; a jump
+        // wider than this is logged and ignored, and the honest floor arrives with the
+        // next announcement.
+        this._archiveSeqFloorMaxJump = 1024;
 
         // Per-coin indexer JSON-RPC clients (same env -> p2pConfig surface as
         // ReorgHandler / CrossChainCallEngine). Used ONLY for on-chain ANCHOR
@@ -2435,7 +2454,7 @@ class StateAnchorPublisher {
             // Unconditional (all set sizes): the membership check above already
             // pins the size-1 identity, and a single-member ladder resolves to
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
-            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), electionPubkeys);
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
             // Same backup-only rule as the v0 path. A leader driving its
             // own batch on the wake cadence would archive whatever few rows are
@@ -2604,13 +2623,54 @@ class StateAnchorPublisher {
         return 'round_started';
     }
 
-    // Content-anchored election key: deterministic + identical on every hub
-    // (both fields come from quorum-agreed state) and STABLE while the batch is
-    // stalled, so the failover ladder has a fixed anchor to climb against.
-    // Unlike the old current-block key, which re-elected fresh every block (and
-    // on a static regtest tip elected the SAME leader forever).
-    _archiveElectionKey(cp, batchSeq){
-        return 'XANCV1|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq) + '|' + String(batchSeq);
+    // WRAPPER-anchored election key: deterministic, identical on every hub, and STABLE
+    // while the batch is stalled, so the failover ladder has a fixed anchor to climb
+    // against. Every field is the wrapper checkpoint's own identity, all of it
+    // quorum-agreed: chain/network are the wrapper's, and checkpoint_seq is derived from
+    // snapshot_block by the checkpoint engine, so two hubs holding the same wrapper
+    // cannot disagree about the key no matter what else diverges.
+    //
+    // The batch_seq is deliberately NOT in the key. It came from
+    // _getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own
+    // cross_chain_matches / cross_chain_calls / validator_rewards, with no consensus
+    // step: it is only fleet-uniform while _backfillBatch plus the XANC_FINALIZED gossip
+    // have landed everywhere. Once two hubs' tables differ by one missed back-fill they
+    // keyed the SAME wrapper differently, so each ranked itself 0 under its own key and
+    // both published (two archives at batches 26 and 27 for one wrapper, observed live),
+    // or, after a degraded round, each read itself rank 1 under its own key and NEITHER
+    // published (hub0 at batch 38, hub1 at batch 39: a stuck federation).
+    //
+    // Trade-off taken on purpose: successive batches under one wrapper now elect the same
+    // leader. Rotation still happens as checkpoint_seq advances, and within a wrapper the
+    // ladder (`_rankUnlocked` against electionBlock - snapshot_block) is what moves the
+    // publish off a dead leader, which is exactly the job a STABLE anchor is needed for.
+    // `batchSeq` is accepted and ignored so existing call sites/stubs stay valid.
+    _archiveElectionKey(cp, batchSeq){                      // eslint-disable-line no-unused-vars
+        return 'XANCV2|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq);
+    }
+
+    // Canonical a follower signs when it REFUSES to co-sign a proposal whose batch_seq it
+    // already holds as consumed. Distinct prefix from XANCFIN/the archive canonical, so a
+    // refusal can never be replayed as a co-signature or an announcement.
+    _seqRefusalCanonical(batchSeq, consumedSeq){
+        return 'XANCSEQ|' + String(batchSeq) + '|' + String(consumedSeq);
+    }
+
+    // Learn that the federation already consumed `seq`. Callers must have AUTHENTICATED
+    // the evidence first (an oracle_publish member's signature, or an on-chain read):
+    // the floor decides which seq the next round draws, so unauthenticated input here
+    // would let any peer push this hub's numbering forward at will.
+    _noteConsumedBatchSeq(seq, why){
+        // Reject null/undefined/'' outright rather than leaning on Number(): all three
+        // coerce to 0, which is a REAL seq, so a wire field that simply was not set
+        // would otherwise pin the floor at batch 0.
+        if(seq === null || seq === undefined || seq === '') return;
+        let s = Number(seq);
+        if(!Number.isFinite(s) || s <= this._observedConsumedBatchSeq) return;
+        this._observedConsumedBatchSeq = s;
+        console.warn('StateAnchorPublisher: batch seq ' + s + ' is already consumed by the federation (' +
+                     why + '); the next archive round will draw above it rather than rebuilding under a ' +
+                     'stale local seq');
     }
 
     // Failover-ladder check shared by leader election and follower verification:
@@ -3200,12 +3260,15 @@ class StateAnchorPublisher {
         // costs one co-signature on one round, which the round timeout re-runs.
         if(electionPubkeys.length === 0) return;
         {
-            // Same content-anchored key + failover ladder the leader used.
+            // Same wrapper-anchored key + failover ladder the leader used. Keyed on the
+            // WIRE checkpoint only: the wire batch_seq no longer reaches the key, so a
+            // verifier whose own batch numbering has drifted from the proposer's still
+            // derives the identical rank order.
             // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
-            // Runs for a single-member set too (previously skipped), so the
+            // Runs for a single-member set too, so the
             // sole elected leader cannot be impersonated by a non-member.
-            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), electionPubkeys);
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
         }
@@ -3225,6 +3288,29 @@ class StateAnchorPublisher {
         let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
                                                String(d.batch_crc32), Number(d.total_chunks));
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
+        // Stale-seq convergence, the receiving half. The election key no longer carries a batch_seq, so
+        // a proposer whose seq is stale now reaches us as a correctly-elected leader
+        // asking us to co-sign a seq we already hold as CONSUMED (its rows are archived
+        // in our tables; the proposer missed that back-fill). Co-signing would put a
+        // second v1 head on DOGE under a number that is already taken, which corrupts
+        // chunk reassembly for both batches. Refuse, and say so on the wire so the
+        // proposer can converge instead of re-proposing the same stale seq every flush.
+        //
+        // Placed BEFORE _recordObservedArchiveLeader on purpose: recording it would
+        // authorize this leader's FINALIZED to stamp our rows under the stale seq.
+        // Refusing costs no liveness - the proposer re-derives above our seq and comes
+        // back - and a hub that is genuinely BEHIND (its next seq is at or below the
+        // proposal) never takes this branch.
+        let myNextSeq = await this._getNextBatchSeq();
+        if(Number(d.batch_seq) < myNextSeq){
+            let consumed = myNextSeq - 1;
+            console.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
+                         ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
+                         consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
+                         'behind on the archive back-fill; answering with a stale-seq refusal');
+            this._broadcastSeqRefusal(Number(d.batch_seq), consumed);
+            return;
+        }
         // The sender has validated as the (rank-unlocked) elected archive leader
         // for this batch_seq at election_block. Bind it locally BEFORE the
         // snapshot-set co-sign check below, so an election-set member that will
@@ -3559,11 +3645,56 @@ class StateAnchorPublisher {
         return true;
     }
 
+    // Answer a SIGN_REQ we refuse on stale-seq grounds. Deliberately rides the EXISTING
+    // XANC_SIGN message as optional fields (`consumed_seq` + `refusal_sig`, with `sig`
+    // empty) rather than introducing a new p2p type: an un-upgraded leader runs this
+    // through _handleSign's `ValidatorIdentity.verify(round.canonical, '')`, which is
+    // false, so it drops the message exactly as it drops any other unusable co-signature.
+    // The refusal is signed because it can abandon a live round: unsigned, any peer could
+    // stall archiving federation-wide.
+    _broadcastSeqRefusal(batchSeq, consumedSeq){
+        if(!this.peerManager || !this.identity) return;
+        this.peerManager.broadcast(XANC_SIGN, {
+            batch_seq: Number(batchSeq),
+            sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
+            sig: '',
+            consumed_seq: Number(consumedSeq),
+            refusal_sig: this.identity.sign(this._seqRefusalCanonical(Number(batchSeq), Number(consumedSeq)))
+        });
+    }
+
     async _handleSign(envelope){
         let d = envelope.data;
         let round = this._archiveRound;
         if(!round || round.done || Number(d.batch_seq) !== round.batchSeq) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
+        // Stale-seq convergence, the proposing half. A follower that already holds this
+        // round's seq as consumed answers with a stale-seq refusal instead of a
+        // signature. Learn the floor from it and ABANDON the round: rebuilding the same
+        // batch under the same stale seq every flush is what left the federation stuck
+        // (hub0 batch 38 / hub1 batch 39, neither publishing). Rows stay pending and the
+        // next flush draws above the floor.
+        //
+        // Authenticated against the oracle_publish set at THIS round's own election
+        // block (the same population that elected the round) plus a signature over the
+        // refusal canonical, and only a refusal naming a seq at or above ours can move
+        // anything, so a member cannot walk our numbering backwards or forwards at will.
+        if(d.consumed_seq !== undefined && d.consumed_seq !== null){
+            if(Number(d.consumed_seq) < round.batchSeq) return;
+            let electionPubkeys = await this._getActiveOraclePublishPubkeys(round.electionBlock);
+            if(!electionPubkeys.includes(pubkey)) return;
+            if(!ValidatorIdentity.verify(this._seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
+                                         String(d.refusal_sig || ''), pubkey)) return;
+            console.warn('StateAnchorPublisher: archive round (batch ' + round.batchSeq + ') refused by ' +
+                         pubkey.substring(0, 12) + '..., which holds batch seq ' + Number(d.consumed_seq) +
+                         ' as consumed; abandoning the round rather than publishing a second archive under ' +
+                         'seq ' + round.batchSeq + ' (rows stay pending and re-archive above the learned seq)');
+            this._noteConsumedBatchSeq(Number(d.consumed_seq), 'co-sign refusal from ' + pubkey.substring(0, 12) + '...');
+            round.done = true;
+            if(round.timer){ clearTimeout(round.timer); round.timer = null; }
+            if(this._archiveRound === round) this._archiveRound = null;
+            return;
+        }
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
@@ -3712,10 +3843,16 @@ class StateAnchorPublisher {
         // the FINALIZED against it; nothing binds the local seq to match_batch_seq.
         let chunkSeq = (result && result.archiveAnchor && result.archiveAnchor.match_batch_seq != null)
             ? Number(result.archiveAnchor.match_batch_seq) : round.batchSeq;
-        if(chunkSeq !== round.batchSeq)
+        if(chunkSeq !== round.batchSeq){
             console.log('StateAnchorPublisher: adopted an already-published archive head (txid ' + txid +
                         ', batch ' + chunkSeq + ') for round ' + round.batchSeq +
                         '; remaining chunks go out under the adopted seq');
+            // Stale-seq convergence: the chain itself says this batch landed under a HIGHER seq than the
+            // one our rows produced, which is the on-chain form of "we are behind on the
+            // back-fill". Strongest evidence available (no peer asserted it), so feed the
+            // floor and stop the next round from re-drawing a seq DOGE already carries.
+            this._noteConsumedBatchSeq(chunkSeq, 'archive head found on DOGE under batch ' + chunkSeq);
+        }
 
         let lostChunks = 0;
         for(let i = 1; i < round.chunks.length; i++){
@@ -3861,6 +3998,13 @@ class StateAnchorPublisher {
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._finalizedCanonical(Number(d.batch_seq), d.txid, d.matches.length),
                                      String(d.sig || ''), sender)) return;
+        // batch_seq is bound into the canonical just verified and the sender is
+        // an oracle_publish member, so this is authenticated evidence that the seq is
+        // spent. Learn it HERE, ahead of the observed-leader gate below: a hub that
+        // missed the SIGN_REQ (the very hub most likely to be behind) is rejected by that
+        // gate and would otherwise learn nothing, then draw the taken seq on its own next
+        // round. Recording the floor stamps no rows, so it cannot suppress anything.
+        this._noteConsumedBatchSeq(Number(d.batch_seq), 'XANC_FINALIZED from ' + sender.substring(0, 12) + '...');
         // Authenticate the FINALIZED sender as an archive leader we actually
         // observed getting elected for THIS batch_seq (via _handleSignReq). The
         // archive election is keyed on election_block, which the FINALIZED
@@ -4491,7 +4635,24 @@ class StateAnchorPublisher {
             '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1), ' +
             '  COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1)' +
             '), -1) + 1 AS next_seq');
-        return (r && r.length > 0) ? Number(r[0].next_seq) : 0;
+        let local = (r && r.length > 0) ? Number(r[0].next_seq) : 0;
+        // The rows above are consensus-uniform only once every back-fill has
+        // landed. _observedConsumedBatchSeq carries the seqs the federation demonstrably
+        // spent while this hub was missing one, so the stale hub converges on the
+        // leader's numbering instead of re-proposing a taken seq until the withheld
+        // XANC_FINALIZED (which re-stamps the real rows) finally arrives.
+        let floor = this._observedConsumedBatchSeq + 1;
+        if(!(floor > local)) return local;
+        if(floor - local > this._archiveSeqFloorMaxJump){
+            console.warn('StateAnchorPublisher: observed consumed batch seq ' + this._observedConsumedBatchSeq +
+                         ' is more than ' + this._archiveSeqFloorMaxJump + ' above our own next seq ' + local +
+                         '; ignoring it as implausible and keeping the row-derived seq');
+            return local;
+        }
+        console.warn('StateAnchorPublisher: own rows give next batch seq ' + local + ' but the federation has ' +
+                     'already consumed ' + this._observedConsumedBatchSeq + '; drawing ' + floor +
+                     ' (this hub is behind on an archive back-fill)');
+        return floor;
     }
 
     // Maps a state_checkpoints row to the 9 identity fields only; deliberately OMITS

@@ -25,8 +25,8 @@
 // Every case drives the REAL aggregator with real Ed25519 quorum signatures over
 // the real canonical builders. The gate is moved by stubbing the module's own
 // pattern selector at a threshold, the same way the straddle cases drive the
-// sig-tally gate, so both branches are exercised while the shipped map stays
-// unarmed on mainnet.
+// sig-tally gate, so both branches are exercised without depending on which
+// network the shipped map happens to have armed.
 
 const crypto            = require('crypto');
 const fs                = require('fs');
@@ -98,16 +98,19 @@ describe('PRICE v0 canonical price-value flag day: hub copy @regression', functi
 
     describe('the rule this hub ships', function () {
 
-        it('is UNARMED on mainnet, so nothing changes there yet', function () {
-            expect(priceScale.PRICE_SCALE_ACTIVATION.mainnet).to.equal(9999999999);
+        it('is ARMED at genesis on mainnet by the 2026-09-09 ruling', function () {
+            // 0 PRICE actions have ever been indexed on any mainnet chain (measured
+            // 2026-09-09), so tightening the decimal bound refuses no round ever accepted.
+            expect(priceScale.PRICE_SCALE_ACTIVATION.mainnet).to.equal(0);
             let now = Math.floor(Date.now() / 1000);
-            expect(priceScale.isPriceScaleCanonicalActive(now, 'mainnet')).to.equal(false);
-            expect(priceScale.isValidPriceValue(WIDE, now, 'mainnet')).to.equal(true);
-            expect(priceScale.isValidPriceValue(NEAR_ZERO, now, 'mainnet')).to.equal(true);
+            expect(priceScale.isPriceScaleCanonicalActive(now, 'mainnet')).to.equal(true);
+            expect(priceScale.isValidPriceValue(WIDE, now, 'mainnet')).to.equal(false);
+            expect(priceScale.isValidPriceValue(NEAR_ZERO, now, 'mainnet')).to.equal(false);
+            expect(priceScale.isValidPriceValue(HONEST, now, 'mainnet')).to.equal(true);
         });
 
-        it('runs from genesis on testnet and regtest', function () {
-            for (const network of ['testnet', 'regtest']) {
+        it('runs from genesis on every network', function () {
+            for (const network of ['mainnet', 'testnet', 'regtest']) {
                 expect(priceScale.isPriceScaleCanonicalActive(0, network), network).to.equal(true);
                 expect(priceScale.isValidPriceValue(WIDE, 0, network), network).to.equal(false);
                 expect(priceScale.isValidPriceValue(HONEST, 0, network), network).to.equal(true);

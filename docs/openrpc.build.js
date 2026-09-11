@@ -130,12 +130,18 @@ const METHODS = [
     ['requestattestation', 'Request a cross-chain attestation for a source-chain action.', ['source_chain', 'source_action_index', 'dest_chain'], { auth: true }],
     ['getattestations', 'List cross-chain attestations, optionally filtered by status.', ['status', 'limit']],
     ['getattestation', 'One cross-chain attestation, keyed by source chain + action index.', ['source_chain', 'source_action_index']],
+    // Present in the committed spec but missing from this list, so a regeneration
+    // silently deleted them and only the drift guard (spec methods === controller
+    // methods) noticed. Restored verbatim from the committed spec, for the same
+    // reason pushpricebatch below was: this generator has to be idempotent.
+    ['getattestationresponsibleset', 'The responsible validator set for one pending attestation request, resolved from the capability snapshot at its buried block.', [{ name: 'request_id', required: true, schema: { type: 'string' } }]],
+    ['getrollcallstatus', "ROLLCALL presence-proof publisher status for this hub: the epoch it last worked, whether it signed, how many signatures it holds and how many are already on chain, the elected leader and this hub's rank, any txids it published, and whether its signer module can broadcast. Publisher state only: the authoritative roll-call record lives on the BTC indexer.", [], { auth: true }],
     ['reportreorg', 'Report a chain reorg to the federation.', ['chain', 'reorg_height', 'timestamp', 'old_hash', 'new_hash'], { auth: true }],
     ['getreorghistory', 'Recent reorg attestations.', ['limit']],
     ['initiateswap', 'Initiate a tracked cross-chain swap.', ['source_chain', 'source_action_index', 'dest_chain', 'dest_action_index'], { auth: true }],
     ['getswap', 'One tracked swap, keyed by source chain + action index.', ['source_chain', 'source_action_index']],
     ['getswaps', 'List tracked swaps, optionally filtered by status.', ['status', 'limit']],
-    ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time'], { auth: true, internal: true }],
+    ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time', 'chain_id'], { auth: true, internal: true }],
     ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
     // Present in the committed spec but missing from this list, so every
     // regeneration silently DELETED it and the drift guard only noticed on the
@@ -146,6 +152,7 @@ const METHODS = [
     ['pushpricereorg', 'Indexer push: price reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushdexreorg', 'Indexer push: cross-chain DEX match reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
+    ['retractattestbatch', 'Indexer push: a reorg un-landed an ATTEST v5 batch, so the batch link it stamped on the carried response rows is cleared. Clears the link only; no mirror row is deleted.', ['source_chain', 'network', 'batch_key', 'window_start', 'window_end', 'action_index'], { auth: true, internal: true }],
 ];
 
 const spec = {
@@ -168,7 +175,16 @@ const spec = {
         const m = {
             name, summary,
             paramStructure: 'by-name',
-            params: (params || []).map((p) => ({ name: p, required: false, schema: { type: ['string', 'number', 'object'] } })),
+            // A param is either a bare name (the summary-level default: optional, and
+            // unconstrained across the three shapes JSON-RPC by-name arguments arrive
+            // in) or a declared {name, required, schema}. The declared form exists
+            // because the committed spec already carried hand-tightened params that a
+            // regeneration would otherwise have silently loosened, which is the same
+            // idempotency failure the restored rows above document from the other side.
+            params: (params || []).map((p) => (typeof p === 'string'
+                ? { name: p, required: false, schema: { type: ['string', 'number', 'object'] } }
+                : { name: p.name, required: p.required === true,
+                    schema: p.schema || { type: ['string', 'number', 'object'] } })),
             // Unconstrained unless the row declares a result schema (item #4481).
             // Every method used to claim `type: object`, which is a FALSE claim for
             // the array returners (getpricesnapshots, getvalidators, getproposals,

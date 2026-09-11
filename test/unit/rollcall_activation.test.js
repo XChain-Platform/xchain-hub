@@ -99,14 +99,15 @@ describe('ROLLCALL activation: hub copy @regression', function () {
     // ------------------------------------------------------------------
     describe('the eight consensus values this hub will sign against', function () {
 
-        it('pins the per-network activation heights, mainnet and regtest INERT by default', function () {
-            // null, not 0 and not a height: the operator owns the mainnet flag day.
+        it('pins the per-network activation heights, regtest INERT by default', function () {
+            // mainnet arms at genesis by the 2026-09-09 ruling: 0 validators, 0 stakes and
+            // 0 roll-calls measured that day, so every epoch below the tip closes empty.
             // regtest is null until the VENUE opts in; arming it by default
             // wedges every single-coin BTC venue at its first close, because the epoch
             // close has no DOGE peer to ask and defers rather than reading silence as
             // absence. All three copies, including the record in
             // xchain-documentation/protocol/constants.js, resolve it the same way.
-            expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(null);
+            expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             expect(local.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
             expect(local.ROLLCALL_ACTIVATION.regtest).to.equal(null);
         });
@@ -123,7 +124,7 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(armed.isRollcallActive(0, 'regtest')).to.equal(true);
             // The 2026-09-01 ruling scopes the no-tunable-input rule to networks with a
             // shared ledger. These two must stay unreachable from the environment.
-            expect(armed.ROLLCALL_ACTIVATION.mainnet).to.equal(null);
+            expect(armed.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             expect(armed.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
             expect(loadWithEnv('off').ROLLCALL_ACTIVATION.regtest).to.equal(null);
             expect(loadWithEnv('nonsense').ROLLCALL_ACTIVATION.regtest).to.equal(null);
@@ -180,11 +181,12 @@ describe('ROLLCALL activation: hub copy @regression', function () {
 
     describe('isRollcallActive, as this hub evaluates it', function () {
 
-        it('never arms an inert mainnet, at any height', function () {
-            // 0 >= null is TRUE in JS: the trap the Number.isFinite guard exists for.
-            expect(0 >= local.ROLLCALL_ACTIVATION.mainnet).to.equal(true);
+        it('arms mainnet at genesis, every height included', function () {
+            expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             for (const h of [0, 1, 961000, 99999999])
-                expect(local.isRollcallActive(h, 'mainnet'), 'mainnet armed at ' + h).to.equal(false);
+                expect(local.isRollcallActive(h, 'mainnet'), 'mainnet inert at ' + h).to.equal(true);
+            // Still fails closed on a height it cannot parse, even at threshold 0.
+            expect(local.isRollcallActive('abc', 'mainnet')).to.equal(false);
         });
 
         it('gates testnet exactly at its pinned height', function () {
@@ -253,11 +255,16 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(armed.rollcallEpochClosingAt(12345, 'regtest')).to.equal(null);
         });
 
-        it('never closes an epoch on an inert mainnet', function () {
+        it('closes epochs on a genesis-armed mainnet, and never on an inert regtest', function () {
             const C = local.rollcallCloseHeight(1008, 'mainnet');
             expect(C, 'the arithmetic stays well-defined').to.be.a('number');
             expect(local.rollcallEpochClosingAt(C, 'mainnet'),
-                'an inert network must never close an epoch, which is what keeps mainnet from evicting anyone')
+                'a genesis-armed mainnet closes the epoch its close height names').to.equal(1008);
+            // The inert-network leg keeps its negative control on the network that is
+            // still inert by default: regtest, until a venue opts in.
+            const R = local.rollcallCloseHeight(30, 'regtest');
+            expect(local.rollcallEpochClosingAt(R, 'regtest'),
+                'an inert network must never close an epoch, which is what keeps it from evicting anyone')
                 .to.equal(null);
         });
 

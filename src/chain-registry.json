@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-19T22:13:07.038Z",
+  "generated_at": "2026-09-09T02:43:30.361Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -247,7 +247,7 @@
       },
       "encoder": {
         "defaultUrl": "http://localhost",
-        "defaultPort": 3003
+        "defaultPort": 3023
       },
       "hub": {
         "defaultUrl": "http://localhost",

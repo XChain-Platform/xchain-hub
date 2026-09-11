@@ -44,6 +44,8 @@ const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const roundBandLib      = require('./lib/oracle_round_band.js');
+const snapWrite         = require('./lib/capability_snapshot_write.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -54,6 +56,55 @@ const FENCE_WARN_INTERVAL_MS = 60_000;
 // Same sizing rationale as FENCE_WARN_INTERVAL_MS: a pair that stays gone keeps
 // re-announcing itself in any log tail, without one stalled feed flooding the log.
 const MISSING_PAIR_WARN_INTERVAL_MS = 60_000;
+
+// ── Derived capability snapshots ────────────────────────────────────────────
+// Every capability the consensus path persists into capability_snapshots, and so
+// every capability a chain-only hub must derive for itself. Row 45 built this pass
+// for `price` alone, which left a standalone node failing closed on ATTEST and
+// storing ANCHOR archive heads `unverified` (measured on the testnet chain-only node
+// 2026-09-09: 1,148 rows, all `price`, no other capability at any height).
+//
+// The consensus writers this mirrors, one per name:
+//   price          OracleConsensus._persistCapabilitySnapshot (round finalization)
+//   oracle_publish StateCheckpointEngine.js:477,866  (the ANCHOR archive-head verifier)
+//   cross_chain    CrossChainCallEngine.js:721, RetractionConsensus.js:393,
+//                  CrossChainDexConsensus.js:326,377, CrossChainDexEngine.js:712
+//   attestation    AttestationBatchPublisher.js:722  (the v5 ATTEST head verifier)
+//
+// `cross_chain` is written by engines whose _persistCapabilitySnapshot takes a third
+// `network` argument, and that argument is NOT a per-row scope this pass cannot supply.
+// capability_snapshots has no network column (lib/capability_snapshot_write.js COLUMNS)
+// and every reader keys on (capability, snapshot_block) alone (xchain-indexer db.js
+// getCapabilitySnapshotWeights / getCapabilitySnapshotValidators / getCapabilitySnapshotCount
+// / isPubkeyInCapabilitySnapshot). The argument feeds exactly two things: the
+// STAKE_WEIGHTED_QUORUM activation key, whose map is keyed mainnet/testnet/regtest, and
+// btc_chain_id, a transport column in no reader's WHERE. Both are properties of the HUB's
+// own deployment network, which a standalone hub knows as this.hub.network, so the rows
+// this pass writes for `cross_chain` are the same rows the engines write.
+const DERIVED_CAPABILITIES = ['price', 'oracle_publish', 'cross_chain', 'attestation'];
+
+// How far back from the BTC tip a hub that does NOT run oracle consensus keeps
+// capability_snapshots rows. It has to be a WINDOW rather than a single
+// height because the hub never learns which anchor it needs: the indexer resolves
+// a landed batch's quorum against capability_snapshots BEFORE it pushes anything,
+// so an anchor the hub has not already covered produces no push to learn from.
+// 144 blocks is ~1 day of Bitcoin, which covers a node following the tip and a
+// day of catch-up; a deeper chain-only bootstrap raises it by config.
+const PRICE_CAP_DERIVE_LOOKBACK_BLOCKS = 144;
+
+// Seconds between derivation passes. One pass costs at most one indexer RPC per
+// uncovered height, and the batch rail publishes hourly, so a minute is far
+// finer-grained than anything it feeds.
+const PRICE_CAP_DERIVE_INTERVAL_S = 60;
+
+// Ceiling on the (capability, height) pairs ONE pass resolves. The first pass of a
+// cold hub has the whole lookback window to fill for every capability, and doing that
+// in a single tick would fire 144 * DERIVED_CAPABILITIES RPCs at the Bitcoin indexer at
+// boot. The unit is the RPC, not the height, so widening the capability list did not
+// widen this budget. The pass walks newest-first and covers ALL capabilities at a height
+// before it steps back one, so the tip (what a node following the chain needs next) is
+// fully covered first and the backfill trails behind it over the following ticks.
+const PRICE_CAP_DERIVE_MAX_PER_TICK = 64;
 
 class PriceAggregator extends EventEmitter {
 
@@ -72,6 +123,21 @@ class PriceAggregator extends EventEmitter {
         // ingest counters here: the log carries the driver line, this is the read tier.
         this.implausibleRoundRejections = 0;
         this.lastImplausibleRound = null;
+        // Derived capability snapshots (chain-only hubs). Timer handle, re-entrancy
+        // latch, the BTC heights this process has already covered, and the heights whose
+        // last attempt failed loudly (so the failure is named once rather than once per
+        // pass). Both are keyed PER CAPABILITY (Map<capability, Set<height>>) because a
+        // height covered for `price` says nothing about whether `attestation` was
+        // resolved there, and collapsing them would mark three capabilities covered on
+        // the strength of a fourth. Every set is pruned to the lookback window on every
+        // pass, so none can grow past it.
+        this._priceCapDeriveTimer   = null;
+        this._priceCapDeriveRunning = false;
+        this._capDerivedBlocks      = new Map();
+        this._capWarnedBlocks       = new Map();
+        // Counters for the diagnostics tier, same posture as the ingest counters above.
+        this.priceCapabilityBlocksDerived = 0;
+        this.priceCapabilityRowsDerived   = 0;
     }
 
     // The plausible round band for THIS hub, or null when the local oracle
@@ -1315,6 +1381,356 @@ class PriceAggregator extends EventEmitter {
 
         console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };
+    }
+
+    /* ── Derived capability snapshots ─────────────────────────────────────────
+     *
+     * NOTHING wrote a capability snapshot of ANY kind on a hub that does not run oracle
+     * consensus. For `price` the sole writer was OracleConsensus._persistCapabilitySnapshot on the
+     * round-FINALIZATION path, which only a validator hub reaches, so a chain-only node
+     * (an indexer whose only price source is the on-chain batch, pointed at its own
+     * standalone hub) mirrored an empty capability_snapshots and recorded EVERY landed
+     * batch `invalid: insufficient signer stake`: off BTC the indexer resolves the price
+     * set from the hub-mirrored table alone (xchain-indexer db.js usesCapabilitySnapshot),
+     * so the qualified set was empty, S summed to zero and the strict bar could not be
+     * met by signatures that all verify. Measured on the real testnet chain-only node
+     * 2026-09-09: 60 batches parsed, 60 refusals, capability_snapshots empty in all three
+     * of its databases while its Bitcoin view answered HTTP 200.
+     *
+     * THE ORDERING IS WHY THIS IS A TIMER AND NOT AN INGEST HOOK. The indexer validates a
+     * parsed batch BEFORE it pushes it to the hub, so a fix that filled the snapshot when
+     * a VALID batch arrived could never fire: no snapshot means invalid, invalid means no
+     * push, no push means no snapshot. Nothing on the receive path may be the trigger.
+     * The hub therefore DERIVES the set for a WINDOW of BTC heights straight from the
+     * configured Bitcoin indexer (operator ruling 2026-09-09), on its own clock, before
+     * and independently of any batch, and persists it through the same shared writer the
+     * consensus path uses so both paths produce byte-identical rows.
+     *
+     * Validator identity still goes through Bitcoin: every row here comes from
+     * CapabilitySnapshot's `getcapabilityvalidators` / `getstakeweightsbycapability` read
+     * against the BTC indexer at a BTC height, exactly as the consensus path resolves it.
+     * Nothing is invented locally, and an unreachable or truncated read writes NOTHING.
+     *
+     * THE SAME HOLE EXISTS FOR EVERY OTHER CAPABILITY, and each has its own refusal.
+     * `price` was simply the one the batch rail surfaced first. On the same measured
+     * chain-only node, of 13 verdict divergences against origin, five were ATTEST actions
+     * refused `invalid: insufficient signer stake` for a missing `attestation` snapshot
+     * and one was an ANCHOR archive head stored `unverified` for a missing
+     * `oracle_publish` snapshot (xchain-indexer actions/anchor.js:519 documents that
+     * exact behaviour). So the pass derives every name in DERIVED_CAPABILITIES, on the
+     * same window, the same clock and the same shared writer.
+     */
+
+    // The kill switch. Any value but 'off' (case-insensitive) leaves derivation on,
+    // because a hub that silently stops writing these rows is the failure this whole
+    // path exists to close: an operator must have to spell the word to lose it.
+    _priceCapabilityDerivationEnabled() {
+        return String(process.env.HUB_PRICE_CAPABILITY_DERIVE || '').trim().toLowerCase() !== 'off';
+    }
+
+    // True for a hub that runs oracle consensus, whose existing round-finalization
+    // writer already covers every anchor a batch it signs can carry. Both signals are
+    // checked because they settle at different moments in boot: `oracleConsensus` is
+    // built by startOracle(), a few awaits after start() arms this timer, while
+    // `peerManager` (built by startP2P, and the sole precondition startOracle has) is
+    // already the decision. Reading only the former would let a slow boot fire one pass
+    // on a validator hub.
+    _runsOracleConsensus() {
+        if (!this.hub) return false;
+        if (this.hub.oracleConsensus) return true;
+        try {
+            if (typeof this.hub.getPeerManager === 'function' && this.hub.getPeerManager()) return true;
+        } catch (e) { /* a hub double without a peer manager is not a validator */ }
+        return false;
+    }
+
+    // Arm the derivation pass. Called from XChainHub.start() unconditionally: the
+    // pass itself decides whether this hub needs it, because start() runs BEFORE
+    // startP2P/startOracle and cannot yet tell a validator from a standalone hub.
+    startPriceCapabilityDerivation() {
+        if (this._priceCapDeriveTimer) return false;
+        if (!this._priceCapabilityDerivationEnabled()) {
+            console.warn('PriceAggregator: HUB_PRICE_CAPABILITY_DERIVE=off, so this hub will not derive '
+                + 'capability snapshots (' + DERIVED_CAPABILITIES.join(', ') + '). If it does not run oracle '
+                + 'consensus, nothing else writes them: every on-chain PRICE batch and every ATTEST its '
+                + 'indexer parses will read `invalid: insufficient signer stake`, and every ANCHOR archive '
+                + 'head will be stored `unverified`.');
+            return false;
+        }
+        let intervalS = positiveIntConfig(process.env.HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S,
+            PRICE_CAP_DERIVE_INTERVAL_S, 'HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S');
+        // The FIRST pass waits a full interval rather than firing now: start() has not yet
+        // been followed by startP2P/startOracle, so a pass at t=0 would run on a validator
+        // hub before the signals that identify it exist. See _runsOracleConsensus.
+        this._priceCapDeriveTimer = setInterval(() => {
+            this.runPriceCapabilityDerivation().catch(e => {
+                console.error('PriceAggregator: `price` capability derivation pass failed:',
+                    e && e.message ? e.message : e);
+            });
+        }, intervalS * 1000);
+        // Never hold the process open: this is a background repair, not work anyone waits on.
+        if (typeof this._priceCapDeriveTimer.unref === 'function') this._priceCapDeriveTimer.unref();
+        return true;
+    }
+
+    stopPriceCapabilityDerivation() {
+        if (this._priceCapDeriveTimer) {
+            clearInterval(this._priceCapDeriveTimer);
+            this._priceCapDeriveTimer = null;
+        }
+    }
+
+    // One derivation pass. Resolves the BTC tip, covers the newest uncovered heights in
+    // the lookback window, and returns what it did so a test or an operator RPC can read
+    // the pass rather than infer it from logs.
+    async runPriceCapabilityDerivation() {
+        if (this._priceCapDeriveRunning) return { ran: false, reason: 'pass already running' };
+        if (!this._priceCapabilityDerivationEnabled()) return { ran: false, reason: 'disabled' };
+        // A validator hub keeps its existing behaviour exactly: the round-finalization
+        // writer owns these rows there, and this pass disarms itself for the process.
+        if (this._runsOracleConsensus()) {
+            this.stopPriceCapabilityDerivation();
+            return { ran: false, reason: 'hub runs oracle consensus' };
+        }
+
+        this._priceCapDeriveRunning = true;
+        try {
+            let tip = await this.hub._resolveBtcLatestBlock();
+            let t   = Number(tip);
+            // FAIL CLOSED, LOUDLY. _resolveBtcLatestBlock returns null for an unreachable
+            // indexer, a stale pushed tip and an over-lagged direct tip alike, and every
+            // one of those means this hub cannot know the qualifying set at any height.
+            // Deriving from a guessed height would mirror a set nobody can verify.
+            if (!Number.isFinite(t) || t <= 0) {
+                console.error('PriceAggregator: cannot derive capability snapshots: the '
+                    + 'configured Bitcoin view returned no usable tip. Nothing written. Until it '
+                    + 'answers, every on-chain PRICE batch and every ATTEST this node parses reads '
+                    + '`invalid: insufficient signer stake` and every ANCHOR archive head is stored '
+                    + '`unverified`.');
+                return { ran: false, reason: 'no btc tip' };
+            }
+            t = Math.floor(t);
+
+            let lookback = positiveIntConfig(process.env.HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS,
+                PRICE_CAP_DERIVE_LOOKBACK_BLOCKS, 'HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS');
+            let from = Math.max(0, t - lookback + 1);
+
+            // Bound every memory set to the window. Pruning by HEIGHT rather than by
+            // insertion order is what makes them bounded and exact at once: a height that
+            // has fallen out of the window is never revisited, so forgetting it costs
+            // nothing, and nothing inside the window is ever forgotten and re-derived.
+            for (let capability of DERIVED_CAPABILITIES) {
+                let done = this._coveredBlocks(this._capDerivedBlocks, capability);
+                let warned = this._coveredBlocks(this._capWarnedBlocks, capability);
+                for (let b of [...done])   if (b < from) done.delete(b);
+                for (let b of [...warned]) if (b < from) warned.delete(b);
+            }
+
+            // Newest first, and ALL capabilities at a height before stepping back one: the
+            // tip is the height the next landed batch, ATTEST or archive head anchors
+            // nearest, so a cold hub covers everything it needs now before it walks the
+            // backfill. The cap counts RPC units, so widening the capability list spends no
+            // more indexer budget per tick than the price-only pass did.
+            let todo = [];
+            for (let b = t; b >= from && todo.length < PRICE_CAP_DERIVE_MAX_PER_TICK; b--) {
+                for (let capability of DERIVED_CAPABILITIES) {
+                    if (todo.length >= PRICE_CAP_DERIVE_MAX_PER_TICK) break;
+                    if (!this._coveredBlocks(this._capDerivedBlocks, capability).has(b))
+                        todo.push({ capability: capability, block: b });
+                }
+            }
+
+            let written = 0, rows = 0, empty = 0, failed = 0;
+            // Per-capability tallies, so an operator reading one pass can see WHICH
+            // capability is stuck rather than a single number that hides three healthy
+            // ones behind a fourth.
+            let byCapability = {};
+            for (let capability of DERIVED_CAPABILITIES)
+                byCapability[capability] = { written: 0, rows: 0, empty: 0, failed: 0 };
+
+            for (let item of todo) {
+                let capability = item.capability, block = item.block;
+                let tally = byCapability[capability];
+                let res = await this._persistDerivedCapabilitySnapshot(capability, block);
+                if (res.status === 'written') {
+                    // Covered: remember it so the next pass spends no RPC on it.
+                    this._coveredBlocks(this._capDerivedBlocks, capability).add(block);
+                    this._coveredBlocks(this._capWarnedBlocks, capability).delete(block);
+                    written += 1;  tally.written += 1;
+                    rows    += res.rows;  tally.rows += res.rows;
+                } else if (res.status === 'empty') {
+                    // A genuinely empty qualifying set at this height. Nothing to mirror
+                    // and nothing wrong: the read succeeded, so the height is covered and
+                    // an off-BTC verifier reading zero rows fails closed, which is the
+                    // same verdict this hub would reach.
+                    this._coveredBlocks(this._capDerivedBlocks, capability).add(block);
+                    empty += 1;  tally.empty += 1;
+                } else {
+                    // 'unresolved', 'truncated' or 'error': NOT covered, so the next pass
+                    // retries it. The warning fires once per capability per height per
+                    // process so a stuck indexer names itself without drowning the log
+                    // every minute.
+                    failed += 1;  tally.failed += 1;
+                    let warned = this._coveredBlocks(this._capWarnedBlocks, capability);
+                    if (!warned.has(block)) {
+                        warned.add(block);
+                        console.warn('PriceAggregator: no `' + capability + '` capability snapshot written at '
+                            + 'BTC block ' + block + ' (' + res.status + (res.detail ? ': ' + res.detail : '') + '). '
+                            + 'An action anchored there that needs the `' + capability + '` set will read '
+                            + '`invalid: insufficient signer stake` (or be stored `unverified`) until this '
+                            + 'resolves; retrying each pass.');
+                    }
+                }
+            }
+
+            this.priceCapabilityBlocksDerived += written;
+            this.priceCapabilityRowsDerived   += rows;
+            if (written > 0) {
+                let per = DERIVED_CAPABILITIES
+                    .filter(c => byCapability[c].written > 0)
+                    .map(c => c + ' ' + byCapability[c].written)
+                    .join(', ');
+                console.log('PriceAggregator: derived capability snapshots for ' + written
+                    + ' (capability, BTC block) pair(s) (' + rows + ' rows) in [' + from + ', ' + t + ']'
+                    + (per ? ' [' + per + ']' : '')
+                    + (empty ? ', ' + empty + ' pair(s) resolved empty' : '')
+                    + (failed ? ', ' + failed + ' pair(s) unresolved' : ''));
+            }
+            return { ran: true, tip: t, from: from, considered: todo.length,
+                     written: written, rows: rows, empty: empty, failed: failed,
+                     capabilities: DERIVED_CAPABILITIES.slice(), byCapability: byCapability };
+        } finally {
+            this._priceCapDeriveRunning = false;
+        }
+    }
+
+    // The per-capability height set inside one of the two Maps, created on first use.
+    // Split out so the pass, the prune and the tests all reach the same object rather
+    // than each re-deriving "does this Map already have a Set for this capability".
+    _coveredBlocks(map, capability) {
+        let set = map.get(capability);
+        if (!set) { set = new Set(); map.set(capability, set); }
+        return set;
+    }
+
+    // Resolve the qualifying validator set for `capability` at a BTC block, normalized to
+    // { pubkey, source, weight, amount }.
+    //
+    // The resolution is OracleConsensus._resolveCapabilityValidators verbatim (same
+    // activation key, same two RPCs, same normalization, same truncation marker), with
+    // ONE deliberate difference: a degraded read returns null here instead of collapsing
+    // to []. Both refuse to write, but only the null tells the caller the Bitcoin view
+    // failed, which is the difference between "retry and say so" and "this height really
+    // has no qualified validators".
+    //
+    // The capability is a pass-through to the BTC indexer RPC, exactly as it is in the
+    // six consensus writers: `getcapabilityvalidators` / `getstakeweightsbycapability`
+    // take it as a parameter, and CapabilitySnapshot keys its cache and its min_stake
+    // lookup on it. Nothing else about the resolution differs per capability, which is
+    // why one resolver serves all four.
+    async _resolveDerivedCapabilityValidators(capability, block) {
+        let capSnapshot = this.hub ? this.hub.capabilitySnapshot : null;
+        if (!capSnapshot) return null;
+        // The hub's OWN deployment network is the activation key for every capability,
+        // `cross_chain` included: STAKE_WEIGHTED_QUORUM_ACTIVATION is keyed
+        // mainnet/testnet/regtest, and the engines' third `network` argument carries the
+        // same value read off the match row. See DERIVED_CAPABILITIES.
+        let weighted = swq.isStakeWeightedQuorumActive(block, this.hub.network);
+        if (weighted) {
+            if (typeof capSnapshot.getWeightSnapshot !== 'function') return null;
+            let snap = await capSnapshot.getWeightSnapshot(capability, block);
+            if (!snap || !Array.isArray(snap.validators)) return null;
+            let validators = snap.validators.map(v => ({
+                pubkey: v.pubkey,
+                source: String(v.source != null ? v.source : ''),
+                weight: String(v.weight != null ? v.weight : '0'),
+                amount: String(v.weight != null ? v.weight : '0')
+            }));
+            // Carry the truncation marker through the .map so the persist can refuse an
+            // over-cap set (SWQ-TRUNC parity with the other writers).
+            if (snap.truncated === true) validators.truncated = true;
+            return validators;
+        }
+        let snap = await capSnapshot.getSnapshot(capability, block);
+        if (!snap || !Array.isArray(snap.validators)) return null;
+        let counted = snap.validators.map(v => ({
+            pubkey: v.pubkey,
+            source: '',
+            weight: String(v.amount != null ? v.amount : '0'),
+            amount: String(v.amount != null ? v.amount : '0')
+        }));
+        // getSnapshot marks an over-cap COUNT set truncated as well, and the persist guard
+        // reads the marker off this array, so carry it in both modes.
+        if (snap.truncated === true) counted.truncated = true;
+        return counted;
+    }
+
+    // The `price` resolver under its original name. CapabilitySnapshotTruncationParity
+    // drives this exact signature to prove the COUNT-mode truncation marker survives the
+    // .map, and that guard is about the resolver's shape, not about which capability it
+    // was asked for, so the name stays and the widened resolver does the work.
+    async _resolvePriceCapabilityValidators(block) {
+        return this._resolveDerivedCapabilityValidators('price', block);
+    }
+
+    // Persist the `capability` set at `block` and mirror it to hub-DB subscribers. The
+    // write and the select-back are OracleConsensus._persistCapabilitySnapshot's, through
+    // the same shared writer, so the rows a chain-only hub produces are byte-identical to
+    // a validator hub's for the same block and INSERT IGNORE makes either order a no-op
+    // for the other.
+    //
+    // Returns { status, rows }: 'written', 'empty' (read fine, nobody qualified),
+    // 'unresolved' (the Bitcoin view failed), 'truncated' or 'error'.
+    async _persistDerivedCapabilitySnapshot(capability, block) {
+        let validators = await this._resolveDerivedCapabilityValidators(capability, block);
+        if (validators === null) return { status: 'unresolved', rows: 0, detail: 'Bitcoin view unreachable or degraded' };
+        // SWQ-TRUNC-MIRROR, held exactly as OracleConsensus states it: never mirror a
+        // TRUNCATED set. The marker is a JS array property with no capability_snapshots
+        // column behind it, so persisting the capped rows would hand an off-BTC verifier
+        // a partial set it reads back as COMPLETE and let it clear a 2/3 bar over an
+        // under-counted stake denominator this hub itself rejects. Writing nothing leaves
+        // the mirror empty, so that read yields S=0 and fails closed through the same
+        // predicate as everything else.
+        if (validators.truncated === true) {
+            console.warn('PriceAggregator: refusing to persist a TRUNCATED ' + capability + ' capability '
+                + 'snapshot at block ' + block + ' (over the source cap; raise VALIDATOR_QUERY_LIMIT '
+                + 'fleet-wide). No rows mirrored.');
+            return { status: 'truncated', rows: 0 };
+        }
+        if (validators.length === 0) return { status: 'empty', rows: 0 };
+
+        let rows;
+        try {
+            rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        } catch (e) {
+            return { status: 'error', rows: 0, detail: e && e.message ? e.message : String(e) };
+        }
+        // Broadcast the committed rows, keyed on the full widened uq_cap_snap (block,
+        // capability, pubkey, SOURCE) exactly as the consensus path re-reads them: a
+        // pubkey delegated by two sources has two rows, and a pubkey-only LIMIT 1 re-read
+        // would stream only one. Without this the indexer never receives them live.
+        // Delivery is not allowed to un-commit the write, so a broadcast failure is
+        // reported and the block still counts as covered.
+        try {
+            if (this.hub && this.hub.hubDbBroadcaster) {
+                for (let row of rows) {
+                    let r = await this.db.doQuery(
+                        'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                        [block, capability, row.signing_pubkey, row.source]);
+                    if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
+                }
+            }
+        } catch (e) {
+            console.error('PriceAggregator: mirroring the derived ' + capability + ' capability snapshot at '
+                + 'block ' + block + ' to subscribers failed: ' + (e && e.message));
+        }
+        return { status: 'written', rows: rows.length };
+    }
+
+    // The `price` persist under its original name, kept for callers and tests that
+    // predate the widening (row 45's shape). Same write, same guard, same rows.
+    async _persistPriceCapabilitySnapshot(block) {
+        return this._persistDerivedCapabilitySnapshot('price', block);
     }
 }
 

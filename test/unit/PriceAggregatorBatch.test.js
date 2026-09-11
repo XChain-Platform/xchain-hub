@@ -25,6 +25,9 @@ const { expect }        = require('chai');
 const PriceAggregator   = require('../../src/PriceAggregator');
 const { createMockHub } = require('../helpers/mockHub');
 const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
+// The pair-name flag day's own map. Every shipped network is genesis-on since the
+// 2026-09-09 ruling, so the D14 case below straddles a threshold it installs itself.
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../src/price_pair_activation.js');
 
 // Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) -> 128-hex }
 function makeValidator() {
@@ -448,34 +451,60 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
     // ---- D14: the pair-name flag day keys on the batch's block_time ----
 
     it('keys the pair-name flag day on the batch block_time, not on the round timestamps (D14)', async function () {
-        // Mainnet widening is the unarmed 9999999999 sentinel. The rounds are stamped
-        // far below it and the landing block is above it, which is exactly the ~70
-        // minute hub/chain skew batching creates: keyed on the round timestamps the hub
-        // would refuse a whole hour the chain accepted.
+        // The subject is WHICH timestamp keys the gate, not which network is armed.
+        // Mainnet armed at genesis on 2026-09-09, so nothing shipped straddles a
+        // threshold any more; this pins one on mainnet for the duration of the case.
+        // The rounds are stamped far below it and the landing block is above it, which
+        // is exactly the ~70 minute hub/chain skew batching creates: keyed on the round
+        // timestamps the hub would refuse a whole hour the chain accepted.
+        const shipped = PRICE_PAIR_WIDEN_ACTIVATION.mainnet;
+        PRICE_PAIR_WIDEN_ACTIVATION.mainnet = 5000000000;
+        try {
+            hub.network = 'mainnet';
+            let inserts = stubDb([]);
+            let rounds  = makeRounds().map(r => ({
+                ...r,
+                btc_block_height: 799000,                 // one side of every mainnet flag day
+                pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]   // 6-character ticker, widened bound only
+            }));
+            // Every round shares anchor 799000, so the header anchor is 799000 too (§4).
+            let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
+
+            let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: 799000, block_time: 10000000000
+            }));
+
+            expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+            expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
+
+            // Same batch, landing block BELOW the widening: the legacy 5-character bound
+            // applies and the pair is refused.
+            let below = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: 799000, block_time: 1700004000
+            }));
+            expect(below.accepted).to.equal(false);
+            expect(below.reason).to.equal('invalid pairs');
+        } finally { PRICE_PAIR_WIDEN_ACTIVATION.mainnet = shipped; }
+    });
+
+    it('admits the widened pair on a genesis-armed mainnet, at any landing block (2026-09-09)', async function () {
+        // The shipped rule, with no threshold pinned: 0 PRICE actions have ever been
+        // indexed on any mainnet chain (measured 2026-09-09), so the widened bound is
+        // in force from the first mainnet block that carries a batch.
+        expect(PRICE_PAIR_WIDEN_ACTIVATION.mainnet).to.equal(0);
         hub.network = 'mainnet';
         let inserts = stubDb([]);
         let rounds  = makeRounds().map(r => ({
             ...r,
-            btc_block_height: 799000,                 // one side of every mainnet flag day
-            pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]   // 6-character ticker, widened bound only
+            btc_block_height: 799000,
+            pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]
         }));
-        // Every round shares anchor 799000, so the header anchor is 799000 too (§4).
         let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
-
         let result = await agg.receiveValidatedBatch('BTC', makeBatch({
-            rounds, sigs, btc_block_height: 799000, block_time: 10000000000
-        }));
-
-        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-        expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
-
-        // Same batch, landing block BELOW the widening: the legacy 5-character bound
-        // applies and the pair is refused.
-        let below = await agg.receiveValidatedBatch('BTC', makeBatch({
             rounds, sigs, btc_block_height: 799000, block_time: 1700004000
         }));
-        expect(below.accepted).to.equal(false);
-        expect(below.reason).to.equal('invalid pairs');
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
     });
 
     // ---- Reorg fence ----
