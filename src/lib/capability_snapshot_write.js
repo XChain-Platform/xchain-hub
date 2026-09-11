@@ -101,6 +101,12 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     // SWQ-TRUNC-MIRROR held at the choke point, so no writer can forget it in either
     // quorum mode: a truncated set has dropped signers and no completeness column, so a
     // mirror reads it COMPLETE. Refusing leaves S=0, which fails closed like an empty set.
+    //
+    // RULED 2026-09-11 (operator): acceptable ungated, no activation gate needed. With
+    // VALIDATOR_QUERY_LIMIT at 1000 and today's roster of 6, this branch cannot currently
+    // fire; it is safe by unreachability, not by design. Revisit when the qualifying
+    // roster nears VALIDATOR_QUERY_LIMIT: either gate this refusal behind an activation
+    // check at that point, or re-affirm the ungated ruling.
     if(validators && validators.truncated === true){
         console.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
                      ' capability snapshot at block ' + block +
