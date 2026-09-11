@@ -151,7 +151,11 @@ class PeerManager extends EventEmitter {
         this.dedupCacheMax  = positiveIntConfig(config.P2P_DEDUP_CACHE_MAX, 100000,
             'P2P_DEDUP_CACHE_MAX');
 
-        // Peer connections: Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound }>
+        // Peer connections:
+        // Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound,
+        //             failures, lastError }>
+        // failures counts consecutive failed dials since the last successful open;
+        // it drives both the backoff ceiling and the retry log line.
         this.peers = new Map();
 
         // Message deduplication: Map<id, expiresAt>
@@ -741,7 +745,9 @@ class PeerManager extends EventEmitter {
                 lastSeen:       null,
                 reconnectDelay: this.config.P2P_RECONNECT_BASE || 2000,
                 reconnectTimer: null,
-                inbound:        false
+                inbound:        false,
+                failures:       0,
+                lastError:      null
             });
         }
 
@@ -765,6 +771,10 @@ class PeerManager extends EventEmitter {
             peer.ws    = ws;
             peer.state = 'open';
             peer.reconnectDelay = this.config.P2P_RECONNECT_BASE || 2000;
+            // A reached peer is no longer unreachable: drop it back to the fast
+            // ceiling so the next real outage is noticed promptly.
+            peer.failures  = 0;
+            peer.lastError = null;
             this.emit('peer:connect', addr);
             console.log('Connected to peer: ' + addr);
         });
@@ -783,8 +793,14 @@ class PeerManager extends EventEmitter {
             this._scheduleReconnect(addr);
         });
 
+        // Do NOT log here. A dial that is refused by design (a federation port
+        // whose peers are staged but not launched) emits one of these per peer per
+        // retry, and at error level that buries everything real in the same log.
+        // The message is stashed and reported once per backoff step instead, by
+        // _scheduleReconnect, which is the only place that knows how many times in
+        // a row this peer has failed and how long the next wait is.
         ws.on('error', (e) => {
-            console.error('Outbound peer error (' + addr + '):', e.message);
+            peer.lastError = (e && e.message) ? e.message : String(e);
         });
 
         peer.ws = ws;
@@ -800,13 +816,35 @@ class PeerManager extends EventEmitter {
         let jitter = Math.floor(Math.random() * delay * 0.25);
         let totalDelay = delay + jitter;
 
+        peer.failures = (peer.failures || 0) + 1;
+
         peer.reconnectTimer = setTimeout(() => {
             peer.reconnectTimer = null;
             this._connectToPeer(addr);
         }, totalDelay);
 
-        let maxDelay = this.config.P2P_RECONNECT_MAX || 60000;
+        // Two ceilings, and the second is why this hub stops shouting. A peer that
+        // drops once and comes back is a blip, and P2P_RECONNECT_MAX (a minute) is
+        // the right ceiling for it. A peer that has refused every dial in a row is
+        // not coming back on its own schedule - it is a host that is down, or a
+        // federation port whose validators have not been launched yet - and
+        // retrying it every minute forever buys nothing while costing a log line
+        // per peer per minute. After P2P_RECONNECT_ESCALATE_AFTER consecutive
+        // failures the backoff is allowed to grow past a minute, up to
+        // P2P_RECONNECT_UNREACHABLE_MAX.
+        let escalateAfter = this.config.P2P_RECONNECT_ESCALATE_AFTER || 5;
+        let maxDelay = (peer.failures >= escalateAfter)
+            ? (this.config.P2P_RECONNECT_UNREACHABLE_MAX || 900000)
+            : (this.config.P2P_RECONNECT_MAX || 60000);
         peer.reconnectDelay = Math.min(delay * 2, maxDelay);
+
+        // One line per backoff step, at warn, not one per dial at error. The rate
+        // decays with the backoff itself, so an indefinitely dead peer settles at a
+        // line per ceiling interval rather than a line a minute.
+        console.warn('P2P: peer ' + addr + ' unreachable (' + peer.failures +
+            ' consecutive failure' + (peer.failures === 1 ? '' : 's') +
+            (peer.lastError ? ', last error: ' + peer.lastError : '') +
+            '); next attempt in ' + Math.round(totalDelay / 1000) + 's');
     }
 
 // Record a peer's advertised consensus rules and raise the two alarms this

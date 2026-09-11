@@ -51,6 +51,11 @@
  *     restores the full allowance and a crash-loop spends one window's budget per
  *     restart - a gate that a misconfiguration (or a bad deploy) can make spend
  *     MORE, which is exactly what the first invariant forbids.
+ *   - Once persistTo() has armed that store, a spend it cannot RECORD is a spend it
+ *     refuses: reserve() rolls its reservation back and returns null when the write
+ *     fails, and check()/allow() refuse while the store stays broken. A hub on a
+ *     read-only disk goes visibly silent rather than authorising an unrecorded spend
+ *     whose budget the next restart hands straight back.
  *   - The USD cap is default-ON (config-default-enabled): unset config
  *     yields the $2000 clamp, not "disabled". Per-broadcast cost defaults to a
  *     conservative estimate; a caller that knows the real fee passes it to
@@ -131,7 +136,7 @@ class SpendGuard {
         this.pauseReason = null;
 
         // Diagnostics: why spends were skipped, per gate.
-        this.blocked = { pause: 0, spend: 0, balance: 0 };
+        this.blocked = { pause: 0, spend: 0, balance: 0, persist: 0 };
 
         // Restart persistence: OFF until an effector's start() calls persistTo().
         // Opt-in by CALL rather than by config so constructing a guard
@@ -149,6 +154,11 @@ class SpendGuard {
                          path.join('./data', 'spend-state', String(this.label).replace(/[^A-Za-z0-9_.-]/g, '_') + '.json');
         this._statePath   = null;
         this._warnedWrite = false;
+        // Set the moment a write to the store fails, cleared the moment one succeeds.
+        // While set, every pre-send gate refuses: a spend this guard cannot record
+        // durably is a spend the next restart will hand the allowance back for.
+        this._persistBroken    = false;
+        this._lastPersistError = null;
 
         registry.set(this.label, this);
     }
@@ -190,6 +200,14 @@ class SpendGuard {
         if (this.paused){
             this.blocked.pause++;
             return { ok: false, reason: this.label + ': effector spend PAUSED (' + (this.pauseReason || '') + '); skipping broadcast' };
+        }
+
+        // The store already refused a write, so a spend authorised here could not be
+        // recorded. Same fail-closed rule reserve() applies, reached by the sites that
+        // use the pure-predicate pair instead.
+        if (!this._storeUsable()){
+            this.blocked.persist++;
+            return { ok: false, reason: this._persistBlockedReason() };
         }
 
         // A configured floor that never receives a balance is silently inert:
@@ -260,7 +278,20 @@ class SpendGuard {
         this._spends.push({ t: now, cost: c, reservation: token.id });
         // Persist the RESERVATION too: a crash between reserving and sending must not
         // hand the restart its budget back, since the send may well have gone out.
-        this._persist();
+        //
+        // And if that write does not land, the reservation does not authorise anything.
+        // Roll it back in this same synchronous turn and refuse: an unrecorded spend is
+        // indistinguishable, after a restart, from a spend that never happened, so
+        // authorising one turns a read-only disk into an unbounded allowance. The hub
+        // goes visibly silent instead (operator ruling: fail closed).
+        if (!this._persist()){
+            let i = this._spends.findIndex(e => e.reservation === token.id);
+            if (i >= 0) this._spends.splice(i, 1);
+            this.ceiling.release(token.ceilingHandle);
+            token.settled = true;                    // a stray release() must stay a no-op
+            this.blocked.persist++;
+            return null;
+        }
         return token;
     }
 
@@ -402,23 +433,60 @@ class SpendGuard {
                      '; assuming the window is already spent (fail-closed) until it rolls over');
     }
 
-    // Write-through after every mutation. Best-effort: a failed write leaves this
-    // process correctly gated and only weakens the NEXT restart, so it must not
-    // throw on the broadcast path - but it is warned once so it is not silent.
+    // Write-through after every mutation. Never throws on the broadcast path, but it
+    // REPORTS: true when the state is durable (or persistence was never armed), false
+    // when the write failed. Swallowing the failure silently was the defect - the
+    // caller went on to authorise a broadcast the store had no record of, so the next
+    // restart read an empty window and handed the effector its full allowance back,
+    // once per restart, exactly the unbounded-across-restarts shape persistTo() exists
+    // to close. Operator ruling 2026-09-09/2026-09-11: fail closed.
     _persist(){
-        if (!this._statePath) return;
+        if (!this._statePath) return true;
         try {
             fs.mkdirSync(path.dirname(this._statePath), { recursive: true });
             fs.writeFileSync(this._statePath, JSON.stringify({
                 label: this.label, windowMs: this.windowMs, savedAt: Date.now(), spends: this._spends
             }));
+            if (this._persistBroken){
+                // The disk came back (remount, freed space, fixed permissions). Clear
+                // the refusal in the same place that raised it, and re-arm the warning
+                // so a LATER failure is announced again instead of staying silent
+                // behind a stale warned-once flag.
+                this._persistBroken    = false;
+                this._lastPersistError = null;
+                this._warnedWrite      = false;
+                console.log(this.label + ': spend state at ' + this._statePath +
+                            ' accepts writes again; spends resume');
+            }
+            return true;
         } catch(e){
-            if (this._warnedWrite) return;
-            this._warnedWrite = true;
-            console.warn(this.label + ': could not persist spend state to ' + this._statePath +
-                         ' (' + (e && e.message ? e.message : e) + '); the ceiling still binds this process ' +
-                         'but will reset on restart');
+            this._persistBroken    = true;
+            this._lastPersistError = (e && e.message) ? e.message : String(e);
+            if (!this._warnedWrite){
+                this._warnedWrite = true;
+                console.warn(this.label + ': could not persist spend state to ' + this._statePath +
+                             ' (' + this._lastPersistError + '); REFUSING to authorise further spends ' +
+                             'until the store accepts writes (fail-closed)');
+            }
+            return false;
         }
+    }
+
+    // Pre-send guard on the store itself. A store that has already refused a write
+    // cannot record the spend the caller is about to make, so while it is broken
+    // every gate refuses. Re-probes by writing the CURRENT state (idempotent, and the
+    // same bytes _persist() would have written), so a hub whose disk comes back
+    // resumes on its own rather than needing a restart to notice.
+    _storeUsable(){
+        if (!this._statePath || !this._persistBroken) return true;
+        return this._persist();
+    }
+
+    // Why the store gate refused, in the same shape as every other gate's reason.
+    _persistBlockedReason(){
+        return this.label + ': spend state at ' + this._statePath + ' is unwritable (' +
+               (this._lastPersistError || 'write failed') + '); refusing to authorise a spend ' +
+               'this hub cannot record (fail-closed)';
     }
 
     // ---- Legacy drop-in shims for former SpendCeiling call sites ----
@@ -427,6 +495,7 @@ class SpendGuard {
     // pause in here is what makes a runtime pause reach the primary broadcast path.
     allow(cost){
         if (this.paused) return false;
+        if (!this._storeUsable()) return false;
         let now = Date.now();
         if (!this.ceiling.allow(now)) return false;
         return this.spentInWindow(now) + this._cost(cost) <= this.maxSpendUsdCents;
@@ -435,6 +504,7 @@ class SpendGuard {
     noteBlocked(now){
         now = now || Date.now();
         if (this.paused) return this.label + ': effector spend PAUSED (' + (this.pauseReason || '') + ')';
+        if (this._persistBroken) return this._persistBlockedReason();
         if (!this.ceiling.allow(now)) return this.ceiling.noteBlocked(now);
         return this.label + ': rolling per-window spend ceiling reached ($' +
                (this.maxSpendUsdCents / 100).toFixed(2) + ')';
@@ -449,6 +519,10 @@ class SpendGuard {
             estSpendUsdCents:      this.estSpendUsdCents,
             spentInWindowUsdCents: this.spentInWindow(now),
             hardCapUsdCents:       HARD_CAP_USD_CENTS,
+            // An operator needs to see WHY a hub went silent: a broken spend store is
+            // a refusal, not a quiet period.
+            persistBroken:         !!this._persistBroken,
+            persistError:          this._lastPersistError,
             count:                 this.ceiling.stats(now),
             blocked:               Object.assign({}, this.blocked)
         };

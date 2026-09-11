@@ -187,8 +187,8 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         hub.db.doQuery.resolves({ affectedRows: 1 });
         await agg.retractFromActionIndex('BTC', 50, null, 7);
         expect(hub.db.bumpPriceIngestWatermark.calledOnce).to.equal(true);
-        // (source_chain, retraction_generation, from_action_index)
-        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 7, 50]);
+        // (source_chain, retraction_generation, from_action_index, network)
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 7, 50, '']);
     });
 
     it('HUB-RETRACT-4: records the watermark even on a 0-row delete (the stale push may not have arrived yet)', async function () {
@@ -1256,6 +1256,17 @@ describe('PriceAggregator ingest-fence rejection warning', function () {
         expect(line).to.contain('price_ingest_watermarks');
     });
 
+    // The remedy an operator pastes has to be the SCOPED delete. An unscoped one run
+    // against a hub DB shared with a live network drops that network's fence for the same
+    // chain, which is the exact failure the network column was added to remove.
+    it('hands the operator a network-scoped DELETE, never a chain-only one', async function () {
+        hub.network = 'regtest';
+        await agg.receiveOraclePrice('BTC', STALE);
+        let line = warn.firstCall.args[0];
+        expect(line).to.contain("DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC' AND network = 'regtest'");
+        expect(line).to.not.match(/source_chain = 'BTC'\s+on the hub DB/);
+    });
+
     it('throttles repeats for the same chain and reports the suppressed count on the next line', async function () {
         for (let i = 0; i < 5; i++) await agg.receiveOraclePrice('BTC', STALE);
         expect(warn.callCount).to.equal(1);       // 4 suppressed inside the window
@@ -1286,6 +1297,90 @@ describe('PriceAggregator ingest-fence rejection warning', function () {
         let result = await agg.receiveOraclePrice('BTC', { ...STALE, action_index: 50, push_generation: 5 });
         expect(result).to.deep.equal({ accepted: true });
         expect(warn.called).to.equal(false);
+    });
+});
+
+// Keyed on source_chain alone, one hub DB holds ONE row per chain no matter how
+// many deployment networks share or precede it: a retraction on one network raises
+// the fence for all of them, and clearing one network's fence drops the rest.
+// Every fence read and write the aggregator issues must carry the hub's own
+// network, which is what makes the row per (network, chain) end to end.
+describe('PriceAggregator price ingest fence is scoped per network', function () {
+
+    const STALE = {
+        source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
+        value: '1.23', block_time: 1700000000, action_index: 120, push_generation: 0
+    };
+
+    let clock;
+
+    // The v1 ingest path applies a block_time freshness window before it reaches the fence,
+    // so pin the clock to STALE's block_time the way the warning suite does; otherwise the
+    // push is rejected upstream and the fence read never happens.
+    beforeEach(function () {
+        clock = sinon.useFakeTimers({ now: 1700000000000, toFake: ['Date'] });
+    });
+
+    afterEach(function () {
+        clock.restore();
+        sinon.restore();
+    });
+
+    function aggOn(network) {
+        let hub = createMockHub({ network });
+        return { hub, agg: new PriceAggregator(hub) };
+    }
+
+    it('reads the fence with the hub\'s own network, so another network\'s row is unreachable', async function () {
+        let { hub, agg } = aggOn('regtest');
+        sinon.stub(console, 'warn');
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(hub.db.getPriceIngestWatermark.called).to.equal(true);
+        expect(hub.db.getPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 'regtest']);
+    });
+
+    it('writes a retraction\'s fence under the hub\'s own network', async function () {
+        let { hub, agg } = aggOn('testnet');
+        hub.db.doQuery.resolves({ affectedRows: 0 });
+        await agg.retractFromActionIndex('DOGE', 500, null, 9);
+        expect(hub.db.bumpPriceIngestWatermark.called, 'fence bumped').to.equal(true);
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['DOGE', 9, 500, 'testnet']);
+    });
+
+    // The behavioural claim in the ledger's verify line, driven rather than read: two hubs
+    // on the same DB, same chain, different networks. A regtest retraction must fence
+    // regtest and leave testnet's key alone, so a testnet clear and a regtest clear are
+    // different rows.
+    it('two hubs on one DB fence the same chain under different keys', async function () {
+        let regtest = aggOn('regtest');
+        let testnet = aggOn('testnet');
+        regtest.hub.db.doQuery.resolves({ affectedRows: 0 });
+        testnet.hub.db.doQuery.resolves({ affectedRows: 0 });
+
+        await regtest.agg.retractFromActionIndex('BTC', 10, null, 3);
+        await testnet.agg.retractFromActionIndex('BTC', 77, null, 4);
+
+        let regKey  = regtest.hub.db.bumpPriceIngestWatermark.firstCall.args.slice(-1)[0];
+        let testKey = testnet.hub.db.bumpPriceIngestWatermark.firstCall.args.slice(-1)[0];
+        expect(regKey).to.equal('regtest');
+        expect(testKey).to.equal('testnet');
+        expect(regKey).to.not.equal(testKey);
+    });
+
+    // A hub that does not know its own network keys the legacy '' bucket, which is where
+    // its pre-migration rows already are: unchanged behaviour, not a silently lost fence.
+    it('falls back to the legacy unset bucket when the hub names no network', async function () {
+        let { hub, agg } = aggOn(undefined);
+        sinon.stub(console, 'warn');
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(hub.db.getPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', '']);
+    });
+
+    it('folds casing and whitespace so a HUB_NETWORK typo cannot split the key', async function () {
+        let { hub, agg } = aggOn('  RegTest  ');
+        sinon.stub(console, 'warn');
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(hub.db.getPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 'regtest']);
     });
 });
 
