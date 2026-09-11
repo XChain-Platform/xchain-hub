@@ -44,6 +44,7 @@ const path       = require('path');
 
 const AttestationRelay = require('../../src/AttestationRelay.js');
 const eq               = require('../../src/equivocation_header.js');
+const rejectSlot       = require('../../src/attest_relay_reject_slot_activation.js');
 
 const REQ_ID    = 'd'.repeat(64);
 const PUBKEY_A  = 'a'.repeat(64);
@@ -453,6 +454,96 @@ describe('AttestationRelay', function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
             await relay._poll();
             expect(proposedRows(relay, 'request')).to.have.length(0);
+        });
+
+        // ── The reject-slot half, on both sides of the arm ──────────────────
+        //
+        // A REFUSED home row names a request that was never materialized: a malformed
+        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
+        // the arm the indexer stores no such row, so one in the view is residue and
+        // must not answer "already materialized" or the origin's request is stranded.
+        // Below the arm the stored refusal still occupies the id fleet-wide, so
+        // suppressing the broadcast is what keeps the hub from burning a fee per poll
+        // on a v3 every indexer drops.
+        describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () {
+
+            const refusedHomeRow = () => homeRelayedRow({
+                request_status:        'rejected',
+                response_action_index: null,
+                response_block_index:  null,
+                response_hash:         null,
+                response_payload:      null,
+                response_status:       null,
+                meta:                  null,
+            });
+
+            // A hub whose BTC chain_tips row carries `blockTime`, which is the plane the
+            // gate resolves on (the indexer half reads the landing block's own time).
+            const hubWithTipTime = (blockTime) => ({
+                db: {
+                    doQuery:     sinon.stub().resolves([]),
+                    getChainTip: sinon.stub().resolves({ blockHeight: 1000, blockTime: blockTime, chainId: null }),
+                },
+            });
+
+            // Drive a threshold rather than the armed map, so both sides of the arm are
+            // reachable wherever the networks are armed today. Restored in place.
+            function withThreshold(network, value, fn) {
+                const map   = rejectSlot.ATTEST_RELAY_REJECT_SLOT_ACTIVATION;
+                const saved = map[network];
+                map[network] = value;
+                return fn().finally(() => { map[network] = saved; });
+            }
+
+            it('materializes the request when the gate is ARMED, refused row and all', async function () {
+                const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [refusedHomeRow()]);
+                await withThreshold('regtest', 1786060800, () => relay._poll());
+                expect(proposedRows(relay, 'request')).to.have.length(1);
+                expect(relay._homeRelayed.has(REQ_ID)).to.equal(false);
+            });
+
+            it('still suppresses the request one second BELOW the arm', async function () {
+                const relay = makeRelay(hubWithTipTime(1786060799), [originRow()], [refusedHomeRow()]);
+                await withThreshold('regtest', 1786060800, () => relay._poll());
+                expect(proposedRows(relay, 'request')).to.have.length(0);
+                expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
+            });
+
+            it('suppresses the request when the home tip time is unknown, whatever the arming state', async function () {
+                // No tip pushed to this hub: the gate cannot be resolved, so the driver
+                // keeps the pre-arm behaviour rather than guessing armed and spending.
+                const relay = makeRelay({ db: { doQuery: sinon.stub().resolves([]) } },
+                    [originRow()], [refusedHomeRow()]);
+                await relay._poll();
+                expect(proposedRows(relay, 'request')).to.have.length(0);
+                expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
+
+                // A tip row with no time reads 0 through getChainTip, which is "unknown"
+                // and must not satisfy a 0 threshold.
+                const zero = makeRelay(hubWithTipTime(0), [originRow()], [refusedHomeRow()]);
+                await zero._poll();
+                expect(proposedRows(zero, 'request')).to.have.length(0);
+                expect(zero._homeRelayed.has(REQ_ID)).to.equal(true);
+            });
+
+            it('drops ONLY refused rows when armed: a fulfilled row still suppresses', async function () {
+                // The regression the relayed view exists for must survive the exclusion:
+                // a fulfilled BTC row is out of the pending queue but the request IS
+                // materialized, and re-broadcasting it burns a fee on a duplicate v3.
+                const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [homeRelayedRow()]);
+                await withThreshold('regtest', 1786060800, () => relay._poll());
+                expect(proposedRows(relay, 'request')).to.have.length(0);
+                expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
+            });
+
+            it('leaves an armed hub with no refused rows untouched, and asks the DB nothing', async function () {
+                const hub   = hubWithTipTime(1786060800);
+                const relay = makeRelay(hub, [originRow()], [homeRelayedRow()]);
+                await withThreshold('regtest', 1786060800, () => relay._poll());
+                expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
+                // The gate read is only taken when there is a refusal to weigh.
+                expect(hub.db.getChainTip.called).to.equal(false);
+            });
         });
 
         it('keeps the previous home-pending view when the BTC indexer is unreachable', async function () {
