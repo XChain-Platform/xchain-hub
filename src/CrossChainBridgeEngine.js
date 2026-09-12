@@ -54,6 +54,7 @@ const axios        = require('axios');
 const bc                     = require('./bcmath.js');
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
+const ah                     = require('./lib/admission_height.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
@@ -482,6 +483,9 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!row.src_address || !row.dest_address) return;
         if(bc.bclte(this._normalizeAmount(row.amount) || '0', 0)) return;
 
+        // A transfer is read by dest_chain alone, so its map has one entry.
+        if(!await this._stampAdmission('bridge_transfers', row, 'transfer ' + transferId)) return;
+
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
         this._inflight.add(transferId);
         this._inflightSourceLegs.add(sourceLegKey);
@@ -622,6 +626,10 @@ class CrossChainBridgeEngine extends EventEmitter {
             push_generation: 0
         };
 
+        // The SHARP case: a policy snapshot's consuming select carries no chain clause, so
+        // its map must cover every chain the federation serves, NOT the pair's own copies.
+        if(!await this._stampAdmission('policy_snapshots', row, 'policy snapshot ' + snapshotId)) return;
+
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
         this._inflight.add(snapshotId);
         try {
@@ -716,6 +724,35 @@ class CrossChainBridgeEngine extends EventEmitter {
     // consensus, the persisted finalizing_view from a verifier). It lives only in the EQUIV
     // header and is never a content field: putting it in the signed bytes is what lets a
     // legitimate view change be told apart from equivocation.
+    // Stamp the row's ADMISSION MAP over the chains that read it, at this hub's fresh
+    // admission tip on each plus the table's block margin. Returns false when the round
+    // must NOT open.
+    //
+    // The federation chain list handed to the every-chain rail is the ADMISSION COLUMN set,
+    // which is by construction the chains this schema can carry a height for. A chain added
+    // to the federation later adds a column, and rows signed before it existed simply do
+    // not name it and bind there by effective_time, which is C38's fail-closed direction.
+    //
+    // C4: with no fresh tip for a reading chain this hub refuses to open the round rather
+    // than guessing a height. Every column is named at every height, so a legacy row
+    // carries explicit NULLs rather than an absent key.
+    async _stampAdmission(table, row, label){
+        let map = null;
+        if(ah.isAdmissionEra(row.network, row.snapshot_block)){
+            let readSet = ah.admissionReadSet(table, row, ah.ADMIT_COLUMN_CHAINS);
+            map = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
+                ? await this.hub.resolveAdmitBlocks(table, readSet) : null;
+            if(!map){
+                console.error('CrossChainBridge: refusing to open the round for ' + label +
+                    ' at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' +
+                    readSet.join(' / '));
+                return false;
+            }
+        }
+        Object.assign(row, ah.admitBlocksToColumns(map));
+        return true;
+    }
+
     _canonicalMatch(r, view){
         let hasTransfer = !!(r && r.transfer_id);
         let hasPolicy   = !!(r && r.snapshot_id);
@@ -728,6 +765,8 @@ class CrossChainBridgeEngine extends EventEmitter {
                 r.dest_chain, r.dest_address, String(r.amount),
                 String(r.effective_time), r.network || ''
             ].join('|');
+            // A transfer is read by dest_chain alone, so its map has one entry.
+            raw += ah.admissionCanonicalField('CrossChainBridge', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
             if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
                 return eq.buildEquivCanonical(eq.ENGINE_TAGS.BRIDGE, r.transfer_id, (view != null ? view : 0), raw);
             return raw;
@@ -737,6 +776,11 @@ class CrossChainBridgeEngine extends EventEmitter {
             String(r.policy_seq), String(r.origin_block), String(r.policy_hash),
             String(r.effective_time), r.network || ''
         ].join('|');
+        // A policy snapshot is the sharp case: its consuming select carries NO chain clause
+        // at all, so its map must name every chain the federation serves. A chain added
+        // after the row was signed is simply absent from it and binds there by the legacy
+        // effective_time rule, which is safe by construction rather than silently unbound.
+        raw += ah.admissionCanonicalField('CrossChainPolicy', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.POLICY, r.snapshot_id, (view != null ? view : 0), raw);
         return raw;

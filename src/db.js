@@ -376,6 +376,79 @@ class Database {
         // overwrite another's. That is the bug this item exists to remove, so the re-key is
         // the migration, not the column.
         await this._migratePriceFencePrimaryKey();
+        // The mirror admission columns (spec §5.5, C28, C35). A JS helper and NOT a dated
+        // .sql, because this repo HAS no dated-.sql runner: the two files under
+        // xchain-hub/migrations/ are applied by hand, so a migration copied from the
+        // indexer's style would sit there and never run on a single deployed hub.
+        await this._migrateAdmissionColumns();
+    }
+
+    // Add the per-chain admission height columns to every mirrored table that carries one.
+    //
+    // The column set per table is the row's measured READ SET, not a uniform three: attest
+    // responses and anchor-reward attestations are read on BTC alone by the indexer's own
+    // call-site guard, so a second column there would be a column nothing could ever set.
+    //
+    // Every column is nullable with no default, per C28 and the one mirror .sql that is
+    // byte-identical across both repos (attestation_responses.request_block_index). NULL is
+    // the legacy row and binds by effective_time at every height, so an existing row needs
+    // no backfill and a node that has not crossed the flag day is byte-identical to today.
+    // No index: the barrier compares a per-table watermark, not this column, and the
+    // consuming selects already have their own covering keys.
+    async _migrateAdmissionColumns(){
+        const TABLES = {
+            cross_chain_matches:        ['btc', 'ltc', 'doge'],
+            cross_chain_calls:          ['btc', 'ltc', 'doge'],
+            bridge_transfers:           ['btc', 'ltc', 'doge'],
+            policy_snapshots:           ['btc', 'ltc', 'doge'],
+            price_snapshots:            ['btc', 'ltc', 'doge'],
+            attestation_responses:      ['btc'],
+            anchor_reward_attestations: ['btc'],
+        };
+        for(let table of Object.keys(TABLES))
+            for(let chain of TABLES[table])
+                await this._migrateAddNullableColumn(table, 'admit_block_' + chain, 'BIGINT UNSIGNED DEFAULT NULL');
+
+        // oracle_prices takes ONE unqualified column, not the per-chain map. It is the only
+        // unsigned rail: no signatures, no canonical, nothing to stamp a map into. Its height
+        // is the PUBLISHING chain's, which source_chain already names, so the barrier certifies
+        // it against heights[oracle_prices][source_chain] rather than against the reading
+        // chain's own B, and every chain reads the row without needing an entry of its own.
+        await this._migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
+    }
+
+    // Add one nullable column if the table exists and does not already carry it.
+    //
+    // Idempotent from information_schema, so it runs on every boot at the cost of one read
+    // per column. A table with NO columns is one this node has not created yet; the CREATE
+    // TABLE from src/sql covers it, so this returns rather than failing the boot.
+    //
+    // A failure is logged and swallowed, as _migrateColumnType's is and for the same
+    // reason: runMigrations is one sequential pass, so a throw here takes every migration
+    // after it and the hub boot down with it. The consequence of the column being absent is
+    // bounded and stated: this hub cannot stamp admission heights, so above the activation
+    // it refuses to finalize those rows rather than producing rows no verifier can rebuild.
+    async _migrateAddNullableColumn(table, column, columnDef){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT column_name AS c FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ?",
+                [this.dbName, table]
+            );
+            if(!rows || rows.length === 0) return;   // table not here yet; CREATE TABLE covers it
+            for(let r of rows)
+                if(String(r.c).toLowerCase() === String(column).toLowerCase()) return;   // already migrated
+            await db.query('ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + columnDef);
+            console.log('Migration: added ' + table + '.' + column + ' ' + columnDef);
+        } catch(e){
+            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is absent. Until it exists this hub ' +
+                'cannot stamp an admission height for that table, so above the mirror admission activation it ' +
+                'will REFUSE to finalize those rows. Run by hand: ALTER TABLE `' + table + '` ADD COLUMN `' +
+                column + '` ' + columnDef, e);
+        } finally {
+            await db.release();
+        }
     }
 
     // Move price_ingest_watermarks' PRIMARY KEY onto (network, source_chain).
@@ -1169,6 +1242,12 @@ class Database {
         return ['transfer_id', 'snapshot_block', 'network', 'src_chain', 'src_action_index',
                 'src_address', 'dest_chain', 'dest_address', 'tick', 'decimals', 'amount',
                 'effective_time', 'finalizing_view', 'validator_signatures', 'push_generation',
+                // The admission map, one column per chain in the row's read set. Inside the
+                // signed canonical, so it is written from `row` like every other signed
+                // field. Placed BEFORE btc_chain_id because that one stays LAST by contract:
+                // it is the only transport-only column and the write path's tests read it
+                // off the end of the parameter list.
+                'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
                 'btc_chain_id'];
     }
 
@@ -1177,7 +1256,12 @@ class Database {
         return ['snapshot_id', 'snapshot_block', 'origin_chain', 'tick', 'policy_seq',
                 'origin_block', 'policy_hash', 'allow_list', 'block_list', 'sleeping',
                 'effective_time', 'network', 'finalizing_view', 'validator_signatures',
-                'push_generation', 'btc_chain_id'];
+                'push_generation',
+                // Every federation chain, because a policy snapshot's consuming select
+                // carries no chain clause: see the note in src/sql/policy_snapshots.sql.
+                // Before btc_chain_id, which stays LAST by contract (see the transfer list).
+                'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+                'btc_chain_id'];
     }
 
     // Persist one quorum-signed transfer record. Returns true ONLY when a row was

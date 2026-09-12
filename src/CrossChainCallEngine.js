@@ -61,6 +61,7 @@ const axios        = require('axios');
 
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
+const ah                     = require('./lib/admission_height.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { XCALL_MAX_HOPS }     = require('./constants.js');
 const coins                  = require('./coins');
@@ -407,6 +408,8 @@ class CrossChainCallEngine extends EventEmitter {
             push_generation:       Number(call.push_generation) || 0
         };
 
+        if(!await this._stampAdmission(row)) return;
+
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
@@ -524,6 +527,8 @@ class CrossChainCallEngine extends EventEmitter {
             push_generation:       Number(dispatch.push_generation) || 0
         };
 
+        if(!await this._stampAdmission(row)) return;
+
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
@@ -543,6 +548,31 @@ class CrossChainCallEngine extends EventEmitter {
     // the EQUIV flag-day the content is wrapped (TAG=XCALL, ROUND_ID = the sha256 round id,
     // which folds in `phase` so dispatch and result get DISTINCT keys, VIEW=view). The view
     // lives in the header only (not a content field).
+    // Stamp the row's ADMISSION MAP over the chains that read it (target_chain OR
+    // source_chain, from the consuming selects), at this hub's fresh admission tip on each
+    // plus the table's block margin. Returns false when the round must NOT open.
+    //
+    // C4: with no fresh tip for either chain this hub refuses to open the round rather
+    // than guessing a height, because a guessed height forks while a refusal stalls one
+    // rail. Every column is named at every height so a legacy row carries explicit NULLs,
+    // which is the legacy binding rule rather than an absent key.
+    async _stampAdmission(row){
+        let map = null;
+        if(ah.isAdmissionEra(row.network, row.snapshot_block)){
+            let readSet = ah.admissionReadSet('cross_chain_calls', row);
+            map = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
+                ? await this.hub.resolveAdmitBlocks('cross_chain_calls', readSet) : null;
+            if(!map){
+                console.error('CrossChainCall: refusing to open the ' + row.phase + ' round for call ' +
+                    String(row.call_id).substring(0,16) + '... at snapshot_block ' + row.snapshot_block +
+                    '; no fresh admission tip for ' + readSet.join(' / '));
+                return false;
+            }
+        }
+        Object.assign(row, ah.admitBlocksToColumns(map));
+        return true;
+    }
+
     _canonicalMatch(r, view){
         let raw;
         if(r.phase === 'result'){
@@ -561,6 +591,11 @@ class CrossChainCallEngine extends EventEmitter {
                 String(r.gas_limit), String(r.cross_hops), String(r.effective_time)
             ].join('|');
         }
+        // The admission map, height-gated on the ROW's own snapshot_block. BOTH phases
+        // carry it: the dispatch is read by source_chain and target_chain and the result by
+        // target_chain, and a phase that skipped the field would bind by effective_time
+        // while its sibling bound by height, which is the split this design removes.
+        raw += ah.admissionCanonicalField('CrossChainCall', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, this._roundId(r.phase, r.call_id), (view != null ? view : 0), raw);
         return raw;
@@ -737,7 +772,13 @@ class CrossChainCallEngine extends EventEmitter {
                     'target_chain','target_contract_index','method','params_json',
                     'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
                     'finalizing_view','validator_signatures','push_generation',
-                    'btc_chain_id'];
+                    'btc_chain_id',
+                    // The admission map, one column per chain in the row's read set
+                    // (target_chain OR source_chain). Inside the signed canonical. APPENDED
+                    // at the end deliberately: this list's positional order is mirrored by
+                    // hand in the engine's unit-test fake, so inserting mid-list silently
+                    // re-maps every column after the insertion point in that stand-in.
+                    'admit_block_btc','admit_block_ltc','admit_block_doge'];
         // Resolved into the value list rather than onto `row`: the row object feeds the
         // canonical and the retraction paths, and btc_chain_id is transport, never consensus.
         // The XCALL canonical enumerates its fields explicitly, so this value has no path

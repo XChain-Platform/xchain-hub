@@ -25,6 +25,15 @@ CREATE TABLE cross_chain_matches (
     b_payout_addr        VARCHAR(255) NOT NULL,
     b_payout_legs        TEXT,                                      -- B-order royalty split (JSON [{to,bps}], b_chain encoding; NULL = none); signed into the canonical at/above CROSS_CHAIN_ROYALTY
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- wall-clock instant indexers apply at (shared clock across chains)
+    -- ADMISSION HEIGHTS, one per chain in the row's read set (a_chain OR b_chain).
+    -- Readable at block B on chain C iff admit_block_<c> <= B. NULL is the LEGACY row and
+    -- binds by effective_time <= t(B) at EVERY height, so every consuming select is
+    -- (admit_block_<c> IS NULL AND effective_time <= ?) OR (admit_block_<c> IS NOT NULL AND admit_block_<c> <= ?)
+    -- and NEVER a bare `admit_block_<c> <= ?`, which evaluates to NULL for legacy rows,
+    -- silently drops them and is a silent consensus change. Inside the signed canonical.
+    admit_block_btc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge     BIGINT UNSIGNED DEFAULT NULL,
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the round finalized at; signed into the EQUIV canonical (WI-2 bump 2) so the indexer rebuilds the exact view
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}]; 2f+1 over the canonical match
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted

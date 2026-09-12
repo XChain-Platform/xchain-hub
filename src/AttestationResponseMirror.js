@@ -89,6 +89,7 @@ const wid    = require('./attest_responsible_widening_activation.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
 const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./lib/attest_response_body_cap.js');
+const ah     = require('./lib/admission_height.js');
 
 // The mirrored column set, in the order the snapshot route (api.js
 // GET /hub-db/snapshot/attestation_responses) selects them. It is written out
@@ -101,7 +102,7 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./lib/attest
 const MIRROR_COLUMNS = [
     'network', 'request_id', 'request_action_index', 'request_block_index',
     'provider_id', 'status', 'response_payload', 'response_hash', 'meta',
-    'effective_time', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
+    'effective_time', 'admit_block_btc', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
     'finalized_at'
 ];
 
@@ -370,6 +371,12 @@ class AttestationResponseMirror {
             response_hash:        crypto.createHash('sha256').update(bodyBytes).digest('hex'),
             meta:                 event.meta == null ? '' : String(event.meta),
             effective_time:       effectiveTime,
+            // The admission height the signatures cover, stored verbatim from the round.
+            // Null is the LEGACY row and it binds by effective_time at every height, which
+            // is why it is stored as null rather than as a 0 an indexer would read as
+            // "admissible at genesis". Attest responses are read by BTC alone, so one column.
+            admit_block_btc:      (event.admitBlocks && event.admitBlocks.BTC != null)
+                                      ? Number(event.admitBlocks.BTC) : null,
             // Ordered exactly as the signature list is: the pubkey at index i signed
             // the signature at index i, which is what lets a consumer pair them
             // without re-deriving the responsible set's ordering.
@@ -910,6 +917,13 @@ class AttestationResponseMirror {
             response_hash:        responseHash,
             meta:                 d.meta == null ? '' : String(d.meta),
             effective_time:       effectiveTime,
+            // From the wire, and NOT coerced: Number(null) and Number('') are both 0, a
+            // finite height that would make the row admissible at the first block every
+            // indexer already has. Anything that is not a non-negative safe integer is
+            // stored as null, which is the legacy row and binds by effective_time. The
+            // verifier re-checks it as part of the canonical, so a lying sender only
+            // produces a row whose signatures do not verify.
+            admit_block_btc:      this._heightOrNull(d.admit_block_btc),
             signer_pubkeys:       signerPubkeys,
             signatures:           String(d.signatures == null ? '' : d.signatures),
             // TINYINT UNSIGNED, and purely informational: the verifier recomputes the
@@ -1147,9 +1161,15 @@ class AttestationResponseMirror {
             // signing site makes, with the SIGNED effective_time from the row. The
             // era assertion inside it is a second, independent check that this row and
             // this request agree about which era they are in.
+            // The ROW's own admission map, passed explicitly: this hub has no open round
+            // for a peer's finalized row, so the round-pinned default would read null and
+            // rebuild legacy bytes for an admission-era row. Passing the row's map is also
+            // what makes the era gate a real check here, since it refuses when the row's
+            // map and the request's era disagree.
             canonical = consensus._buildCanonical(
                 rid, String(row.provider_id), bodyBytes, String(row.status),
-                String(row.meta == null ? '' : row.meta), declaredBlock, Number(row.effective_time));
+                String(row.meta == null ? '' : row.meta), declaredBlock, Number(row.effective_time),
+                ah.rowAdmitBlocks(row));
         } catch (e){
             return { ok: false, error: 'canonical could not be rebuilt: ' + (e && e.message ? e.message : e) };
         }
@@ -1235,6 +1255,16 @@ class AttestationResponseMirror {
         if(v == null) return null;
         let n = Number(v);
         return Number.isFinite(n) ? Math.trunc(n) : null;
+    }
+
+    // An admission HEIGHT off the wire, or null. Deliberately NOT _intOrNull: that one
+    // reads '' as 0 (Number('') is 0) and would turn a missing height into "admissible at
+    // block 0", which is the row binding at the first block every indexer already has.
+    // Null here means the legacy row, which binds by effective_time at every height.
+    _heightOrNull(v){
+        if(v === null || v === undefined || v === '') return null;
+        let n = Number(v);
+        return (Number.isSafeInteger(n) && n >= 0) ? n : null;
     }
 
     _shortRid(event){

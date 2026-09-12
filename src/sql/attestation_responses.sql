@@ -98,6 +98,12 @@ CREATE TABLE attestation_responses (
     response_hash        CHAR(64)     NOT NULL,                    -- sha256 of the body bytes; the field the canonical already signs
     meta                 TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci, -- as in the on-chain v1 (attests.meta): opaque provider bytes, so utf8mb4 for the same reason
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- unix seconds, leader-chosen, INSIDE the signed canonical: the applying block is a pure function of it
+    -- ADMISSION HEIGHT on BTC, and BTC alone: the indexer's call-site guard reads this
+    -- table on BTC only, so the row's map has exactly one entry. Readable at block B iff
+    -- this <= B. NULL is the LEGACY row and binds by effective_time <= t(B) at EVERY
+    -- height, so the consuming select is IS NULL OR and never a bare <= on this nullable
+    -- column. Inside the signed canonical, appended after a '|' in canonical spelling.
+    admit_block_btc      BIGINT UNSIGNED DEFAULT NULL,
     signer_pubkeys       TEXT         NOT NULL,                    -- JSON array, ordered responsible-set pubkeys that signed
     signatures           TEXT         NOT NULL,                    -- JSON [{pubkey,sig}], Ed25519 over the mirror-era canonical
     widen                TINYINT UNSIGNED DEFAULT 0,               -- the widening step the leader used; INFORMATIONAL, the verifier recomputes it

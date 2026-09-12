@@ -27,6 +27,12 @@ CREATE TABLE bridge_transfers (
     decimals             TINYINT UNSIGNED NOT NULL,                -- the token's DECIMALS (8 for XCHAIN); signed for the same reason as `tick`, and the precision `amount` is formatted at
     amount               VARCHAR(250) NOT NULL,                    -- decimal string at `decimals` fractional digits; VARCHAR because amounts are bignumber math, never a DB numeric (the a_amount/b_amount precedent)
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- protocol-time instant every indexer applies at: now + relayMarginFloorS(dest_chain); a follower refuses to co-sign a row less than 60 s or more than 3600 s ahead of its own clock
+    -- ADMISSION HEIGHTS over the row's read set (dest_chain alone). Only that chain's
+    -- column is ever set; the others exist so one uniform predicate serves every mirror
+    -- table. NULL is the legacy row: see the note in cross_chain_matches.sql.
+    admit_block_btc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge     BIGINT UNSIGNED DEFAULT NULL,
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the canonical was signed under; the indexer rebuilds the exact EQUIV header VIEW from it
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] over the EQUIV-wrapped canonical; stake-weighted two-thirds or 2f+1 per the CROSS_SETTLE rule
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted

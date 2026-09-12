@@ -45,6 +45,8 @@ const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
 const fullnodeActivation = require('./lib/fullnode_activation.js');
+const admissionHeight    = require('./lib/admission_height.js');
+const { blockIntervalS } = require('./lib/relay_margin.js');
 const presence           = require('./lib/oracle_round_presence.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
@@ -1716,6 +1718,162 @@ class XChainHub {
             return false;
         }
         return true;
+    }
+
+    // ---- the ADMISSION tip, per chain (spec §5.2; C29, F35) ----------------
+    //
+    // A SIBLING of _resolveBtcLatestBlock, not a generalization of it. That method
+    // must keep serving the COMMITTED tip, because a validator set anchored on a
+    // height the fleet has not committed is the failure its lag and freshness gates
+    // exist to prevent. This one answers a different question: which block may a
+    // mirrored row first be READ at, which the committed tip cannot answer at all.
+    //
+    // Reading the committed tip here is CIRCULAR and would fork. A barriered indexer
+    // stops committing and stops pushing chain tips, so the hub's observed height
+    // freezes at exactly the block the barrier is holding, and frozenHeight + margin
+    // names a block the fleet has already passed. The decoder runs UPSTREAM of the
+    // block loop and no mirror barrier gates it, so decoder_block keeps advancing
+    // precisely while block_index is frozen: it is the one tip in the response that
+    // is not downstream of the thing it exists to unblock.
+    //
+    // Default stall window, in blocks of the chain, before a decoder tip that has
+    // not advanced is dated as frozen. Six blocks is about an hour on BTC, 15 minutes
+    // on LTC and 6 minutes on DOGE, which is the same shape as the follower bound and
+    // for the same reason: the window has to be a block count or it collapses on the
+    // fast chains. Overridable per deployment, never per call.
+    static get ADMISSION_TIP_STALL_BLOCKS(){ return 6; }
+
+    async _resolveAdmissionTip(coin){
+        let c = admissionHeight.normalizeChain(coin);
+        if(c === null){
+            console.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
+            return null;
+        }
+        let url = await this._resolveIndexerUrl(c);
+        if(!url){
+            console.warn('XChainHub: no ' + c + ' indexer URL configured; no admission tip for ' + c +
+                '. Rows read by ' + c + ' cannot be finalized above the admission activation.');
+            return null;
+        }
+        let result;
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0', id: Date.now(),
+                method: 'getlatestblock', params: {}
+            }, { timeout: 5000 });
+            result = res && res.data && res.data.result;
+        } catch (err) {
+            console.error('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message);
+            return null;
+        }
+        if(!result || result.error) return null;
+
+        // MAX_INDEXER_LAG_BLOCKS is DELIBERATELY not applied here, and this is the
+        // single easiest mistake to make on this path. That gate refuses a tip whose
+        // `lag` (decoder_block - block_index) exceeds 200, so the round does not anchor
+        // a validator set on a stale committed height. A barriered indexer IS a
+        // high-lag indexer: lag is the barrier's own depth. Applying it here would
+        // refuse the admission reading in precisely the case admission by height was
+        // designed to serve, and the rail would stall for the reason it exists to fix.
+        // Checked on the RAW value before coercing. Number(null) and Number('') are both 0,
+        // a finite non-negative integer, so a bare Number() here would read an ABSENT
+        // decoder_block as height 0 and stamp an admission height of 0 + margin: a row
+        // admissible at a block every live chain passed years ago.
+        let raw = result.decoder_block;
+        let tip = (raw === null || raw === undefined || raw === '') ? NaN : Number(raw);
+        if(!Number.isSafeInteger(tip) || tip < 0){
+            // A v6 indexer, or one that has not decoded a block yet. Refused, not
+            // guessed: falling back to block_index here would reintroduce the circularity.
+            console.warn('XChainHub: ' + c + ' indexer returned no usable decoder_block (' +
+                JSON.stringify(result.decoder_block) + '); no admission tip for ' + c);
+            return null;
+        }
+        if(!this._admissionTipFresh(c, tip)) return null;
+        return tip;
+    }
+
+    // Per-chain freshness gate for the admission tip. Today's gates (_btcPushedTipFresh,
+    // _btcDirectTipAcceptable) are BTC-only and date a tip against a stored block_time;
+    // the decoder tip carries no time, so this one dates it against the last height THIS
+    // hub observed for that chain and how long ago it observed it.
+    //
+    // A height that BEATS the last observation proves the chain moved and is always
+    // taken, exactly as _btcDirectTipAcceptable takes an advancing height. Only a height
+    // that has NOT moved can be dated as frozen, and only after the chain's own window.
+    //
+    // First sight is accepted and recorded: a tip we have never seen before cannot be
+    // dated, and refusing it would make every hub restart a rail outage. The refusal
+    // that matters is the frozen decoder, which needs two observations to see.
+    _admissionTipFresh(coin, tip){
+        let c = admissionHeight.normalizeChain(coin);
+        if(c === null) return false;
+        if(!this._admissionTipSeen) this._admissionTipSeen = new Map();
+        let nowMs = Date.now();
+        let prev = this._admissionTipSeen.get(c);
+        if(!prev || Number(tip) > Number(prev.height)){
+            this._admissionTipSeen.set(c, { height: Number(tip), atMs: nowMs });
+            return true;
+        }
+        let maxAgeS = Number(process.env.ADMISSION_TIP_MAX_AGE_S);
+        if(!Number.isFinite(maxAgeS) || maxAgeS <= 0)
+            maxAgeS = XChainHub.ADMISSION_TIP_STALL_BLOCKS * blockIntervalS(c);
+        let ageS = Math.floor((nowMs - Number(prev.atMs)) / 1000);
+        if(ageS > maxAgeS){
+            console.warn('XChainHub: the ' + c + ' decoder tip has not advanced past height ' + Number(tip) +
+                ' in ' + ageS + 's, exceeding this chain\'s ' + maxAgeS + 's admission stall window; ' +
+                'refusing to stamp an admission height for ' + c + ' rather than guessing one');
+            return false;
+        }
+        return true;
+    }
+
+    // Every admission tip a row's read set needs, read in parallel. A chain whose tip is
+    // refused comes back null rather than missing, so the caller's refusal names it.
+    async _resolveAdmissionTips(chains){
+        let out = {};
+        let want = [];
+        for(let raw of (chains || [])){
+            let c = admissionHeight.normalizeChain(raw);
+            if(c === null){ out[String(raw)] = null; continue; }
+            if(want.indexOf(c) === -1) want.push(c);
+        }
+        let tips = await Promise.all(want.map((c) => this._resolveAdmissionTip(c).catch(() => null)));
+        want.forEach((c, i) => { out[c] = tips[i]; });
+        return out;
+    }
+
+    // The producer's one entry point: the admission map for a row, or null when this hub
+    // cannot justify one.
+    //
+    // Null is a REFUSAL TO FINALIZE the row, not a legacy row (C4). Above the activation
+    // the engine that gets null must defer the row rather than sign it, because a guessed
+    // admission height forks the federation while a refusal stalls one rail and says on
+    // which chain. Below the activation no engine asks.
+    //
+    // @param {string} table the mirrored table, which picks the margin
+    // @param {string[]} readSet the chains that read the row (admissionHeight.admissionReadSet)
+    // @returns {Promise<object|null>}
+    async resolveAdmitBlocks(table, readSet){
+        let tips;
+        try { tips = await this._resolveAdmissionTips(readSet); }
+        catch (err) {
+            console.error('XChainHub: admission tip read failed for ' + String(table) + ':', err.message);
+            return null;
+        }
+        let missing = admissionHeight.missingAdmissionTips(readSet, tips);
+        if(missing.length > 0){
+            // Per chain, because that is the operator's whole diagnosis: which chain's
+            // decoder went away, and therefore which rails stopped finalizing.
+            for(let c of missing)
+                console.error('XChainHub: no fresh admission tip for ' + c + '; refusing to finalize ' +
+                    String(table) + ' rows read by ' + c + ' until one is available');
+            return null;
+        }
+        try { return admissionHeight.admitBlocks(readSet, tips, table); }
+        catch (err) {
+            console.error('XChainHub: cannot stamp an admission map for ' + String(table) + ':', err.message);
+            return null;
+        }
     }
 
     // Which BTC network this hub talks to. For a hub that DECLARED one (every validator,

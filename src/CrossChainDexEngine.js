@@ -49,6 +49,7 @@ const bc                     = require('./bcmath.js');
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
 const ccr                    = require('./cross_chain_royalty_activation.js');
+const ah                     = require('./lib/admission_height.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
@@ -665,6 +666,33 @@ class CrossChainDexEngine extends EventEmitter {
             b_push_generation: Number(hi.push_generation) || 0
         };
 
+        // The ADMISSION MAP, stamped over the chains that READ this match (a_chain OR
+        // b_chain, from the consuming selects) at this hub's own fresh admission tip on
+        // each, plus the table's block margin. Height-gated on the row's own
+        // snapshot_block, so the era for this match is fixed here and every canonical
+        // built for it afterwards reads the stored columns.
+        //
+        // C4: with no fresh tip for either chain this hub REFUSES to finalize the match
+        // rather than guessing a height. A guessed height forks (two hubs stamp different
+        // maps for the same match and neither quorum reproduces), a refusal stalls this
+        // one pairing and says which chain's decoder went away.
+        let admitMap = null;
+        if(ah.isAdmissionEra(row.network, row.snapshot_block)){
+            let readSet = ah.admissionReadSet('cross_chain_matches', row);
+            admitMap = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
+                ? await this.hub.resolveAdmitBlocks('cross_chain_matches', readSet) : null;
+            if(!admitMap){
+                console.error('CrossChainDex: refusing to finalize match ' + matchId.substring(0,16) +
+                    '... at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' +
+                    readSet.join(' / '));
+                return;
+            }
+        }
+        // Every column named at every height, so a legacy row carries explicit NULLs rather
+        // than an absent key the driver would have to coerce. NULL is the legacy row and it
+        // binds by effective_time, which is what a below-the-activation match must do.
+        Object.assign(row, ah.admitBlocksToColumns(admitMap));
+
         // Resolve the cross_chain validator set at snapshot_block (deterministic,
         // BTC-anchored) so every node computes the same quorum. The leader of the
         // round persists + mirrors these rows to indexers (in consensus PROPOSE).
@@ -875,6 +903,12 @@ class CrossChainDexEngine extends EventEmitter {
         // below it the canonical is byte-identical to the legacy format.
         if(ccr.isCrossChainRoyaltyActive(r.snapshot_block, r.network))
             raw += '|' + String(r.a_payout_legs || '') + '|' + String(r.b_payout_legs || '');
+        // The admission map, height-gated on the ROW's own snapshot_block and never on a
+        // consumer's height, so the rule for a match is fixed the moment it is produced and
+        // the two eras can never share a signature. Refuses in BOTH directions, exactly as
+        // AttestationConsensus._buildCanonical does for the mirror era. Appended LAST so its
+        // '|' separator argument holds whatever the royalty gate did before it.
+        raw += ah.admissionCanonicalField('CrossChainDex', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, r.match_id, (view != null ? view : 0), raw);
         return raw;
@@ -902,7 +936,13 @@ class CrossChainDexEngine extends EventEmitter {
                     'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr','a_payout_legs',
                     'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr','b_payout_legs',
                     'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation',
-                    'btc_chain_id'];
+                    'btc_chain_id',
+                    // The admission map, one column per chain. Inside the signed canonical,
+                    // unlike btc_chain_id above, so it is read off `row` with everything else.
+                    // APPENDED at the end: this list's positional order is mirrored by hand
+                    // in the engine's unit-test fake, and a mid-list insert re-maps every
+                    // column after it there while the production INSERT stays correct.
+                    'admit_block_btc','admit_block_ltc','admit_block_doge'];
         // Resolved into the value list rather than onto `row`: the row object is what the
         // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
         // never consensus. _canonicalMatch enumerates its fields explicitly, so this value has

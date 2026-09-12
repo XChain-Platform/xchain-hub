@@ -60,6 +60,10 @@ CREATE TABLE anchor_reward_attestations (
     reward_amount          VARCHAR(32)  NOT NULL,                    -- audit only; the indexer credits the FROZEN constant, never this wire value
     publisher_attestations TEXT         NOT NULL,                    -- JSON [{pubkey,sig}], the 2f+1 XANCPUB oracle_publish quorum over the reward canonical
     doge_anchor_txid       VARCHAR(64)  DEFAULT NULL,                -- the MINED DOGE ANCHOR this reward is proof-bound to (see the mined-anchor note below)
+    -- ADMISSION HEIGHT on BTC, and BTC alone (the indexer's call-site guard). Its margin
+    -- is the existing ANCHOR_REWARD_MIRROR_MATURITY of 144, already frozen fleet-wide, so
+    -- no producer value changes here. NULL is the legacy row: see attestation_responses.sql.
+    admit_block_btc        BIGINT UNSIGNED DEFAULT NULL,
     created_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Hub-mirrored (hub_db_sync HUB_STATE_TABLES), like state_checkpoints: INSERT-IGNORE
     -- apply, never retracted. Written only AFTER the XANCPUB quorum resolves for a

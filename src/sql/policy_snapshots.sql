@@ -30,6 +30,14 @@ CREATE TABLE policy_snapshots (
     sleeping             TINYINT(1)   NOT NULL DEFAULT 0,          -- tick sleep on the origin row; committed through policy_hash only, not repeated in the canonical. Column exists for the reads
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- now + max(relayMarginFloorS(c)) over every chain c that holds a copy of this tick per the hub's own bridge_transfers rows (never over BRIDGE_CHAINS, which an issuer can empty while copies exist). NOT monotonic across policy_seq, so apply order is by seq
     network              VARCHAR(20)  NOT NULL,                    -- mainnet/testnet/regtest; signed
+    -- ADMISSION HEIGHTS, and this is the SHARP case: the consuming select carries no chain
+    -- clause at all, so every chain the federation serves reads every row and the map must
+    -- name all of them. A chain added to the federation AFTER a row was signed is simply
+    -- absent from that row's map and binds there by effective_time, which is safe by
+    -- construction rather than silently unbound. See the note in cross_chain_matches.sql.
+    admit_block_btc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc      BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge     BIGINT UNSIGNED DEFAULT NULL,
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the canonical was signed under
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] over the EQUIV-wrapped XPOLICY canonical
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted

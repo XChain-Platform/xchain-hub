@@ -27,6 +27,12 @@ CREATE TABLE cross_chain_calls (
     gas_limit             BIGINT UNSIGNED NOT NULL,                -- caller-funded target-side gas ceiling
     cross_hops            INT          NOT NULL DEFAULT 0,         -- X→Y→X ping-pong bound (signed into the canonical)
     effective_time        BIGINT UNSIGNED NOT NULL,                -- apply at first block_time >= this (dispatch: target chain; result: source chain)
+    -- ADMISSION HEIGHTS over the row's read set (target_chain OR source_chain). See the
+    -- note in cross_chain_matches.sql: NULL is the legacy row and binds by effective_time
+    -- at every height, so the consuming select is IS NULL OR, never a bare <=.
+    admit_block_btc       BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc       BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge      BIGINT UNSIGNED DEFAULT NULL,
     finalizing_view       INT          NOT NULL DEFAULT 0,         -- PBFT view the round finalized at; signed into the EQUIV canonical (WI-2 bump 2) so the indexer rebuilds the exact view
     status                VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- row lifecycle: finalized / retracted (same model as cross_chain_matches)
     result_status         VARCHAR(20),                             -- result phase only: ok|reverted|out_of_gas|no_contract|not_callable|payload_too_large|error

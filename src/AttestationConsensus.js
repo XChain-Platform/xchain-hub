@@ -51,6 +51,7 @@ const { positiveIntConfig } = require('./lib/config_int.js');
 const { buildResponseCanonicalRaw, isCanonicalIntSpelling } = require('./attest_response_canonical.js');
 // Era selection, keyed on the REQUEST's own block (never the response's).
 const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
+const ah                = require('./lib/admission_height.js');
 const { resolveAttestResponseForwardS } = require('./lib/attest_response_timing.js');
 // Body-size ceiling every proposed/signed response must clear, leader and
 // follower alike (spec §5.3, D40/D41, row 9). Applies in both canonical eras.
@@ -647,7 +648,24 @@ class AttestationConsensus extends EventEmitter {
         // regardless is what lets any responsible hub lead without a second round
         // trip, and it is the value this hub's own PROPOSE signature covers.
         let myEffective   = mirrorEra ? this._chooseEffectiveTime() : null;
-        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, requestBlock, myEffective);
+        // The ADMISSION map for this round, resolved once here for the same reason
+        // myEffective is: every canonical below reads the round's stored value rather
+        // than re-resolving a tip that moves under it. An attest response is read by
+        // BTC alone (the indexer's call-site guard), so the map has one entry.
+        //
+        // C4, and it is a refusal to OPEN the round rather than a guess: with no fresh
+        // BTC admission tip this hub cannot justify an admission height, and a guessed
+        // one forks the federation while a refusal stalls this one rail and says so.
+        let myAdmit = null;
+        if(ah.isAdmissionEra(this.hub && this.hub.network, requestBlock)){
+            myAdmit = await this._resolveRoundAdmitBlocks();
+            if(!myAdmit){
+                console.error('AttestationConsensus: refusing to open round ' + rid.substring(0,16) +
+                    '... at block ' + requestBlock + '; no fresh BTC admission tip to stamp an admission height from');
+                return;
+            }
+        }
+        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, requestBlock, myEffective, myAdmit);
 
         // LEADER gate (spec §5.3, D40/D41, row 9): refuse to propose a body over
         // ATTEST_RESPONSE_BODY_MAX_BYTES rather than let it finalize and die at the
@@ -723,6 +741,10 @@ class AttestationConsensus extends EventEmitter {
                 ? Math.ceil(Number(roundState.pinnedMaxResponseBytes) * 1.4)
                 : null,
             finalized:    false,
+            // The round's admission map, pinned at proposal time above. Every canonical
+            // built for this rid reads it through _roundAdmitBlocks, so no two messages
+            // of one round can carry heights from two different tip readings.
+            admitBlocks:  myAdmit,
             timer:        null
         };
 
@@ -1916,6 +1938,11 @@ class AttestationConsensus extends EventEmitter {
             // recomputed `now + margin` at write time would store a value no
             // signature covers, and every indexer would skip the row.
             effectiveTime: pending.effectiveTime == null ? null : pending.effectiveTime,
+            // The admission map the signatures cover, for the same reason: the mirror row
+            // stores it verbatim and every verifier rebuilds the canonical from the stored
+            // column, so a consumer that re-read a tip at write time would store heights no
+            // signature covers. Null in the legacy era.
+            admitBlocks:  pending.admitBlocks == null ? null : pending.admitBlocks,
             // Extra responsible slots the liveness ladder granted this round
             // (attest_responsible_widening_activation.js). Derived from the set consensus actually
             // ran, not recomputed, so the publisher's failover rank is ordered over the
@@ -1987,7 +2014,14 @@ class AttestationConsensus extends EventEmitter {
     // gate keys on the REQUEST's block plus the hub's network, so the hub and the
     // on-chain verifier flip identically. `requestBlock` undefined (no request in
     // scope) -> both gates OFF -> bare legacy bytes (safe).
-    _buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime){
+    //
+    // `admitBlocks` is the row's admission map (section 5.5). Omitting it resolves the
+    // OPEN ROUND's pinned map for this rid, which is what every in-round signing site
+    // wants and why none of them had to grow an eighth argument; a verifier rebuilding
+    // the canonical from a stored row has no round and passes the row's own map
+    // explicitly. Its era gate is inside admissionCanonicalField and refuses in both
+    // directions exactly as the effective_time gate above does.
+    _buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
         let et = (effectiveTime === undefined) ? null : effectiveTime;
         if(effectiveTime !== undefined){
@@ -2008,6 +2042,11 @@ class AttestationConsensus extends EventEmitter {
             meta:          meta,
             effectiveTime: et
         });
+        // Appended after the shared twin's bytes and before the EQUIV wrapper, so the
+        // twin stays a pure function of the response fields and this file owns the one
+        // field the indexer rebuilds from the mirrored row's own columns.
+        raw += ah.admissionCanonicalField('AttestationConsensus', this.hub && this.hub.network, requestBlock,
+            (admitBlocks === undefined) ? this._roundAdmitBlocks(requestId) : admitBlocks);
         if(eq.isEquivHeaderActive(requestBlock, this.hub && this.hub.network))
             raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, requestId, 0, raw);
         return Buffer.from(raw, 'utf8');
@@ -2017,15 +2056,40 @@ class AttestationConsensus extends EventEmitter {
     // 128-hex-char sig or null when no identity is available. Forwards the
     // era-aware / era-unaware distinction of _buildCanonical by arity, so a
     // six-argument caller keeps signing exactly the bytes it signed before.
-    _signCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime){
+    _signCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
         if(!this.identity) return null;
         try {
-            let canonical = (arguments.length >= 7)
-                ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime)
-                : this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
+            let canonical = (arguments.length >= 8)
+                ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks)
+                : (arguments.length >= 7)
+                    ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime)
+                    : this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
             console.warn('AttestationConsensus: sign failed:', e);
+            return null;
+        }
+    }
+
+    // The admission map pinned on this rid's OPEN round, or null when no round is open
+    // for it. Null is the LEGACY value, which is correct at every height below the
+    // activation and fails closed above it: admissionCanonicalField refuses to build
+    // admission-era bytes without a map rather than inventing one.
+    _roundAdmitBlocks(requestId){
+        let p = this.pending && this.pending.get(String(requestId).toLowerCase());
+        return (p && p.admitBlocks !== undefined) ? p.admitBlocks : null;
+    }
+
+    // This hub's admission map for an attest-response round: BTC alone, because the
+    // indexer's call-site guard reads attestation_responses on BTC only. Null when the
+    // hub cannot produce a fresh BTC admission tip, which the caller turns into a refusal
+    // to open the round.
+    async _resolveRoundAdmitBlocks(){
+        let hub = this.hub;
+        if(!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
+        try { return await hub.resolveAdmitBlocks('attestation_responses', ['BTC']); }
+        catch (e){
+            console.error('AttestationConsensus: admission tip read failed:', e && e.message ? e.message : e);
             return null;
         }
     }
