@@ -180,3 +180,63 @@ describe('PRICE v0 canonical: three-way twin parity', function () {
         });
     });
 });
+
+// The single-round PRICE v0 canonical is a separate write from the batch above (its own
+// builders: OracleConsensus._buildPriceV0Payload, PriceAggregator._buildPriceV0Payload,
+// xchain-indexer ed25519.buildPriceV0Payload), gated on EQUIV_HEADER_ACTIVATION rather than
+// unconditional. `regtest` activates the header at height 0, so hubTwins()'s stub network
+// exercises the header on every height without touching production thresholds.
+describe('PRICE v0 single-round canonical: three-way twin parity', function () {
+
+    let hub;
+    before(function () { hub = hubTwins(); });
+
+    const ROUND   = 5;
+    const TIME    = 1756199400;
+    const HEIGHT  = 799000;
+    const NETWORK = 'regtest';   // matches hubTwins()'s stub hub.network
+
+    function pairsCoinKeyed() {
+        return [
+            { coinPair: 'XCP/USD',  price: 0.4237 },
+            { pair:     'BTC/USD',  price: '61234.5' },
+            { coinPair: 'AAA/USD',  price: 1 },
+        ];
+    }
+
+    function pairsPairKeyed() {
+        return pairsCoinKeyed().map(p => ({ pair: p.coinPair || p.pair, price: p.price }));
+    }
+
+    it('the hub twins agree with each other on a coinPair-keyed round', function () {
+        assert.strictEqual(
+            hub.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
+            hub.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
+            'PriceAggregator diverged from the OracleConsensus producer on a coinPair-keyed round');
+    });
+
+    it('a coinPair-keyed round matches the pair-keyed form on both hub twins', function () {
+        for (const [name, twin] of [['producer', hub.producer], ['ingest', hub.ingest]]) {
+            assert.strictEqual(
+                twin._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
+                twin._buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), HEIGHT),
+                'hub ' + name + ' spells coinPair and pair to different bytes');
+        }
+    });
+
+    describe('against the indexer verifier twin', function () {
+
+        it('all three twins emit identical bytes for a coinPair-keyed round', function () {
+            let ed25519 = loadIndexerTwin(this);
+            if (!ed25519) return;
+
+            let expected = ed25519.buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), NETWORK, HEIGHT);
+            assert.strictEqual(ed25519.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), NETWORK, HEIGHT), expected,
+                'indexer verifier: coinPair input must match pair input');
+            assert.strictEqual(hub.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT), expected,
+                'OracleConsensus (PRODUCER) diverged from the indexer verifier on a coinPair-keyed round');
+            assert.strictEqual(hub.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT), expected,
+                'PriceAggregator (hub ingest verifier) diverged from the indexer verifier on a coinPair-keyed round');
+        });
+    });
+});

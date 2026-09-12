@@ -312,7 +312,7 @@ class PriceAggregator extends EventEmitter {
     // bytes, so any divergence here rejects every legitimate round.
     _buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
         let sortedPairs = pairs
-            .map(p => ({ pair: p.pair, price: String(p.price) }))
+            .map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }))
             .sort((a, b) => {
                 if (a.pair < b.pair) return -1;
                 if (a.pair > b.pair) return 1;
