@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-11
+
+### Changed
+- The attestation provider fetch timeout default is 20000 ms, so a healthy but slow provider no longer leaves a round short of the bodies its redundancy asked for; `CONFIGURATION.md` documents it alongside `ATTESTATION_PROPOSER_SEEN_MAX`.
+
+### Fixed
+- Price snapshots carry the clock of the block their PRICE batch landed in, earliest landing wins, and the stamp is mirrored to every following indexer so a fee is priced only from rounds whose batch has landed.
+- The proposed snapshot height is resolved and bounded once, before the clamp-reference gate and every other reader of it.
+- A refused relay row no longer counts as a materialized request, gated on the reject-slot activation through a copy of the indexer's twin module, so the honest relay it still owes is sent.
+- A deferred reward attestation whose still-shallow txid draws a rejected status verdict retries until its TTL instead of being dropped.
+- An unreachable peer is backed off past a minute and reported once per backoff step at warn level.
+- A spend-guard reservation the store cannot record fails closed and rolls back.
+- Capability snapshots are derived per capability off signing identity rather than the peer manager, and the price-ingest fence is keyed on network as well as source chain, with a migration adding the column.
+- The Docker image no longer tries to bake a `.env` file, so the build succeeds on the legacy builder and configuration reaches the container as environment only.
+
 ## [0.17.0] - 2026-09-10
 
 ### Added

@@ -114,7 +114,11 @@ describe('oracle band constants agree across the mirror repos (#3886)', function
     }
 
     it('resolved the hub repo root, so the sibling paths below are real', function () {
-        expect(path.basename(REPO_ROOT), 'walk-up landed outside xchain-hub: ' + REPO_ROOT)
+        // A lane worktree renames the checkout directory (it is never literally
+        // "xchain-hub"), so identity comes from package.json's own name field
+        // rather than the walk-up's basename, which is worktree-naming noise.
+        const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+        expect(pkg.name, 'walk-up landed outside xchain-hub: ' + REPO_ROOT)
             .to.equal('xchain-hub');
     });
 

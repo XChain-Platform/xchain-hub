@@ -16,6 +16,7 @@ const EventEmitter       = require('events');
 const ValidatorIdentity  = require('../../src/ValidatorIdentity');
 const PeerManager        = require('../../src/PeerManager');
 const observability      = require('../../src/observability');
+const { waitUntil }      = require('../helpers/waitUntil');
 
 describe('PeerManager', function () {
 
@@ -744,6 +745,129 @@ describe('PeerManager', function () {
             clock.tick(3000); // delay+jitter ∈ [2000,2500) → fires
             expect(connect.calledWith('ws://p:1')).to.be.true;
             clock.restore();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Unreachable-peer backoff. A federation port whose validators
+    // are staged but not launched refuses every dial by design. The defect was
+    // a production hub dialling each of them once a minute forever and writing
+    // an error line per refusal, which drowns real errors.
+    // -----------------------------------------------------------------
+
+    describe('unreachable-peer backoff and logging', function () {
+        const TEN_MINUTES = 10 * 60 * 1000;
+
+        it('holds the fast ceiling while a peer has only just started failing', function () {
+            let clock = sinon.useFakeTimers();
+            sinon.stub(console, 'warn');
+            pm.running = true;
+            sinon.stub(pm, '_connectToPeer');
+            // At the fast ceiling already, but only one failure deep.
+            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 0 });
+            pm._scheduleReconnect('ws://p:1');
+            expect(pm.peers.get('ws://p:1').reconnectDelay).to.equal(60000);
+            clearTimeout(pm.peers.get('ws://p:1').reconnectTimer);
+            clock.restore();
+        });
+
+        it('lifts the ceiling past a minute once a peer has refused every dial in a row', function () {
+            let clock = sinon.useFakeTimers();
+            sinon.stub(console, 'warn');
+            pm.running = true;
+            sinon.stub(pm, '_connectToPeer');
+            // One short of the escalation threshold; this call crosses it.
+            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 4 });
+            pm._scheduleReconnect('ws://p:1');
+            expect(pm.peers.get('ws://p:1').reconnectDelay).to.be.above(60000);
+            clearTimeout(pm.peers.get('ws://p:1').reconnectTimer);
+            clock.restore();
+        });
+
+        it('costs a handful of log lines over ten minutes of refusal, not one a minute', function () {
+            let clock = sinon.useFakeTimers();
+            let warn  = sinon.stub(console, 'warn');
+            let err   = sinon.stub(console, 'error');
+            pm.running = true;
+
+            // Every dial is refused: the socket errors, then closes, and close is
+            // where _scheduleReconnect is called from.
+            sinon.stub(pm, '_connectToPeer').callsFake(function (addr) {
+                pm.peers.get(addr).lastError = 'connect ECONNREFUSED 10.0.0.1:10001';
+                pm._scheduleReconnect(addr);
+            });
+
+            // A hub that has been up for hours: this peer is already sitting at the
+            // one-minute ceiling, which is exactly the state that produced 45 error
+            // lines per ten minutes across five validators.
+            pm.peers.set('ws://v1:10001', {
+                inbound: false, reconnectDelay: 60000, failures: 30,
+                lastError: 'connect ECONNREFUSED 10.0.0.1:10001'
+            });
+            pm._scheduleReconnect('ws://v1:10001');
+            clock.tick(TEN_MINUTES);
+
+            // Ten one-minute retries would be ten lines; escalating backoff keeps it
+            // to a few. Five such peers must stay well under the 45 that were measured.
+            expect(warn.callCount).to.be.at.most(5);
+            expect(err.called).to.be.false;
+
+            let peer = pm.peers.get('ws://v1:10001');
+            if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
+            pm.running = false;
+            clock.restore();
+        });
+
+        it('a refused dial is stashed and reported once at warn, never at error', async function () {
+            let warn = sinon.stub(console, 'warn');
+            let err  = sinon.stub(console, 'error');
+            pm.running = true;
+
+            // Loopback discard port: nothing listens, so the connect is refused.
+            let addr = '127.0.0.1:9';
+            pm._connectToPeer(addr);
+            // The refusal is observable on the peer record, so poll it rather
+            // than sleeping past the slowest box this suite might run on.
+            await waitUntil(
+                () => (pm.peers.get(addr) || {}).lastError,
+                { timeoutMs: 5000, label: 'the refused dial to be stashed on the peer record' }
+            );
+
+            let peer = pm.peers.get(addr);
+            if (peer && peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
+            pm.running = false;
+
+            expect(err.called).to.be.false;
+            expect(peer.lastError || '').to.contain('ECONNREFUSED');
+            expect(warn.callCount).to.equal(1);
+            expect(warn.firstCall.args[0]).to.contain('ECONNREFUSED');
+            expect(warn.firstCall.args[0]).to.contain(addr);
+        });
+
+        it('a peer that comes back resets the failure count', async function () {
+            const WS = require('ws');
+            let srv = new WS.Server({ host: '127.0.0.1', port: 0 });
+            await new Promise((res) => srv.on('listening', res));
+            let addr = '127.0.0.1:' + srv.address().port;
+
+            pm.running = true;
+            pm.peers.set(addr, {
+                ws: null, state: 'closed', lastSeen: null, reconnectDelay: 60000,
+                reconnectTimer: null, inbound: false, failures: 9,
+                lastError: 'connect ECONNREFUSED'
+            });
+
+            pm._connectToPeer(addr);
+            await new Promise((res) => pm.once('peer:connect', res));
+
+            let peer = pm.peers.get(addr);
+            expect(peer.failures).to.equal(0);
+            expect(peer.lastError).to.be.null;
+            expect(peer.reconnectDelay).to.equal(config.P2P_RECONNECT_BASE);
+
+            pm.running = false;
+            if (peer.ws) peer.ws.terminate();
+            await new Promise((res) => srv.close(res));
         });
     });
 

@@ -3262,6 +3262,27 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         expect(pub._deferredRewardAttest.size, 'terminal verdict clears the entry').to.equal(0);
     });
 
+    it('retains the entry on rejected:status and still writes once it verifies', async function () {
+        // A shallow txid's decoded status can be a reorg-order artifact (e.g. the
+        // indexer's CHECKPOINT_SEQ replay guard firing against a competing anchor that
+        // has not yet settled), so 'rejected:status' must not be treated as a permanent
+        // forgery verdict the way 'rejected:mismatch'/'rejected:version' are: it has to
+        // survive to retry, exactly like 'rejected:txid' already does.
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => onChain({ status: 'invalid: CHECKPOINT_SEQ (stale; replay of an older checkpoint)' });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'no reward while the status verdict stands').to.equal(0);
+        expect(pub._deferredRewardAttest.size, 'entry survives a rejected:status verdict').to.equal(1);
+
+        // The chain resettles: the same txid now decodes valid and is buried deep enough.
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'the attestation is written once it verifies').to.equal(1);
+        expect(pub._deferredRewardAttest.size, 'entry cleared on verification').to.equal(0);
+    });
+
     it('expires the entry after the TTL rather than writing on a never-confirming anchor', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();

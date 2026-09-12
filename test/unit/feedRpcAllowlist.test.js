@@ -25,7 +25,7 @@ const { waitUntil } = require('../helpers/waitUntil');
 // The complete indexer->hub vocabulary (xchain-indexer src/hub_client.js).
 const FEED_METHODS = [
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ];
 
 // A deliberately broad sample of what must NOT be reachable from a public port:

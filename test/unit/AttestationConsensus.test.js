@@ -943,7 +943,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         await flush();
         expect(agreeSpy.called).to.equal(true);
         // timeoutMs bounds the judge call to the round's fetch-timeout budget
-        // (ATTESTATION_FETCH_TIMEOUT, default 10000ms) so a slow-drip judge
+        // (ATTESTATION_FETCH_TIMEOUT, default 20000ms) so a slow-drip judge
         // vendor cannot overrun the round window.
         // expectedN pins the majority denominator to the responsible-set bound
         // need = min(redundancy=2, responsible.length=3) = 2 (item 2642).
@@ -954,7 +954,22 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // outcome is the log-only could-not-judge channel agree() fills before an
         // inconclusive null; empty on the way in.
         expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
-            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2, outcome: {} });
+            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 20000, expectedN: 2, outcome: {} });
+    });
+
+    it('an explicit ATTESTATION_FETCH_TIMEOUT still overrides the 20 s default for the judge call', async function () {
+        // The raise moves the default only. An operator who tuned the key already
+        // (down, for a fast vendor, or up past 20 s) must keep the budget they set, on
+        // the judge leg as well as the fetch leg.
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        hub = createMockHub({ identity: me, p2pConfig: { ATTESTATION_FETCH_TIMEOUT: '7500' } });
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(agreeSpy.called).to.equal(true);
+        expect(agreeSpy.firstCall.args[1].timeoutMs).to.equal(7500);
     });
 
     // fetch() honours the block-anchored pinned model, so the allowlist

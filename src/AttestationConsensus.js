@@ -1008,7 +1008,11 @@ class AttestationConsensus extends EventEmitter {
             // makes providers/llm.js's deadlineAt already elapsed, so the judge fallback
             // chain breaks at its first iteration ("judge budget exhausted") and every
             // judge_model round resolves no_quorum.
-            let judgeTimeoutMs = positiveIntConfig(this.config.ATTESTATION_FETCH_TIMEOUT, 10000,
+            // The 20000 default matches AttestationRound's DEFAULT_FETCH_TIMEOUT (raised
+            // from 10000 by operator ruling 2026-09-11); a hub with no explicit key must
+            // give the judge the same budget the fetch leg got, or the two legs of one
+            // round disagree about how long a slow vendor is allowed to be.
+            let judgeTimeoutMs = positiveIntConfig(this.config.ATTESTATION_FETCH_TIMEOUT, 20000,
                 'ATTESTATION_FETCH_TIMEOUT');
             // expectedN pins the majority denominator to the responsible-set size,
             // not the surviving ok-proposal count (item 2642). Without it, failed

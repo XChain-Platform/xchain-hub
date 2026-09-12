@@ -61,7 +61,14 @@ const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 // federation costs about 3.3 queries a second fleet-wide.
 const DEFAULT_POLL_MS         = 3000;
 const DEFAULT_CONFIRMATIONS   = 3;      // BTC blocks of confirmation before initiating fetch (spec §14)
-const DEFAULT_FETCH_TIMEOUT   = 10000;  // ms: provider fetch timeout
+// ms: provider fetch timeout. 20 s, not the historical 10 s (operator ruling
+// 2026-09-11): a slow-but-healthy provider fetch that crossed 10 s aborted here and
+// left the round with fewer independent bodies than its redundancy asked for, which
+// byte_equality reads as a no_quorum rather than as a slow vendor. 20 s still sits an
+// order of magnitude under DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, so the round timer
+// remains the terminal backstop. AttestationConsensus bounds the judge call with the
+// same key and must carry the same literal; the two are read on separate paths.
+const DEFAULT_FETCH_TIMEOUT   = 20000;
 const POLL_LIMIT              = 100;    // max pending requests fetched per poll page (cursor advances across pages)
 
 class AttestationRound {

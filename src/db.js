@@ -368,6 +368,67 @@ class Database {
             'MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
         await this._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
             'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+        // re-key price_ingest_watermarks from (source_chain) to
+        // (network, source_chain). alterTableForDrift adds the `network` column on an
+        // already-deployed table but never touches keys, so without this step a migrated
+        // hub carries the column and STILL collapses every network onto one row per chain:
+        // the fence's upsert would key on source_chain and one network's retraction would
+        // overwrite another's. That is the bug this item exists to remove, so the re-key is
+        // the migration, not the column.
+        await this._migratePriceFencePrimaryKey();
+    }
+
+    // Move price_ingest_watermarks' PRIMARY KEY onto (network, source_chain).
+    //
+    // Idempotent: reads the live key first and no-ops once it already names both columns,
+    // so this runs on every boot at the cost of one information_schema read.
+    //
+    // DROP and ADD are issued as ONE ALTER. MariaDB DDL is not transactional, and a table
+    // left with no primary key would let two rows for the same (network, chain) seat, which
+    // is a silently divergent fence rather than a loud failure. A single statement either
+    // lands both halves or neither.
+    //
+    // No dedup pass is needed: the old key made source_chain unique on its own, and the
+    // drift-added column defaults every existing row to '', so (network, source_chain) is
+    // already unique across the existing rows. Those rows stay in the '' bucket, which
+    // getPriceIngestWatermark folds into every network's read, so the migration cannot
+    // lower a live fence; the fleet migration script backfills them onto the owning hub's
+    // network to retire the coupling for good.
+    //
+    // A failure here is logged, not thrown: the pre-migration chain-keyed fence still
+    // rejects stale replays (over-broadly, across networks), so refusing to boot would
+    // trade a scoping defect for an outage.
+    async _migratePriceFencePrimaryKey(){
+        const table = 'price_ingest_watermarks';
+        let db = await this.getConnection();
+        try {
+            let present = await this._liveIndexColumns(db, table, 'PRIMARY');
+            // [] means the table is not here yet (a fresh install creates it from the SQL
+            // source, already correctly keyed). Nothing to migrate either way.
+            if(present.length === 0 || (present[0] === 'network' && present[1] === 'source_chain')) return;
+
+            let missing = await this._missingIndexColumns(db, table, '(network, source_chain)');
+            if(missing.length > 0){
+                console.error('Migration: cannot re-key ' + table + ' on (network, source_chain); the table is '
+                    + 'missing ' + missing.join(', ') + '. The fence stays chain-keyed, so one network\'s '
+                    + 'retraction still fences every network for that chain. Run the fleet migration '
+                    + '(xchain-hub/migrations/2026-09-11-price-ingest-watermarks-network-column.sql) by hand.');
+                return;
+            }
+
+            await db.query('ALTER TABLE `' + table + '` DROP PRIMARY KEY, ADD PRIMARY KEY (network, source_chain)');
+            let after = await this._liveIndexColumns(db, table, 'PRIMARY');
+            if(after[0] === 'network' && after[1] === 'source_chain')
+                console.log('Migration: re-keyed ' + table + ' on (network, source_chain); the price ingest '
+                    + 'fence is now per network, not shared across every network on this hub DB.');
+            else
+                console.error('Migration: the re-key of ' + table + ' did not take (PRIMARY now covers '
+                    + (after.join(', ') || 'nothing') + '). The fence is still chain-keyed.');
+        } catch(e){
+            console.error('Migration error re-keying ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
     }
 
     // Widen a column's character set in place. Idempotent: reads the live
@@ -1031,17 +1092,37 @@ class Database {
         return w == null ? 0 : Number(w);
     }
 
-    // HUB-RETRACT-4: per-source-chain price ingest fence. Returns the highest source-chain
-    // rollback generation whose price retraction the hub has processed, plus that retraction's
-    // orphaned-range lower bound; or null when no retraction has ever been recorded for the chain
-    // (so pre-reorg generation-0 pushes are never rejected). PriceAggregator rejects an incoming
-    // price push whose push_generation <= retraction_generation AND action_index >= from_action_index:
-    // exactly a stale replay of a rolled-back action arriving after its retraction (the re-published
-    // canonical row carries a higher generation and passes).
-    async getPriceIngestWatermark(sourceChain){
+    // The fence's network scope, normalized the same way on the read and the write so a
+    // HUB_NETWORK of '  Regtest ' keys the same row as 'regtest'. '' is the legacy/unset
+    // bucket: a hub that does not know its own network writes there, and every reader folds
+    // that bucket in (see getPriceIngestWatermark).
+    static normalizeFenceNetwork(network){
+        return typeof network === 'string' ? network.trim().toLowerCase() : '';
+    }
+
+    // HUB-RETRACT-4: per-(network, source-chain) price ingest fence. Returns the highest
+    // source-chain rollback generation whose price retraction the hub has processed, plus that
+    // retraction's orphaned-range lower bound; or null when no retraction has ever been recorded
+    // for the chain on this network (so pre-reorg generation-0 pushes are never rejected).
+    // PriceAggregator rejects an incoming price push whose push_generation <= retraction_generation
+    // AND action_index >= from_action_index: exactly a stale replay of a rolled-back action arriving
+    // after its retraction (the re-published canonical row carries a higher generation and passes).
+    //
+    // `network` is part of the key because one hub DB can be shared by, or outlive, more than one
+    // deployment network: on a chain-only key, clearing the regtest fence after an indexer wipe
+    // dropped the LIVE network's fence for that chain and admitted the orphan replay it existed to
+    // stop. The legacy '' bucket (rows written before the column, or by a hub with HUB_NETWORK
+    // unset) is ambiguous by construction, so it is folded in here and the STRICTER fence wins:
+    // highest generation, and at a tie the lowest orphan bound. Over-rejecting is loud and
+    // clearable; a fence silently lost is not.
+    async getPriceIngestWatermark(sourceChain, network){
+        let net = Database.normalizeFenceNetwork(network);
         let rows = await this.doQuery(
-            "SELECT retraction_generation, from_action_index FROM price_ingest_watermarks WHERE source_chain = ? LIMIT 1",
-            [sourceChain]);
+            `SELECT retraction_generation, from_action_index FROM price_ingest_watermarks
+             WHERE source_chain = ? AND network IN (?, '')
+             ORDER BY retraction_generation DESC, from_action_index ASC
+             LIMIT 1`,
+            [sourceChain, net]);
         if(!rows || rows.length === 0) return null;
         return {
             retraction_generation: Number(rows[0].retraction_generation) || 0,
@@ -1049,26 +1130,30 @@ class Database {
         };
     }
 
-    // Raise a chain's ingest fence to a retraction's generation. Monotonic in generation: a higher
-    // generation replaces the stored (generation, from); the same generation only widens the
-    // orphaned range downward (LEAST from); a lower generation is ignored. The from_action_index
+    // Raise one network's fence for a chain to a retraction's generation. Monotonic in generation:
+    // a higher generation replaces the stored (generation, from); the same generation only widens
+    // the orphaned range downward (LEAST from); a lower generation is ignored. The from_action_index
     // assignment is ordered BEFORE retraction_generation so its CASE reads the OLD generation
     // (MariaDB evaluates ON DUPLICATE assignments left to right).
-    async bumpPriceIngestWatermark(sourceChain, generation, fromActionIndex){
+    //
+    // The write always names this hub's own network, so a retraction on one network can no longer
+    // raise a fence that drops another network's healthy pushes.
+    async bumpPriceIngestWatermark(sourceChain, generation, fromActionIndex, network){
         let gen  = Number(generation);
         let from = Number(fromActionIndex);
         if(!Number.isFinite(gen) || gen < 0) return;
         if(!Number.isFinite(from) || from < 0) from = 0;
+        let net = Database.normalizeFenceNetwork(network);
         await this.doQuery(
-            `INSERT INTO price_ingest_watermarks (source_chain, retraction_generation, from_action_index)
-             VALUES (?, ?, ?)
+            `INSERT INTO price_ingest_watermarks (network, source_chain, retraction_generation, from_action_index)
+             VALUES (?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 from_action_index = CASE
                     WHEN VALUES(retraction_generation) > retraction_generation THEN VALUES(from_action_index)
                     WHEN VALUES(retraction_generation) = retraction_generation THEN LEAST(from_action_index, VALUES(from_action_index))
                     ELSE from_action_index END,
                 retraction_generation = GREATEST(retraction_generation, VALUES(retraction_generation))`,
-            [sourceChain, gen, from]);
+            [net, sourceChain, gen, from]);
     }
 
     // Returns 0 on a fresh node or unparseable value.

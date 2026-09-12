@@ -1698,14 +1698,23 @@ class StateAnchorPublisher {
     //
     // Only 'verified' writes: _verifyAnchorOnChain binds the exact txid AND the exact
     // ANCHOR version, so neither a never-mined transaction nor a different anchor for the
-    // same checkpoint can stand in as proof. A decided CONTENT verdict
-    // ('rejected:status' / ':mismatch' / ':version') is terminal for this txid and drops
-    // the entry. 'rejected:txid' is deliberately NOT terminal here: getanchoraction
-    // reports checkpoint_anchored UNFILTERED, so that verdict also fires while our own tx
-    // is merely unmined on a checkpoint that already carries an earlier anchor, which is
-    // the v1 archive head's normal state. Retrying it until the TTL costs a queue slot;
-    // dropping it would forfeit a legitimate reward. Every non-verified outcome writes
-    // nothing either way, so the safety property does not depend on this choice.
+    // same checkpoint can stand in as proof. A decided CONTENT verdict ('rejected:mismatch'
+    // / ':version') is terminal for this txid and drops the entry: both are checked only
+    // AFTER the dogeConfirmations depth gate, against a decoded payload buried deep enough
+    // that a reorg is not expected to change it.
+    //
+    // 'rejected:status' and 'rejected:txid' are deliberately NOT terminal here.
+    // 'rejected:txid' fires while getanchoraction's checkpoint_anchored is UNFILTERED, so
+    // it also fires while our own tx is merely unmined on a checkpoint that already carries
+    // an earlier anchor, which is the v1 archive head's normal state. 'rejected:status'
+    // (the indexer's decoded-invalid verdict, e.g. a CHECKPOINT_SEQ replay guard) is
+    // checked BEFORE that same depth gate, so it can be reached by a still-shallow txid
+    // whose ordering a pending reorg can still rewrite: today's "stale replay" against a
+    // competing anchor can undecide itself once the chain resettles, so treating it as
+    // terminal here can drop a reward for an anchor that goes on to verify. Retrying either
+    // until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
+    // Every non-verified outcome writes nothing either way, so the safety property does not
+    // depend on this choice.
     async _drainDeferredRewardAttest(){
         if(this._deferredRewardAttest.size === 0) return;
         for(let [key, e] of [...this._deferredRewardAttest]){
@@ -1734,7 +1743,7 @@ class StateAnchorPublisher {
                                                         Number(e.snapshotBlock), e.publisher, e.attestSigs,
                                                         String(e.txid).toLowerCase(), e);
                     console.log('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
-                } else if(v === 'rejected:status' || v === 'rejected:mismatch' || v === 'rejected:version'){
+                } else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     this._deferredRewardAttest.delete(key);
                     console.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
                                  v + '); dropped, no reward');

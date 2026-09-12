@@ -28,9 +28,11 @@ function createMockHub(overrides = {}) {
         // null (tip unavailable) so the round falls back to its round-number
         // anchor without throwing; tests needing a real tip override this.
         getChainTip: sinon.stub().resolves(null),
-        // HUB-RETRACT-4 price ingest fence. Default: no watermark recorded, so ingest
-        // never rejects (pre-fix behaviour); tests that exercise the fence override
-        // getPriceIngestWatermark to return a {retraction_generation, from_action_index}.
+        // HUB-RETRACT-4 price ingest fence, keyed (network, source_chain). Default: no
+        // watermark recorded, so ingest never rejects (pre-fix behaviour); tests that
+        // exercise the fence override getPriceIngestWatermark to return a
+        // {retraction_generation, from_action_index}. Both accessors take the hub's own
+        // network as their last argument; assert on it via the stub's call args.
         getPriceIngestWatermark: sinon.stub().resolves(null),
         bumpPriceIngestWatermark: sinon.stub().resolves(),
         close: sinon.stub().resolves()
@@ -55,6 +57,10 @@ function createMockHub(overrides = {}) {
     let p2pConfigDefaults = { ORACLE_EPOCH_START: 1704067200000 }; // 2024-01-01 UTC
     let hub = {
         db:              overrides.db || db,
+        // The hub's own deployment network. Left undefined by default so activation
+        // helpers see exactly what they saw before this key existed; tests that care
+        // about network scoping (the price ingest fence) pass one in.
+        network:         overrides.network,
         p2pConfig:       { ...p2pConfigDefaults, ...(overrides.p2pConfig || {}) },
         getPeerManager:  sinon.stub().returns(overrides.peerManager || peerManager),
         getIdentity:     sinon.stub().returns(overrides.identity || identity),

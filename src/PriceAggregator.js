@@ -83,6 +83,21 @@ const MISSING_PAIR_WARN_INTERVAL_MS = 60_000;
 // this pass writes for `cross_chain` are the same rows the engines write.
 const DERIVED_CAPABILITIES = ['price', 'oracle_publish', 'cross_chain', 'attestation'];
 
+// The XChainHub properties that hold each capability's consensus writer, one entry per
+// name in DERIVED_CAPABILITIES and drawn from the same writer list above. Presence of
+// ANY of a capability's engines means the consensus path on this hub already covers it,
+// so the derivation pass skips that capability and only that capability. The engines
+// are built by startOracle / startCrossChain / startAttestation, each of which gates
+// only on a peer manager, which is why engine presence alone cannot distinguish a
+// validator from a mesh-only hub and _runsConsensusFor pairs it with the signing
+// identity. See _runsConsensusFor.
+const CAPABILITY_CONSENSUS_ENGINES = {
+    price:          ['oracleConsensus'],
+    oracle_publish: ['stateCheckpoints'],
+    cross_chain:    ['crossChainCalls', 'crossChainDex', 'retractionConsensus'],
+    attestation:    ['attestationBatchPublisher']
+};
+
 // How far back from the BTC tip a hub that does NOT run oracle consensus keeps
 // capability_snapshots rows. It has to be a WINDOW rather than a single
 // height because the hub never learns which anchor it needs: the indexer resolves
@@ -237,8 +252,8 @@ class PriceAggregator extends EventEmitter {
             + ' if it flaps, that federation is dropping it at its own aggregation gate.');
     }
 
-    // An ingest-fence rejection USED TO BE silent (a bare
-    // { accepted:false } return), and that is how it killed a price rail: reset an
+    // An ingest-fence rejection must never be silent (a bare
+    // { accepted:false } return), because a silent one kills a price rail: reset an
     // indexer DB and its push_generations counter restarts at 0, so every push from
     // it sits at or below a kept retraction_generation and is dropped. The operator
     // sees "prices stopped" with nothing anywhere naming the cause, and the
@@ -252,6 +267,19 @@ class PriceAggregator extends EventEmitter {
     // Throttled per source chain because a replaying pusher must not be able to
     // flood the log: the first rejection prints immediately, then at most one line
     // per window, carrying the count it stands for so the volume is never lost.
+    // The deployment network every fence read and write on this hub is scoped to. The fence
+    // row is keyed (network, source_chain): without the network key, a hub DB shared by, or
+    // outliving, more than one network holds ONE row per chain for all of them, so clearing
+    // a regtest fence drops the live network's fence for that chain. A hub whose HUB_NETWORK is unset
+    // keys the legacy '' bucket, which is exactly where its pre-column rows already are.
+    // Normalized in the same shape as db.js normalizeFenceNetwork (trim + lowercase) rather
+    // than by requiring db.js, which would pull the mariadb driver into this module's require
+    // graph for a two-line string fold.
+    _fenceNetwork() {
+        let net = this.hub && this.hub.network;
+        return typeof net === 'string' ? net.trim().toLowerCase() : '';
+    }
+
     _warnIngestFenceRejection(sourceChain, kind, pushGeneration, actionIndex, wm) {
         let chain = sourceChain || 'unknown';
         let now   = Date.now();
@@ -271,7 +299,10 @@ class PriceAggregator extends EventEmitter {
             + ' / XCHAIN-USD path fails with it. If the ' + chain + ' indexer DB was reset or rebuilt,'
             + ' its push_generations counter restarted at 0 and this fence row is stale: clear it with'
             + " DELETE FROM price_ingest_watermarks WHERE source_chain = '" + chain + "'"
-            + ' on the hub DB. Otherwise this is a stale replay of a retracted action and the'
+            + " AND network = '" + this._fenceNetwork() + "'"
+            + ' on the hub DB. The network clause is what keeps the clear off every OTHER'
+            + " network's fence for the same chain, so run it exactly as written."
+            + ' Otherwise this is a stale replay of a retracted action and the'
             + ' drop is correct.');
     }
 
@@ -590,7 +621,7 @@ class PriceAggregator extends EventEmitter {
         // action_index (older sender) => no fence, as before.
         let roundActionIndex = parseInt(sourceActionIndex);
         if (Number.isFinite(roundActionIndex)) {
-            let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+            let wm = await this.db.getPriceIngestWatermark(sourceChain || '', this._fenceNetwork());
             if (wm && pushGeneration <= wm.retraction_generation && roundActionIndex >= wm.from_action_index) {
                 // Never silent: a rebuilt indexer trips this fence on every push.
                 this._warnIngestFenceRejection(sourceChain, 'PRICE v0 round', pushGeneration, roundActionIndex, wm);
@@ -674,6 +705,52 @@ class PriceAggregator extends EventEmitter {
         }
 
         return { accepted: true };
+    }
+
+    // Stamp the LANDING clock of the batch that carried `round` onto rows of that
+    // round which are already finalized here, and re-emit whatever it changed so every
+    // mirror following this hub converges on the same value.
+    //
+    // EARLIEST LANDING WINS. Overlapping and re-published batches carry the same rounds
+    // by design (D25), so taking the minimum makes the stored clock independent of the
+    // order a hub happened to receive them in; two hubs that saw the same chain end up
+    // bounding fee pricing identically, which is the whole point of the column.
+    //
+    // Returns the number of rows re-emitted (0 when an earlier batch already stamped
+    // the round at or below this clock).
+    async _stampBatchLanding(round, blockTime) {
+        let landed = Number(blockTime);
+        if (!Number.isSafeInteger(landed) || landed <= 0) return 0;
+        try {
+            await this.db.doQuery(
+                "UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? " +
+                "AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)",
+                [landed, round, landed]
+            );
+            // Re-read rather than trust an affected-row count: the mirror applier is an
+            // upsert keyed on (round_number, coin_pair), so it needs the WHOLE row, and
+            // selecting the rows that now carry THIS clock also skips the no-op case
+            // without asking the driver for a count it does not uniformly report.
+            let rows = await this.db.doQuery(
+                'SELECT round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, ' +
+                'validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index, ' +
+                'push_generation, batch_block_time, created_at FROM price_snapshots ' +
+                'WHERE round_number = ? AND batch_block_time = ?',
+                [round, landed]
+            );
+            for (let row of (rows || [])) {
+                this.emit('row:inserted', { table: 'price_snapshots', row: row });
+            }
+            return (rows || []).length;
+        } catch (err) {
+            // Never fatal: the round is finalized either way, and an unstamped round
+            // reads as NOT LANDED, which fails fee pricing closed rather than pricing
+            // against a round the chain has not shown. Loud, because a hub that cannot
+            // stamp holds the fee gate shut for its own indexers once the bound is armed.
+            console.error('PriceAggregator: could not stamp the landing clock for round ' +
+                round + ':', err);
+            return 0;
+        }
     }
 
     // PRICE v0 (batch) ingest: ONE quorum signature set over a WINDOW of full-body
@@ -848,7 +925,7 @@ class PriceAggregator extends EventEmitter {
         if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
         let batchActionIndex = parseInt(sourceActionIndex);
         if (Number.isFinite(batchActionIndex)) {
-            let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+            let wm = await this.db.getPriceIngestWatermark(sourceChain || '', this._fenceNetwork());
             if (wm && pushGeneration <= wm.retraction_generation && batchActionIndex >= wm.from_action_index) {
                 // Never silent: a rebuilt indexer trips this fence on every push.
                 this._warnIngestFenceRejection(sourceChain, 'PRICE batch', pushGeneration, batchActionIndex, wm);
@@ -958,6 +1035,13 @@ class PriceAggregator extends EventEmitter {
             );
             if (existing && existing.length > 0) {
                 duplicates++;
+                // The round is already finalized HERE, but this batch is how the round
+                // reached the CHAIN, and the landing clock is what fee pricing bounds
+                // itself on once that gate is armed. On a validator every round of its
+                // own batch takes this branch (it finalized them all itself), so
+                // stamping only the stored rows would leave the one node kind that
+                // produces rounds unable to tell a landed round from an unlanded one.
+                await this._stampBatchLanding(r.round, blockTime);
                 continue;
             }
 
@@ -967,12 +1051,19 @@ class PriceAggregator extends EventEmitter {
             // the landing block on the landing chain (D8), NOT the round's BTC anchor.
             // Two consensus readers read reference_block, so a v2 row that differed here
             // would fork them.
+            //
+            // batch_block_time is the LANDING BLOCK's own clock, and it is a different
+            // quantity from every other time column here: block_timestamp is when the
+            // round was priced, this is when the chain could first show it. Fee pricing
+            // bounds itself on it so a hub-connected node and a chain-only node select
+            // the same round (price_fee_batch_landed_activation.js in the indexer).
             let insertedRows = [];
-            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?)").join(', ');
+            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?)").join(', ');
             let params = [];
             for (let p of r.pairs) {
                 params.push(r.round, p.pair, p.price, referenceBlock, sourceChain || null, r.timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt);
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration,
+                            blockTime, createdAt);
                 insertedRows.push({
                     round_number:        r.round,
                     coin_pair:           p.pair,
@@ -987,6 +1078,7 @@ class PriceAggregator extends EventEmitter {
                     source_chain:        sourceChain || null,
                     source_action_index: sourceActionIndex,
                     push_generation:     pushGeneration,
+                    batch_block_time:    blockTime,
                     created_at:          createdAt
                 });
             }
@@ -999,7 +1091,7 @@ class PriceAggregator extends EventEmitter {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, created_at)
+                 push_generation, batch_block_time, created_at)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
                     price = VALUES(price), reference_block = VALUES(reference_block),
@@ -1007,7 +1099,9 @@ class PriceAggregator extends EventEmitter {
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
                     status = 'finalized', source_chain = VALUES(source_chain),
                     source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation)`;
+                    push_generation = VALUES(push_generation),
+                    batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
+                                          VALUES(batch_block_time), batch_block_time)`;
             try {
                 await this.db.doQuery(query, params);
             } catch (err) {
@@ -1153,7 +1247,7 @@ class PriceAggregator extends EventEmitter {
         // action_index sits in that retraction's orphaned range; the re-published canonical row
         // carries a higher generation (or a below-orphan action_index) and passes. No watermark row
         // exists until the first retraction, so genuine pre-reorg generation-0 pushes are never hit.
-        let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+        let wm = await this.db.getPriceIngestWatermark(sourceChain || '', this._fenceNetwork());
         if (wm && pushGeneration <= wm.retraction_generation && actionIndex >= wm.from_action_index) {
             // Never silent: a rebuilt indexer trips this fence on every push.
             this._warnIngestFenceRejection(sourceChain, 'PRICE v1 oracle', pushGeneration, actionIndex, wm);
@@ -1331,7 +1425,7 @@ class PriceAggregator extends EventEmitter {
         // (xchain-indexer/src/hub_client.js) or the retained retry becomes a silent drop.
         if (fenced) {
             try {
-                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
+                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from, this._fenceNetwork());
             } catch (e) {
                 console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
                 return { error: 'ingest fence not persisted for ' + sourceChain
@@ -1428,20 +1522,57 @@ class PriceAggregator extends EventEmitter {
         return String(process.env.HUB_PRICE_CAPABILITY_DERIVE || '').trim().toLowerCase() !== 'off';
     }
 
-    // True for a hub that runs oracle consensus, whose existing round-finalization
-    // writer already covers every anchor a batch it signs can carry. Both signals are
-    // checked because they settle at different moments in boot: `oracleConsensus` is
-    // built by startOracle(), a few awaits after start() arms this timer, while
-    // `peerManager` (built by startP2P, and the sole precondition startOracle has) is
-    // already the decision. Reading only the former would let a slow boot fire one pass
-    // on a validator hub.
-    _runsOracleConsensus() {
+    // True when THIS hub holds a signing identity, the precondition every consensus
+    // writer of a capability snapshot has: each of them persists on a path that
+    // finalizes, co-signs or publishes under this hub's own key, so a hub that signs
+    // nothing can never reach one however many engines its boot built. startP2P sets
+    // `identity` from SIGNING_PRIVKEY_HEX BEFORE it constructs the peer manager, and
+    // every start*() that builds an engine is awaited after that, so this signal is
+    // settled earlier in boot than any engine and closes the boot race on its own.
+    _hasSigningIdentity() {
         if (!this.hub) return false;
-        if (this.hub.oracleConsensus) return true;
+        if (this.hub.identity) return true;
         try {
-            if (typeof this.hub.getPeerManager === 'function' && this.hub.getPeerManager()) return true;
-        } catch (e) { /* a hub double without a peer manager is not a validator */ }
+            if (typeof this.hub.getIdentity === 'function' && this.hub.getIdentity()) return true;
+        } catch (e) { /* a hub double without an identity accessor signs nothing */ }
         return false;
+    }
+
+    // True when the consensus path ON THIS HUB already writes `capability`'s snapshot,
+    // in which case the derivation pass leaves that capability alone.
+    //
+    // PER CAPABILITY, never one answer for all four. The previous gate asked a single
+    // question ("does this hub run oracle consensus?") and answered it from the PEER
+    // MANAGER, which made the whole pass disarm on any hub in the mesh. That is exactly
+    // the shape the public tier runs: a peer manager so it receives federation frames,
+    // no signing key, so no round it sees is ever finalized under its key and NOTHING
+    // writes oracle_publish, cross_chain or attestation on it. Those three stayed
+    // uncovered on every such hub, which is the ATTEST refusal and the `unverified`
+    // ANCHOR archive head the chain-only node measured.
+    //
+    // Engine presence refines the identity signal rather than replacing it: a validator
+    // that holds one capability's writer and not another's derives only the missing one.
+    // A spurious derive costs nothing if a slow boot has not yet built an engine: the
+    // rows are byte-identical to the consensus writer's and INSERT IGNORE makes either
+    // order a no-op for the other (see _persistDerivedCapabilitySnapshot).
+    _runsConsensusFor(capability) {
+        if (!this.hub) return false;
+        if (!this._hasSigningIdentity()) return false;
+        let engines = CAPABILITY_CONSENSUS_ENGINES[capability] || [];
+        return engines.some(name => Boolean(this.hub[name]));
+    }
+
+    // The `price` question under its original name; XChainHub's arming comment points
+    // here for why a validator hub needs no derivation pass.
+    _runsOracleConsensus() {
+        return this._runsConsensusFor('price');
+    }
+
+    // The capabilities this hub must derive for itself: every name whose consensus
+    // writer does not run here. Empty means the consensus path covers all four and the
+    // pass has nothing left to do.
+    _capabilitiesToDerive() {
+        return DERIVED_CAPABILITIES.filter(c => !this._runsConsensusFor(c));
     }
 
     // Arm the derivation pass. Called from XChainHub.start() unconditionally: the
@@ -1451,8 +1582,9 @@ class PriceAggregator extends EventEmitter {
         if (this._priceCapDeriveTimer) return false;
         if (!this._priceCapabilityDerivationEnabled()) {
             console.warn('PriceAggregator: HUB_PRICE_CAPABILITY_DERIVE=off, so this hub will not derive '
-                + 'capability snapshots (' + DERIVED_CAPABILITIES.join(', ') + '). If it does not run oracle '
-                + 'consensus, nothing else writes them: every on-chain PRICE batch and every ATTEST its '
+                + 'capability snapshots (' + DERIVED_CAPABILITIES.join(', ') + '). For every one of them '
+                + 'whose consensus writer does not run here, nothing else writes them: every on-chain '
+                + 'PRICE batch and every ATTEST its '
                 + 'indexer parses will read `invalid: insufficient signer stake`, and every ANCHOR archive '
                 + 'head will be stored `unverified`.');
             return false;
@@ -1486,11 +1618,14 @@ class PriceAggregator extends EventEmitter {
     async runPriceCapabilityDerivation() {
         if (this._priceCapDeriveRunning) return { ran: false, reason: 'pass already running' };
         if (!this._priceCapabilityDerivationEnabled()) return { ran: false, reason: 'disabled' };
-        // A validator hub keeps its existing behaviour exactly: the round-finalization
-        // writer owns these rows there, and this pass disarms itself for the process.
-        if (this._runsOracleConsensus()) {
+        // A hub whose consensus path writes EVERY derived capability keeps its existing
+        // behaviour exactly: those writers own these rows there, and this pass disarms
+        // itself for the process. One covered capability disarms nothing: the pass runs
+        // for the rest, which is the whole of
+        let capabilities = this._capabilitiesToDerive();
+        if (capabilities.length === 0) {
             this.stopPriceCapabilityDerivation();
-            return { ran: false, reason: 'hub runs oracle consensus' };
+            return { ran: false, reason: 'hub runs consensus for every derived capability' };
         }
 
         this._priceCapDeriveRunning = true;
@@ -1519,7 +1654,7 @@ class PriceAggregator extends EventEmitter {
             // insertion order is what makes them bounded and exact at once: a height that
             // has fallen out of the window is never revisited, so forgetting it costs
             // nothing, and nothing inside the window is ever forgotten and re-derived.
-            for (let capability of DERIVED_CAPABILITIES) {
+            for (let capability of capabilities) {
                 let done = this._coveredBlocks(this._capDerivedBlocks, capability);
                 let warned = this._coveredBlocks(this._capWarnedBlocks, capability);
                 for (let b of [...done])   if (b < from) done.delete(b);
@@ -1533,7 +1668,7 @@ class PriceAggregator extends EventEmitter {
             // more indexer budget per tick than the price-only pass did.
             let todo = [];
             for (let b = t; b >= from && todo.length < PRICE_CAP_DERIVE_MAX_PER_TICK; b--) {
-                for (let capability of DERIVED_CAPABILITIES) {
+                for (let capability of capabilities) {
                     if (todo.length >= PRICE_CAP_DERIVE_MAX_PER_TICK) break;
                     if (!this._coveredBlocks(this._capDerivedBlocks, capability).has(b))
                         todo.push({ capability: capability, block: b });
@@ -1545,7 +1680,7 @@ class PriceAggregator extends EventEmitter {
             // capability is stuck rather than a single number that hides three healthy
             // ones behind a fourth.
             let byCapability = {};
-            for (let capability of DERIVED_CAPABILITIES)
+            for (let capability of capabilities)
                 byCapability[capability] = { written: 0, rows: 0, empty: 0, failed: 0 };
 
             for (let item of todo) {
@@ -1586,7 +1721,7 @@ class PriceAggregator extends EventEmitter {
             this.priceCapabilityBlocksDerived += written;
             this.priceCapabilityRowsDerived   += rows;
             if (written > 0) {
-                let per = DERIVED_CAPABILITIES
+                let per = capabilities
                     .filter(c => byCapability[c].written > 0)
                     .map(c => c + ' ' + byCapability[c].written)
                     .join(', ');
@@ -1598,7 +1733,7 @@ class PriceAggregator extends EventEmitter {
             }
             return { ran: true, tip: t, from: from, considered: todo.length,
                      written: written, rows: rows, empty: empty, failed: failed,
-                     capabilities: DERIVED_CAPABILITIES.slice(), byCapability: byCapability };
+                     capabilities: capabilities.slice(), byCapability: byCapability };
         } finally {
             this._priceCapDeriveRunning = false;
         }

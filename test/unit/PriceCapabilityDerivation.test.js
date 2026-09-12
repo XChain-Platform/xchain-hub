@@ -564,33 +564,138 @@ describe('PriceAggregator: derived capability snapshots (chain-only hub)', funct
         });
     });
 
-    describe('a hub that DOES run oracle consensus is untouched', function () {
+    describe('a hub whose consensus path writes every capability is untouched', function () {
 
-        it('writes nothing and disarms itself once oracleConsensus exists', async function () {
-            hub.oracleConsensus = { /* the round-finalization writer owns these rows */ };
+        // The validator shape: a signing identity plus every capability's writer. Spelled
+        // out rather than imported, for the reason CAPS is.
+        function makeValidator(h) {
+            h.identity                 = { getPubkeyHex: () => 'aa'.repeat(32) };
+            h.oracleConsensus          = { /* price, round finalization */ };
+            h.stateCheckpoints         = { /* oracle_publish, archive-head verifier */ };
+            h.crossChainCalls          = { /* cross_chain, XCALL dispatch */ };
+            h.attestationBatchPublisher = { /* attestation, v5 ATTEST head */ };
+        }
+
+        it('writes nothing and disarms itself when all four writers run here', async function () {
+            makeValidator(hub);
             agg.startPriceCapabilityDerivation();
             expect(agg._priceCapDeriveTimer).to.not.equal(null);
 
             let res = await agg.runPriceCapabilityDerivation();
 
             expect(res.ran).to.be.false;
-            expect(res.reason).to.equal('hub runs oracle consensus');
+            expect(res.reason).to.equal('hub runs consensus for every derived capability');
             expect(hub._resolveBtcLatestBlock.called).to.be.false;
             expect(db.store.size).to.equal(0);
             expect(agg._priceCapDeriveTimer).to.equal(null);
         });
 
-        it('treats a peer manager as the same answer, closing the boot race', async function () {
-            // startOracle()'s ONLY precondition is a peer manager, and it runs a few awaits
-            // after start() arms the timer. Without this arm a slow boot would let one pass
-            // fire on a validator hub.
-            hub.oracleConsensus = null;
-            hub.getPeerManager  = sinon.stub().returns({ validatorAddr: 'ws://validator-1:10001' });
+        it('disarms on a hub whose identity is reachable only through getIdentity()', async function () {
+            // startP2P assigns `identity` directly, but every hub double in this repo
+            // exposes it through the accessor, and reading only the field would make a
+            // validator double derive rows its own writers own.
+            makeValidator(hub);
+            delete hub.identity;
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => 'aa'.repeat(32) });
 
             let res = await agg.runPriceCapabilityDerivation();
 
-            expect(res.reason).to.equal('hub runs oracle consensus');
+            expect(res.reason).to.equal('hub runs consensus for every derived capability');
             expect(hub._resolveBtcLatestBlock.called).to.be.false;
+        });
+    });
+
+    // The gate must ask its question per capability, off the signing identity.
+    // Asking ONE question for all four and answering it from the PEER MANAGER lets
+    // any hub in the mesh disarm the whole pass, and the mesh is the shape the public
+    // tier runs: a peer manager so federation frames arrive, no signing key, so
+    // nothing it sees is ever finalized under its key and NOTHING writes
+    // oracle_publish, cross_chain or attestation on it.
+    describe('a mesh hub that signs nothing derives every capability', function () {
+
+        beforeEach(function () {
+            // In the mesh, and holding no signing key: startP2P builds the peer manager
+            // unconditionally but mints an identity only from SIGNING_PRIVKEY_HEX.
+            hub.getPeerManager = sinon.stub().returns({ validatorAddr: 'ws://validator-1:10001' });
+            hub.getIdentity    = sinon.stub().returns(null);
+            hub.identity       = null;
+        });
+
+        it('runs the pass instead of disarming, with a peer manager present', async function () {
+            agg.startPriceCapabilityDerivation();
+
+            let res = await agg.runPriceCapabilityDerivation();
+
+            expect(res.ran).to.be.true;
+            expect(res.capabilities).to.deep.equal(CAPS);
+            // Still armed: the next pass must keep the window covered as the tip moves.
+            expect(agg._priceCapDeriveTimer).to.not.equal(null);
+        });
+
+        for (let capability of CAPS) {
+            it('derives `' + capability + '` at the anchor, which nothing else wrote here', async function () {
+                expect(indexerReadsWeights(db, capability, ANCHOR)).to.have.lengthOf(0);
+
+                await agg.runPriceCapabilityDerivation();
+
+                expect(indexerReadsWeights(db, capability, ANCHOR)).to.have.lengthOf(SET.length);
+            });
+        }
+
+        it('flips the three refusals the measured node showed, on a peer-manager hub', async function () {
+            await agg.runPriceCapabilityDerivation();
+
+            // The five ATTEST actions refused `invalid: insufficient signer stake`.
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'attestation')).to.equal('valid');
+            // The ANCHOR archive head stored `unverified`.
+            expect(indexerArchiveHeadStatus(db, ANCHOR, THREE_SIGNERS)).to.equal('valid');
+            // The cross-chain match verifier, on the same rail.
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'cross_chain')).to.equal('valid');
+        });
+
+        it('logs no unavailable-snapshot warning for any capability', async function () {
+            let warn = sinon.stub(console, 'warn');
+
+            let res = await agg.runPriceCapabilityDerivation();
+
+            expect(res.failed).to.equal(0);
+            expect(warn.getCalls().some(c => /capability snapshot written/.test(c.args.join(' ')))).to.be.false;
+        });
+    });
+
+    describe('one covered capability disarms nothing', function () {
+
+        // A validator that holds ONE capability's writer: the other three are still
+        // uncovered on it, and a single global answer would have skipped all four.
+        for (let owned of CAPS) {
+            let engine = { price: 'oracleConsensus', oracle_publish: 'stateCheckpoints',
+                           cross_chain: 'crossChainCalls', attestation: 'attestationBatchPublisher' }[owned];
+
+            it('skips `' + owned + '` (its writer runs here) and derives the other three', async function () {
+                hub.identity = { getPubkeyHex: () => 'aa'.repeat(32) };
+                hub[engine]  = { /* the only consensus writer this hub holds */ };
+
+                let res = await agg.runPriceCapabilityDerivation();
+
+                expect(res.ran).to.be.true;
+                expect(res.capabilities).to.deep.equal(CAPS.filter(c => c !== owned));
+                // The consensus writer's own rows are its business: this pass wrote none.
+                expect(indexerReadsWeights(db, owned, ANCHOR)).to.have.lengthOf(0);
+                for (let other of CAPS.filter(c => c !== owned))
+                    expect(indexerReadsWeights(db, other, ANCHOR)).to.have.lengthOf(SET.length);
+                expect(agg._priceCapDeriveTimer).to.equal(null);   // never armed in this test
+            });
+        }
+
+        it('spends its per-tick budget on the uncovered capabilities only', async function () {
+            hub.identity        = { getPubkeyHex: () => 'aa'.repeat(32) };
+            hub.oracleConsensus = {};
+
+            let res = await agg.runPriceCapabilityDerivation();
+
+            // The grid is the window times the capabilities STILL uncovered, so a skipped
+            // capability frees its share of the budget rather than wasting it.
+            expect(res.considered).to.equal(WINDOW * (CAPS.length - 1));
         });
     });
 

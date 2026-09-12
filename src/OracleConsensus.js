@@ -1102,6 +1102,72 @@ class OracleConsensus extends EventEmitter {
         }
     }
 
+    // Resolve the round's snapshot anchor from the wire-supplied btcBlockHeight and
+    // bound it against this hub's own BTC tip. Returns the height to pin the round at,
+    // or null when the PROPOSE must be dropped (the caller returns on null; it has
+    // already logged the reason). Separate from _handlePropose so the bound can run
+    // ahead of every other reader of the wire height, the clamp-reference activation
+    // gate included.
+    async _boundedProposeHeight(round, btcBlockHeight) {
+        // Fix (#1225): do NOT substitute the round id for a missing BTC block
+        // height on a federated hub. The leader locked the price snapshot at the
+        // real round block in finalizeRound; pinning the follower's snapshot at
+        // block_index = round (not a BTC boundary) locks a DIFFERENT (price, block)
+        // set/quorum than the leader for the same round, or degrades to the null
+        // path. Only reachable from a peer that omits the height (old peer mid
+        // rolling deploy, or a malformed envelope) -- current honest senders always
+        // populate it. Fail closed: drop the PROPOSE rather than pin to a fake block.
+        // A single-node / regtest hub (_getQuorum()===0) has no peer to split from,
+        // so it keeps the legacy round-as-anchor fallback for bootstrap.
+        let blockHeight = btcBlockHeight;
+        if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
+            if (this._getQuorum() > 0) {
+                console.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
+                    'height in envelope on a federated hub; refusing to pin the price snapshot ' +
+                    'at the round id (not a BTC block boundary), which would diverge from the ' +
+                    'leader\'s snapshot for this round.');
+                return null;
+            }
+            return round;
+        }
+        // Freshness bound (fail closed), the missing half of the guard above,
+        // which closes only the ABSENT-height case. A present but ancient
+        // height is refused by nothing downstream: CapabilitySnapshot's echo
+        // check rejects a MISMATCHED echo, and the indexer fail-closes only
+        // above its own tip, so an old-but-indexed block resolves a perfectly
+        // valid snapshot. That hands the proposer four choices at once: the
+        // quorum denominator (getQuorum(snap)), the member set that
+        // _getLeader elects from (so it can pick a height where it is the
+        // round's leader and the legitimacy check then validates it against
+        // its own choice), the weighted-vs-count mode the snapshot guards call
+        // a federation-split hazard, and the side of the clamp-reference
+        // activation gate this hub takes for the round. Bound the wire height
+        // against our own resolved BTC tip before any of the four read it, and
+        // decline when we cannot resolve a tip of our own. Same shape and
+        // tolerance as StateCheckpointEngine's co-sign guard. Federated hubs
+        // only, like every other fail-closed guard on this path.
+        if (this._getQuorum() > 0) {
+            let myTip = this.hub && this.hub._resolveBtcLatestBlock
+                ? await this.hub._resolveBtcLatestBlock()
+                : null;
+            if (!Number.isFinite(Number(myTip))) {
+                console.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
+                    'our own BTC tip to bound the leader-supplied snapshot height ' +
+                    '(federated hub).');
+                return null;
+            }
+            if (Math.abs(Number(myTip) - Number(blockHeight)) > this.snapshotToleranceBlocks) {
+                console.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
+                    blockHeight + ' deviates from our own BTC tip ' + myTip + ' by more than ' +
+                    this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
+                    'let the proposer select the price snapshot, the round leader, the ' +
+                    'quorum mode and the clamp-reference gate.');
+                return null;
+            }
+        }
+        return blockHeight;
+    }
+
     async _handlePropose(envelope) {
         let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
         // Round 0 is a real, valid round (the first ORACLE_ROUND_INTERVAL after
@@ -1124,15 +1190,26 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
+        // Bound the wire-supplied height against our own BTC tip BEFORE anything else
+        // in this handler reads it (operator ruling 2026-09-11). Every later reader of
+        // btcBlockHeight is a choice the proposer would otherwise get to make for one
+        // round: the clamp-reference activation gate immediately below, and the
+        // snapshot / leader / quorum-mode resolution further down. One drop decision,
+        // taken once, ahead of all of them. A height the bound refuses leaves this
+        // handler having touched nothing.
+        let blockHeight = await this._boundedProposeHeight(round, btcBlockHeight);
+        if (blockHeight === null) return;
+
         // Align the clamp reference to THIS round before the co-sign gate below reads
-        // it. Placed after the digest and known-sender checks so an unsigned or forged
-        // PROPOSE cannot make a hub query its database.
+        // it. Placed after the digest, known-sender and freshness checks so neither an
+        // unsigned or forged PROPOSE nor one carrying a height this hub is about to
+        // refuse can make a hub query its database or flip which side of the gate it
+        // takes for the round.
         //
         // GATED on oracle_clamp_reference_activation.js, keyed on the envelope's own
-        // btcBlockHeight: the same field that becomes `blockHeight` for the
-        // weighted-quorum gate below, so the follower and the leader evaluate one round
-        // against one height. The header records why reading it ahead of the freshness
-        // bound is safe.
+        // btcBlockHeight: the same field bounded above and the same one that anchors
+        // the weighted-quorum gate below, so the follower and the leader evaluate one
+        // round against one height.
         if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
             await this._refreshLastFinalizedForRound(round);
         }
@@ -1142,71 +1219,16 @@ class OracleConsensus extends EventEmitter {
         // same snapshot-member-filtered submission set every hub's finalizeRound
         // uses, or a non-member submitter could skew which sender this follower
         // accepts as the legitimate fallback. A pending round reuses its locked
-        // member set; otherwise the snapshot is resolved here (the same
-        // fail-closed guards that used to sit at pending creation, just earlier)
-        // and consumed by the pending creation further down.
-        let blockHeight = null, wt = false, snap = null, quorumForRound = null;
+        // member set; otherwise the snapshot is resolved here, ahead of the
+        // pending creation that consumes it. The round's anchor height is
+        // resolved and bounded above, before the clamp-reference read.
+        let wt = false, snap = null, quorumForRound = null;
         let memberPubkeys = null;
         {
             let existing = this.pendingRounds.get(round);
             if (existing) {
                 memberPubkeys = existing.memberPubkeys || null;
             } else {
-                // Fix (#1225): do NOT substitute the round id for a missing BTC block
-                // height on a federated hub. The leader locked the price snapshot at the
-                // real round block in finalizeRound; pinning the follower's snapshot at
-                // block_index = round (not a BTC boundary) locks a DIFFERENT (price, block)
-                // set/quorum than the leader for the same round, or degrades to the null
-                // path. Only reachable from a peer that omits the height (old peer mid
-                // rolling deploy, or a malformed envelope) -- current honest senders always
-                // populate it. Fail closed: drop the PROPOSE rather than pin to a fake block.
-                // A single-node / regtest hub (_getQuorum()===0) has no peer to split from,
-                // so it keeps the legacy round-as-anchor fallback for bootstrap.
-                blockHeight = btcBlockHeight;
-                if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
-                    if (this._getQuorum() > 0) {
-                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
-                            'height in envelope on a federated hub; refusing to pin the price snapshot ' +
-                            'at the round id (not a BTC block boundary), which would diverge from the ' +
-                            'leader\'s snapshot for this round.');
-                        return;
-                    }
-                    blockHeight = round;
-                }
-                // Freshness bound (fail closed), the missing half of the guard above,
-                // which closes only the ABSENT-height case. A present but ancient
-                // height is refused by nothing downstream: CapabilitySnapshot's echo
-                // check rejects a MISMATCHED echo, and the indexer fail-closes only
-                // above its own tip, so an old-but-indexed block resolves a perfectly
-                // valid snapshot. That hands the proposer three choices at once: the
-                // quorum denominator (getQuorum(snap)), the member set that
-                // _getLeader elects from (so it can pick a height where it is the
-                // round's leader and the legitimacy check then validates it against
-                // its own choice), and the weighted-vs-count mode the guard below
-                // calls a federation-split hazard. Bound the wire height against our
-                // own resolved BTC tip before any of the three read it, and decline
-                // when we cannot resolve a tip of our own. Same shape and tolerance as
-                // StateCheckpointEngine's co-sign guard. Federated hubs only, like
-                // every other fail-closed guard on this path.
-                if (this._getQuorum() > 0) {
-                    let myTip = this.hub && this.hub._resolveBtcLatestBlock
-                        ? await this.hub._resolveBtcLatestBlock()
-                        : null;
-                    if (!Number.isFinite(Number(myTip))) {
-                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
-                            'our own BTC tip to bound the leader-supplied snapshot height ' +
-                            '(federated hub).');
-                        return;
-                    }
-                    if (Math.abs(Number(myTip) - Number(blockHeight)) > this.snapshotToleranceBlocks) {
-                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
-                            blockHeight + ' deviates from our own BTC tip ' + myTip + ' by more than ' +
-                            this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
-                            'let the proposer select the price snapshot, the round leader and the ' +
-                            'quorum mode.');
-                        return;
-                    }
-                }
                 // Same activation gate + weight snapshot the leader locked in finalizeRound,
                 // so this follower tallies the round identically (weighted on stake or legacy
                 // on count), keyed on the round's BTC block boundary + the hub's network.

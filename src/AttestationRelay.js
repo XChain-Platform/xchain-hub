@@ -99,6 +99,7 @@ const axios  = require('axios');
 const eq          = require('./equivocation_header.js');
 const swq         = require('./stake_weighted_quorum.js');
 const attestRelay = require('./attest_relay_activation.js');
+const rejectSlot  = require('./attest_relay_reject_slot_activation.js');
 const snapWrite   = require('./lib/capability_snapshot_write.js');
 const coins       = require('./coins');
 
@@ -132,6 +133,12 @@ const MAX_PAGES       = 20;    // bounds any one sweep at 10k rows
 // would close an origin request the home chain still intends to fulfill. The origin
 // indexer enforces the same list, so anything else is refused there anyway.
 const RELAYABLE_STATUSES = ['ok', 'expired'];
+
+// The request lifecycle value the indexer stamps on a REFUSED relay row (attest.js
+// writes REQUEST_STATUS='rejected' whenever a v3 carries an error verdict). Every
+// other value it can hold, 'pending' / 'fulfilled' / 'errored' / 'expired', belongs
+// to a request that really was materialized on the home chain.
+const REFUSED_REQUEST_STATUS = 'rejected';
 
 // Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js, as in
 // AttestationPublisher: an oversized payload is rejected by createTx, and finding
@@ -288,6 +295,10 @@ class AttestationRelay {
         // are kept and OR'd because each is refreshed independently and each fails
         // closed by retaining its previous value, so either surviving a failed read
         // still suppresses the duplicate.
+        //
+        // ANY status EXCEPT a refusal, once ATTEST_RELAY_REJECT_SLOT is armed: a
+        // refused row names a request that was never materialized. See
+        // _withoutRefusedRows for why that exclusion had to wait for the arm.
         this._homeRelayed = new Set();
 
         // Per-origin pending views, request_id -> row, same role for the response leg:
@@ -545,8 +556,78 @@ class AttestationRelay {
         if(!this.indexers[HOME_CHAIN] || !this.indexers[HOME_CHAIN].url) return null;
         let res = await this._fetchAllPages(HOME_CHAIN, 'getrelayedattestation_requests', 'requests');
         if(!res.ok) return null;
-        this._homeRelayed = new Set(res.rows.map(r => String(r.request_id || '').toLowerCase()));
-        return res;
+        let rows = await this._withoutRefusedRows(res.rows);
+        this._homeRelayed = new Set(rows.map(r => String(r.request_id || '').toLowerCase()));
+        return { ok: res.ok, rows: rows, latest: res.latest };
+    }
+
+    // Drop the REFUSED rows from the relayed view, but only once
+    // ATTEST_RELAY_REJECT_SLOT is armed on the home chain.
+    //
+    // The indexer's relayed read returns a v3-materialized request at ANY lifecycle
+    // status, a refusal included, and the driver treats every row in it as proof the
+    // request is already on the home chain. A REFUSED row is the opposite: the id was
+    // named by a malformed v3, nothing was attested, and the request the origin chain
+    // is still waiting for was never materialized. While the gate was inert that row
+    // also occupied the id in every indexer's DB (the single-v0 guard counts it), so
+    // suppressing the broadcast was correct: the honest v3 would have been dropped on
+    // arrival and the fee burned once per poll. Above the threshold the indexer stores
+    // no such row, so a refusal can no longer stand in the honest relay's way and the
+    // hub must stop letting one stand in its own.
+    //
+    // Only the wide relayed view needs this. The pending view never carries a refusal
+    // (a refused request is not pending), and the per-id re-read a co-signer does
+    // before a v4 demands a terminal response row, which a refused request cannot have
+    // (a v1 is admitted only against a pending request).
+    async _withoutRefusedRows(rows){
+        if(!Array.isArray(rows) || rows.length === 0) return Array.isArray(rows) ? rows : [];
+        // The gate read costs a config lookup, so it is only taken when there is
+        // actually a refusal in the view. A healthy fleet has none and pays nothing.
+        if(!rows.some(r => String(r && r.request_status) === REFUSED_REQUEST_STATUS)) return rows;
+        if(!await this._rejectSlotArmed()) return rows;
+        let kept = rows.filter(r => String(r && r.request_status) !== REFUSED_REQUEST_STATUS);
+        console.warn('AttestationRelay: ignoring ' + (rows.length - kept.length) +
+                     ' REFUSED ' + HOME_CHAIN + ' relay row(s) in the materialized view ' +
+                     '(ATTEST_RELAY_REJECT_SLOT armed on ' + this.network +
+                     '); the requests they name are still owed a relay');
+        return kept;
+    }
+
+    // Is ATTEST_RELAY_REJECT_SLOT armed on the home chain as of its tip?
+    //
+    // PLANE: the home chain's own consensus timestamp, which is the plane the indexer
+    // half resolves on (the LANDING block's block time), read off the chain_tips an
+    // indexer pushes to this hub. A missing db, a hub no indexer has pushed a tip to,
+    // or an unparseable/zero time answers NOT ARMED, which is the pre-arm behaviour
+    // this method is a correction to: it costs a relay that waits, never a fee spent
+    // on a v3 the fleet drops.
+    async _rejectSlotArmed(){
+        let blockTime = null;
+        try {
+            if(this.db && typeof this.db.getChainTip === 'function'){
+                let tip = await this.db.getChainTip(HOME_CHAIN, this.network);
+                let t   = Number(tip && tip.blockTime);
+                // getChainTip returns 0 for a tip row with no time, so 0 is "unknown"
+                // here rather than a timestamp, and a 0-threshold network must not read
+                // it as armed.
+                if(Number.isFinite(t) && t > 0) blockTime = t;
+            }
+        } catch(e){
+            blockTime = null;
+        }
+        if(blockTime == null){
+            this._logRejectSlotPlaneOnce();
+            return false;
+        }
+        return rejectSlot.isAttestRelayRejectSlotActive(blockTime, this.network);
+    }
+
+    _logRejectSlotPlaneOnce(){
+        if(this._rejectSlotPlaneLogged) return;
+        this._rejectSlotPlaneLogged = true;
+        console.warn('AttestationRelay: no ' + HOME_CHAIN + ' tip time on ' + this.network +
+                     ', so ATTEST_RELAY_REJECT_SLOT cannot be resolved; REFUSED relay rows still ' +
+                     'count as materialized (wire an indexer tip push to lift this)');
     }
 
     async _relayHomeResponses(home){

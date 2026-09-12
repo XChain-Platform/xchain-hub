@@ -204,7 +204,13 @@ describe('OracleConsensus: the propose-side clamp reference honours the same hei
 
     afterEach(function () { sinon.restore(); });
 
-    function propose(btcBlockHeight) {
+    // A PROPOSE whose height this hub ACCEPTS, which is what makes an assertion about
+    // the gate meaningful: the follower freshness bound runs ahead of the gate, so a
+    // height the bound refuses never reaches it and "no re-read" would hold for the
+    // wrong reason. The tip defaults to the proposed height (dead centre of the
+    // tolerance band) unless a case is about the bound itself.
+    function propose(btcBlockHeight, tip) {
+        hub._resolveBtcLatestBlock.resolves(tip === undefined ? btcBlockHeight : tip);
         const prices = [{ coinPair: 'BTC/USD', price: '100000' }];
         return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
@@ -220,7 +226,9 @@ describe('OracleConsensus: the propose-side clamp reference honours the same hei
 
     it('aligns it on regtest, which is armed at genesis', async function () {
         hub.network = 'regtest';
-        await oc._handlePropose(propose(0));
+        // Any height at or above 0 is armed on regtest; a real BTC height rather than
+        // literal block 0, which the snapshot-anchor guard refuses on a federated hub.
+        await oc._handlePropose(propose(500));
         expect(refresh.calledOnceWithExactly(ROUND)).to.be.true;
     });
 
@@ -234,5 +242,39 @@ describe('OracleConsensus: the propose-side clamp reference honours the same hei
         hub.network = 'mainnet';
         await oc._handlePropose(propose(9999999));
         expect(refresh.called).to.be.false;
+    });
+
+    // ORDERING (operator ruling 2026-09-11). The gate is keyed on the envelope's own
+    // btcBlockHeight, so whichever runs first owns the round: with the activation read
+    // ahead of the freshness bound, a registered sender chose which side of the gate
+    // this hub took for one round just by claiming a height, and the PROPOSE it rode in
+    // on was dropped a few lines later. The bound now runs first, so a height this hub
+    // refuses steers nothing.
+    it('refuses a height outside the tolerance band without reading the reference', async function () {
+        hub.network = 'regtest';                      // armed at genesis, so the gate would fire
+        const height = 5000;
+        const tip    = height - oc.snapshotToleranceBlocks - 1;
+
+        await oc._handlePropose(propose(height, tip));
+
+        expect(refresh.called, 'the bound drops the PROPOSE before the gate is read').to.be.false;
+        expect(hub.db.doQuery.called, 'and before it can cost this hub a query').to.be.false;
+    });
+
+    it('still reads the reference at the far edge of the band, which the refusal is measured against', async function () {
+        hub.network = 'regtest';
+        const height = 5000;
+
+        await oc._handlePropose(propose(height, height - oc.snapshotToleranceBlocks));
+
+        expect(refresh.calledOnceWithExactly(ROUND), 'an accepted height reaches the gate').to.be.true;
+    });
+
+    it('reads nothing when this hub cannot resolve a tip of its own', async function () {
+        hub.network = 'regtest';
+        await oc._handlePropose(propose(5000, null));
+
+        expect(refresh.called, 'no tip means no bound, so nothing downstream may run').to.be.false;
+        expect(hub.db.doQuery.called).to.be.false;
     });
 });
