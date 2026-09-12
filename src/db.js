@@ -1283,6 +1283,20 @@ class Database {
         return !!(rows && rows.length);
     }
 
+    // The transfer_id of this hub's persisted, non-retracted record for one source leg, or
+    // null when it holds none. A follower's _validateTransfer reads this rather than
+    // bridgeTransferExistsForSource's boolean because it has to tell "this row IS the
+    // persisted record" (same id, a legitimate re-validation) from "a record for this leg
+    // already exists under a DIFFERENT id" (the duplicate-finalization shape: the same
+    // source leg re-derives a new transfer_id at every snapshot_block, section 6).
+    async getBridgeTransferIdForSource(network, srcChain, srcActionIndex){
+        let rows = await this.doQuery(
+            'SELECT transfer_id FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
+            "src_action_index = ? AND status <> 'retracted' LIMIT 1",
+            [String(network || ''), String(srcChain || ''), Number(srcActionIndex)]);
+        return (rows && rows.length) ? String(rows[0].transfer_id) : null;
+    }
+
     // Returns 0 on a fresh node or unparseable value.
     async getLastSeq(){
         let rows = await this.doQuery(

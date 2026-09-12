@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - A hub whose signing key is outside the chain-effective signer set no longer broadcasts into rounds it cannot sign or opens checkpoint rounds it cannot lead, and says so once per set change; it keeps receiving, relaying and serving.
 - The PRICE v0 payload builder now accepts a coinPair-keyed pair the same as a pair-keyed one, matching the hub's other two v0 payload copies byte for byte.
+- A bridge source leg finalizes as exactly one transfer however many snapshot heights it spans, so the destination chain mints or releases once per lock or burn.
 
 ## [0.18.0] - 2026-09-11
 

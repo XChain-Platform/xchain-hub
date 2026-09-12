@@ -172,6 +172,15 @@ class CrossChainBridgeEngine extends EventEmitter {
         // Round ids in PBFT but not yet written (the sibling engines' _inflight).
         this._inflight = new Set();
 
+        // SOURCE LEG guard: at most one in-flight round per (network, src_chain,
+        // src_action_index). transfer_id folds snapshot_block into its preimage on purpose
+        // (section 6, the DEX stranding fix), so the SAME source leg polled a cycle later at
+        // a new BTC height derives a DIFFERENT id and _inflight above cannot see the earlier
+        // round is still running for it. This closes that window: a leg is guarded from
+        // propose through finalize/abandon/defer, however many heights the round spans.
+        this._inflightSourceLegs  = new Set();
+        this._inflightTransferLeg = new Map();  // transfer_id -> source leg key, for release
+
         // Live pending legs from the LAST completed poll, keyed `<tick>|<dest_chain>`, as
         // an array of decimal amount strings. A lock that is mined but not yet at depth has
         // already debited its sender and credited the escrow on the origin chain, while the
@@ -215,7 +224,7 @@ class CrossChainBridgeEngine extends EventEmitter {
                 console.error('CrossChainBridge: write finalized transfer error:', err && err.message));
         });
         this.transferConsensus.on('match:abandoned', (ev) => {
-            this._inflight.delete(String(ev.matchId));
+            this._releaseSourceLegGuard(String(ev.matchId));
         });
 
         this.policyConsensus = new CrossChainDexConsensus(this, {
@@ -381,6 +390,21 @@ class CrossChainBridgeEngine extends EventEmitter {
         return Math.max(platform, raised);
     }
 
+    // Release both halves of the source-leg guard for one transfer round: the plain
+    // _inflight entry every sibling engine keys by round id, and the source-leg entry this
+    // engine keys additionally by (network, src_chain, src_action_index) (constructor
+    // comment). Called on abandon, on defer, and after a finalize write (successful or a
+    // no-op duplicate), so a leg is never left guarded under a transfer_id whose round has
+    // already ended.
+    _releaseSourceLegGuard(transferId){
+        this._inflight.delete(transferId);
+        let legKey = this._inflightTransferLeg.get(transferId);
+        if(legKey){
+            this._inflightSourceLegs.delete(legKey);
+            this._inflightTransferLeg.delete(transferId);
+        }
+    }
+
     async _maybeFinalizeTransfer(coin, network, latestBlock, snapshotBlock, t){
         if(!t) return;
         let kind = String(t.transfer_kind || '');
@@ -421,6 +445,15 @@ class CrossChainBridgeEngine extends EventEmitter {
         let transferId = this._deriveTransferId(network, coin, srcActionIndex, destChain,
                                                 String(t.dest_address || ''), snapshotBlock);
         if(this._inflight.has(transferId)) return;
+        // Source-leg guard, keyed WITHOUT snapshot_block (unlike transferId above): the same
+        // leg offered again next poll cycle, before this round has finalized or persisted,
+        // derives a DIFFERENT transferId and would otherwise sail past the check above and
+        // open a second round for one lock (DEFECT 1: BTC action 95 finalized at both 1017
+        // and 1018). This is the proposer's own refusal; _validateTransfer below is the
+        // follower's independent one, so a proposer that skipped this cannot get a
+        // duplicate signed either.
+        let sourceLegKey = network + '|' + coin + ':' + srcActionIndex;
+        if(this._inflightSourceLegs.has(sourceLegKey)) return;
         if(await this.db.bridgeTransferExistsForSource(network, coin, srcActionIndex)) return;
 
         let row = {
@@ -451,12 +484,14 @@ class CrossChainBridgeEngine extends EventEmitter {
 
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
         this._inflight.add(transferId);
+        this._inflightSourceLegs.add(sourceLegKey);
+        this._inflightTransferLeg.set(transferId, sourceLegKey);
         try {
             await this.transferConsensus.propose(transferId, {
                 row: row, snapshot: { validators: validators, count: validators.length }
             });
         } catch(e){
-            this._inflight.delete(transferId);
+            this._releaseSourceLegGuard(transferId);
             throw e;
         }
     }
@@ -768,6 +803,26 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(String(row.network || '') !== String(this.network || '')) return false;
         if(String(row.tick) !== 'XCHAIN' && !this._gateActive('token', Number(row.snapshot_block), 'BTC')) return false;
 
+        // Source-leg uniqueness, the follower's OWN refusal (section 7, D14's poll/sign/
+        // insert/retract cycle assumes one record per source leg): a leader could bypass its
+        // own _maybeFinalizeTransfer guard (be Byzantine, or lag on a stale in-memory set
+        // after a restart) and propose a SECOND transfer for a leg this hub already holds a
+        // persisted, non-retracted record for. Comparing ids rather than just existence lets
+        // a re-validation of the SAME already-persisted round (an identical transfer_id,
+        // e.g. a retried FINAL_SYNC) through, and refuses only a genuinely different one.
+        let existingId = await this.db.getBridgeTransferIdForSource(row.network, row.src_chain, Number(row.src_action_index));
+        if(existingId && String(existingId).toLowerCase() !== String(row.transfer_id).toLowerCase()) return false;
+
+        // Second half of the same refusal, for the window the database cannot speak to: a
+        // round this hub already has OPEN for the leg has written nothing, so the read above
+        // returns null. On a view change between two consecutive snapshot heights the new
+        // leader re-derives a DIFFERENT transfer_id for the same leg and the mesh would
+        // co-sign both. Exempt the row of THIS hub's own open round (its transfer_id maps to
+        // the same leg key), or a self-validating leader would refuse its own proposal.
+        let legKey = String(row.network || '') + '|' + String(row.src_chain || '') + ':' + Number(row.src_action_index);
+        if(this._inflightSourceLegs.has(legKey) &&
+           this._inflightTransferLeg.get(String(row.transfer_id).toLowerCase()) !== legKey) return false;
+
         let res;
         try { res = await this._indexerCall(row.src_chain, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
         catch(e){ return false; }
@@ -861,16 +916,24 @@ class CrossChainBridgeEngine extends EventEmitter {
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view      = ev.view != null ? ev.view : 0;
         if(!await this._persistSnapshotOrDefer(row, row.transfer_id, this.transferConsensus)) return;
-        row.btc_chain_id = await this._resolveBtcChainId(row.network);
         let inserted;
-        try { inserted = await this.db.insertBridgeTransfer(row); }
+        // The chain-id resolution is inside the deferring try on purpose: it is the only await
+        // between the source-leg guard being set and its release, and this handler runs from
+        // an event .catch that only logs. A throw outside the try would leave
+        // the leg guarded forever, which now also makes this hub refuse to CO-SIGN any later
+        // transfer for it (_validateTransfer's in-flight half), so the leak would outlive the
+        // round it belongs to. Deferring instead matches the fail-closed rule below.
+        try {
+            row.btc_chain_id = await this._resolveBtcChainId(row.network);
+            inserted = await this.db.insertBridgeTransfer(row);
+        }
         catch(e){
             console.error('CrossChainBridge: finalized transfer write FAILED (fail-closed; deferring ' +
                           String(row.transfer_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this._defer(row.transfer_id, this.transferConsensus);
             return;
         }
-        this._inflight.delete(row.transfer_id);
+        this._releaseSourceLegGuard(row.transfer_id);
         if(!inserted) return;
         await this._mirrorRow('bridge_transfers', 'transfer_id', row.transfer_id);
         console.log('CrossChainBridge: finalized transfer ' + String(row.transfer_id).substring(0, 16) + '... ' +
@@ -936,7 +999,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // poll re-proposes it. BOTH releases are needed: _inflight gates the poll and the
     // consensus finalized-ring refuses to re-run a round id it has retired.
     _defer(roundId, consensus){
-        this._inflight.delete(roundId);
+        this._releaseSourceLegGuard(roundId);
         if(consensus && typeof consensus.forgetFinalized === 'function') consensus.forgetFinalized(roundId);
     }
 
@@ -997,7 +1060,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         for(let r of rows){
             await this.db.doQuery(
                 "UPDATE bridge_transfers SET status = 'retracted' WHERE transfer_id = ?", [r.transfer_id]);
-            this._inflight.delete(r.transfer_id);
+            this._releaseSourceLegGuard(r.transfer_id);
             // Clear the consensus finalized-ring entry: the transfer_id is the round id, and
             // without this a transfer re-formed after this reorg could never re-finalize.
             this.transferConsensus.forgetFinalized(r.transfer_id);
