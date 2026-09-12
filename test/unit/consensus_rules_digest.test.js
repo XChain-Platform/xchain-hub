@@ -73,15 +73,47 @@ describe('consensus_rules_digest: the digest', function () {
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', function () {
 
-    it('is sorted, has 20 entries, and contains the three gates this train appends', function () {
+    it('is sorted, has 27 entries, and contains the gates the last two trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(20, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(27, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
             'attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2',
-            'rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION'
+            'rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION',
+            // The time-keyed mirror barrier family and its anchor-attest member. THIS hub
+            // evaluates all of them (the follower admission bound, the producer era gate and
+            // the admission stamp it signs), which is why they are shared gates at all.
+            'mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION',
+            'mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION',
+            'mirror_admission_activation.ADMIT_MARGIN_BLOCKS',
+            'mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS',
+            'mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS',
+            'anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION',
+            'anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S'
         ]);
+    });
+
+    // The append is at the END, and this is what "at the end" has to mean operationally: the
+    // preimage of every gate that was already registered is byte-for-byte where it was, so an
+    // old build and a new build disagree ONLY about the rows the new build added. An insertion
+    // mid-list would leave every later gate in a different preimage position and the digest
+    // would move for reasons no operator could attribute to a gate.
+    it('appends the family at the END, leaving the pre-existing gate order untouched', function () {
+        const PRE_EXISTING = [
+            'anchor_reward_activation', 'attest_relay_activation', 'checkpoint_commitment_activation',
+            'cross_chain_royalty_activation', 'equivocation_header', 'price_pair_activation',
+            'price_sig_tally_activation', 'retraction_signing_activation', 'rollcall_activation',
+            'snapshot_reorg_buffer', 'stake_weighted_quorum', 'attest_responsible_widening_activation',
+            'attest_response_mirror_activation', 'attest_zero_conf_activation',
+            'attest_responsible_widening_activation', 'rollcall_gates_activation'
+        ];
+        const mods = crd.SHARED_GATES.map(g => g[0]);
+        expect(mods.slice(0, PRE_EXISTING.length),
+            'a SHARED_GATES entry was inserted mid-list; that reorders the preimage of every gate after it')
+            .to.deep.equal(PRE_EXISTING);
+        expect(mods.slice(PRE_EXISTING.length), 'the family must be the LAST two entries')
+            .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation']);
     });
 
     // The 2026-09-09 genesis-arm ruling left no SHIPPED gate on the far-future sentinel,
