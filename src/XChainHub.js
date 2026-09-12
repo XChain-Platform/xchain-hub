@@ -33,6 +33,7 @@ const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
 const CrossChainDexEngine  = require('./CrossChainDexEngine.js');
 const CrossChainCallEngine = require('./CrossChainCallEngine.js');
+const CrossChainBridgeEngine = require('./CrossChainBridgeEngine.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const StateAnchorPublisher  = require('./StateAnchorPublisher.js');
 const RetractionConsensus   = require('./RetractionConsensus.js');
@@ -563,6 +564,12 @@ class XChainHub {
         // and result rows, and mirrors them to indexers. Idles without indexer URLs.
         this.crossChainCalls = new CrossChainCallEngine(this);
         await this.crossChainCalls.start();
+
+        // XBRIDGE: confirmation-gates lock/burn legs, PBFTs the transfer record and the
+        // per-token policy snapshot, and mirrors both to indexers. Idles below the
+        // activation gate and without indexer URLs.
+        this.crossChainBridge = new CrossChainBridgeEngine(this);
+        await this.crossChainBridge.start();
 
         // Quorum-signed per-chain ledger/actions/contract hash commitments, written
         // off-chain and streamed over the hub-DB mirror so consumers can verify state.
@@ -2098,6 +2105,7 @@ class XChainHub {
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
+        if(this.crossChainBridge) await this.crossChainBridge.stop();
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();
         if(this.crossChain)       await this.crossChain.stop();

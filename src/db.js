@@ -1156,6 +1156,133 @@ class Database {
             [net, sourceChain, gen, from]);
     }
 
+    // ---------------------------------------------------------------------------
+    // Bridge tables (the base bridge spec section 6, token spec section 5,
+    // policy spec section 5). CrossChainBridgeEngine runs the rounds; the writes and
+    // the invariant read live here beside the other table writers so one place owns
+    // the column lists that the hub-DB mirror carries to every indexer.
+    // ---------------------------------------------------------------------------
+
+    // Columns written for a finalized transfer record. `status` is left to its DDL
+    // default ('finalized') and `id`/`created_at` are assigned by the table.
+    static get BRIDGE_TRANSFER_COLUMNS(){
+        return ['transfer_id', 'snapshot_block', 'network', 'src_chain', 'src_action_index',
+                'src_address', 'dest_chain', 'dest_address', 'tick', 'decimals', 'amount',
+                'effective_time', 'finalizing_view', 'validator_signatures', 'push_generation',
+                'btc_chain_id'];
+    }
+
+    // Columns written for a finalized policy snapshot.
+    static get POLICY_SNAPSHOT_COLUMNS(){
+        return ['snapshot_id', 'snapshot_block', 'origin_chain', 'tick', 'policy_seq',
+                'origin_block', 'policy_hash', 'allow_list', 'block_list', 'sleeping',
+                'effective_time', 'network', 'finalizing_view', 'validator_signatures',
+                'push_generation', 'btc_chain_id'];
+    }
+
+    // Persist one quorum-signed transfer record. Returns true ONLY when a row was
+    // actually written, so the caller mirrors, credits and logs exactly once per
+    // finalization and a duplicate finalize (restart race, a second hub) is a no-op.
+    //
+    // INSERT IGNORE plus a revive of a retracted row: the cross_chain_matches rule
+    // verbatim (CrossChainDexEngine._insertMatchRow). transfer_id folds snapshot_block
+    // into its preimage, so a source leg reorged out and re-mined while the BTC tip has
+    // not moved re-derives the IDENTICAL id; without the revive the IGNORE would no-op
+    // against the stale 'retracted' row and the re-formed transfer would strand,
+    // unmirrored, until the tip advanced. A row already 'finalized' is left untouched by
+    // the status guard, which is what keeps the double-finalize dedupe.
+    async insertBridgeTransfer(row){
+        let cols = Database.BRIDGE_TRANSFER_COLUMNS;
+        let res = await this.doQuery(
+            'INSERT IGNORE INTO bridge_transfers (' + cols.join(', ') + ') VALUES (' +
+            cols.map(() => '?').join(', ') + ')',
+            cols.map(c => row[c]));
+        if(res && Number(res.affectedRows) > 0) return true;
+        let revive = await this.doQuery(
+            "UPDATE bridge_transfers SET status = 'finalized', validator_signatures = ?, " +
+            "finalizing_view = ?, effective_time = ? WHERE transfer_id = ? AND status = 'retracted'",
+            [row.validator_signatures, row.finalizing_view, row.effective_time, row.transfer_id]);
+        return !!(revive && Number(revive.affectedRows) > 0);
+    }
+
+    // Persist one quorum-signed policy snapshot. Append-only, the state_checkpoints
+    // shape: a superseding policy is a NEW row at a higher policy_seq, never an in-place
+    // update (the mirror applies rows INSERT IGNORE, so an UPDATE would never propagate),
+    // and there is no retraction path for this table. Returns true only on a real insert
+    // so a same-seq race between two hubs collapses on uq_policy_seq silently.
+    async insertPolicySnapshot(row){
+        let cols = Database.POLICY_SNAPSHOT_COLUMNS;
+        let res = await this.doQuery(
+            'INSERT IGNORE INTO policy_snapshots (' + cols.join(', ') + ') VALUES (' +
+            cols.map(() => '?').join(', ') + ')',
+            cols.map(c => row[c]));
+        return !!(res && Number(res.affectedRows) > 0);
+    }
+
+    // Highest FINALIZED policy_seq this hub holds for one token, or 0 when it holds
+    // none. The next snapshot signs at this + 1 (policy spec section 3 step 2); a gap is
+    // ordering only and never a refusal, so the caller never back-fills.
+    async getLatestPolicySeq(network, originChain, tick){
+        let rows = await this.doQuery(
+            "SELECT MAX(policy_seq) AS seq FROM policy_snapshots " +
+            "WHERE network = ? AND origin_chain = ? AND tick = ? AND status = 'finalized'",
+            [String(network || ''), String(originChain || ''), String(tick || '')]);
+        if(!rows || rows.length === 0 || rows[0].seq == null) return 0;
+        let n = Number(rows[0].seq);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    // The finalized snapshot a follower would be equivocating against: our own row at
+    // the same (network, origin_chain, tick, policy_seq), or null when we hold none.
+    async getPolicySnapshotAtSeq(network, originChain, tick, policySeq){
+        let rows = await this.doQuery(
+            'SELECT snapshot_id, policy_hash, origin_block, snapshot_block, status FROM policy_snapshots ' +
+            'WHERE network = ? AND origin_chain = ? AND tick = ? AND policy_seq = ? LIMIT 1',
+            [String(network || ''), String(originChain || ''), String(tick || ''), Number(policySeq)]);
+        return (rows && rows.length) ? rows[0] : null;
+    }
+
+    // Every (tick, src_chain, dest_chain) triple this hub has ever finalized on one
+    // network. The policy poll derives its candidate (origin_chain, tick) pairs from it,
+    // and the invariant read derives which chains hold a copy of a tick.
+    //
+    // Direction is NOT a column (base spec D19: it is derived from the chains, and every
+    // canonical field is a byte-match obligation forever), so the caller resolves which
+    // side of a triple is the origin rather than reading it here.
+    async getBridgeTransferChainPairs(network){
+        return await this.doQuery(
+            'SELECT DISTINCT tick, src_chain, dest_chain FROM bridge_transfers ' +
+            "WHERE network = ? AND status = 'finalized' ORDER BY tick, src_chain, dest_chain",
+            [String(network || '')]);
+    }
+
+    // Finalized transfers whose effective_time has NOT passed yet: signed, mirrored, and
+    // not applyable on any destination until the block loop's protocol time reaches the
+    // stamp. They are the "signed but unapplied" half of the invariant's in-flight term.
+    //
+    // Amounts come back as the raw decimal strings the record carries. SQL SUM() would
+    // coerce them through a float and silently lose the low digits of an 18-decimal
+    // token, so the caller sums them with bcmath instead.
+    async getInFlightBridgeTransfers(network, nowSeconds, tick){
+        let args = [String(network || ''), Number(nowSeconds)];
+        let sql = 'SELECT tick, dest_chain, amount FROM bridge_transfers ' +
+                  "WHERE network = ? AND status = 'finalized' AND effective_time > ?";
+        if(tick){ sql += ' AND tick = ?'; args.push(String(tick)); }
+        return await this.doQuery(sql, args);
+    }
+
+    // True when this hub already holds a non-retracted record for a source leg, so the
+    // poll does not re-propose a round for a transfer it has finalized. Keyed on
+    // (src_chain, src_action_index), which is unique per source leg whatever the
+    // snapshot_block the id folded in.
+    async bridgeTransferExistsForSource(network, srcChain, srcActionIndex){
+        let rows = await this.doQuery(
+            'SELECT 1 FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
+            "src_action_index = ? AND status <> 'retracted' LIMIT 1",
+            [String(network || ''), String(srcChain || ''), Number(srcActionIndex)]);
+        return !!(rows && rows.length);
+    }
+
     // Returns 0 on a fresh node or unparseable value.
     async getLastSeq(){
         let rows = await this.doQuery(

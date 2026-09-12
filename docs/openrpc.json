@@ -1505,6 +1505,91 @@
       }
     },
     {
+      "name": "getbridgeinvariant",
+      "summary": "Bridge backing invariant, tick -> chain -> {escrow, supply, in_flight, delta, finalized_policy_seq}: the escrow held at ADDRESS.BRIDGE_<chain> on the tick's origin chain against that chain's supply plus in-flight transfers. Open read tier on purpose (no x-auth): the explorer token page, the wallet move flow and the operator watch item all read it without a federation key. `tick` narrows the map to one tick; without it XCHAIN is always present. The invariant is an INEQUALITY (escrow >= supply + in_flight), so a positive delta is a surplus and only a negative delta is a deficit.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "tick",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "oneOf": [
+            {
+              "type": "object",
+              "description": "tick -> chain -> entry. XCHAIN is always present, so the base asset can be read on a chain that has carried no token leg; `tick` narrows the map to that one tick.",
+              "additionalProperties": {
+                "type": "object",
+                "description": "chain -> entry, one entry per chain this tick has a leg on.",
+                "additionalProperties": {
+                  "type": "object",
+                  "description": "Backing of one tick on one chain. escrow is the balance at ADDRESS.BRIDGE_<chain> on the tick's ORIGIN chain; delta is the signed escrow - (supply + in_flight), positive a surplus (WARN: a stranger may SEND to an escrow, which is their own loss), negative a deficit (CRIT: someone else's units are unbacked). Null escrow/supply/delta mean the chain state was not readable, not zero. The origin chain holds the asset itself, so it carries no escrow and no delta.",
+                  "properties": {
+                    "escrow": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "supply": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "in_flight": {
+                      "type": "string"
+                    },
+                    "delta": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "finalized_policy_seq": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "escrow",
+                    "supply",
+                    "in_flight",
+                    "delta",
+                    "finalized_policy_seq"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "description": "In-result error envelope: this handler validates arguments itself and returns {error} rather than raising a JSON-RPC error.",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "pushchaintip",
       "summary": "Indexer push: chain tip update.",
       "paramStructure": "by-name",
@@ -2203,6 +2288,63 @@
     {
       "name": "pushdexreorg",
       "summary": "Indexer push: cross-chain DEX match reorg rollback.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "from_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "to_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "retraction_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured",
+      "x-internal": true
+    },
+    {
+      "name": "pushbridgereorg",
+      "summary": "Indexer push: XBRIDGE lock/burn reorg rollback. Every bridge_transfers record whose SOURCE leg sits at or above from_action_index is marked retracted and its deletion broadcast so mirrors drop the row. A destination leg already applied stays applied (milestone 1 ships no destination-side unwind), so getbridgeinvariant then reports the deficit; policy_snapshots has no retraction path, being append-only.",
       "paramStructure": "by-name",
       "params": [
         {

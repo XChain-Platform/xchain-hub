@@ -19,10 +19,11 @@
  * when ANY table in the indexer's mirror set gains a DDL change a stale indexer
  * cannot interpret, and equally when the mirror SET itself gains a table (a table
  * a stale indexer does not know about is a row shape it cannot interpret either,
- * it just fails by omission instead of by column). As of now that set is eight
+ * it just fails by omission instead of by column). As of now that set is ten
  * tables: oracle_prices, price_snapshots, cross_chain_matches, cross_chain_calls,
  * capability_snapshots, state_checkpoints, anchor_reward_attestations,
- * attestation_responses (see xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS +
+ * attestation_responses, bridge_transfers, policy_snapshots (see
+ * xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS +
  * CROSS_CHAIN_TABLES + HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
  * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
  * is a ledger-fork risk. The indexer rejects a version mismatch so a hub-side
@@ -64,6 +65,21 @@
 // finalized at all, so the request it is waiting on times out instead of
 // resolving. A stale indexer must reject this stream until it has applied
 // the 2026-09-03-attestation-responses migration.
-const HUB_SCHEMA_VERSION = 5;
+//
+// v6: the mirror set gained bridge_transfers and policy_snapshots (hub_db_sync
+// CROSS_CHAIN_TABLES). bridge_transfers carries the cross_chain quorum's signed
+// transfer record, which the destination indexer injects as the XBRIDGE settle leg
+// that credits an address and moves that chain's supply; policy_snapshots carries
+// the signed origin-token policy a destination materializes onto a bridged copy. A
+// stale indexer does not merely miss rows: without bridge_transfers the bridge
+// barrier never opens, so a transfer whose source leg has ALREADY debited on the
+// other chain is never applied there and the escrow behind it is held against
+// nothing. A stale indexer must reject this stream until it has applied the
+// 2026-09-12-bridge-tables migration.
+//
+// ROLL ORDER IS THE REVERSE OF THE CROSS-CHAIN PRECEDENT'S "hub first": indexers and
+// readers roll first, this hub LAST. Rolled ahead of the fleet it stamps 6 on every
+// payload and every mirror closed against a v5 indexer fails.
+const HUB_SCHEMA_VERSION = 6;
 
 module.exports = { HUB_SCHEMA_VERSION };

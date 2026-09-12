@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-09T02:43:30.361Z",
+  "generated_at": "2026-09-12T07:38:22.346Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -61,7 +61,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -145,7 +146,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -229,7 +231,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -306,7 +309,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -383,7 +387,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -460,7 +465,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -541,7 +547,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "litecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -622,7 +629,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "litecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
@@ -703,7 +711,8 @@
         "SWEEP",
         "UNSTAKE",
         "VOTE",
-        "WITHDRAW"
+        "WITHDRAW",
+        "XBRIDGE"
       ],
       "uriScheme": "litecoin",
       "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",

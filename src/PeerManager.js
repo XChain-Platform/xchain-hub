@@ -48,14 +48,23 @@ const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
 const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';
 const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
 
-// Every module in this service that subscribes to the PeerManager 'message'
-// fan-out, one entry each. The ceiling below is derived from this roster instead
-// of being a hand-picked number, so it cannot drift away from what actually
-// subscribes; PeerManagerListenerCeiling.test.js re-derives the roster from the
-// sources and fails when the two disagree.
+// Every SUBSCRIPTION to the PeerManager 'message' fan-out that a full boot creates,
+// one entry each. The ceiling below is derived from this roster instead of being a
+// hand-picked number, so it cannot drift away from what actually subscribes;
+// PeerManagerListenerCeiling.test.js re-derives the roster from the sources and
+// fails when the two disagree.
+//
+// Most entries are a bare module name, because most subscribers are singletons and
+// their module registers exactly one handler. CrossChainDexConsensus is not: it is a
+// parameterized PBFT channel and the hub boots one instance per round family, so its
+// extra channels are named `<module>:<channel>` and each one is a listener of its own.
+// PeerManagerListenerCeiling.test.js recovers the module from an entry by splitting on
+// the first ':' when it compares the roster against the sources.
 const MESSAGE_SUBSCRIBERS = Object.freeze([
     'AttestationBatchPublisher', 'AttestationConsensus', 'AttestationResponseMirror',
-    'Consensus', 'CrossChainDexConsensus', 'CrossChainEngine', 'FullNodeChallengeRound',
+    'Consensus', 'CrossChainDexConsensus',
+    'CrossChainDexConsensus:XBRIDGE_TRANSFER', 'CrossChainDexConsensus:XPOLICY_SNAPSHOT',
+    'CrossChainEngine', 'FullNodeChallengeRound',
     'Governance', 'OracleBatchSigner', 'OracleConsensus', 'OracleRound', 'ReorgHandler',
     'RetractionConsensus', 'RollcallRound', 'StateAnchorPublisher', 'StateCheckpointEngine'
 ]);

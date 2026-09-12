@@ -78,6 +78,44 @@ const PING_RESULT = {
     required: ['status', 'db'],
 };
 
+// getbridgeinvariant returns a MAP (tick -> chain -> entry, the BridgeInvariant
+// typedef in src/api.js), which is the second shape a downstream consumer reads
+// structurally rather than by name: the explorer token page, the wallet move flow
+// and the platform watch script all key into it. Declared by hand for the
+// same reason SNAPSHOTS_RESULT is, and with the same {error} branch, because the
+// handler answers a bad tick or an inactive engine in its own result rather than
+// raising a JSON-RPC error. Every property is always present on an entry
+// (CrossChainBridgeEngine.getBridgeInvariant seeds each one), but escrow, supply
+// and delta are null until the chain state is readable, which is why their types
+// carry 'null': a chain the hub cannot read reports "unknown", never a fabricated
+// zero, since a zero on a live copy reads as a total deficit.
+const BRIDGE_INVARIANT_ENTRY = {
+    type: 'object',
+    description: 'Backing of one tick on one chain. escrow is the balance at ADDRESS.BRIDGE_<chain> on the tick\'s ORIGIN chain; delta is the signed escrow - (supply + in_flight), positive a surplus (WARN: a stranger may SEND to an escrow, which is their own loss), negative a deficit (CRIT: someone else\'s units are unbacked). Null escrow/supply/delta mean the chain state was not readable, not zero. The origin chain holds the asset itself, so it carries no escrow and no delta.',
+    properties: {
+        escrow:               { type: ['string', 'null'] },
+        supply:               { type: ['string', 'null'] },
+        in_flight:            { type: 'string' },
+        delta:                { type: ['string', 'null'] },
+        finalized_policy_seq: { type: ['number', 'null'] },
+    },
+    required: ['escrow', 'supply', 'in_flight', 'delta', 'finalized_policy_seq'],
+};
+const BRIDGE_INVARIANT_RESULT = {
+    oneOf: [
+        {
+            type: 'object',
+            description: 'tick -> chain -> entry. XCHAIN is always present, so the base asset can be read on a chain that has carried no token leg; `tick` narrows the map to that one tick.',
+            additionalProperties: {
+                type: 'object',
+                description: 'chain -> entry, one entry per chain this tick has a leg on.',
+                additionalProperties: BRIDGE_INVARIANT_ENTRY,
+            },
+        },
+        RPC_ERROR_ENVELOPE,
+    ],
+};
+
 // name, summary, params (by-name, summary-level), tags
 // auth: true ⇒ in WRITE_METHODS (x-api-key header required when HUB_API_KEY is configured)
 // internal: true ⇒ used by platform services (indexers/validators), not for general clients
@@ -141,6 +179,7 @@ const METHODS = [
     ['initiateswap', 'Initiate a tracked cross-chain swap.', ['source_chain', 'source_action_index', 'dest_chain', 'dest_action_index'], { auth: true }],
     ['getswap', 'One tracked swap, keyed by source chain + action index.', ['source_chain', 'source_action_index']],
     ['getswaps', 'List tracked swaps, optionally filtered by status.', ['status', 'limit']],
+    ['getbridgeinvariant', 'Bridge backing invariant, tick -> chain -> {escrow, supply, in_flight, delta, finalized_policy_seq}: the escrow held at ADDRESS.BRIDGE_<chain> on the tick\'s origin chain against that chain\'s supply plus in-flight transfers. Open read tier on purpose (no x-auth): the explorer token page, the wallet move flow and the operator watch item all read it without a federation key. `tick` narrows the map to one tick; without it XCHAIN is always present. The invariant is an INEQUALITY (escrow >= supply + in_flight), so a positive delta is a surplus and only a negative delta is a deficit.', ['tick'], { result: BRIDGE_INVARIANT_RESULT }],
     ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time', 'chain_id'], { auth: true, internal: true }],
     ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
     // Present in the committed spec but missing from this list, so every
@@ -152,6 +191,7 @@ const METHODS = [
     ['pushpricereorg', 'Indexer push: price reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushdexreorg', 'Indexer push: cross-chain DEX match reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
+    ['pushbridgereorg', 'Indexer push: XBRIDGE lock/burn reorg rollback. Every bridge_transfers record whose SOURCE leg sits at or above from_action_index is marked retracted and its deletion broadcast so mirrors drop the row. A destination leg already applied stays applied (milestone 1 ships no destination-side unwind), so getbridgeinvariant then reports the deficit; policy_snapshots has no retraction path, being append-only.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['retractattestbatch', 'Indexer push: a reorg un-landed an ATTEST v5 batch, so the batch link it stamped on the carried response rows is cleared. Clears the link only; no mirror row is deleted.', ['source_chain', 'network', 'batch_key', 'window_start', 'window_end', 'action_index'], { auth: true, internal: true }],
 ];
 

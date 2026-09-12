@@ -159,7 +159,7 @@ const WRITE_METHODS  = new Set([
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'retractattestbatch',
-    'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
+    'pushdexreorg', 'pushbridgereorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
 // Interim credential scoping: the reorg-retraction rails feed row:deleted
@@ -182,7 +182,7 @@ const WRITE_METHODS  = new Set([
 // the same rollback.js retraction block as its siblings and travels on the same
 // HubClient credential, so leaving it in the bulk tier would mean an operator who
 // scoped HUB_REORG_API_KEY had one retraction rail still answering to the bulk key.
-const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch']);
+const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch']);
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
@@ -194,7 +194,7 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
@@ -1298,6 +1298,33 @@ async function startApi(){
             }
         },
 
+        // Retract bridge_transfers records after an indexer rolled back XBRIDGE lock/burn
+        // actions in a reorg. The indexer pushes its source chain plus the lowest rolled-back
+        // action_index; the hub marks every record whose SOURCE leg sits at or above that
+        // index 'retracted' and broadcasts deletions so mirrors drop the row.
+        //
+        // A record the destination has NOT applied is then never applied. One already
+        // applied stays applied (base spec D16: milestone 1 ships no destination-side
+        // unwind, because the destination chain did not reorg and a forward un-mint would
+        // change its hashes forward, never back); getbridgeinvariant then reports the
+        // deficit and the watch item raises CRIT. policy_snapshots has no retraction path:
+        // it is append-only and a later policy_seq supersedes.
+        async pushbridgereorg({source_chain, from_action_index, to_action_index, retraction_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(from_action_index === undefined || from_action_index === null)
+                return {error: "from_action_index is required"};
+            if(!hub.crossChainBridge) return {error: "cross-chain bridge engine not active"};
+            try {
+                let retracted = await hub.crossChainBridge.retractTransfersForReorg(
+                    source_chain, from_action_index, to_action_index, retraction_generation);
+                return {status: "ok", source_chain, from_action_index, retracted};
+            } catch (err) {
+                return {error: err.message || "error retracting bridge transfers"};
+            }
+        },
+
         async registervalidator({signing_pubkey, addr}){
             try {
                 await hub.registerValidator(signing_pubkey, addr);
@@ -1773,6 +1800,62 @@ async function startApi(){
             }
         },
 
+        /**
+         * The response shape, frozen up front because three lanes read it:
+         * the explorer token page, the wallet move flow and the platform watch script.
+         *
+         * Open read (aggregate totals are already visible in the explorer). Keyed by tick,
+         * then by chain, with XCHAIN always present; an optional `tick` argument narrows it
+         * to one entry.
+         *
+         * THE INVARIANT IS AN INEQUALITY, NOT AN EQUALITY: escrow >= supply per chain,
+         * modulo in-flight. Nothing refuses a user credit to a protocol role address today,
+         * so a plain SEND can land value on an escrow with no transfer row. That is a
+         * SURPLUS, the sender's own loss, like a send to the burn address, and no other
+         * holder is unbacked by it: the watch raises WARN. A DEFICIT (supply > escrow) is
+         * the only direction in which someone else's units have nothing behind them, and is
+         * a forgery or a reorg: the watch raises CRIT. A strict equality any stranger can
+         * break with one SEND is an alarm that cries wolf.
+         *
+         * @typedef {Object} BridgeInvariantEntry
+         * @property {string} escrow    - balance of this tick at ADDRESS.BRIDGE_<chain> on
+         *   the tick's ORIGIN chain, decimal string
+         * @property {string} supply    - this tick's SUPPLY on `chain`, decimal string
+         * @property {string} in_flight - total amount of transfers whose source leg has
+         *   applied and whose destination leg has NOT. The window includes the confirmation
+         *   wait and the attestation round, not only "finalized but unapplied"
+         * @property {string} delta     - signed escrow - (supply + in_flight); positive is a
+         *   surplus (WARN), negative a deficit (CRIT)
+         * @property {number|null} finalized_policy_seq - highest FINALIZED policy_seq the
+         *   hub holds for this tick, or null when the tick carries no policy snapshot. The
+         *   hub knows only what it finalized; the APPLIED seq is read per destination
+         *   through the indexer's getappliedpolicy
+         *
+         * @typedef {Object.<string, Object.<string, BridgeInvariantEntry>>} BridgeInvariant
+         *   tick -> chain -> entry
+         */
+
+        // OPEN READ TIER on purpose (not in WRITE_METHODS, not in SENSITIVE_READ_METHODS):
+        // the aggregate totals are already visible in the explorer, and the explorer token
+        // page, the wallet move flow and the platform watch script all read it without
+        // a federation key. `tick` narrows the map to one entry; without it XCHAIN is always
+        // present so the base asset can be read on a chain that has carried no token leg.
+        // Body: { tick?: string }
+        async getbridgeinvariant({tick}){
+            if(!hub.crossChainBridge) return {error: "cross-chain bridge engine not active"};
+            if(tick !== undefined && tick !== null && typeof tick !== 'string')
+                return {error: "tick must be a string"};
+            // The tick is used as an object key and a SQL parameter, never interpolated, but
+            // bound its length to the column so a megabyte of junk cannot be echoed back.
+            if(typeof tick === 'string' && tick.length > 250)
+                return {error: "tick must be at most 250 characters"};
+            try {
+                return await hub.crossChainBridge.getBridgeInvariant(tick || null);
+            } catch (err) {
+                return {error: "error reading the bridge invariant"};
+            }
+        },
+
         async getswap({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
@@ -2052,6 +2135,56 @@ async function startApi(){
                 [since, limit]
             );
             res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+        } catch (err) {
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
+    // GET /hub-db/snapshot/bridge_transfers: bootstrap snapshot of the signed transfer
+    // records (the base bridge spec section 6). SELECT * deliberately, as the
+    // cross_chain_matches sibling does: every column on this table is mirror-consumed
+    // (finalizing_view rebuilds the EQUIV header VIEW, push_generation fences reorg
+    // retractions, btc_chain_id arms the mirror's chain-identity filter, tick and decimals
+    // are signed content), so an explicit list could only ever drop one of them silently.
+    //
+    // Retracted rows are excluded for the reason the two siblings above give: the streaming
+    // path DELETEs them on reorg, so a bootstrapping mirror must skip them or it diverges
+    // byte-for-byte from a long-running streamed mirror.
+    app.get('/hub-db/snapshot/bridge_transfers', async (req, res) => {
+        try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                "SELECT * FROM bridge_transfers WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
+                [since, limit]
+            );
+            res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+        } catch (err) {
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
+    // GET /hub-db/snapshot/policy_snapshots: bootstrap snapshot of the signed per-token
+    // policy snapshots (the token bridge policy spec section 5). No status
+    // filter, unlike the two tables above: this one is APPEND-ONLY with no retraction path
+    // (a later policy_seq supersedes, the state_checkpoints shape), so the stream deletes
+    // nothing here and a bootstrap that filtered would diverge from a streamed mirror in
+    // the opposite direction.
+    app.get('/hub-db/snapshot/policy_snapshots', async (req, res) => {
+        try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
