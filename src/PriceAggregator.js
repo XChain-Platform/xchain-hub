@@ -707,6 +707,52 @@ class PriceAggregator extends EventEmitter {
         return { accepted: true };
     }
 
+    // Stamp the LANDING clock of the batch that carried `round` onto rows of that
+    // round which are already finalized here, and re-emit whatever it changed so every
+    // mirror following this hub converges on the same value.
+    //
+    // EARLIEST LANDING WINS. Overlapping and re-published batches carry the same rounds
+    // by design (D25), so taking the minimum makes the stored clock independent of the
+    // order a hub happened to receive them in; two hubs that saw the same chain end up
+    // bounding fee pricing identically, which is the whole point of the column.
+    //
+    // Returns the number of rows re-emitted (0 when an earlier batch already stamped
+    // the round at or below this clock).
+    async _stampBatchLanding(round, blockTime) {
+        let landed = Number(blockTime);
+        if (!Number.isSafeInteger(landed) || landed <= 0) return 0;
+        try {
+            await this.db.doQuery(
+                "UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? " +
+                "AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)",
+                [landed, round, landed]
+            );
+            // Re-read rather than trust an affected-row count: the mirror applier is an
+            // upsert keyed on (round_number, coin_pair), so it needs the WHOLE row, and
+            // selecting the rows that now carry THIS clock also skips the no-op case
+            // without asking the driver for a count it does not uniformly report.
+            let rows = await this.db.doQuery(
+                'SELECT round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, ' +
+                'validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index, ' +
+                'push_generation, batch_block_time, created_at FROM price_snapshots ' +
+                'WHERE round_number = ? AND batch_block_time = ?',
+                [round, landed]
+            );
+            for (let row of (rows || [])) {
+                this.emit('row:inserted', { table: 'price_snapshots', row: row });
+            }
+            return (rows || []).length;
+        } catch (err) {
+            // Never fatal: the round is finalized either way, and an unstamped round
+            // reads as NOT LANDED, which fails fee pricing closed rather than pricing
+            // against a round the chain has not shown. Loud, because a hub that cannot
+            // stamp holds the fee gate shut for its own indexers once the bound is armed.
+            console.error('PriceAggregator: could not stamp the landing clock for round ' +
+                round + ':', err);
+            return 0;
+        }
+    }
+
     // PRICE v0 (batch) ingest: ONE quorum signature set over a WINDOW of full-body
     // rounds. Same posture as receiveValidatedRound (the pusher's local validation is
     // never trusted; every signature is re-verified here against the canonical bytes
@@ -989,6 +1035,13 @@ class PriceAggregator extends EventEmitter {
             );
             if (existing && existing.length > 0) {
                 duplicates++;
+                // The round is already finalized HERE, but this batch is how the round
+                // reached the CHAIN, and the landing clock is what fee pricing bounds
+                // itself on once that gate is armed. On a validator every round of its
+                // own batch takes this branch (it finalized them all itself), so
+                // stamping only the stored rows would leave the one node kind that
+                // produces rounds unable to tell a landed round from an unlanded one.
+                await this._stampBatchLanding(r.round, blockTime);
                 continue;
             }
 
@@ -998,12 +1051,19 @@ class PriceAggregator extends EventEmitter {
             // the landing block on the landing chain (D8), NOT the round's BTC anchor.
             // Two consensus readers read reference_block, so a v2 row that differed here
             // would fork them.
+            //
+            // batch_block_time is the LANDING BLOCK's own clock, and it is a different
+            // quantity from every other time column here: block_timestamp is when the
+            // round was priced, this is when the chain could first show it. Fee pricing
+            // bounds itself on it so a hub-connected node and a chain-only node select
+            // the same round (price_fee_batch_landed_activation.js in the indexer).
             let insertedRows = [];
-            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?)").join(', ');
+            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?)").join(', ');
             let params = [];
             for (let p of r.pairs) {
                 params.push(r.round, p.pair, p.price, referenceBlock, sourceChain || null, r.timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt);
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration,
+                            blockTime, createdAt);
                 insertedRows.push({
                     round_number:        r.round,
                     coin_pair:           p.pair,
@@ -1018,6 +1078,7 @@ class PriceAggregator extends EventEmitter {
                     source_chain:        sourceChain || null,
                     source_action_index: sourceActionIndex,
                     push_generation:     pushGeneration,
+                    batch_block_time:    blockTime,
                     created_at:          createdAt
                 });
             }
@@ -1030,7 +1091,7 @@ class PriceAggregator extends EventEmitter {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, created_at)
+                 push_generation, batch_block_time, created_at)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
                     price = VALUES(price), reference_block = VALUES(reference_block),
@@ -1038,7 +1099,9 @@ class PriceAggregator extends EventEmitter {
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
                     status = 'finalized', source_chain = VALUES(source_chain),
                     source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation)`;
+                    push_generation = VALUES(push_generation),
+                    batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
+                                          VALUES(batch_block_time), batch_block_time)`;
             try {
                 await this.db.doQuery(query, params);
             } catch (err) {

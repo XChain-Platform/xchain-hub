@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Price snapshots carry the clock of the block their PRICE batch landed in, earliest landing wins, and the stamp is mirrored to every following indexer so a fee is priced only from rounds whose batch has landed.
+
 ## [0.17.0] - 2026-09-10
 
 ### Added

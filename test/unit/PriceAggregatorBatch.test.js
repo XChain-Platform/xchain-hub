@@ -129,7 +129,7 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
     // column order the statement declares.
     const COLS = ['round_number', 'coin_pair', 'price', 'reference_block', 'reference_chain',
                   'block_timestamp', 'validator_count', 'consensus_proof', 'source_chain',
-                  'source_action_index', 'push_generation', 'created_at'];
+                  'source_action_index', 'push_generation', 'batch_block_time', 'created_at'];
     function decodeInsert(params) {
         let rows = [];
         for (let i = 0; i < params.length; i += COLS.length) {
@@ -247,8 +247,15 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         expect(Object.keys(first)).to.deep.equal([
             'round_number', 'coin_pair', 'price', 'reference_block', 'reference_chain',
             'block_timestamp', 'validator_count', 'consensus_round', 'consensus_proof',
-            'status', 'source_chain', 'source_action_index', 'push_generation', 'created_at'
+            'status', 'source_chain', 'source_action_index', 'push_generation',
+            'batch_block_time', 'created_at'
         ]);
+        // The landing clock is the LANDING BLOCK's own time, which is neither the round's
+        // pricing timestamp nor a height: that distinction is the only reason the column
+        // exists, so assert it here rather than only that the key is present.
+        expect(first.batch_block_time).to.equal(BLOCK_TIME);
+        expect(first.batch_block_time).to.not.equal(BLOCK_INDEX);
+        expect(first.batch_block_time).to.not.equal(first.block_timestamp);
         expect(first.round_number).to.equal(100);
         expect(first.status).to.equal('finalized');
         expect(first.consensus_round).to.equal(1);
