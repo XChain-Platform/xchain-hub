@@ -236,6 +236,16 @@ class PeerManager extends EventEmitter {
         this.dedupCacheMax  = positiveIntConfig(config.P2P_DEDUP_CACHE_MAX, 100000,
             'P2P_DEDUP_CACHE_MAX');
 
+        // Outbound membership gate (authoringHeld). Cached against the Set object
+        // and the identity it was computed from, so the check costs one reference
+        // compare per send and is recomputed only when the signer set is refreshed.
+        this._holdVerdict    = false;
+        this._holdVerdictSet = undefined;
+        this._holdVerdictId  = undefined;
+        // { held, fp } of the last announcement, so the line follows the SET rather
+        // than the round. Null until the first resolved set.
+        this._holdAnnounced  = null;
+
         // Peer connections:
         // Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound,
         //             failures, lastError }>
@@ -440,7 +450,66 @@ class PeerManager extends EventEmitter {
         }
     }
 
+    // Should a message this hub AUTHORS be held back?
+    //
+    // The mirror image of the membership test _verifySignature applies to an
+    // arriving envelope: a hub whose signing key is outside the chain-effective
+    // signer set is an observer, so every peer drops what it authors before the
+    // handler runs. Proposing, preparing, committing, voting or asking for a
+    // co-signature from there is pure noise (a re-admitted testnet service hub
+    // cost each of five validators one PEER_REJECT every 4 s). Relay, inbound
+    // handling and the mirror feed are deliberately not routed through here.
+    //
+    // Fails OPEN in every state that is not a definite absence, so a real
+    // validator can never go silent on a transient set read: no identity, no set
+    // yet, an empty set (boot, or an upstream that answered with nothing), a key
+    // that will not render, or a mesh that does not require signatures at all
+    // (there a peer admits an unknown sender anyway, so the send would land).
+    authoringHeld() {
+        if (!this.requireSigs || !this.identity) return false;
+        let set = this.effectiveSignerSet;
+        if (!set || typeof set.has !== 'function' || set.size === 0) return false;
+        if (this._holdVerdictSet === set && this._holdVerdictId === this.identity) return this._holdVerdict;
+
+        this._holdVerdictSet = set;
+        this._holdVerdictId  = this.identity;
+        let me = null;
+        try { me = String(this.identity.getPubkeyHex()).toLowerCase(); }
+        catch (e) { me = null; }
+        this._holdVerdict = me ? !set.has(me) : false;
+        this._announceAuthoringHold(set, me);
+        return this._holdVerdict;
+    }
+
+    // One info line per signer-set CHANGE, never per round. Keyed on the set's
+    // members rather than the Set object, because the refresh installs a new
+    // object every poll and announcing per object would print every 30s.
+    _announceAuthoringHold(set, me) {
+        let held = this._holdVerdict;
+        let fp   = [...set].sort().join(',');
+        let prev = this._holdAnnounced;
+        if (prev && prev.held === held && (!held || prev.fp === fp)) return;
+        this._holdAnnounced = { held: held, fp: fp };
+        if (held) {
+            console.log('PeerManager: this hub is not in the ' + set.size + '-member chain-effective ' +
+                'signer set, so it will not author consensus messages or checkpoint rounds ' +
+                '(peers would drop them); receiving, relay and the mirror feed are unaffected' +
+                (me ? ' (pubkey ' + me + ')' : ''));
+            return;
+        }
+        // A member hub says nothing at boot; only the return from a hold is news.
+        if (prev) {
+            console.log('PeerManager: this hub is in the ' + set.size + '-member chain-effective ' +
+                'signer set; it is authoring consensus messages again');
+        }
+    }
+
     broadcast(type, data) {
+        // Observer hold (authoringHeld): no envelope is built, so nothing reaches
+        // the wire and no dedup slot is spent. Null rather than an envelope; no
+        // caller in src/ reads the return.
+        if (this.authoringHeld()) return null;
+
         let envelope = this._buildEnvelope(type, data);
 
         // Mark own message as seen (with cache bound)
@@ -458,6 +527,9 @@ class PeerManager extends EventEmitter {
     }
 
     sendToPeer(addr, type, data) {
+        // Same observer hold as broadcast: false is the existing "did not send".
+        if (this.authoringHeld()) return false;
+
         let peer = this.peers.get(addr);
         if (!peer || !peer.ws || peer.ws.readyState !== WebSocket.OPEN) return false;
 

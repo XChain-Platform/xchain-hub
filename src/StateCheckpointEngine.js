@@ -219,6 +219,24 @@ class StateCheckpointEngine extends EventEmitter {
         if(!(this._frozenTipTicks > 0)) this._frozenTipTicks = 60;
         this._notMySlotBlock = null;     // btcBlock seen by the last not-my-slot tick
         this._notMySlotTicks = 0;        // consecutive not-my-slot ticks at that block
+
+        // True while the P2P layer is holding back everything this hub authors.
+        // Surfaced by getStats so an operator reading getcheckpointstats sees why
+        // no checkpoint is being cut without a per-tick stall record to read it from.
+        this._observerIdle = false;
+    }
+
+    // An observer hub (signing key outside the chain-effective signer set) can never
+    // get a checkpoint co-signed, so it neither opens a round nor meters the cadence:
+    // nothing here is fixable at this hub, and a stall record every two blocks buried
+    // the records that are. PeerManager announces the state once per set change.
+    // Reads the gate defensively: a peer manager that predates it, or none at all,
+    // leaves the old behaviour in place.
+    _observerHold(){
+        let pm = this.peerManager;
+        let held = !!(pm && typeof pm.authoringHeld === 'function' && pm.authoringHeld());
+        this._observerIdle = held;
+        return held;
     }
 
     // Record a due-but-not-my-slot tick at `btcBlock`. Returns true when the same
@@ -363,6 +381,9 @@ class StateCheckpointEngine extends EventEmitter {
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
+            // True means the cadence is deliberately idle rather than broken: this hub
+            // is outside the signer set, so it opens no round at all (see _observerHold).
+            observer_idle:           this._observerIdle,
             cadence_stalls:          this._cadenceStalls,
             cadence_stall_reason:    this._cadenceStallReason,
             cadence_stall_block:     this._cadenceStallBlock,
@@ -403,6 +424,8 @@ class StateCheckpointEngine extends EventEmitter {
     // Cadence: leader-only initiation; followers only react to SIGN_REQs.
     async _tick(){
         if(this._ticking) return;
+        // Before any indexer round trip: an observer's round cannot be signed.
+        if(this._observerHold()) return;
         this._ticking = true;
         try {
             let btcBlock = await this._resolveSnapshotBlock();

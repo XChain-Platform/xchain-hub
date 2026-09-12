@@ -294,7 +294,8 @@ class XChainHub {
         }
         let blocks = PeerManager.stakeActivationBlocks(this.network);
         console.warn('XChainHub: this hub\'s signing pubkey is NOT in the chain-effective signer set, ' +
-            'so peers will REJECT its messages until a STAKE for it confirms and activates' +
+            'so it runs as an observer (mirroring and serving, authoring nothing) until a STAKE ' +
+            'for it confirms and activates' +
             (blocks === null ? '' : ' (' + blocks + ' blocks after the transaction confirms)') +
             ' (pubkey ' + pubkey + ')');
     }
