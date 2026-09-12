@@ -12,9 +12,9 @@
 
 // PeerManagerListenerCeiling.test.js proved the ceiling matches the declared
 // roster, but every subscriber in that file is a synthetic `pm.on('message', ...)`
-// stand-in named after a module, not the module itself, so the live 11-listener
-// boot warning is never observed first-hand there and the roster is only
-// derived from source registrations. This file closes that gap: it drives the REAL
+// stand-in named after a module, not the module itself: its roster is derived
+// from source registrations, and the live 11-listener boot warning is never
+// observed first-hand there. This file closes that gap: it drives the REAL
 // boot sequence api.js runs (hub.start / startP2P / startConsensus / startOracle
 // / startAttestation / startCrossChain / startReorgHandler / startGovernance)
 // against a real PeerManager, with only the database swapped for an in-memory
@@ -120,6 +120,10 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
         // The point of running the real boot rather than the synthetic roster test:
         // confirm the roster is not just declared correctly but ACTUALLY exercised,
         // one real handler per real subscriber, same invariant as the synthetic test.
-        expect(hub.peerManager.listenerCount('message')).to.equal(PeerManager.MESSAGE_SUBSCRIBERS.length);
+        // The roster is config-derived (row 21): RollcallRound and the attest relay are
+        // credited only on the branches that attach them, so the expected count is read
+        // from this boot's own config and env, never from the unconfigured static list.
+        expect(hub.peerManager.listenerCount('message')).to.equal(
+            PeerManager.messageSubscribers(hub.p2pConfig, process.env).length);
     });
 });

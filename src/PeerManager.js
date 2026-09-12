@@ -29,6 +29,9 @@ const rulesDigest = require('./consensus_rules_digest.js');
 const coins            = require('./coins');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
+// The roster below credits RollcallRound only where the engine would really start,
+// so it reads the engine's own activation source rather than a copy of it.
+const rollcallActivation = require('./rollcall_activation.js');
 
 // Bootstrap peers every new hub can reach. One hostname per validator; the
 // PORT selects the network, so a seed on the wrong port reaches the wrong
@@ -60,25 +63,94 @@ const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
 // extra channels are named `<module>:<channel>` and each one is a listener of its own.
 // PeerManagerListenerCeiling.test.js recovers the module from an entry by splitting on
 // the first ':' when it compares the roster against the sources.
-const MESSAGE_SUBSCRIBERS = Object.freeze([
+//
+// Two of the subscribers are a CONFIGURATION question rather than a constant, so the
+// roster is computed per hub (messageSubscribers below) instead of being one frozen
+// list: RollcallRound attaches nothing on a network with no activation height and one
+// listener wherever a height is set, and the relay's PBFT channel exists only when
+// ATTEST_RELAY_ENABLED is on. A roster that guessed either way is wrong on some real
+// hub, and because the ceiling IS the roster length, a roster one short of what
+// attaches turns the MaxListenersExceededWarning permanently on, which is the
+// condition the per-hub roster exists to prevent.
+//
+// The subscribers here attach at every boot that reaches their start(): nothing in
+// the configuration removes one.
+const UNCONDITIONAL_SUBSCRIBERS = Object.freeze([
     'AttestationBatchPublisher', 'AttestationConsensus', 'AttestationResponseMirror',
     'Consensus', 'CrossChainDexConsensus',
-    'CrossChainDexConsensus:XBRIDGE_TRANSFER', 'CrossChainDexConsensus:XPOLICY_SNAPSHOT',
+    'CrossChainDexConsensus:XBRIDGE_TRANSFER', 'CrossChainDexConsensus:XCALL_RELAY',
+    'CrossChainDexConsensus:XPOLICY_SNAPSHOT',
     'CrossChainEngine', 'FullNodeChallengeRound',
     'Governance', 'OracleBatchSigner', 'OracleConsensus', 'OracleRound', 'ReorgHandler',
-    'RetractionConsensus', 'RollcallRound', 'StateAnchorPublisher', 'StateCheckpointEngine'
+    'RetractionConsensus', 'StateAnchorPublisher', 'StateCheckpointEngine'
 ]);
 
-// Node's default of 10 sits below that count, so every hub logged a
-// MaxListenersExceededWarning at boot and a genuine listener leak had nowhere left
-// to announce itself. Sized to the roster exactly rather than to Infinity: one
-// subscriber that registers twice is still one listener too many, and still warns.
-const MAX_MESSAGE_LISTENERS = MESSAGE_SUBSCRIBERS.length;
+// Does RollcallRound reach the fan-out registration in its start()? Three gates come
+// first (RollcallRound.js start()), and this reads those same three inputs from the
+// same places, so the credit follows the engine rather than a copy of its rules:
+// ROLLCALL_ENABLED not switched off, a cadence for the network, and an activation
+// height for it (mainnet and testnet carry one, regtest only when the venue arms it
+// via XC_ROLLCALL_REGTEST_ACTIVATION).
+//
+// Written without the registration call spelled out, deliberately: the source-parity
+// derivation in PeerManagerListenerCeiling.test.js scans these files for that call
+// and would read a comment quoting it as a subscriber PeerManager itself registers.
+//
+// An unresolvable network is CREDITED, not skipped. PeerManager sees only its own
+// config, while the engine resolves the network from `hub.network`, which XChainHub
+// will also take from opts.network. A hub whose p2p config names no network may still
+// be running on one this PeerManager cannot see, and may therefore start the engine.
+// Over-counting there costs a softer leak signal on a hub nobody named a network for;
+// under-counting costs the warning on every boot of a live one.
+function rollcallRoundAttaches(config, env) {
+    const cfg = config || {};
+    if (String(env.ROLLCALL_ENABLED || cfg.ROLLCALL_ENABLED || 'true') === 'false') return false;
+    const network = String(cfg.HUB_NETWORK || '');
+    if (!network) return true;
+    const interval = rollcallActivation.ROLLCALL_INTERVAL_BLOCKS[network];
+    if (!Number.isFinite(interval) || interval <= 0) return false;
+    return Number.isFinite(rollcallActivation.ROLLCALL_ACTIVATION[network]);
+}
+
+// Does AttestationRelay reach its consensus channel's start()? The engine constructs
+// that channel either way, but start() returns on the opt-in check before starting it,
+// and an unstarted channel subscribes to nothing. Read here exactly as
+// AttestationRelay.js reads it: env first, then config, default off.
+function attestRelayAttaches(config, env) {
+    const cfg = config || {};
+    return String(env.ATTEST_RELAY_ENABLED || cfg.ATTEST_RELAY_ENABLED || '0') === '1';
+}
+
+// The subscribers a configuration can add or remove, each paired with the predicate
+// that reads the same inputs its engine reads.
+const CONDITIONAL_SUBSCRIBERS = Object.freeze([
+    { entry: 'RollcallRound',                     attaches: rollcallRoundAttaches },
+    { entry: 'CrossChainDexConsensus:ATTEST_RELAY', attaches: attestRelayAttaches }
+]);
 
 class PeerManager extends EventEmitter {
-    // The 'message' subscriber roster and the listener ceiling derived from it.
-    static get MESSAGE_SUBSCRIBERS()   { return MESSAGE_SUBSCRIBERS; }
-    static get MAX_MESSAGE_LISTENERS() { return MAX_MESSAGE_LISTENERS; }
+    // Every 'message' listener a hub with THIS configuration creates at boot, one entry
+    // each. The ceiling is this list's length: Node's default of 10 sits far below it, so
+    // an unsized ceiling leaves every hub logging a MaxListenersExceededWarning at boot
+    // and a genuine listener leak with nowhere to announce itself. Sized to the roster exactly
+    // rather than to Infinity, so one subscriber that registers twice is still one
+    // listener too many and still warns.
+    static messageSubscribers(config, env) {
+        const e      = env || process.env;
+        const roster = [...UNCONDITIONAL_SUBSCRIBERS];
+        for (const sub of CONDITIONAL_SUBSCRIBERS) {
+            if (sub.attaches(config, e)) roster.push(sub.entry);
+        }
+        return Object.freeze(roster);
+    }
+
+    // The roster of a PeerManager carrying no configuration of its own, under this
+    // process's environment: every unconditional subscriber, plus each conditional one
+    // whose gate is open or unresolvable. It is the roster's widest honest reading, and
+    // what the source-parity derivation in PeerManagerListenerCeiling.test.js compares
+    // module names against. A CONFIGURED hub's ceiling comes from messageSubscribers().
+    static get MESSAGE_SUBSCRIBERS()   { return PeerManager.messageSubscribers(null, process.env); }
+    static get MAX_MESSAGE_LISTENERS() { return PeerManager.MESSAGE_SUBSCRIBERS.length; }
 
     // Default seed list for a network, or [] when there is none to offer
     // (regtest is a local venue and must never dial public seeds).
@@ -106,7 +178,11 @@ class PeerManager extends EventEmitter {
 
     constructor(config, db) {
         super();
-        this.setMaxListeners(MAX_MESSAGE_LISTENERS);
+        // Sized to THIS hub's roster, not to the widest one: the ceiling is the number
+        // of listeners its own configuration will attach, so a hub that arms roll call
+        // or the relay makes room for them and a hub that does not still hears about
+        // the first listener past its real boot load.
+        this.setMaxListeners(PeerManager.messageSubscribers(config, process.env).length);
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;

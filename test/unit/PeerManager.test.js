@@ -826,12 +826,10 @@ describe('PeerManager', function () {
             // Loopback discard port: nothing listens, so the connect is refused.
             let addr = '127.0.0.1:9';
             pm._connectToPeer(addr);
-            // The refusal is observable on the peer record, so poll it rather
-            // than sleeping past the slowest box this suite might run on.
-            await waitUntil(
-                () => (pm.peers.get(addr) || {}).lastError,
-                { timeoutMs: 5000, label: 'the refused dial to be stashed on the peer record' }
-            );
+            // The refusal arrives on the socket's error event, so poll for the stashed
+            // error rather than sleeping a fixed span long enough to cover a loaded box.
+            await waitUntil(() => (pm.peers.get(addr) || {}).lastError,
+                { timeoutMs: 5000, label: 'the refused dial to be stashed on the peer' });
 
             let peer = pm.peers.get(addr);
             if (peer && peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
@@ -1070,5 +1068,167 @@ describe('PeerManager', function () {
             c1.close();
             await a.stop();
         });
+    });
+
+    // -----------------------------------------------------------------
+    // messageSubscribers() and the 'message' listener ceiling
+    // -----------------------------------------------------------------
+    //
+    // The ceiling IS the roster length, so a roster that credits a subscriber which
+    // does not attach hides a leak of that size, and one that misses a subscriber
+    // which does attach prints MaxListenersExceededWarning at every boot, which is
+    // the always-on warning a sized ceiling removes. Two subscribers are a configuration
+    // question rather than a constant, so each case below is driven against the
+    // engine's OWN gate (its activation module, its enabled flag, its real handler)
+    // rather than against a copy of the rule written into this file.
+
+    describe('message subscriber roster', function () {
+
+        const rca                  = require('../../src/rollcall_activation.js');
+        const RollcallRound        = require('../../src/RollcallRound.js');
+        const AttestationRelay     = require('../../src/AttestationRelay.js');
+        const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
+        const { spawnSync }        = require('child_process');
+
+        const ROLLCALL = 'RollcallRound';
+        const RELAY    = 'CrossChainDexConsensus:ATTEST_RELAY';
+
+        // A hub config as PeerManager sees it: XChainHub hands it p2pConfig, so the
+        // network and the engine opt-ins it carries are readable from here.
+        const hubConfig = (extra) => Object.assign({ P2P_VALIDATOR_ADDR: 'ws://self:10001' }, extra || {});
+
+        // A duck-typed hub, enough for the engines whose gates are compared with the
+        // roster below. Their constructors read config and nothing else.
+        const stubHub = (cfg, peerManager) => ({
+            db: dbStub, p2pConfig: cfg, network: cfg.HUB_NETWORK || '',
+            getPeerManager: () => peerManager || null, getIdentity: () => null
+        });
+
+        // Collect the warnings Node defers past the synchronous .on() that raises them.
+        async function warningsDuring(fn) {
+            const seen = [];
+            const onWarning = (w) => seen.push(w);
+            process.on('warning', onWarning);
+            try {
+                await fn();
+                await new Promise((resolve) => setImmediate(resolve));
+                await new Promise((resolve) => setImmediate(resolve));
+            } finally {
+                process.removeListener('warning', onWarning);
+            }
+            return seen;
+        }
+
+        // Attach `count` distinct listeners; return the ceiling warnings they raised.
+        async function attachListeners(target, count) {
+            const warnings = await warningsDuring(async () => {
+                for (let i = 0; i < count; i++) target.on('message', function () { return i; });
+            });
+            return warnings.filter(w => w.name === 'MaxListenersExceededWarning').map(w => w.message);
+        }
+
+        // The roster for a regtest hub, computed in a child process so the arming
+        // environment is the real one: rollcall_activation.js reads
+        // XC_ROLLCALL_REGTEST_ACTIVATION once, at require time, on purpose.
+        function regtestRosterWith(armingValue) {
+            const env = Object.assign({}, process.env);
+            if (armingValue === null) delete env[rca.ROLLCALL_REGTEST_ENV];
+            else env[rca.ROLLCALL_REGTEST_ENV] = armingValue;
+            const pmPath = require.resolve('../../src/PeerManager.js');
+            const out = spawnSync(process.execPath, ['-e',
+                'const PM = require(' + JSON.stringify(pmPath) + ');' +
+                'const r = PM.messageSubscribers({ HUB_NETWORK: "regtest" }, process.env);' +
+                'process.stdout.write(JSON.stringify({ n: r.length, rollcall: r.indexOf("RollcallRound") >= 0 }));'
+            ], { env, encoding: 'utf8' });
+            expect(out.status, out.stderr).to.equal(0);
+            return JSON.parse(out.stdout);
+        }
+
+        it('a regtest venue with no activation height credits no roll-call listener', function () {
+            this.timeout(10000);
+            // 18 is what lane L6e counted attaching at a real regtest boot: the 14
+            // singleton subscribers plus the four CrossChainDexConsensus channels.
+            expect(regtestRosterWith(null)).to.deep.equal({ n: 18, rollcall: false });
+        });
+
+        it('arming the regtest venue adds exactly one, and it is the roll-call listener', function () {
+            this.timeout(10000);
+            expect(regtestRosterWith('armed')).to.deep.equal({ n: 19, rollcall: true });
+        });
+
+        it('a network whose activation height is set credits RollcallRound', function () {
+            // mainnet and testnet carry literal heights, so this branch needs no env.
+            for (const network of ['mainnet', 'testnet']) {
+                const cfg    = hubConfig({ HUB_NETWORK: network });
+                const engine = new RollcallRound(stubHub(cfg));
+                // The three inputs the engine's start() gates on, read off the engine.
+                expect(engine.enabled, network).to.be.true;
+                expect(engine.interval, network).to.be.a('number').and.to.be.above(0);
+                expect(Number.isFinite(rca.ROLLCALL_ACTIVATION[network]), network).to.be.true;
+                expect(PeerManager.messageSubscribers(cfg, process.env), network).to.include(ROLLCALL);
+            }
+        });
+
+        it('an armed network with roll call switched off credits no roll-call listener', function () {
+            const cfg    = hubConfig({ HUB_NETWORK: 'testnet', ROLLCALL_ENABLED: 'false' });
+            const engine = new RollcallRound(stubHub(cfg));
+            expect(engine.enabled).to.be.false;
+            expect(PeerManager.messageSubscribers(cfg, process.env)).to.not.include(ROLLCALL);
+        });
+
+        it('the relay channel is credited exactly when AttestationRelay is opted in', function () {
+            for (const optIn of ['0', '1']) {
+                const cfg    = hubConfig({ HUB_NETWORK: 'regtest', ATTEST_RELAY_ENABLED: optIn });
+                const engine = new AttestationRelay(stubHub(cfg));
+                const roster = PeerManager.messageSubscribers(cfg, process.env);
+                expect(engine.enabled, optIn).to.equal(optIn === '1');
+                // An unstarted channel subscribes to nothing, and start() returns on
+                // this flag before starting it, so the credit must follow the flag.
+                expect(roster.indexOf(RELAY) >= 0, optIn).to.equal(engine.enabled);
+            }
+        });
+
+        it('the XCALL relay channel is credited because the call engine really attaches one', async function () {
+            sinon.stub(console, 'warn');
+            sinon.stub(console, 'log');
+            const cfg    = hubConfig({ HUB_NETWORK: 'regtest' });
+            const target = new PeerManager(cfg, dbStub);
+            const engine = new CrossChainCallEngine(stubHub(cfg, target));
+
+            const before = target.listenerCount('message');
+            await engine.start();
+            const after = target.listenerCount('message');
+            await engine.stop();
+
+            expect(after - before).to.equal(1);
+            expect(target.listenerCount('message')).to.equal(before);
+            // The channel name taken from the engine's own PBFT message types, so a
+            // renamed channel fails here instead of drifting away from the roster.
+            const channel = String(engine.consensus.types.PROPOSE).replace(/_PROPOSE$/, '');
+            expect(PeerManager.messageSubscribers(cfg, process.env))
+                .to.include('CrossChainDexConsensus:' + channel);
+        });
+
+        // Each configuration branch, driven the way a leak would be seen: a full set
+        // of legitimate subscribers is silent, and the next one warns.
+        const branches = [
+            ['regtest with nothing armed',  { HUB_NETWORK: 'regtest' }],
+            ['a network with roll call armed', { HUB_NETWORK: 'testnet' }],
+            ['regtest with the relay opted in', { HUB_NETWORK: 'regtest', ATTEST_RELAY_ENABLED: '1' }]
+        ];
+        for (const [label, extra] of branches) {
+            it('the ceiling equals the attachment count on ' + label, async function () {
+                const cfg    = hubConfig(extra);
+                const roster = PeerManager.messageSubscribers(cfg, process.env);
+                const target = new PeerManager(cfg, dbStub);
+
+                expect(new Set(roster).size, 'a repeated entry is a silent +1').to.equal(roster.length);
+                expect(target.getMaxListeners()).to.equal(roster.length);
+                expect(await attachListeners(target, roster.length),
+                    'a full boot must be silent').to.deep.equal([]);
+                expect((await attachListeners(target, 1)).length,
+                    'a listener leak would now be silent').to.be.at.least(1);
+            });
+        }
     });
 });
