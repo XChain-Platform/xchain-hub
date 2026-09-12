@@ -204,6 +204,67 @@ describe('CrossChainBridgeEngine', function(){
             expect(engine._indexerCall.called).to.equal(true);
         });
 
+        // Row 28: XCHAIN_BRIDGE_ACTIVATION is keyed '<COIN>:<network>', because BTC, LTC and
+        // DOGE reach the flag day at three heights that are not comparable. The poll's own
+        // gate reads the BTC-anchored snapshot block, so without a per-leg gate the hub would
+        // start signing LTC and DOGE legs the instant BTC crossed. The predicate is replaced
+        // with a coin-aware stand-in (the vendored twin answers the same for every coin on
+        // regtest, which no coin-blind call could be told apart from), and the leg's OWN
+        // height and chain are what it must be handed.
+        it('gates a leg on the source chain\'s own flag day, not on BTC\'s', async function(){
+            const { engine } = makeEngine();
+            const seen = [];
+            engine.activation.bridge = (block, network, coin) => {
+                seen.push(String(coin) + '@' + String(block));
+                return (coin === 'DOGE') ? Number(block) >= 500 : true;
+            };
+
+            // DOGE below its own instant: refused, even though BTC (the snapshot anchor) is armed.
+            await engine._maybeFinalizeTransfer('DOGE', 'regtest', 200, 150,
+                pendingLeg({ transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC', block_index: 100 }));
+            expect(engine.transferConsensus.propose.called).to.equal(false);
+            expect(seen).to.include('DOGE@100');
+
+            // A BTC leg at the very same height is signed: the refusal above was the CHAIN,
+            // not the height.
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ block_index: 100 }));
+            expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
+
+            // And DOGE at its own instant goes through.
+            await engine._maybeFinalizeTransfer('DOGE', 'regtest', 700, 150,
+                pendingLeg({ transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC',
+                             block_index: 600, src_action_index: 43 }));
+            expect(engine.transferConsensus.propose.callCount).to.equal(2);
+        });
+
+        // The follower half of the same rule. A proposer that gated per chain and a validator
+        // that did not would disagree across the boundary, which is the one place a bridge
+        // cannot afford to: the validator must refuse a leg from a chain still below its own
+        // instant rather than accept it because the BTC anchor is past.
+        it('refuses to validate a proposed row whose source chain is below its own flag day', async function(){
+            const { engine } = makeEngine();
+            engine.activation.bridge = (block, network, coin) => (coin === 'DOGE') ? Number(block) >= 500 : true;
+            engine._indexerCall = sinon.stub().resolves({
+                latest_block_index: 200, network: 'regtest',
+                transfers: [pendingLeg({ transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC',
+                                         block_index: 100 })]
+            });
+            const row = {
+                transfer_id: engine._deriveTransferId('regtest', 'DOGE', 41, 'BTC', 'nDestAddress', 150),
+                snapshot_block: 150, tick: 'XCHAIN', decimals: 8,
+                src_chain: 'DOGE', src_action_index: 41, src_address: 'mSrcAddress',
+                dest_chain: 'BTC', dest_address: 'nDestAddress', amount: '5.00000000',
+                effective_time: 1757000000, network: 'regtest', push_generation: 0
+            };
+            expect(await engine._validateTransfer(row)).to.equal(false);
+
+            // The positive control, without which the refusal above would pass against a
+            // row rejected for some entirely different reason: arm DOGE at its own height
+            // and the identical row validates.
+            engine.activation.bridge = () => true;
+            expect(await engine._validateTransfer(row)).to.equal(true);
+        });
+
         it('holds a non-XCHAIN leg behind the token gate while XCHAIN rides the bridge gate', async function(){
             const { engine } = makeEngine({ tokenActive: false });
             await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ tick: 'FUFU' }));

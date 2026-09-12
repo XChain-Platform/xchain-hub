@@ -63,4 +63,49 @@ describe('bridge/token/policy activation twin parity (hub <-> indexer) @regressi
         assert.strictEqual(typeof token.isTokenBridgeActive, 'function');
         assert.strictEqual(typeof policy.isTokenPolicyInheritanceActive, 'function');
     });
+
+    // Row 28: the bridge twin is keyed '<COIN>:<network>' because the three chains reach the
+    // flag day at three heights. The engine calls the predicate with a third argument, so a
+    // twin whose predicate still took two would silently read the bare network key for every
+    // chain and open the bridge on LTC and DOGE the moment BTC crossed. Byte-equality to the
+    // indexer (above) does not catch that on its own: it would only prove the hub is running
+    // whatever the indexer runs, including the wrong arity. This drives the hub's own copy.
+    it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare network key', function () {
+        const { XCHAIN_BRIDGE_ACTIVATION, isXchainBridgeActive } = require('../../src/xchain_bridge_activation.js');
+        const saved = XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'];
+        XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'] = 700;
+        try {
+            assert.strictEqual(isXchainBridgeActive(100, 'regtest', 'LTC'), false, 'LTC below its own slot');
+            assert.strictEqual(isXchainBridgeActive(700, 'regtest', 'LTC'), true,  'LTC at its own slot');
+            assert.strictEqual(isXchainBridgeActive(100, 'regtest', 'BTC'), true,  'BTC keeps the bare regtest 0');
+            assert.strictEqual(isXchainBridgeActive(100, 'regtest'), true,         'no coin falls back to the bare key');
+        } finally {
+            if (saved === undefined) delete XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'];
+            else XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'] = saved;
+        }
+        assert.strictEqual(XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'], saved, 'the vendored map was not restored');
+    });
+
+    // The hub's three shipped maps must stay dark on both live networks for every chain: the
+    // hub signs transfer records, so an armed slot here is a federation that starts signing
+    // on a network the fleet has not deployed the flag day to.
+    it('holds every mainnet and testnet slot of all three twins unarmed', function () {
+        const maps = {
+            XCHAIN_BRIDGE_ACTIVATION: require('../../src/xchain_bridge_activation.js').XCHAIN_BRIDGE_ACTIVATION,
+            TOKEN_BRIDGE_ACTIVATION:  require('../../src/token_bridge_activation.js').TOKEN_BRIDGE_ACTIVATION,
+            TOKEN_POLICY_INHERITANCE_ACTIVATION:
+                require('../../src/token_policy_activation.js').TOKEN_POLICY_INHERITANCE_ACTIVATION
+        };
+        for (const [name, map] of Object.entries(maps)) {
+            let checked = 0;
+            for (const key of Object.keys(map)) {
+                if (!/mainnet|testnet/.test(key)) continue;
+                checked++;
+                assert.strictEqual(map[key], 9999999999,
+                    name + '.' + key + ' is off the house sentinel; arming a live network is the operator\'s ' +
+                    'act on the arming train, never a code change');
+            }
+            assert.ok(checked >= 2, 'not vacuous: ' + name + ' declares no live-network slot');
+        }
+    });
 });

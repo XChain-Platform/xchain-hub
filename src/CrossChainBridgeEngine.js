@@ -281,10 +281,17 @@ class CrossChainBridgeEngine extends EventEmitter {
     // Activation
     // ---------------------------------------------------------------------------
 
-    // Is a gate armed for `block` on this hub's network? Fails CLOSED on a missing
-    // predicate (an unvendored flag-day twin) and logs the reason once per gate, so an
-    // operator sees why the engine is idle instead of watching it quietly sign nothing.
-    _gateActive(name, block){
+    // Is a gate armed for `block` on this hub's network, for the chain `coin` whose height
+    // `block` is? Fails CLOSED on a missing predicate (an unvendored flag-day twin) and logs
+    // the reason once per gate, so an operator sees why the engine is idle instead of
+    // watching it quietly sign nothing.
+    //
+    // The coin is passed to every family even though only the bridge map is keyed
+    // '<COIN>:<network>' today: the token and policy predicates take (block, network) and
+    // ignore the extra argument, so one call shape serves all three and a later coin-keying
+    // of either map needs no new call site. A height is only ever meaningful with the chain
+    // it was measured on, so the two travel together.
+    _gateActive(name, block, coin){
         let fn = this.activation && this.activation[name];
         if(typeof fn !== 'function'){
             if(!this._idleLogged[name]){
@@ -294,7 +301,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             }
             return false;
         }
-        try { return !!fn(block, this.network); }
+        try { return !!fn(block, this.network, coin); }
         catch(e){ return false; }
     }
 
@@ -310,8 +317,11 @@ class CrossChainBridgeEngine extends EventEmitter {
             if(snapshotBlock == null) return;   // no anchor: sign nothing this tick
             // A hub on a pre-activation network never polls (base spec section 7). The gate
             // is keyed on the BTC-anchored snapshot block, the same anchor that selects the
-            // validator set, so every hub in the federation flips on one height.
-            if(!this._gateActive('bridge', snapshotBlock)) return;
+            // validator set, so every hub in the federation flips on one height. That block
+            // is a BTC height, so it is judged against the BTC key: this is the federation's
+            // "is the bridge live at all" test, and each chain's own flag day is then
+            // checked per leg in _maybeFinalizeTransfer against that chain's own height.
+            if(!this._gateActive('bridge', snapshotBlock, 'BTC')) return;
             let pending = new Map();
             for(let coin of ALLOWED_CHAINS){
                 if(!this.indexers[coin] || !this.indexers[coin].url) continue;
@@ -322,7 +332,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             // mid-pass cannot drop its legs out of the invariant and turn a healthy read
             // into a phantom surplus.
             this._pendingInFlight = pending;
-            if(this._gateActive('policy', snapshotBlock)){
+            if(this._gateActive('policy', snapshotBlock, 'BTC')){
                 try { await this._pollPolicySnapshots(snapshotBlock); }
                 catch(e){ console.warn('CrossChainBridge: policy poll failed: ' + (e && e.message)); }
             }
@@ -381,9 +391,19 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!tick) return;
         // A general-token leg needs the token-bridge gate as well as the bridge gate; the
         // base spec's own legs are XCHAIN and ride the bridge gate alone. The parity test
-        // pins TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION per network, so this can
-        // never arm v3/v4 without an engine behind it.
-        if(tick !== 'XCHAIN' && !this._gateActive('token', snapshotBlock)) return;
+        // pins TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key, so
+        // this can never arm v3/v4 without an engine behind it. The token map is
+        // network-keyed and the snapshot block is BTC's, so the coin travels with the height.
+        if(tick !== 'XCHAIN' && !this._gateActive('token', snapshotBlock, 'BTC')) return;
+
+        // The SOURCE CHAIN's own flag day, read at the height this leg was mined, which is
+        // the same (block, coin) pair the indexer verdicts the action against. The map is
+        // keyed '<COIN>:<network>' and the three chains arm at three heights, so the
+        // BTC-anchored gate in _poll cannot speak for a leg mined on LTC or DOGE: without
+        // this the hub would sign an LTC leg the moment BTC crossed its instant. The
+        // follower re-applies the identical test in _validateTransfer, so proposer and
+        // validator refuse on the same height rather than disagreeing across the boundary.
+        if(!this._gateActive('bridge', Number(t.block_index), coin)) return;
 
         let srcActionIndex = Number(t.src_action_index);
         if(!Number.isInteger(srcActionIndex) || srcActionIndex <= 0) return;
@@ -733,7 +753,10 @@ class CrossChainBridgeEngine extends EventEmitter {
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
         let myBlock = await this._resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_BLOCK_TOLERANCE) return false;
-        if(!this._gateActive('bridge', Number(row.snapshot_block))) return false;
+        // The snapshot block is a BTC height (the anchor that selects the validator set), so
+        // it is judged against the BTC key. The source chain's own flag day is checked in
+        // _validateTransfer, at the height the leg was mined.
+        if(!this._gateActive('bridge', Number(row.snapshot_block), 'BTC')) return false;
 
         return hasTransfer ? await this._validateTransfer(row) : await this._validatePolicy(row);
     }
@@ -743,7 +766,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!ALLOWED_CHAINS.includes(row.src_chain) || !ALLOWED_CHAINS.includes(row.dest_chain)) return false;
         if(row.src_chain === row.dest_chain) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
-        if(String(row.tick) !== 'XCHAIN' && !this._gateActive('token', Number(row.snapshot_block))) return false;
+        if(String(row.tick) !== 'XCHAIN' && !this._gateActive('token', Number(row.snapshot_block), 'BTC')) return false;
 
         let res;
         try { res = await this._indexerCall(row.src_chain, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
@@ -757,6 +780,12 @@ class CrossChainBridgeEngine extends EventEmitter {
         // Our OWN depth judgement, at the MIN_DEPTH our own indexer reports the lock stamped.
         let depth = latest - Number(leg.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this._effectiveDepth(row.src_chain, leg.min_depth)) return false;
+
+        // The SOURCE CHAIN's own flag day, at the height the leg was mined: the mirror of the
+        // proposer's gate in _maybeFinalizeTransfer, on the same (block, coin) pair, so a leg
+        // from a chain that has not reached its own instant is refused by every follower
+        // rather than admitted because BTC crossed first.
+        if(!this._gateActive('bridge', Number(leg.block_index), row.src_chain)) return false;
 
         let fieldsMatch =
             String(leg.src_address)  === String(row.src_address) &&
@@ -777,7 +806,8 @@ class CrossChainBridgeEngine extends EventEmitter {
     }
 
     async _validatePolicy(row){
-        if(!this._gateActive('policy', Number(row.snapshot_block))) return false;
+        // snapshot_block is a BTC height, as everywhere else the anchor is read.
+        if(!this._gateActive('policy', Number(row.snapshot_block), 'BTC')) return false;
         if(!allCanonicalInts(row, POLICY_CANONICAL_INT_FIELDS)) return false;
         if(!ALLOWED_CHAINS.includes(row.origin_chain)) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
