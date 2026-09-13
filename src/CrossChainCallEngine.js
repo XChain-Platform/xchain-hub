@@ -125,16 +125,6 @@ const RESULT_BACKOFF_MAX_MS     = 60 * 60 * 1000;   // exponential backoff ceili
 const RESULT_BACKOFF_EXCLUDE_MAX = 500;             // max parked call_ids excluded per query (bounds query size)
 const RESULT_BACKOFF_MAP_MAX    = 10000;            // parked-map cap; FIFO evict just retries an entry sooner (safe)
 
-// Read-only surface column list for the relay-row API (getCall/listCalls).
-// Excludes the heavy validator_signatures blob, the hub-side-only ANCHOR audit
-// columns (batch_seq/archived_status/anchor_txid), and the mirror-internal
-// consensus fences (finalizing_view/push_generation): those serve signature
-// verification and reorg fencing, not operator/explorer display.
-const CALL_SURFACE_COLS = 'id, call_id, phase, snapshot_block, network, source_chain, ' +
-    'source_action_index, source_contract_index, target_chain, target_contract_index, ' +
-    'method, params_json, gas_limit, cross_hops, effective_time, status, result_status, ' +
-    'return_payload_b64, created_at';
-
 // Bound on listCalls rows (mirrors the api-side validateLimit ceiling).
 const CALL_LIST_MAX = 10000;
 
@@ -301,9 +291,7 @@ class CrossChainCallEngine extends EventEmitter {
     // row's own `status` field distinguishes finalized from retracted. Read-only.
     async getCall(callId){
         if(!callId) return null;
-        let rows = await this.db.doQuery(
-            'SELECT ' + CALL_SURFACE_COLS + " FROM cross_chain_calls WHERE call_id = ? ORDER BY phase",
-            [String(callId)]);
+        let rows = await this.db.findCrossChainCallPhasesByCallId(String(callId));
         if(!rows || rows.length === 0) return null;
         return {
             call_id:  String(callId),
@@ -315,20 +303,10 @@ class CrossChainCallEngine extends EventEmitter {
     // List XCALL relay rows for the explorer/dashboard, newest first,
     // with optional source_chain/target_chain/status/phase filters. Read-only.
     async listCalls({sourceChain, targetChain, status, phase, limit} = {}){
-        let where = [];
-        let args  = [];
-        if(sourceChain){ where.push('source_chain = ?'); args.push(String(sourceChain)); }
-        if(targetChain){ where.push('target_chain = ?'); args.push(String(targetChain)); }
-        if(status){ where.push('status = ?'); args.push(String(status)); }
-        if(phase){ where.push('phase = ?'); args.push(String(phase)); }
-        let sql = 'SELECT ' + CALL_SURFACE_COLS + ' FROM cross_chain_calls';
-        if(where.length) sql += ' WHERE ' + where.join(' AND ');
-        sql += ' ORDER BY id DESC LIMIT ?';
         let n = parseInt(limit);
         if(!Number.isInteger(n) || n <= 0) n = 50;
         if(n > CALL_LIST_MAX) n = CALL_LIST_MAX;
-        args.push(n);
-        return await this.db.doQuery(sql, args);
+        return await this.db.findCrossChainCallsForSurface({sourceChain, targetChain, status, phase}, n);
     }
 
     async _poll(){
@@ -447,12 +425,7 @@ class CrossChainCallEngine extends EventEmitter {
         for(let [cid, b] of this._resultBackoff){
             if(b.nextAt > now){ parked.push(cid); if(parked.length >= RESULT_BACKOFF_EXCLUDE_MAX) break; }
         }
-        let exclude = parked.length ? (" AND d.call_id NOT IN (" + parked.map(() => '?').join(',') + ")") : "";
-        let pending = await this.db.doQuery(
-            "SELECT d.* FROM cross_chain_calls d " +
-            "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
-            "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = ? AND r.id IS NULL" + exclude +
-            " ORDER BY d.id ASC LIMIT 100", [coin, ...parked]);
+        let pending = await this.db.findCrossChainCallDispatchesAwaitingResult(coin, parked);
         for(let d of pending){
             let callId = String(d.call_id).toLowerCase();
             try {
@@ -847,18 +820,6 @@ class CrossChainCallEngine extends EventEmitter {
             this._deferFinalize(row);
             return;
         }
-        let cols = ['call_id','phase','snapshot_block','network',
-                    'source_chain','source_action_index','source_contract_index',
-                    'target_chain','target_contract_index','method','params_json',
-                    'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
-                    'finalizing_view','validator_signatures','push_generation',
-                    'btc_chain_id',
-                    // The admission map, one column per chain in the row's read set
-                    // (target_chain OR source_chain). Inside the signed canonical. APPENDED
-                    // at the end deliberately: this list's positional order is mirrored by
-                    // hand in the engine's unit-test fake, so inserting mid-list silently
-                    // re-maps every column after the insertion point in that stand-in.
-                    'admit_block_btc','admit_block_ltc','admit_block_doge'];
         // Resolved into the value list rather than onto `row`: the row object feeds the
         // canonical and the retraction paths, and btc_chain_id is transport, never consensus.
         // The XCALL canonical enumerates its fields explicitly, so this value has no path
@@ -876,13 +837,8 @@ class CrossChainCallEngine extends EventEmitter {
             this._deferFinalize(row);
             return;
         }
-        let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
-        // A retracted row for the same (call_id, phase) can exist after a reorg.
-        // INSERT IGNORE would silently discard the re-finalized content, leaving
-        // the call permanently stranded in 'retracted'. Use ON DUPLICATE KEY UPDATE
-        // to overwrite a retracted row with the current quorum's content so the
-        // re-mined call can proceed normally.
-        let updateCols = cols.filter(c => c !== 'call_id' && c !== 'phase');
+        // The row write is an upsert (db/cross_chain.js setCrossChainCallFinalized), so a
+        // reorg-retracted twin for the same (call_id, phase) is overwritten, not skipped.
         // The row write sits OUTSIDE the recovery the snapshot persist above gets, and it
         // is the same precondition: a throw here means this hub finalized nothing, yet the
         // listener's bare .catch left _inflight set and the round retired in consensus.
@@ -892,11 +848,7 @@ class CrossChainCallEngine extends EventEmitter {
         // the upsert wrote nothing, so _rowExists still reports the call open and the next
         // poll re-proposes cleanly.
         try {
-            await this.db.doQuery(
-                'INSERT INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')' +
-                ' ON DUPLICATE KEY UPDATE ' + updateCols.map(c => c + ' = VALUES(' + c + ')').join(', ') +
-                ", status = 'finalized'",
-                vals);
+            await this.db.setCrossChainCallFinalized(row, btcChainId);
         } catch(e){
             console.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
                           String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
@@ -1122,15 +1074,9 @@ class CrossChainCallEngine extends EventEmitter {
         // row matches. A round whose row is not inserted yet is invisible to the SQL below,
         // and the early return on an empty select leaves no other trace of this retraction.
         this._recordRetraction(chain, bounds);
-        let tail = " AND source_chain = ? AND source_action_index >= ?" +
-                   (bounded ? " AND source_action_index <= ?" : "") +
-                   (fenced ? " AND push_generation <= ?" : "");
-        let params = [chain, from];
-        if(bounded) params.push(to);
-        if(fenced) params.push(gen);
-        let rows = await this.db.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
+        let rows = await this.db.findFinalizedCrossChainCallsInRetractionRange(chain, bounds);
         if(!rows.length) return;
-        await this.db.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
+        await this.db.updateCrossChainCallsRetractedInRange(chain, bounds);
         for(let r of rows){
             let rid = this._roundId(r.phase, String(r.call_id));
             this._inflight.delete(rid);

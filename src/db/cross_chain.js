@@ -24,6 +24,55 @@
  *
  ********************************************************************/
 
+// Read-only surface column list for the relay-row API (getCall/listCalls).
+// Excludes the heavy validator_signatures blob, the hub-side-only ANCHOR audit
+// columns (batch_seq/archived_status/anchor_txid), and the mirror-internal
+// consensus fences (finalizing_view/push_generation): those serve signature
+// verification and reorg fencing, not operator/explorer display.
+// Moved here from src/CrossChainCallEngine.js:133.
+const CALL_SURFACE_COLS = 'id, call_id, phase, snapshot_block, network, source_chain, ' +
+    'source_action_index, source_contract_index, target_chain, target_contract_index, ' +
+    'method, params_json, gas_limit, cross_hops, effective_time, status, result_status, ' +
+    'return_payload_b64, created_at';
+
+// The listCalls filters, as [caller key, column], in the order their clauses join the
+// WHERE. Fixed here so a filter key only ever selects a column from this list: the
+// caller's filter object supplies values, never SQL.
+const CALL_LIST_FILTERS = [
+    ['sourceChain', 'source_chain'],
+    ['targetChain', 'target_chain'],
+    ['status',      'status'],
+    ['phase',       'phase']
+];
+
+// The column list a finalized cross_chain_calls row is written with.
+// Moved here from src/CrossChainCallEngine.js:850.
+const CALL_FINALIZED_COLS = ['call_id','phase','snapshot_block','network',
+                    'source_chain','source_action_index','source_contract_index',
+                    'target_chain','target_contract_index','method','params_json',
+                    'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
+                    'finalizing_view','validator_signatures','push_generation',
+                    'btc_chain_id',
+                    // The admission map, one column per chain in the row's read set
+                    // (target_chain OR source_chain). Inside the signed canonical. APPENDED
+                    // at the end deliberately: this list's positional order is mirrored by
+                    // hand in the engine's unit-test fake, so inserting mid-list silently
+                    // re-maps every column after the insertion point in that stand-in.
+                    'admit_block_btc','admit_block_ltc','admit_block_doge'];
+
+// The range clause both reorg-retraction statements share, and its params. Built only
+// from fixed fragments: `bounded` and `fenced` choose which clauses join, and every
+// bound is a bound parameter. Moved here from src/CrossChainCallEngine.js:1125.
+function crossChainCallRetractionTail(chain, bounds) {
+    let tail = " AND source_chain = ? AND source_action_index >= ?" +
+               (bounds.bounded ? " AND source_action_index <= ?" : "") +
+               (bounds.fenced ? " AND push_generation <= ?" : "");
+    let params = [chain, bounds.from];
+    if(bounds.bounded) params.push(bounds.to);
+    if(bounds.fenced) params.push(bounds.gen);
+    return { tail, params };
+}
+
 module.exports = {
     // Reads rows from cross_chain_calls.
     // Moved here from src/StateAnchorPublisher.js:2491.
@@ -125,5 +174,74 @@ module.exports = {
     // Moved here from src/CrossChainDexEngine.js:1136.
     async updateCrossChainMatchRetracted(match_id) {
         return this.doQuery(`UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?`, [match_id]);
+    },
+
+    // Reads both phases of one XCALL relay, retracted rows included, with the surface
+    // columns only. Moved here from src/CrossChainCallEngine.js:304.
+    async findCrossChainCallPhasesByCallId(callId) {
+        return this.doQuery(
+            'SELECT ' + CALL_SURFACE_COLS + " FROM cross_chain_calls WHERE call_id = ? ORDER BY phase",
+            [callId]);
+    },
+
+    // Reads a newest-first page of relay rows with any of the listCalls filters.
+    // Moved here from src/CrossChainCallEngine.js:317. The caller clamps `limit`.
+    async findCrossChainCallsForSurface(filters, limit) {
+        let where = [];
+        let args  = [];
+        for(let [key, col] of CALL_LIST_FILTERS){
+            if(filters[key]){ where.push(col + ' = ?'); args.push(String(filters[key])); }
+        }
+        let sql = 'SELECT ' + CALL_SURFACE_COLS + ' FROM cross_chain_calls';
+        if(where.length) sql += ' WHERE ' + where.join(' AND ');
+        sql += ' ORDER BY id DESC LIMIT ?';
+        args.push(limit);
+        return this.doQuery(sql, args);
+    },
+
+    // Reads the finalized dispatches on one target chain that still have no live result
+    // row, skipping the call_ids parked in the result backoff. Moved here from
+    // src/CrossChainCallEngine.js:451. The parked ids are bound one placeholder each;
+    // their count is all they change about the statement.
+    async findCrossChainCallDispatchesAwaitingResult(targetChain, parkedCallIds) {
+        let exclude = parkedCallIds.length ? (" AND d.call_id NOT IN (" + parkedCallIds.map(() => '?').join(',') + ")") : "";
+        return this.doQuery(
+            "SELECT d.* FROM cross_chain_calls d " +
+            "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
+            "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = ? AND r.id IS NULL" + exclude +
+            " ORDER BY d.id ASC LIMIT 100", [targetChain, ...parkedCallIds]);
+    },
+
+    // Writes one finalized cross_chain_calls row, stamping btc_chain_id into the value
+    // list rather than onto the row. Moved here from src/CrossChainCallEngine.js:879.
+    //
+    // A retracted row for the same (call_id, phase) can exist after a reorg.
+    // INSERT IGNORE would silently discard the re-finalized content, leaving
+    // the call permanently stranded in 'retracted'. Use ON DUPLICATE KEY UPDATE
+    // to overwrite a retracted row with the current quorum's content so the
+    // re-mined call can proceed normally.
+    async setCrossChainCallFinalized(row, btcChainId) {
+        let cols = CALL_FINALIZED_COLS;
+        let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
+        let updateCols = cols.filter(c => c !== 'call_id' && c !== 'phase');
+        return this.doQuery(
+            'INSERT INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')' +
+            ' ON DUPLICATE KEY UPDATE ' + updateCols.map(c => c + ' = VALUES(' + c + ')').join(', ') +
+            ", status = 'finalized'",
+            vals);
+    },
+
+    // Reads the finalized cross_chain_calls rows a reorg retraction covers.
+    // Moved here from src/CrossChainCallEngine.js:1131.
+    async findFinalizedCrossChainCallsInRetractionRange(chain, bounds) {
+        let { tail, params } = crossChainCallRetractionTail(chain, bounds);
+        return this.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
+    },
+
+    // Marks the finalized cross_chain_calls rows a reorg retraction covers 'retracted'.
+    // Moved here from src/CrossChainCallEngine.js:1133.
+    async updateCrossChainCallsRetractedInRange(chain, bounds) {
+        let { tail, params } = crossChainCallRetractionTail(chain, bounds);
+        return this.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
     }
 };
