@@ -844,6 +844,12 @@ class CrossChainDexConsensus extends EventEmitter {
     // round the federation already finalized. The quorum signatures over the
     // canonical ARE the proof (the same proof the indexers verify), so a
     // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
+    //
+    // Deliberately NOT bound by the admission map (that guard lives at
+    // _handlePropose via _admissionBoundHolds, refusing a PROPOSER that invents
+    // a height). Here the row already carries 2f+1 signatures, so refusing it
+    // finalizes nothing, it only strands THIS hub outside the federation until
+    // an operator intervenes; there is no proposer left to bound.
     async _handleFinalSync(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
