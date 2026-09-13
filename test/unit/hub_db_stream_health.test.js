@@ -26,6 +26,7 @@ const proxyquire = require('proxyquire').noPreserveCache();
 
 const { ConsensusInputMonitor } = require('../../src/lib/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 describe('/health hub DB stream heartbeat', function () {
 
@@ -41,7 +42,9 @@ describe('/health hub DB stream heartbeat', function () {
         const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
 
         const mockHub = {
-            db: { doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
+            // DB_METHODS supplies getDatabaseLivenessProbe, the ping/health probe,
+            // routed through the doQuery stub beside it.
+            db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
             capabilitySnapshot: { monitor: new ConsensusInputMonitor({ throttleMs: 60000, log: () => {} }) },
             stateAnchorPublisher: null,
             attestationPublisher:  null,

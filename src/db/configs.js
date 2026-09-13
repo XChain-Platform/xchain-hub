@@ -251,5 +251,14 @@ module.exports = {
         let rows = await this.doQuery("SELECT UNIX_TIMESTAMP(MAX(updated_at)) AS watermark FROM configs");
         let w = rows && rows[0] ? rows[0].watermark : null;
         return w == null ? 0 : Number(w);
+    },
+
+    // A liveness probe that reads no table: it resolves when the pool hands out a
+    // working connection and the server answers, and rejects otherwise. It sits in
+    // this mixin because configs is the one family every hub boots with; the
+    // ping and health RPCs race it against a timeout.
+    // Moved here from src/api.js:735, src/api.js:753.
+    async getDatabaseLivenessProbe(){
+        return this.doQuery('SELECT 1', []);
     }
 };

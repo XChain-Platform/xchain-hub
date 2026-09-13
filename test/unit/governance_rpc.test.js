@@ -20,7 +20,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
 const Governance = require('../../src/Governance');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 
 const CapabilityRegistry = proxyquire('../../src/CapabilityRegistry', {
     './capabilities/index.js': {}
@@ -140,7 +140,10 @@ describe('governance/capability read RPC queries', function () {
                 query:   sinon.stub().resolves([]),
                 release: sinon.stub().resolves()
             };
-            return { _conn: conn, getConnection: sinon.stub().resolves(conn) };
+            // The registry's statements live in db/validators.js and take the
+            // connection first; spreading the real methods keeps conn.query the
+            // stub that sees the SQL.
+            return { ...DB_METHODS, _conn: conn, getConnection: sinon.stub().resolves(conn) };
         }
 
         function makeReg() {

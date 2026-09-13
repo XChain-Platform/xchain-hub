@@ -71,5 +71,49 @@ module.exports = {
     // Moved here from src/OraclePublisher.js:2772.
     async updateOraclePublishedRound(txid, round) {
         return this.doQuery('UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?', [txid, round]);
+    },
+
+    // Inserts a row into oracle_submissions.
+    // INSERT IGNORE relies on the UNIQUE KEY (round, coin_pair, validator_pubkey)
+    // so concurrent writes across hubs collapse silently instead of raising
+    // ER_DUP_ENTRY (which db.doQuery would log before our catch could filter it).
+    // Moved here from src/OracleRound.js:1137.
+    async createOracleSubmission(roundNumber, coinPair, validatorPubkey, price, sources) {
+        return this.doQuery(`INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
+                         VALUES (?, ?, ?, ?, ?)`, [roundNumber, coinPair, validatorPubkey, price, sources]);
+    },
+
+    // Reads rows from oracle_prices: the forward page-walk the indexer bootstrap
+    // mirrors byte-for-byte (see src/oraclePricesSnapshotQuery.js for why it must
+    // never change). since and limit arrive clamped.
+    // Moved here from src/oraclePricesSnapshotQuery.js:86.
+    async findOraclePricesAfterId(since, limit) {
+        return this.doQuery('SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+    },
+
+    // Reads rows from oracle_prices: each feed's row with the greatest effective_at
+    // at or before now, for the dashboard's current-per-feed view. now and limit
+    // arrive clamped.
+    // Feed identity is (source_address, coin, tick, fiat): the table key
+    // and what dispenser settlement filters on (indexer getOraclePrice).
+    // PRICE v1 is permissionless, so two operators publishing the same
+    // (coin,tick,fiat) is normal; grouping without source_address would
+    // return only the freshest operator's row and hide an abandoned
+    // operator's stale feed from the dashboard (no feed-stale alert while
+    // dispensers pinned to that ORACLE_ADDRESS settle against dead data).
+    // Join each feed's MAX(effective_at) back to the full row. Ties at the
+    // same effective_at (two txs from one operator) return >1 row for that
+    // feed; the client re-dedups per feed key, so this is harmless and
+    // still bounded to ~= feed count. ORDER BY id keeps output stable.
+    // Moved here from src/oraclePricesSnapshotQuery.js:74.
+    async findLatestOraclePricesPerFeed(now, limit) {
+        return this.doQuery(
+            'SELECT op.* FROM oracle_prices op ' +
+            'JOIN (SELECT source_address, coin, tick, fiat, MAX(effective_at) AS max_eff ' +
+            '      FROM oracle_prices WHERE effective_at <= ? GROUP BY source_address, coin, tick, fiat) latest ' +
+            '  ON op.source_address = latest.source_address ' +
+            ' AND op.coin = latest.coin AND op.tick = latest.tick ' +
+            ' AND op.fiat = latest.fiat AND op.effective_at = latest.max_eff ' +
+            'ORDER BY op.id ASC LIMIT ?', [now, limit]);
     }
 };

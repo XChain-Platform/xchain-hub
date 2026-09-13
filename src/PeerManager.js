@@ -1187,10 +1187,7 @@ class PeerManager extends EventEmitter {
     // Record/update a peer in the database (fire and forget)
     _recordPeer(addr, validatorId, isSeed) {
         if (!this.db) return;
-        let query = `INSERT INTO p2p_peers (addr, validator_id, last_seen_at, is_seed)
-                     VALUES (?, ?, NOW(), ?)
-                     ON DUPLICATE KEY UPDATE validator_id = ?, last_seen_at = NOW()`;
-        this.db.doQuery(query, [addr, validatorId, isSeed ? 1 : 0, validatorId])
+        this.db.setP2pPeer(addr, validatorId, isSeed ? 1 : 0)
             .catch(e => console.error('Error recording peer:', e));
     }
 }

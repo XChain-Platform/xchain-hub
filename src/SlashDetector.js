@@ -445,10 +445,8 @@ class SlashDetector {
             console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
             return false;
         }
-        let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
-                     VALUES (?, ?, ?, ?)`;
         try {
-            await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence]);
+            await this.db.createSlashProposal(validatorPubkey, offenseType, round, evidence);
             return true;
         } catch (e) {
             console.error('Error recording slash proposal:', e);
@@ -463,13 +461,11 @@ class SlashDetector {
     }
 
     async getPendingProposals() {
-        let query = "SELECT * FROM slash_proposals WHERE status = 'pending' ORDER BY created_at DESC";
-        return await this.db.doQuery(query);
+        return await this.db.findPendingSlashProposals();
     }
 
     async getProposalsForValidator(validatorPubkey) {
-        let query = "SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50";
-        return await this.db.doQuery(query, [validatorPubkey]);
+        return await this.db.findRecentSlashProposalsByValidator(validatorPubkey);
     }
 
     // Public read surface behind the unauthenticated `getslashproposals` RPC
@@ -497,27 +493,23 @@ class SlashDetector {
     // AUTO_INCREMENT cursor the explorer pages on; created_at is a
     // second-granularity TIMESTAMP and ties within a burst of detections.
     async getSlashProposals({ status, validatorPubkey, limit } = {}) {
-        let where = [];
-        let args  = [];
+        // Validate and normalise here, where the domain rules live; the statement
+        // itself is assembled in db/slash_proposals.js from the values that pass.
+        let statusFilter = null;
+        let pubkeyFilter = null;
         if (status) {
             if (!PROPOSAL_STATUSES.includes(String(status)))
                 throw new Error('status must be one of: ' + PROPOSAL_STATUSES.join(', '));
-            where.push('status = ?');
-            args.push(String(status));
+            statusFilter = String(status);
         }
         if (validatorPubkey) {
             let pk = String(validatorPubkey).toLowerCase();
             if (!/^[0-9a-f]{64}$/.test(pk))
                 throw new Error('validator_pubkey must be 64 hex characters');
-            where.push('validator_pubkey = ?');
-            args.push(pk);
+            pubkeyFilter = pk;
         }
         let lim = Math.min(Math.max(parseInt(limit, 10) || DEFAULT_PAGE, 1), MAX_PAGE);
-        let query = 'SELECT id, validator_pubkey, offense_type, round_number, evidence, status, created_at ' +
-                    'FROM slash_proposals';
-        if (where.length) query += ' WHERE ' + where.join(' AND ');
-        query += ' ORDER BY id DESC LIMIT ' + lim;
-        let rows = await this.db.doQuery(query, args);
+        let rows = await this.db.findSlashProposalsFiltered(statusFilter, pubkeyFilter, lim);
         return (rows || []).map(r => ({
             id:               r.id,
             validator_pubkey: r.validator_pubkey,

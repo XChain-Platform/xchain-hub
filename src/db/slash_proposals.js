@@ -29,5 +29,50 @@ module.exports = {
     // Moved here from src/SlashGovernance.js:94.
     async findSlashProposals(validatorPubkey) {
         return this.doQuery(`SELECT id, validator_pubkey, offense_type, round_number, evidence, created_at FROM slash_proposals WHERE validator_pubkey = ? AND status = 'pending' ORDER BY id ASC`, [validatorPubkey]);
+    },
+
+    // Inserts a row into slash_proposals.
+    // Moved here from src/SlashDetector.js:448.
+    async createSlashProposal(validatorPubkey, offenseType, roundNumber, evidence) {
+        return this.doQuery(`INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
+                     VALUES (?, ?, ?, ?)`, [validatorPubkey, offenseType, roundNumber, evidence]);
+    },
+
+    // Reads rows from slash_proposals: every pending proposal, newest first, unbounded.
+    // Moved here from src/SlashDetector.js:466.
+    async findPendingSlashProposals() {
+        return this.doQuery("SELECT * FROM slash_proposals WHERE status = 'pending' ORDER BY created_at DESC");
+    },
+
+    // Reads rows from slash_proposals: the 50 newest proposals against one validator,
+    // any status.
+    // Moved here from src/SlashDetector.js:471.
+    async findRecentSlashProposalsByValidator(validatorPubkey) {
+        return this.doQuery("SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50", [validatorPubkey]);
+    },
+
+    // Reads rows from slash_proposals, narrowed to whichever of status and validator
+    // the caller passed (null for no filter). The caller validates both filters and
+    // clamps the page size; the integer check below is what keeps the interpolated
+    // LIMIT from ever carrying anything but a positive whole number.
+    // Moved here from src/SlashDetector.js:516.
+    async findSlashProposalsFiltered(status, validatorPubkey, limit) {
+        if (!Number.isInteger(limit) || limit < 1)
+            throw new Error('findSlashProposalsFiltered: limit must be a positive integer, got ' + limit);
+        let where = [];
+        let args  = [];
+        if (status) {
+            where.push('status = ?');
+            args.push(status);
+        }
+        if (validatorPubkey) {
+            where.push('validator_pubkey = ?');
+            args.push(validatorPubkey);
+        }
+        let query = 'SELECT id, validator_pubkey, offense_type, round_number, evidence, status, created_at ' +
+                    'FROM slash_proposals';
+        if (where.length) query += ' WHERE ' + where.join(' AND ');
+        query += ' ORDER BY id DESC LIMIT ' + limit;
+        return this.doQuery(query, args);
     }
 };

@@ -140,5 +140,50 @@ module.exports = {
     // Moved here from src/Governance.js:899, src/Governance.js:1034.
     async updateGovernanceProposal(applyStatus, proposalId) {
         return this.doQuery(`UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'`, [applyStatus, proposalId]);
+    },
+
+    // Reads rows from governance_proposals, narrowed to whichever of status and
+    // parameter the caller passed. The WHERE clauses are built from the filters
+    // present; the limit is parsed and clamped to 1..500 before it reaches the
+    // statement, so the interpolated LIMIT can never carry caller text.
+    // Moved here from src/Governance.js:434.
+    async findGovernanceProposalsFiltered(status, parameter, limit) {
+        let query = "SELECT * FROM governance_proposals";
+        let where = [];
+        let args = [];
+        if (status) {
+            where.push("status = ?");
+            args.push(status);
+        }
+        if (parameter) {
+            where.push("parameter = ?");
+            args.push(parameter);
+        }
+        if (where.length) query += " WHERE " + where.join(" AND ");
+        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+        query += " ORDER BY created_at DESC LIMIT " + lim;
+        return this.doQuery(query, args);
+    },
+
+    // Reads rows from governance_votes, narrowed to whichever of proposal and voter
+    // the caller passed. Same clause-building and limit clamp as the proposal list
+    // above; the signature column is left out on purpose (see the call site).
+    // Moved here from src/Governance.js:456.
+    async findGovernanceVotesFiltered({ proposalId, voterPubkey, limit } = {}) {
+        let query = "SELECT id, proposal_id, voter_pubkey, vote, created_at FROM governance_votes";
+        let where = [];
+        let args = [];
+        if (proposalId) {
+            where.push("proposal_id = ?");
+            args.push(proposalId);
+        }
+        if (voterPubkey) {
+            where.push("voter_pubkey = ?");
+            args.push(voterPubkey);
+        }
+        if (where.length) query += " WHERE " + where.join(" AND ");
+        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+        query += " ORDER BY id DESC LIMIT " + lim;
+        return this.doQuery(query, args);
     }
 };
