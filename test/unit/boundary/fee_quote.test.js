@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 // Stub all dependencies to isolate XChainHub
 let mockDb;
@@ -37,6 +38,9 @@ describe('Boundary: Fee Quote Calculation', function () {
 
     beforeEach(function () {
         mockDb = {
+            // The named query methods, so getPriceStatus's named read reaches the
+            // doQuery stub below in the same call order the fixtures rely on.
+            ...DB_METHODS,
             doQuery:        sinon.stub(),
             getConfig:      sinon.stub().resolves({}),
             setParam:       sinon.stub().resolves(),

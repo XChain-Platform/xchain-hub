@@ -85,5 +85,27 @@ module.exports = {
     // Moved here from src/SlashGovernance.js:231.
     async updateValidatorBySigningPubkey(signing_pubkey) {
         return this.doQuery(`UPDATE validators SET status = 'suspended', updated_at = NOW() WHERE signing_pubkey = ? AND status = 'active'`, [signing_pubkey]);
+    },
+
+    // Marks the active validators row for one signing key 'removed'.
+    // Moved here from src/XChainHub.js:879, the deregister branch keyed on the key.
+    async updateValidatorRemovedBySigningPubkey(signingPubkey) {
+        return this.doQuery("UPDATE validators SET status = 'removed', updated_at = NOW() WHERE signing_pubkey = ? AND status = 'active'", [signingPubkey]);
+    },
+
+    // Marks the active validators row(s) at one address 'removed'.
+    // Moved here from src/XChainHub.js:879, the deregister branch keyed on the address.
+    // Deliberately unbounded by key: deregistering by address retires whatever active
+    // row that address currently carries, which is how a rotated-away key is cleared.
+    async updateValidatorRemovedByAddr(addr) {
+        return this.doQuery("UPDATE validators SET status = 'removed', updated_at = NOW() WHERE addr = ? AND status = 'active'", [addr]);
+    },
+
+    // Reads the active validator roster the getvalidators RPC answers with.
+    // Moved here from src/XChainHub.js:1112. Wider than findActiveValidators and
+    // findActiveValidatorChains: `chains` rides along with addr and status because
+    // the documented response has always carried it.
+    async findActiveValidatorRoster() {
+        return this.doQuery("SELECT signing_pubkey, addr, chains, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey");
     }
 };
