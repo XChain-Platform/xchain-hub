@@ -431,21 +431,7 @@ class Governance extends EventEmitter {
     // parameter filter serves read-only consumers (e.g. the explorer's governance
     // pages) that browse proposals for one governance knob across its history.
     async getProposals(status, parameter, limit) {
-        let query = "SELECT * FROM governance_proposals";
-        let where = [];
-        let args = [];
-        if (status) {
-            where.push("status = ?");
-            args.push(status);
-        }
-        if (parameter) {
-            where.push("parameter = ?");
-            args.push(parameter);
-        }
-        if (where.length) query += " WHERE " + where.join(" AND ");
-        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
-        query += " ORDER BY created_at DESC LIMIT " + lim;
-        return await this.db.doQuery(query, args);
+        return await this.db.findGovernanceProposalsFiltered(status, parameter, limit);
     }
 
     // List individual votes by proposal and/or voter. Read-only surface for the
@@ -453,21 +439,11 @@ class Governance extends EventEmitter {
     // votes, but list-by-voter needs its own query. Signature column is omitted
     // (verification happens hub-side at cast time, and rows are hub-local state).
     async getVotes({ proposalId, voterPubkey, limit } = {}) {
-        let query = "SELECT id, proposal_id, voter_pubkey, vote, created_at FROM governance_votes";
-        let where = [];
-        let args = [];
-        if (proposalId) {
-            where.push("proposal_id = ?");
-            args.push(proposalId);
-        }
-        if (voterPubkey) {
-            where.push("voter_pubkey = ?");
-            args.push(String(voterPubkey).toLowerCase());
-        }
-        if (where.length) query += " WHERE " + where.join(" AND ");
-        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
-        query += " ORDER BY id DESC LIMIT " + lim;
-        return await this.db.doQuery(query, args);
+        return await this.db.findGovernanceVotesFiltered({
+            proposalId,
+            voterPubkey: voterPubkey ? String(voterPubkey).toLowerCase() : voterPubkey,
+            limit
+        });
     }
 
     async getProposal(proposalId) {
