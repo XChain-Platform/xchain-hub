@@ -2230,7 +2230,7 @@ async function startApi(){
     // transaction (the ATTEST response mirror design).
     //
     // Explicit column list, for the reason spelled out on state_checkpoints above:
-    // this feed and the WS stream must deliver the SAME column set, and `SELECT *`
+    // this feed and the WS stream must deliver the SAME column set, and a star select (every column)
     // drifts them apart the moment the hub table gains a column the broadcaster does
     // not send. Every column below is mirror-consumed - the indexer re-verifies
     // `signatures` over a canonical rebuilt from `effective_time`/`response_hash`/
