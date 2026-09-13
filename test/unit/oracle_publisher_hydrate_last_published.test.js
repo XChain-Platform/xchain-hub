@@ -18,6 +18,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 let fsMock;
 let OraclePublisher;
@@ -60,6 +61,11 @@ function makeHub(overrides) {
 function makeDb(rows) {
     let table = (rows || []).slice();
     return {
+        // Spread the named query methods first: _hydratePublishedMarkers now calls
+        // db.findAllOraclePublishedRounds() instead of issuing SQL inline, and that
+        // method (and every other named method here) calls this.doQuery, which resolves
+        // to the own override below because it stays an own property of this object.
+        ...DB_METHODS,
         table,
         doQuery: sinon.stub().callsFake(async function (q, args) {
             if (/^\s*SELECT/i.test(q)) {
