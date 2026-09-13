@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
+const { DB_METHODS } = require('../../helpers/mockHub');
 
 let mockDb;
 const XChainHub = proxyquire('../../../src/XChainHub', {
@@ -36,6 +37,11 @@ describe('Boundary: Validator Registration', function () {
 
     beforeEach(function () {
         mockDb = {
+            // Spread the named query methods first so registerValidator/syncValidators,
+            // which now call db.updateValidatorByAddr / db.setValidator instead of issuing
+            // SQL at the call site, still route through the doQuery stub below with the
+            // same statement text the assertions expect.
+            ...DB_METHODS,
             doQuery:        sinon.stub().resolves([]),
             setParam:       sinon.stub().resolves(),
             createDatabase: sinon.stub().resolves(),
