@@ -29,6 +29,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 const { waitUntil } = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
     this.timeout(20000);
@@ -51,7 +52,10 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
         const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if(cb) cb(); }), on: sinon.stub() };
 
         const mockHub = Object.assign({
-            db: { doQuery: sinon.stub().resolves([]), getChainTip: sinon.stub().resolves(null) },
+            // Spread first so the /hub-db/snapshot routes' named methods
+            // (findBridgeTransfers, findPolicySnapshots, ...) still route through the
+            // doQuery stub below rather than throwing "is not a function".
+            db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), getChainTip: sinon.stub().resolves(null) },
             network: 'regtest',
             capabilitySnapshot: null,
             getPeerManager: () => null,
@@ -218,7 +222,7 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
 
         it('serves bridge_transfers, excluding retracted rows the stream deletes', async function(){
             const doQuery = sinon.stub().resolves([{ id: 1, transfer_id: 'b'.repeat(64) }]);
-            const { routes } = await bootApi({ hubOverrides: { db: { doQuery, getChainTip: sinon.stub().resolves(null) } } });
+            const { routes } = await bootApi({ hubOverrides: { db: { ...DB_METHODS, doQuery, getChainTip: sinon.stub().resolves(null) } } });
             const handler = routes.get('/hub-db/snapshot/bridge_transfers');
             expect(handler, 'the bridge_transfers snapshot route must be registered').to.be.a('function');
             const res = fakeRes();
@@ -235,7 +239,7 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
 
         it('serves policy_snapshots WITHOUT a status filter, because the table is append-only', async function(){
             const doQuery = sinon.stub().resolves([]);
-            const { routes } = await bootApi({ hubOverrides: { db: { doQuery, getChainTip: sinon.stub().resolves(null) } } });
+            const { routes } = await bootApi({ hubOverrides: { db: { ...DB_METHODS, doQuery, getChainTip: sinon.stub().resolves(null) } } });
             const handler = routes.get('/hub-db/snapshot/policy_snapshots');
             expect(handler, 'the policy_snapshots snapshot route must be registered').to.be.a('function');
             const res = fakeRes();
@@ -248,7 +252,7 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
 
         it('rejects a malformed since_id / limit rather than paging from garbage', async function(){
             const doQuery = sinon.stub().resolves([]);
-            const { routes } = await bootApi({ hubOverrides: { db: { doQuery, getChainTip: sinon.stub().resolves(null) } } });
+            const { routes } = await bootApi({ hubOverrides: { db: { ...DB_METHODS, doQuery, getChainTip: sinon.stub().resolves(null) } } });
             for(const path of ['/hub-db/snapshot/bridge_transfers', '/hub-db/snapshot/policy_snapshots']){
                 const res = fakeRes();
                 // eslint-disable-next-line no-await-in-loop
@@ -259,7 +263,7 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
 
         it('degrades a 500 rather than leaking a driver error to a mirror', async function(){
             const doQuery = sinon.stub().rejects(new Error('ER_NO_SUCH_TABLE: bridge_transfers'));
-            const { routes } = await bootApi({ hubOverrides: { db: { doQuery, getChainTip: sinon.stub().resolves(null) } } });
+            const { routes } = await bootApi({ hubOverrides: { db: { ...DB_METHODS, doQuery, getChainTip: sinon.stub().resolves(null) } } });
             const res = fakeRes();
             await routes.get('/hub-db/snapshot/bridge_transfers')({ query: {} }, res);
             expect(res.status).to.equal(500);
