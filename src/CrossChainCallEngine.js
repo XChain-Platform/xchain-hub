@@ -188,6 +188,18 @@ class CrossChainCallEngine extends EventEmitter {
         // Round ids currently in PBFT but not yet written (mirrors DexEngine._inflight).
         this._inflight = new Set();
 
+        // Retractions this hub applies, recorded even when they match no persisted row.
+        // retractCallsForReorg fences rows that are already in the table; a finalize write
+        // still parked in its awaits owns no row yet, so the retraction passes it by and the
+        // resumed write inserts and mirrors an executable dispatch the reorg already removed.
+        // Each entry carries a monotonic sequence, each pending write remembers the sequence
+        // it started at, and the write re-checks this list immediately before its insert.
+        // Entries older than every pending write serve no one and are pruned, so the list
+        // needs no expiry knob. It is per process: a crash takes the pending write with it.
+        this._retractionFence = [];
+        this._retractionSeq   = 0;
+        this._pendingWrites   = new Set();
+
         // PBFT consensus over each relay row. Distinct message types keep XCALL
         // gossip out of the DEX match rounds; idField binds rounds to round_id.
         this.consensus = new CrossChainDexConsensus(this, {
@@ -791,6 +803,23 @@ class CrossChainCallEngine extends EventEmitter {
 
     async _writeFinalizedRow(ev){
         let row = ev.row;
+        // Sequence this write against the retraction fence before the first await. Every
+        // retraction recorded from here on is one this write has to answer for, and the
+        // registration keeps those entries alive while the awaits below run.
+        // The token is an object, not the number: concurrent writes share a start sequence
+        // and a Set of numbers would let one write's completion unregister the other.
+        this._ensureRetractionFence();
+        let token = { seq: this._retractionSeq };
+        this._pendingWrites.add(token);
+        try {
+            await this._writeFinalizedRowFenced(ev, row, token.seq);
+        } finally {
+            this._pendingWrites.delete(token);
+            this._pruneRetractionFence();
+        }
+    }
+
+    async _writeFinalizedRowFenced(ev, row, startSeq){
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
@@ -842,6 +871,18 @@ class CrossChainCallEngine extends EventEmitter {
         // The XCALL canonical enumerates its fields explicitly, so this value has no path
         // into a signed preimage.
         let btcChainId = await this._resolveBtcChainId(row.network);
+        // Last gate before the insert, after every await on this path. A retraction that
+        // landed while this write was parked owns no row to flip, so the fence is the only
+        // record of it. Take the same fail-closed exit the persist failures take: no insert,
+        // no mirror, round released, so a later poll re-proposes only if the source chain
+        // still carries the call.
+        if(this._retractedSince(startSeq, row)){
+            console.warn('CrossChainCall: retraction landed while finalizing ' + row.phase + ' ' +
+                         String(row.call_id).substring(0, 16) + '... (' + row.source_chain + ':' +
+                         row.source_action_index + '); skipping the row write and the mirror');
+            this._deferFinalize(row);
+            return;
+        }
         let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
         // A retracted row for the same (call_id, phase) can exist after a reorg.
         // INSERT IGNORE would silently discard the re-finalized content, leaving
@@ -885,6 +926,55 @@ class CrossChainCallEngine extends EventEmitter {
     // gates the poll (`if(this._inflight.has(roundId)) return;`) and the consensus
     // finalized-ring refuses to re-run a round id it has already retired. No 'call:'
     // event is emitted, because nothing was finalized in this hub's DB.
+    // Record a retraction this hub applies, before it looks for rows to flip, so a write
+    // that is mid-await is fenced whether or not the retraction finds anything to update.
+    // Bounds arrive already normalized by normalizeRetractionBounds, so the predicate here
+    // and the SQL predicate in retractCallsForReorg read the same fields the same way.
+    // Bring the fence fields up on an instance that reaches these paths without the
+    // constructor, which several suites build with Object.create(Engine.prototype).
+    _ensureRetractionFence(){
+        if(!this._retractionFence) this._retractionFence = [];
+        if(!this._pendingWrites)   this._pendingWrites   = new Set();
+        if(typeof this._retractionSeq !== 'number') this._retractionSeq = 0;
+    }
+
+    _recordRetraction(chain, bounds){
+        this._ensureRetractionFence();
+        this._retractionFence.push({
+            seq: ++this._retractionSeq,
+            chain: String(chain),
+            from: bounds.from, to: bounds.to, gen: bounds.gen,
+            bounded: bounds.bounded, fenced: bounds.fenced
+        });
+        this._pruneRetractionFence();
+    }
+
+    // Drop fence entries no pending write can still consult: a write only reads entries
+    // recorded after it started, so anything at or below the oldest pending write's start
+    // sequence is unreachable. With no write pending the whole list is unreachable.
+    _pruneRetractionFence(){
+        this._ensureRetractionFence();
+        let floor = this._retractionSeq;
+        for(let t of this._pendingWrites) if(t.seq < floor) floor = t.seq;
+        this._retractionFence = this._retractionFence.filter(e => e.seq > floor);
+    }
+
+    // True when a retraction recorded after `sinceSeq` covers this row. The predicate
+    // mirrors retractCallsForReorg's SQL tail: same source chain, index at or above the
+    // lower bound, within the closed upper bound when the retraction is bounded, and at or
+    // below the fenced generation when it is generation-fenced.
+    _retractedSince(sinceSeq, row){
+        this._ensureRetractionFence();
+        let idx = Number(row.source_action_index);
+        let gen = Number(row.push_generation || 0);
+        return this._retractionFence.some(e =>
+            e.seq > sinceSeq &&
+            e.chain === String(row.source_chain) &&
+            idx >= e.from &&
+            (!e.bounded || idx <= e.to) &&
+            (!e.fenced  || gen <= e.gen));
+    }
+
     _deferFinalize(row){
         this._inflight.delete(row.round_id);
         if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
@@ -1039,6 +1129,10 @@ class CrossChainCallEngine extends EventEmitter {
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
+        // Fence the in-process writes FIRST, before the select decides whether any persisted
+        // row matches. A round whose row is not inserted yet is invisible to the SQL below,
+        // and the early return on an empty select leaves no other trace of this retraction.
+        this._recordRetraction(chain, bounds);
         let tail = " AND source_chain = ? AND source_action_index >= ?" +
                    (bounded ? " AND source_action_index <= ?" : "") +
                    (fenced ? " AND push_generation <= ?" : "");
