@@ -573,6 +573,59 @@ class CrossChainCallEngine extends EventEmitter {
         return true;
     }
 
+    // The FOLLOWER half of admission by height: which table this row belongs to, which
+    // chains read it, and which block keys its era. Read by CrossChainDexConsensus, which
+    // holds the one PROPOSE handler every engine shares and cannot know any of the three
+    // for itself: `idField` is 'round_id' on both this engine and AttestationRelay, so
+    // there is nothing on the consensus side to derive a table from without guessing.
+    //
+    // Returning null means "this row is not in the admission era", which is the legacy
+    // binding rule and not a pass: a legacy-era row carrying a map is refused by
+    // _canonicalMatch before the consensus ever asks.
+    admissionScope(row){
+        let r = row || {};
+        if(!ah.isAdmissionEra(r.network, r.snapshot_block)) return null;
+        return { table: 'cross_chain_calls', readSet: ah.admissionReadSet('cross_chain_calls', r) };
+    }
+
+    // The per-chain follower bound (C38, BF6). A leader's admit_blocks[c] must land in
+    // [ourTip + 1, ourTip + ADMIT_MAX_FUTURE_BLOCKS(c)] on every chain that reads the row,
+    // and the map must cover every one of them.
+    //
+    // This is a SECOND axis, not a replacement for the effective_time window above: a hub
+    // with a broken clock and a hub with a wrong tip are each caught by the axis that can
+    // see them, and a Byzantine leader has to be right on both to collect our signature.
+    //
+    // Every failure below is a refusal, including the ones that are our own fault (no
+    // resolver, a dead indexer, a frozen decoder). Adopting a height we could not check
+    // would sign the proposer's own claim back to it, which is what a bound is for.
+    async _checkProposedAdmission(row){
+        let scope;
+        try { scope = this.admissionScope(row); }
+        catch (err) {
+            console.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
+                '...; unusable admission read set: ' + err.message);
+            return false;
+        }
+        if(scope === null) return true;                       // legacy era; the old rule binds
+
+        let map;
+        try { map = ah.rowAdmitBlocks(row); }
+        catch (err) {
+            console.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
+                '...; unusable admission map: ' + err.message);
+            return false;
+        }
+        let v = await ah.checkAdmitBlocksAgainstHub(this.hub, scope.readSet, map);
+        if(!v.ok){
+            console.warn('CrossChainCall: refusing to sign the ' + row.phase + ' round for call ' +
+                String(row.call_id).substring(0,16) + '... at snapshot_block ' + row.snapshot_block +
+                '; ' + v.reason);
+            return false;
+        }
+        return true;
+    }
+
     _canonicalMatch(r, view){
         let raw;
         if(r.phase === 'result'){
@@ -643,6 +696,11 @@ class CrossChainCallEngine extends EventEmitter {
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
         let myBlock = await this._resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > 144) return false;
+
+        // The admission map is a leader-choice field too, and above the activation it is
+        // the field that decides WHEN every indexer binds this row. Bound it against our
+        // own tips before the phase re-derivation, which is the expensive half.
+        if(!(await this._checkProposedAdmission(row))) return false;
 
         if(row.phase === 'dispatch') return await this._validateDispatch(row);
         if(row.phase === 'result')   return await this._validateResult(row);

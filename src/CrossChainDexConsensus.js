@@ -48,6 +48,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+const ah                = require('./lib/admission_height.js');
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
@@ -450,6 +451,44 @@ class CrossChainDexConsensus extends EventEmitter {
         return { validators, quorum, weighted };
     }
 
+    // Does the proposed row's admission map hold against THIS hub's own chain tips?
+    //
+    // True for an engine that declares no admission scope, and for a row below the
+    // activation (admissionScope answers null), because those rows bind by the legacy
+    // effective_time rule and carry no map to bound.
+    //
+    // Every other answer is fail-closed, including the ones caused by our own side: a
+    // scope that throws, a map we cannot read, a tip we cannot resolve. A follower that
+    // adopted an unchecked height would be signing the proposer's own claim back to it.
+    async _admissionBoundHolds(row, rid){
+        if(typeof this.engine.admissionScope !== 'function') return true;
+        let scope;
+        try { scope = this.engine.admissionScope(row); }
+        catch(e){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... has no usable admission scope (' + (e && e.message) + '); not signing');
+            return false;
+        }
+        if(scope === null || scope === undefined) return true;
+
+        let map;
+        try { map = ah.rowAdmitBlocks(row); }
+        catch(e){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... carries an unusable admission map (' + (e && e.message) + '); not signing');
+            return false;
+        }
+        let v;
+        try { v = await ah.checkAdmitBlocksAgainstHub(this.hub, scope.readSet, map); }
+        catch(e){ v = { ok: false, chain: null, reason: 'admission bound check threw: ' + (e && e.message) }; }
+        if(!v.ok){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... failed the ' + String(scope.table) + ' admission bound; not signing: ' + v.reason);
+            return false;
+        }
+        return true;
+    }
+
     async _handlePropose(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
@@ -483,6 +522,19 @@ class CrossChainDexConsensus extends EventEmitter {
             console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
             return;
         }
+
+        // The per-chain follower bound on the row's ADMISSION MAP (C38, BF6), applied here
+        // because this is the one PROPOSE handler every engine on this consensus shares.
+        // An engine opts in by answering admissionScope(row) with the row's table and read
+        // set; one that does not is on the legacy effective_time rule and is unchanged.
+        //
+        // Deliberately a SECOND application for CrossChainCallEngine, which also holds the
+        // bound inside its own validateProposedMatch. The engine gate binds every caller of
+        // validateProposedMatch (its own tests, the e2e legs, any future caller) and this
+        // one binds every engine on the shared path, so neither can be removed by work on
+        // the other. The cost is one getlatestblock per reading chain on a path that
+        // already makes at least two indexer round trips per proposal.
+        if(!(await this._admissionBoundHolds(row, rid))) return;
 
         let adopted = false;
         if(canonical !== pending.canonical){

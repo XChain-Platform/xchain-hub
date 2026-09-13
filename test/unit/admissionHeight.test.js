@@ -21,6 +21,62 @@ const { expect } = require('chai');
 const ah  = require('../../src/lib/admission_height.js');
 const act = require('../../src/mirror_admission_activation.js');
 
+// ─── arming, because a DEFAULT run must drive BOTH eras ──────────────────────
+//
+// Every activation map in this train is deliberately inert, and the regtest key is the only
+// per-process arming seam the codebase has: mirror_admission_activation.js reads it from the
+// environment at MODULE LOAD, so setting process.env in a before() hook arms nothing. The
+// five most consensus-critical cases in this file skip in an unarmed process, and a bare
+// `this.skip()` behind an activation nobody arms is a case CI and every casual run never
+// drives, so the arming is done here rather than left to the launcher.
+//
+// So both eras are driven explicitly, on the shape priceV0CanonicalAdmission.test.js
+// established: purge the twin, the admission seam and the two engine classes that closed over
+// them from the require cache, set (or clear) the height, re-require, and put every cache
+// entry and the variable back byte-exact afterwards. Arming is scoped to the describe that
+// asks for it, never to the process, so the rest of this file and the rest of the run still
+// see the tree they were written against.
+const ERA_MODULES = [
+    '../../src/mirror_admission_activation.js',
+    '../../src/lib/admission_height.js',
+    '../../src/CrossChainDexEngine.js',
+    '../../src/CrossChainBridgeEngine.js'
+];
+
+// The regtest producer activation the armed describes below use. A row at this height is an
+// admission-era row and a row below it is a legacy row, so one armed process drives both.
+const ERA_AT = 1000;
+
+// height: a number to arm regtest at that height, or null to force regtest INERT whatever
+// the process was launched with. The inert direction is armed too, deliberately: a suite
+// that only drove whichever way the environment happened to point is the defect this
+// replaces, and it fails in whichever direction the operator did not happen to launch.
+function withAdmissionActivation(height){
+    const paths    = ERA_MODULES.map(m => require.resolve(m));
+    const saved    = paths.map(p => [p, require.cache[p]]);
+    const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+    for(const p of paths) delete require.cache[p];
+    if(height === null) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+    else process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(height);
+
+    const out = {
+        ah:     require('../../src/lib/admission_height.js'),
+        act:    require('../../src/mirror_admission_activation.js'),
+        // _canonicalMatch reads nothing off `this`, so it is driven off the prototype rather
+        // than through a constructed engine with a hub, a db and a consensus behind it.
+        DEX:    require('../../src/CrossChainDexEngine.js').prototype._canonicalMatch,
+        BRIDGE: require('../../src/CrossChainBridgeEngine.js').prototype._canonicalMatch,
+        restore(){
+            for(const [p, mod] of saved){
+                if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
+            }
+            if(savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
+        }
+    };
+    return out;
+}
+
 describe('admission_height: the measured read sets', () => {
 
     it('a match is read by a_chain and b_chain', () => {
@@ -259,51 +315,75 @@ describe('admission_height: the row helpers', () => {
     });
 });
 
-describe('admission_height: the era gate refuses in BOTH directions', () => {
+describe('admission_height: the era gate, INERT', () => {
     const REGTEST = 'regtest';
     let armed;
 
-    before(() => {
-        // The regtest key is armed from the environment at module load, which is the only
-        // per-process arming seam the codebase has. Whichever way this process was
-        // launched, both directions of the gate are driven below.
-        armed = act.isMirrorAdmissionProducerActive('BTC', REGTEST, 1000);
-    });
+    // Forced inert rather than trusted inert: the assertions below are about the branch a
+    // node takes when its activation key is null, and a process launched with the regtest
+    // key set would otherwise take the other one and pass vacuously.
+    before(() => { armed = withAdmissionActivation(null); });
+    after(() => { armed.restore(); });
 
     it('is keyed on the ROW\'s own BTC block through the producer activation map', () => {
-        expect(ah.isAdmissionEra(REGTEST, 1000)).to.equal(armed);
+        // An unset regtest key is INERT at every height, including height 0.
+        expect(armed.act.isMirrorAdmissionProducerActive('BTC', REGTEST, 1000)).to.equal(false);
+        expect(armed.ah.isAdmissionEra(REGTEST, 0)).to.equal(false);
+        expect(armed.ah.isAdmissionEra(REGTEST, 99999999)).to.equal(false);
         // mainnet and testnet are null in this train, so they are INERT at every height,
         // including the height-0 case a bare `height >= MAP[key]` would arm.
-        expect(ah.isAdmissionEra('mainnet', 0)).to.equal(false);
-        expect(ah.isAdmissionEra('mainnet', 99999999)).to.equal(false);
-        expect(ah.isAdmissionEra('testnet', 0)).to.equal(false);
+        expect(armed.ah.isAdmissionEra('mainnet', 0)).to.equal(false);
+        expect(armed.ah.isAdmissionEra('mainnet', 99999999)).to.equal(false);
+        expect(armed.ah.isAdmissionEra('testnet', 0)).to.equal(false);
         // An unknown network is INERT, never armed.
-        expect(ah.isAdmissionEra('not-a-network', 99999999)).to.equal(false);
+        expect(armed.ah.isAdmissionEra('not-a-network', 99999999)).to.equal(false);
     });
 
     it('builds NO field below the activation, so the legacy bytes are unchanged', () => {
-        expect(ah.admissionCanonicalField('XTEST', 'mainnet', 1000, null)).to.equal('');
-        expect(ah.admissionCanonicalField('XTEST', 'mainnet', 1000, undefined)).to.equal('');
+        expect(armed.ah.admissionCanonicalField('XTEST', 'mainnet', 1000, null)).to.equal('');
+        expect(armed.ah.admissionCanonicalField('XTEST', 'mainnet', 1000, undefined)).to.equal('');
+        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, 1000, null)).to.equal('');
     });
 
     it('refuses to build an ADMISSION canonical for a legacy-era row', () => {
-        expect(() => ah.admissionCanonicalField('XTEST', 'mainnet', 1000, { BTC: 1004 }))
+        expect(() => armed.ah.admissionCanonicalField('XTEST', 'mainnet', 1000, { BTC: 1004 }))
+            .to.throw(/refusing to build an admission-era canonical/);
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, 1000, { BTC: 1004 }))
             .to.throw(/refusing to build an admission-era canonical/);
     });
+});
 
-    it('refuses to build a LEGACY canonical for an admission-era row', function(){
-        // Driven against whichever arming this process has: when regtest is armed the live
-        // map answers, and when it is not, a stand-in activation with the same predicate
-        // shape drives the same branch. The branch under test is the refusal, not the map.
-        if(!armed) return this.skip();
-        expect(() => ah.admissionCanonicalField('XTEST', REGTEST, 1000, null))
+describe('admission_height: the era gate, ARMED at a regtest height', () => {
+    const REGTEST = 'regtest';
+    let armed;
+
+    before(() => { armed = withAdmissionActivation(ERA_AT); });
+    after(() => { armed.restore(); });
+
+    it('arms at the height it was given and NOT below it', () => {
+        expect(armed.ah.isAdmissionEra(REGTEST, ERA_AT)).to.equal(true);
+        expect(armed.ah.isAdmissionEra(REGTEST, ERA_AT + 1)).to.equal(true);
+        expect(armed.ah.isAdmissionEra(REGTEST, ERA_AT - 1)).to.equal(false);
+        // The arming is per (coin, network): mainnet and testnet stay inert in the SAME
+        // process, which is the mixed-fleet case a flag day has to survive.
+        expect(armed.ah.isAdmissionEra('mainnet', ERA_AT)).to.equal(false);
+        expect(armed.ah.isAdmissionEra('testnet', ERA_AT)).to.equal(false);
+    });
+
+    it('refuses to build a LEGACY canonical for an admission-era row', () => {
+        // The branch under test is the refusal, and it is the one that strands a row: a
+        // modern row signed over legacy bytes reproduces for no verifier in the fleet.
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, null))
+            .to.throw(/refusing to build a legacy canonical/);
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, undefined))
             .to.throw(/refusing to build a legacy canonical/);
     });
 
-    it('appends the field after a single pipe when the era is active', function(){
-        if(!armed) return this.skip();
-        expect(ah.admissionCanonicalField('XTEST', REGTEST, 1000, { BTC: 1004, DOGE: 2004 }))
+    it('appends the field after a single pipe when the era is active', () => {
+        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, { BTC: 1004, DOGE: 2004 }))
             .to.equal('|BTC:1004,DOGE:2004');
+        // And a row BELOW the activation in the same armed process still gets no field.
+        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT - 1, null)).to.equal('');
     });
 });
 
@@ -416,12 +496,6 @@ describe('XChainHub._admissionTipFresh: per chain, and a refusal is not a guess'
 
 describe('admission_height: the engines\' canonical builders carry the same gate', () => {
     const REGTEST = 'regtest';
-    const armed = act.isMirrorAdmissionProducerActive('BTC', REGTEST, 1000);
-
-    // _canonicalMatch reads nothing off `this`, so it is driven directly off the prototype
-    // rather than through a constructed engine with a hub, a db and a consensus behind it.
-    const DEX    = require('../../src/CrossChainDexEngine.js').prototype._canonicalMatch;
-    const BRIDGE = require('../../src/CrossChainBridgeEngine.js').prototype._canonicalMatch;
 
     function matchRow(extra){
         return Object.assign({
@@ -438,44 +512,66 @@ describe('admission_height: the engines\' canonical builders carry the same gate
         }, extra || {});
     }
 
-    it('a LEGACY-era match canonical is byte-identical to what it was before this field existed', () => {
-        // mainnet is INERT in this train at every height, so this is the from-genesis
-        // replay case: no separator, no field, nothing appended.
-        let r = matchRow({ network: 'mainnet' });
-        let raw = DEX.call({}, r, 0);
-        expect(raw).to.not.match(/BTC:/);
-        expect(raw.split('|').pop()).to.equal('0');   // b_filled_before, the old last field
+    describe('below the activation', () => {
+        let inert;
+        before(() => { inert = withAdmissionActivation(null); });
+        after(() => { inert.restore(); });
+
+        it('a LEGACY-era match canonical is byte-identical to what it was before this field existed', () => {
+            // mainnet is INERT in this train at every height, so this is the from-genesis
+            // replay case: no separator, no field, nothing appended.
+            let r = matchRow({ network: 'mainnet' });
+            let raw = inert.DEX.call({}, r, 0);
+            expect(raw).to.not.match(/BTC:/);
+            expect(raw.split('|').pop()).to.equal('0');   // b_filled_before, the old last field
+        });
+
+        it('the match builder refuses an admission map on a legacy-era row', () => {
+            expect(() => inert.DEX.call({}, matchRow({ network: 'mainnet', admit_blocks: { BTC: 1004, DOGE: 2004 } }), 0))
+                .to.throw(/CrossChainDex.*refusing to build an admission-era canonical/);
+        });
+
+        it('the policy builder refuses an admission map on a legacy-era row', () => {
+            expect(() => inert.BRIDGE.call({}, policyRow({ network: 'mainnet', admit_block_btc: 1004 }), 0))
+                .to.throw(/CrossChainPolicy.*refusing to build an admission-era canonical/);
+        });
     });
 
-    it('the match builder refuses an admission map on a legacy-era row', () => {
-        expect(() => DEX.call({}, matchRow({ network: 'mainnet', admit_blocks: { BTC: 1004, DOGE: 2004 } }), 0))
-            .to.throw(/CrossChainDex.*refusing to build an admission-era canonical/);
-    });
+    describe('at and above the activation', () => {
+        let armed;
+        before(() => { armed = withAdmissionActivation(ERA_AT); });
+        after(() => { armed.restore(); });
 
-    it('the policy builder refuses an admission map on a legacy-era row', () => {
-        expect(() => BRIDGE.call({}, policyRow({ network: 'mainnet', admit_block_btc: 1004 }), 0))
-            .to.throw(/CrossChainPolicy.*refusing to build an admission-era canonical/);
-    });
+        it('the match builder refuses to build LEGACY bytes for an admission-era row', () => {
+            expect(() => armed.DEX.call({}, matchRow(), 0))
+                .to.throw(/CrossChainDex.*refusing to build a legacy canonical/);
+        });
 
-    it('the match builder refuses to build LEGACY bytes for an admission-era row', function(){
-        if(!armed) return this.skip();
-        expect(() => DEX.call({}, matchRow(), 0))
-            .to.throw(/CrossChainDex.*refusing to build a legacy canonical/);
-    });
+        it('an admission-era match canonical ends with the ASCII-ordered map', () => {
+            let raw = armed.DEX.call({}, matchRow({ admit_block_btc: 1004, admit_block_doge: 2004 }), 0);
+            expect(raw.endsWith('|BTC:1004,DOGE:2004')).to.equal(true);
+            // And the map is the LAST thing appended, so two rows differing only in their
+            // admission heights differ in their signed bytes.
+            let other = armed.DEX.call({}, matchRow({ admit_block_btc: 1005, admit_block_doge: 2004 }), 0);
+            expect(other).to.not.equal(raw);
+        });
 
-    it('an admission-era match canonical ends with the ASCII-ordered map', function(){
-        if(!armed) return this.skip();
-        let raw = DEX.call({}, matchRow({ admit_block_btc: 1004, admit_block_doge: 2004 }), 0);
-        expect(raw.endsWith('|BTC:1004,DOGE:2004')).to.equal(true);
-        // And the map is the LAST thing appended, so two rows differing only in their
-        // admission heights differ in their signed bytes.
-        let other = DEX.call({}, matchRow({ admit_block_btc: 1005, admit_block_doge: 2004 }), 0);
-        expect(other).to.not.equal(raw);
-    });
+        it('an admission-era policy canonical carries every federation chain it was stamped with', () => {
+            let raw = armed.BRIDGE.call({}, policyRow({ admit_block_btc: 1004, admit_block_ltc: 3004, admit_block_doge: 2004 }), 0);
+            expect(raw.endsWith('|BTC:1004,DOGE:2004,LTC:3004')).to.equal(true);
+        });
 
-    it('an admission-era policy canonical carries every federation chain it was stamped with', function(){
-        if(!armed) return this.skip();
-        let raw = BRIDGE.call({}, policyRow({ admit_block_btc: 1004, admit_block_ltc: 3004, admit_block_doge: 2004 }), 0);
-        expect(raw.endsWith('|BTC:1004,DOGE:2004,LTC:3004')).to.equal(true);
+        it('a row BELOW the activation in the same armed process keeps the legacy bytes', () => {
+            // The mixed case a flag day actually produces, and the one a process-wide arming
+            // switch could never drive: both eras alive in one run, keyed on the row. The
+            // assertion is byte EQUALITY against a builder that never heard of the
+            // activation, because "no field appended" is the whole legacy guarantee.
+            let row  = matchRow({ snapshot_block: ERA_AT - 1 });
+            let raw  = armed.DEX.call({}, row, 0);
+            let inert = withAdmissionActivation(null);
+            try { expect(raw).to.equal(inert.DEX.call({}, row, 0)); }
+            finally { inert.restore(); }
+            expect(raw).to.not.match(/\|[A-Z]{3,4}:\d+(,[A-Z]{3,4}:\d+)*$/);
+        });
     });
 });
