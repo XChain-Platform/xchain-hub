@@ -42,7 +42,7 @@
     "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive",
     "test:mutate": "stryker run",
     "test:mutate:pilot": "stryker run stryker.config.phase1.json",
-    "test:boundary": "mocha 'test/boundary/**/*.boundary.test.js' 'test/unit/boundary/**/*.boundary.test.js' --timeout 5000 --recursive",
+    "test:boundary": "mocha 'test/boundary/**/*.test.js' 'test/unit/boundary/**/*.test.js' --timeout 5000 --recursive",
     "check:blind-sleeps": "node bin/check-blind-sleeps.js",
     "check:observability-sync": "bash bin/sync-observability.sh --check"
   },
