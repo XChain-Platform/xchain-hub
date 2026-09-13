@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The PRICE v0 round push carries the producer's signed admission map through to the verifier.  
 - A PRICE v1 oracle price is stamped with its publishing chain's admission height, or left unstamped when no tip resolves.  
 - The PRICE batch canonical, the on-chain batch wire and the batch push carry one admission map per round, era-keyed on each round's own anchor, and a window never straddles the mirror-admission activation.  
-- The batch signer rebuilds each round's admission map from its stored columns, and the batch ingest stores each round's map in `price_snapshots`.
+- The batch signer rebuilds each round's admission map from its stored columns, and the batch ingest stores each round's map in `price_snapshots`.  
+- The oracle leader pins each price round's admission map from its own chain tips behind the mirror-admission activation, carries it in the PROPOSE, and followers co-sign the leader's map only after bounding it against their own tips; both round stores persist the map.
 
 ### Fixed
 - The PRICE batch ingest refuses an admission-era round that carries no map, and a legacy round handed one, instead of storing legacy rows above the activation.  

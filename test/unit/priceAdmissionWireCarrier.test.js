@@ -64,7 +64,8 @@ const ARMED_MODULES = [
     '../../src/lib/admission_height.js',
     '../../src/PriceAggregator.js',
     '../../src/OracleBatchSigner.js',
-    '../../src/OraclePublisher.js'
+    '../../src/OraclePublisher.js',
+    '../../src/OracleConsensus.js'
 ];
 
 let armed = null;
@@ -79,6 +80,7 @@ function armTwins(atHeight) {
     const PriceAggregator  = require('../../src/PriceAggregator.js');
     const OracleBatchSigner = require('../../src/OracleBatchSigner.js');
     const OraclePublisher  = require('../../src/OraclePublisher.js');
+    const OracleConsensus  = require('../../src/OracleConsensus.js');
     const act              = require('../../src/mirror_admission_activation.js');
 
     // Put the process back exactly as it was found; the classes captured above keep the
@@ -90,7 +92,7 @@ function armTwins(atHeight) {
         if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
         else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
     }
-    return { act, PriceAggregator, OracleBatchSigner, OraclePublisher, restore };
+    return { act, PriceAggregator, OracleBatchSigner, OraclePublisher, OracleConsensus, restore };
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +527,158 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: MAP5 }, base)).admitBlocks).to.deep.equal(MAP5);
             expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: null }, base))).to.not.have.property('admitBlocks');
             expect(pub._bufferEntryFromEvent(base)).to.not.have.property('admitBlocks');
+        });
+    });
+
+    // -----------------------------------------------------------------------
+    // 2c. row 18: the producer pins the round's map, the PROPOSE carries it, the follower
+    //     bounds it against its OWN tips and co-signs the LEADER's map or nothing
+    // -----------------------------------------------------------------------
+    describe('the oracle round pins and carries its admission map (row 18)', function () {
+        const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
+        const ROUND = 7;
+        // The leader's map: tip + the price margin (1) on every federation chain.
+        const TIPS  = { BTC: ADMIT_AT, LTC: 2400000, DOGE: 5000000 };
+        const MAP   = { BTC: ADMIT_AT + 1, LTC: 2400001, DOGE: 5000001 };
+        let hub, pm, oc, oracleRound, leader, queries;
+
+        function build(network, tips) {
+            queries = [];
+            hub = createMockHub({ network });
+            pm  = hub._peerManager;
+            pm.validatorPubkeys = new Set();
+            hub.db.doQuery.callsFake(async (sql, params) => { queries.push([sql, params]); return []; });
+            hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
+            // The follower's pre-existing BTC-tip deviation gate reads the committed tip; pin it
+            // at the anchor so only the admission bound under test decides the verdict.
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(ADMIT_AT);
+            // The hub's admission seam, as XChainHub exposes it: this hub's own tips, and
+            // the stamp built from them (tip + margin on every chain in the read set).
+            hub._resolveAdmissionTips = sinon.stub().callsFake(async (chains) => {
+                let out = {}; for (let c of chains) out[c] = (tips && tips[c] != null) ? tips[c] : null; return out;
+            });
+            hub.resolveAdmitBlocks = sinon.stub().callsFake(async (table, readSet) => {
+                if (!tips) return null;
+                let out = {}; for (let c of readSet) { if (tips[c] == null) return null; out[c] = tips[c] + 1; } return out;
+            });
+            oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+            oc = new armed.OracleConsensus(hub, oracleRound);
+            oc.setValidatorSet(VALIDATORS_3);
+            oc.allowUnverifiedPairs = true;
+            leader = oc._getLeader(ROUND);
+        }
+        function asLeader() { pm.validatorAddr = leader.addr; }
+        function asFollower() { pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr; }
+        const PRICES = [{ coinPair: 'BTC/USD', price: '100000' }];
+        function submissionsFrom(addr) { return buildSubmissions([{ sender: addr, prices: PRICES }]); }
+        function envelope(anchor, admitBlocks) {
+            let prices = PRICES;
+            let data = { round: ROUND, prices, digest: oc._digest(ROUND, prices), btcBlockHeight: anchor, btcBlockTime: 1700000000 };
+            if (admitBlocks !== undefined) data.admitBlocks = admitBlocks;
+            return { sender: leader.addr, sig_pubkey: leader.pubkey, data };
+        }
+        const proposeCalls = () => pm.broadcast.getCalls().filter(c => /PROPOSE/i.test(String(c.args[0]))).map(c => c.args[1]);
+
+        afterEach(function () { if (oc) oc.stop && oc.stop(); sinon.restore(); });
+
+        it('the LEADER pins the map from its own tips in the era, signs over it and carries it in the PROPOSE', async function () {
+            build(NETWORK, TIPS); asLeader();
+            await oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
+            const pending = oc.pendingRounds.get(ROUND);
+            expect(pending, 'no pending round').to.exist;
+            expect(pending.admitBlocks).to.deep.equal(MAP);
+            const sent = proposeCalls();
+            expect(sent.length).to.equal(1);
+            expect(sent[0].admitBlocks).to.deep.equal(MAP);
+            // The leader's own signature is over the canonical WITH the map.
+            const canon = oc._buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
+            expect(canon).to.match(/\|BTC:799001,DOGE:5000001,LTC:2400001/);
+            expect(hub.resolveAdmitBlocks.firstCall.args[0]).to.equal('price_snapshots');
+            expect(hub.resolveAdmitBlocks.firstCall.args[1]).to.deep.equal(['BTC', 'LTC', 'DOGE']);
+        });
+
+        it('the LEADER proposes nothing when a tip is missing, never a guessed height', async function () {
+            build(NETWORK, { BTC: ADMIT_AT, LTC: 2400000, DOGE: null }); asLeader();
+            await oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            expect(proposeCalls().length).to.equal(0);
+        });
+
+        it('below the activation the PROPOSE carries no map and nothing awaits: byte-identical behaviour', async function () {
+            build(NETWORK, TIPS); asLeader();
+            const p = oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, LEGACY_AT, 1700000000, null, 1, false, null);
+            // Synchronous to completion below the activation: the round is pending before the await.
+            expect(oc.pendingRounds.has(ROUND)).to.equal(true);
+            await p;
+            expect(proposeCalls()[0]).to.not.have.property('admitBlocks');
+            expect(oc.pendingRounds.get(ROUND).admitBlocks).to.equal(null);
+            expect(hub.resolveAdmitBlocks.called).to.equal(false);
+        });
+
+        it('the FOLLOWER co-signs the LEADER\'s map, pins it, and never one of its own', async function () {
+            // Follower tips differ from the leader's; the leader's map is still inside the window.
+            build(NETWORK, { BTC: ADMIT_AT - 2, LTC: 2399990, DOGE: 4999980 }); asFollower();
+            oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
+            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            const pending = oc.pendingRounds.get(ROUND);
+            expect(pending, 'follower did not open the round').to.exist;
+            expect(pending.admitBlocks).to.deep.equal(MAP);
+            const prepare = pm.broadcast.getCalls().find(c => /PREPARE/i.test(String(c.args[0])));
+            expect(prepare, 'no PREPARE').to.exist;
+            // The follower's signature verifies over the LEADER's map, not its own tips.
+            const canon = oc._buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
+            const signed = hub.getIdentity().sign.getCalls().map(c => c.args[0]);
+            expect(signed).to.include(canon, 'the follower did not sign the canonical carrying the leader\'s map');
+            expect(signed.every(b => /\|BTC:799001,DOGE:5000001,LTC:2400001/.test(b))).to.equal(true, 'a signature over bytes without the leader\'s map');
+            expect(hub.resolveAdmitBlocks.called).to.equal(false, 'the follower must not stamp its own map');
+        });
+
+        it('the FOLLOWER refuses an era PROPOSE with no map, a legacy PROPOSE with one, and a map outside its window', async function () {
+            build(NETWORK, TIPS); asFollower();
+            oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
+            await oc._handlePropose(envelope(ADMIT_AT));                       // era, no map
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            await oc._handlePropose(envelope(LEGACY_AT, MAP));                 // legacy, a map
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            await oc._handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 40 })));  // BTC window is 6
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            await oc._handlePropose(envelope(ADMIT_AT, { BTC: ADMIT_AT + 1 }));   // omits LTC and DOGE, which read the row
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            await oc._handlePropose(envelope(ADMIT_AT, { BTC: '0799001', LTC: 2400001, DOGE: 5000001 }));   // unspellable
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+            expect(pm.broadcast.called).to.equal(false);
+        });
+
+        it('the FOLLOWER refuses to co-sign when it cannot resolve its own tips (fail-closed, never adopts the leader\'s)', async function () {
+            build(NETWORK, TIPS); asFollower();
+            delete hub._resolveAdmissionTips;
+            oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
+            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            expect(oc.pendingRounds.has(ROUND)).to.equal(false);
+        });
+
+        it('a second PROPOSE for a pending round with a DIFFERENT map is refused', async function () {
+            build(NETWORK, { BTC: ADMIT_AT - 2, LTC: 2399990, DOGE: 4999980 }); asFollower();
+            oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
+            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            expect(oc.pendingRounds.get(ROUND).prepares.size).to.be.greaterThan(0);
+            const before = pm.broadcast.callCount;
+            await oc._handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 2 })));
+            expect(pm.broadcast.callCount).to.equal(before);
+            expect(oc.pendingRounds.get(ROUND).admitBlocks).to.deep.equal(MAP);
+        });
+
+        it('_storeSnapshot writes the map into the admission columns, NULL for a legacy round', async function () {
+            build(NETWORK, TIPS);
+            oc._persistCapabilitySnapshot = sinon.stub().resolves();
+            await oc._storeSnapshot(ROUND, PRICES, 3, '[]', ADMIT_AT, 1700000000, { DOGE: 5000001, BTC: ADMIT_AT + 1 });
+            let [sql, params] = queries.find(([q]) => /INSERT INTO price_snapshots/.test(q));
+            expect(sql).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge\)/);
+            expect(params.slice(-3)).to.deep.equal([ADMIT_AT + 1, null, 5000001]);
+            queries.length = 0;
+            await oc._storeSnapshot(ROUND, PRICES, 3, '[]', LEGACY_AT, 1700000000, null);
+            [sql, params] = queries.find(([q]) => /INSERT INTO price_snapshots/.test(q));
+            expect(params.slice(-3)).to.deep.equal([null, null, null]);
         });
     });
 

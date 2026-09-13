@@ -692,11 +692,16 @@ class PriceAggregator extends EventEmitter {
         // a torn round (some pairs from this round, others from the prior round). The hub
         // Database has no transaction API, so a single statement is the atomicity tool.
         if (roundData.pairs.length) {
-            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?)").join(', ');
+            // The round's admission map, the one the verified signatures cover, stored in its
+            // per-chain columns (NULL for a legacy round, never 0), appended AFTER created_at
+            // so every positional reader of this INSERT keeps its index.
+            let admitCols = ah.admitBlocksToColumns(roundData.admit_blocks == null ? null : roundData.admit_blocks);
+            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
             let params = [];
             for (let p of roundData.pairs) {
                 params.push(round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt);
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt,
+                            admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
                 insertedRows.push({
                     round_number:        round,
                     coin_pair:           p.pair,
@@ -711,13 +716,16 @@ class PriceAggregator extends EventEmitter {
                     source_chain:        sourceChain || null,
                     source_action_index: sourceActionIndex,
                     push_generation:     pushGeneration,
-                    created_at:          createdAt
+                    created_at:          createdAt,
+                    admit_block_btc:     admitCols.admit_block_btc,
+                    admit_block_ltc:     admitCols.admit_block_ltc,
+                    admit_block_doge:    admitCols.admit_block_doge
                 });
             }
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, created_at)
+                 push_generation, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
                     price = VALUES(price), reference_block = VALUES(reference_block),
@@ -725,7 +733,9 @@ class PriceAggregator extends EventEmitter {
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
                     status = 'finalized', source_chain = VALUES(source_chain),
                     source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation)`;
+                    push_generation = VALUES(push_generation),
+                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                    admit_block_doge = VALUES(admit_block_doge)`;
             try {
                 await this.db.doQuery(query, params);
             } catch (err) {

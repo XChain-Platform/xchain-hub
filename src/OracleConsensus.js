@@ -768,9 +768,20 @@ class OracleConsensus extends EventEmitter {
                 return;
             }
             // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
-            let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight);
+            // The round's admission map, pinned from this hub's own tips in the admission
+            // era; no fresh tip means no round, never a guessed height (section 5.3).
+            let soloAdmit = null;
+            if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
+                soloAdmit = await this._resolveRoundAdmitBlocks();
+                if (!soloAdmit) {
+                    console.error('Oracle: refusing to finalize round ' + round + ' at anchor ' + btcBlockHeight +
+                        '; no fresh admission tip to stamp an admission height from');
+                    return;
+                }
+            }
+            let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, soloAdmit);
             let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
-            await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime);
+            await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime, soloAdmit);
             // Mark the round finalized so the guard at the top of finalizeRound()
             // dedupes any subsequent call for this round (prevents a duplicate
             // snapshot store / PRICE v0 broadcast).
@@ -784,6 +795,7 @@ class OracleConsensus extends EventEmitter {
                 btcBlockHeight: btcBlockHeight,
                 btcBlockTime:   btcBlockTime,
                 prices:         aggregated,
+                admitBlocks:    soloAdmit,
                 participants:   selfPk ? [selfPk] : [],
                 signatures:     sigsArray,
                 submissions:    submissions
@@ -807,7 +819,8 @@ class OracleConsensus extends EventEmitter {
         // watchdog entry so the abandonment record names what this hub waited on.
         if (isLeader) {
             this._noteRoundSeat(round, 'leader');
-            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
+            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+                .catch(err => console.error('Oracle: proposal for round ' + round + ' failed:', err && err.message));
             return;
         }
 
@@ -849,7 +862,8 @@ class OracleConsensus extends EventEmitter {
                         return;
                     }
                     this._noteRoundSeat(round, 'fallback_proposer', { leader: leaderSubAddr });
-                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
+                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+                        .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
                 // Don't let an armed grace timer keep the process alive on its own;
                 // the hub stays up via its other listeners. Cleared on stop().
@@ -882,7 +896,8 @@ class OracleConsensus extends EventEmitter {
                 return;
             }
             this._noteRoundSeat(round, 'fallback_proposer', { leader: null });
-            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
+            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+                .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
         }, FALLBACK_GRACE_MS);
         // Don't let this grace timer keep the process alive on its own; register
         // it so stop() can cancel it, matching the sibling timer above.
@@ -894,7 +909,14 @@ class OracleConsensus extends EventEmitter {
     // snapshot + quorum are captured in finalizeRound() at the block boundary
     // and threaded through so the entire round uses the same locked validator
     // set. Without the snapshot, falls back to live _getQuorum() per legacy.
-    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
+    //
+    // Async only for the admission era: the leader pins the round's admission map from
+    // this hub's own tips before it signs, and that read is the ONE await in here. Below
+    // the activation nothing awaits, so the body runs to completion synchronously exactly
+    // as before and a caller that does not await it observes no change. A hub with no
+    // fresh tip proposes nothing rather than a guessed height (section 5.3); the fallback
+    // seat then takes the round on the same rule.
+    async _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
             this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
@@ -902,12 +924,23 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
+        let admitBlocks = null;
+        if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
+            admitBlocks = await this._resolveRoundAdmitBlocks();
+            if (!admitBlocks) {
+                console.error('Oracle: refusing to propose round ' + round + ' at anchor ' + btcBlockHeight +
+                    '; no fresh admission tip to stamp an admission height from');
+                return;
+            }
+            if (this.finalized.has(round) || this.pendingRounds.has(round)) return;   // decided while the tip was read
+        }
+
         let digest = this._digest(round, aggregated);
 
         // Sign the canonical PRICE v0 payload locally (this validator's contribution
         // to the on-chain anchor). Embedded in the published PRICE v0 transaction along
         // with sigs from other validators.
-        let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight);
+        let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, admitBlocks);
 
         let pending = {
             round:          round,
@@ -915,6 +948,7 @@ class OracleConsensus extends EventEmitter {
             digest:         digest,
             btcBlockHeight: btcBlockHeight,
             btcBlockTime:   btcBlockTime,
+            admitBlocks:    admitBlocks,
             prepares:       new Set(),
             commits:        new Set(),
             signatures:     new Map(),  // pubkey (hex) -> sig (hex)
@@ -968,7 +1002,10 @@ class OracleConsensus extends EventEmitter {
         // diagnostic/wire-compat hint. Receivers do NOT trust it for fallback-proposer legitimacy;
         // that check is made solely against each receiver's locally-observed submissions (see
         // _handlePropose), since a peer-supplied set is attacker-controllable.
-        this.peerManager.broadcast(ORACLE_PROPOSE, {
+        // The leader's map travels in the PROPOSE, because every follower must co-sign
+        // the SAME map: a follower pinning its own tips would sign bytes no quorum shares.
+        // Absent below the activation, so an un-upgraded peer sees the frame it always saw.
+        let proposeBody = {
             round:          round,
             prices:         aggregated,
             digest:         digest,
@@ -977,7 +1014,9 @@ class OracleConsensus extends EventEmitter {
             submissionKeys: [...submissions.keys()].sort(),
             sig_pubkey:     mySig ? mySig.pubkey : null,
             sig:            mySig ? mySig.sig    : null
-        });
+        };
+        if (admitBlocks !== null) proposeBody.admitBlocks = admitBlocks;
+        this.peerManager.broadcast(ORACLE_PROPOSE, proposeBody);
 
         let tag = isFallback ? '[FALLBACK] ' : '';
         console.log('Oracle: ' + tag + 'Proposed round ' + round + ' with ' + aggregated.length +
@@ -1170,7 +1209,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     async _handlePropose(envelope) {
-        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
+        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig, admitBlocks } = envelope.data;
         // Round 0 is a real, valid round (the first ORACLE_ROUND_INTERVAL after
         // ORACLE_EPOCH_START); guard on integer/non-negative, not falsiness, so a
         // genesis round-0 PROPOSE is not silently dropped as malformed.
@@ -1576,6 +1615,34 @@ class OracleConsensus extends EventEmitter {
         // are only populated when no pending round existed at the top of this
         // handler; a concurrent handler creating one during the await is caught
         // by the has() re-check here.
+        // THE FOLLOWER BOUND on the leader's admission map (section 5.3, C3), the price
+        // rail's twin of CrossChainDexConsensus._admissionBoundHolds. In the admission era
+        // the PROPOSE must carry a map, every chain in it must sit inside this hub's own
+        // window above its own tip, and the map must name every chain this federation
+        // serves (the price read set is every chain). Refused rather than co-signed on any
+        // miss, and never re-resolved from this hub's tips: the bytes co-signed below are
+        // the LEADER's map or nothing. Below the activation a map is refused the other way.
+        let proposedAdmit = null;
+        {
+            let net = this.hub && this.hub.network;
+            let era = ah.isAdmissionEra(net, blockHeight);
+            let has = admitBlocks !== null && admitBlocks !== undefined;
+            if (era !== has) {
+                console.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender + ': ' +
+                    (era ? 'admission-era round carries no admission map' : 'legacy-era round carries an admission map'));
+                return;
+            }
+            if (era) {
+                let verdict = await this._checkProposedAdmit(admitBlocks);
+                if (!verdict.ok) {
+                    console.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender +
+                        ': admission map ' + verdict.reason);
+                    return;
+                }
+                proposedAdmit = verdict.map;
+            }
+        }
+
         if (!this.pendingRounds.has(round) && quorumForRound !== null) {
             let quorum = quorumForRound;
             let pending = {
@@ -1584,6 +1651,7 @@ class OracleConsensus extends EventEmitter {
                 digest:         digest,
                 btcBlockHeight: blockHeight,
                 btcBlockTime:   btcBlockTime   || Math.floor(Date.now() / 1000),
+                admitBlocks:    proposedAdmit,
                 prepares:       new Set(),
                 commits:        new Set(),
                 signatures:     new Map(),  // pubkey (hex) -> sig (hex)
@@ -1634,6 +1702,12 @@ class OracleConsensus extends EventEmitter {
                 ' from ' + envelope.sender + ': expected ' + pending.digest + ', got ' + digest);
             return;
         }
+        // A second PROPOSE for a round already pending must carry the SAME map, or two
+        // leaders are collecting signatures over two byte strings under one digest.
+        if (this._spellAdmit(pending.admitBlocks) !== this._spellAdmit(proposedAdmit)) {
+            console.warn('Oracle: PROPOSE admission-map conflict for round ' + round + ' from ' + envelope.sender);
+            return;
+        }
         this._addVote(pending.prepares, envelope);
         let selfPkOnPropose = this._selfPubkey();
         if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
@@ -1642,7 +1716,7 @@ class OracleConsensus extends EventEmitter {
             this._verifyAndStoreSig(pending, sig_pubkey, sig);
         }
 
-        let mySig = this._signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight);
+        let mySig = this._signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight, pending.admitBlocks);
         if (mySig && !pending.signatures.has(mySig.pubkey)) {
             pending.signatures.set(mySig.pubkey, mySig.sig);
         }
@@ -1760,7 +1834,7 @@ class OracleConsensus extends EventEmitter {
 
             // Include this validator's signature in the COMMIT message so late-joining nodes
             // can collect signatures from any of the three phases (PROPOSE, PREPARE, COMMIT)
-            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight);
+            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight, pending.admitBlocks);
             if (mySig && !pending.signatures.has(mySig.pubkey)) {
                 pending.signatures.set(mySig.pubkey, mySig.sig);
             }
@@ -1817,7 +1891,7 @@ class OracleConsensus extends EventEmitter {
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 await this._storeSnapshot(round, pending.prices, validatorCount, proof,
-                    pending.btcBlockHeight, pending.btcBlockTime);
+                    pending.btcBlockHeight, pending.btcBlockTime, pending.admitBlocks);
 
                 // Persistence succeeded: now (and only now) it is safe to finalize and
                 // drop the in-memory round state.
@@ -2146,7 +2220,10 @@ class OracleConsensus extends EventEmitter {
         return price;
     }
 
-    async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime) {
+    // `admitBlocks` is the round's admission map, stored in its per-chain columns with every
+    // federation column named (NULL for a legacy round, never 0), so the batch signer and
+    // the publisher rebuild the map the quorum signed from the row rather than from memory.
+    async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime, admitBlocks) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         if (!prices || prices.length === 0) return;
@@ -2190,16 +2267,21 @@ class OracleConsensus extends EventEmitter {
         // from N-1) mid-loop, and the id-ordered mirror bootstrap could persist that torn
         // read to a replica. The hub Database exposes no transaction API, so a single
         // statement is the atomicity primitive here.
-        let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized')").join(', ');
+        let admitCols = ah.admitBlocksToColumns(admitBlocks === undefined ? null : admitBlocks);
+        let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
         let params = [];
-        for (let p of prices) params.push(round, p.coinPair, p.price, referenceBlock, blockTimestamp, validatorCount, proof);
+        for (let p of prices) params.push(round, p.coinPair, p.price, referenceBlock, blockTimestamp, validatorCount, proof,
+                                          admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
         let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status)
+                 validator_count, consensus_round, consensus_proof, status,
+                 admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
                  block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
-                 consensus_proof = VALUES(consensus_proof), status = 'finalized'`;
+                 consensus_proof = VALUES(consensus_proof), status = 'finalized',
+                 admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                 admit_block_doge = VALUES(admit_block_doge)`;
         await this.db.doQuery(query, params);
 
         // Durable per-pair skip markers (item #180). A pair can drop out of a
@@ -2430,6 +2512,38 @@ class OracleConsensus extends EventEmitter {
     // three twins now append an ADMISSION FIELD after the JSON body and before the EQUIV
     // wrapper; all three spell it the same way or the price rail stops.
     //
+    // The map this hub stamps on a round it leads: tip + the price margin on EVERY chain the
+    // federation serves, because the price read set is every chain (section 5.1). Null when
+    // any tip is stale or absent, which the caller treats as "propose nothing".
+    async _resolveRoundAdmitBlocks() {
+        let hub = this.hub;
+        if (!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
+        try { return await hub.resolveAdmitBlocks('price_snapshots', ah.ADMIT_COLUMN_CHAINS.slice()); }
+        catch (e) {
+            console.error('Oracle: admission tip read failed:', e && e.message ? e.message : e);
+            return null;
+        }
+    }
+
+    // The follower bound on a proposed map: the shared checker resolves THIS hub's own tips
+    // and refuses fail-closed when it cannot. Returns { ok, map } with the map normalised
+    // through the encoder, so what is pinned is exactly what will be signed.
+    async _checkProposedAdmit(admitBlocks) {
+        let map;
+        try { map = ah.decodeAdmitBlocks(ah.encodeAdmitBlocks(admitBlocks)); }
+        catch (e) { return { ok: false, reason: 'is not a canonical admission map (' + (e && e.message) + ')' }; }
+        if (map === null) return { ok: false, reason: 'is not a canonical admission map' };
+        let verdict = await ah.checkAdmitBlocksAgainstHub(this.hub, ah.ADMIT_COLUMN_CHAINS.slice(), map);
+        if (!verdict || !verdict.ok) return { ok: false, reason: (verdict && verdict.reason) || 'fails the follower bound' };
+        return { ok: true, map: map };
+    }
+
+    // One spelling for "same map or both absent", used to compare two proposals for one round.
+    _spellAdmit(map) {
+        if (map === null || map === undefined) return null;
+        try { return ah.encodeAdmitBlocks(map); } catch (e) { return '(unspellable)'; }
+    }
+
     // `admitBlocks` is this round's admission map, the per-chain heights at which the
     // round becomes readable. A price round is read on every chain, so its map names every
     // chain the federation serves, and omitting it is the LEGACY row: correct at every
