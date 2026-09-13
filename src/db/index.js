@@ -52,25 +52,48 @@ const ark     = require('../anchor_reward_key.js');
 
 // One mixin per table family, each an object of methods installed on
 // Database.prototype below. A family's file is named for the src/sql DDL it owns.
+// Each is required here at the top of the module, one const per family, and the
+// literal MIXINS list below is what installMixins() iterates. The list is spelled
+// out rather than read off the directory so a missing or extra family is a visible
+// diff; db_prototype_install.test.js fails if a file here is never listed.
+const anchorMixin              = require('./anchor.js');
+const attestationMixin         = require('./attestation.js');
+const bridgeTransfersMixin     = require('./bridge_transfers.js');
+const capabilitySnapshotsMixin = require('./capability_snapshots.js');
+const configsMixin             = require('./configs.js');
+const consensusStateMixin      = require('./consensus_state.js');
+const crossChainMixin          = require('./cross_chain.js');
+const governanceMixin          = require('./governance.js');
+const oracleMixin              = require('./oracle.js');
+const p2pPeersMixin            = require('./p2p_peers.js');
+const policySnapshotsMixin     = require('./policy_snapshots.js');
+const pricesMixin              = require('./prices.js');
+const reorgAttestationsMixin   = require('./reorg_attestations.js');
+const slashProposalsMixin      = require('./slash_proposals.js');
+const stateCheckpointsMixin    = require('./state_checkpoints.js');
+const swapRecordsMixin         = require('./swap_records.js');
+const telemetryPingsMixin      = require('./telemetry_pings.js');
+const validatorsMixin          = require('./validators.js');
+
 const MIXINS = [
-    require('./anchor.js'),
-    require('./attestation.js'),
-    require('./bridge_transfers.js'),
-    require('./capability_snapshots.js'),
-    require('./configs.js'),
-    require('./consensus_state.js'),
-    require('./cross_chain.js'),
-    require('./governance.js'),
-    require('./oracle.js'),
-    require('./p2p_peers.js'),
-    require('./policy_snapshots.js'),
-    require('./prices.js'),
-    require('./reorg_attestations.js'),
-    require('./slash_proposals.js'),
-    require('./state_checkpoints.js'),
-    require('./swap_records.js'),
-    require('./telemetry_pings.js'),
-    require('./validators.js')
+    anchorMixin,
+    attestationMixin,
+    bridgeTransfersMixin,
+    capabilitySnapshotsMixin,
+    configsMixin,
+    consensusStateMixin,
+    crossChainMixin,
+    governanceMixin,
+    oracleMixin,
+    p2pPeersMixin,
+    policySnapshotsMixin,
+    pricesMixin,
+    reorgAttestationsMixin,
+    slashProposalsMixin,
+    stateCheckpointsMixin,
+    swapRecordsMixin,
+    telemetryPingsMixin,
+    validatorsMixin
 ];
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
