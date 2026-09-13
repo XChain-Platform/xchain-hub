@@ -13,7 +13,7 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 const eq             = require('../../src/equivocation_header.js');
 const ccr            = require('../../src/cross_chain_royalty_activation.js');
 
@@ -40,8 +40,15 @@ function loadModule() {
 
 function makeDexHub(overrides) {
     let hub = createMockHub(overrides);
-    hub.db = {
+    // DB_METHODS first: the engine calls named query methods, and each of them
+    // routes its statement through the doQuery stub, so a test that swaps doQuery
+    // still sees every statement and its args. getChainTip stays a null-resolving
+    // stub, as in createMockHub: the real one issues its own doQuery, which would
+    // shift every scripted onCall(n) below by one and answer the engine's
+    // btc_chain_id lookup with a row meant for the statement under test.
+    hub.db = { ...DB_METHODS,
         doQuery: sinon.stub().resolves([]),
+        getChainTip: sinon.stub().resolves(null),
         ...(overrides && overrides.db ? overrides.db : {})
     };
     hub.hubDbBroadcaster = overrides && overrides.hubDbBroadcaster !== undefined
