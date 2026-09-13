@@ -1,0 +1,201 @@
+{
+  "censusMetadata": {
+    "tool": "bin/sibling-reference-map.js --census",
+    "capturedAt": "2026-09-13T22:08:40.939Z",
+    "hubSha": "641521f7",
+    "siblingsRoot": "..",
+    "note": "wave 1 base, before any lane moved a file"
+  },
+  "totals": {
+    "siblingReposSwept": 17,
+    "distinctHubPaths": 85,
+    "pathsResolvingToAFile": 80,
+    "referenceSites": 470,
+    "executableSites": 52,
+    "mentionSites": 418,
+    "reposGatingAPush": 6,
+    "dynamicReferences": 7
+  },
+  "byRepo": {
+    "xchain-dashboard": {
+      "executableSites": 0,
+      "mentionSites": 9,
+      "referringFiles": 6,
+      "distinctHubPaths": 7,
+      "gatesAPush": false
+    },
+    "xchain-decoder": {
+      "executableSites": 0,
+      "mentionSites": 12,
+      "referringFiles": 4,
+      "distinctHubPaths": 7,
+      "gatesAPush": false
+    },
+    "xchain-documentation": {
+      "executableSites": 1,
+      "mentionSites": 21,
+      "referringFiles": 10,
+      "distinctHubPaths": 16,
+      "gatesAPush": true
+    },
+    "xchain-e2e-test": {
+      "executableSites": 27,
+      "mentionSites": 68,
+      "referringFiles": 37,
+      "distinctHubPaths": 42,
+      "gatesAPush": true
+    },
+    "xchain-encoder": {
+      "executableSites": 0,
+      "mentionSites": 10,
+      "referringFiles": 2,
+      "distinctHubPaths": 6,
+      "gatesAPush": false
+    },
+    "xchain-explorer": {
+      "executableSites": 1,
+      "mentionSites": 23,
+      "referringFiles": 13,
+      "distinctHubPaths": 17,
+      "gatesAPush": true
+    },
+    "xchain-indexer": {
+      "executableSites": 20,
+      "mentionSites": 207,
+      "referringFiles": 57,
+      "distinctHubPaths": 58,
+      "gatesAPush": true
+    },
+    "xchain-node": {
+      "executableSites": 1,
+      "mentionSites": 13,
+      "referringFiles": 6,
+      "distinctHubPaths": 9,
+      "gatesAPush": true
+    },
+    "xchain-regtest-miner": {
+      "executableSites": 0,
+      "mentionSites": 9,
+      "referringFiles": 1,
+      "distinctHubPaths": 5,
+      "gatesAPush": false
+    },
+    "xchain-sdk": {
+      "executableSites": 0,
+      "mentionSites": 13,
+      "referringFiles": 5,
+      "distinctHubPaths": 8,
+      "gatesAPush": false
+    },
+    "xchain-sync": {
+      "executableSites": 0,
+      "mentionSites": 10,
+      "referringFiles": 2,
+      "distinctHubPaths": 6,
+      "gatesAPush": false
+    },
+    "xchain-utxo-tracker": {
+      "executableSites": 0,
+      "mentionSites": 11,
+      "referringFiles": 3,
+      "distinctHubPaths": 7,
+      "gatesAPush": false
+    },
+    "xchain-vm": {
+      "executableSites": 0,
+      "mentionSites": 2,
+      "referringFiles": 2,
+      "distinctHubPaths": 2,
+      "gatesAPush": false
+    },
+    "xchain-wallet": {
+      "executableSites": 2,
+      "mentionSites": 10,
+      "referringFiles": 4,
+      "distinctHubPaths": 1,
+      "gatesAPush": true
+    }
+  },
+  "dynamicReferences": [
+    {
+      "repo": "xchain-e2e-test",
+      "file": "xchain-e2e-test/test/helpers/multiValidatorHubHelper.js",
+      "line": 59,
+      "form": "helper",
+      "expression": "rel",
+      "via": "_resolveHubFile"
+    },
+    {
+      "repo": "xchain-explorer",
+      "file": "xchain-explorer/test/conformance/schema-conformance.test.js",
+      "line": 201,
+      "form": "root-var",
+      "expression": "path.join(HUB_SQL_DIR, f)",
+      "via": "HUB_SQL_DIR"
+    },
+    {
+      "repo": "xchain-explorer",
+      "file": "xchain-explorer/test/conformance/schema-conformance.test.js",
+      "line": 317,
+      "form": "root-var",
+      "expression": "path.join(HUB_SQL_DIR, f)",
+      "via": "HUB_SQL_DIR"
+    },
+    {
+      "repo": "xchain-hub",
+      "file": "xchain-hub/src/consensus_rules_digest.js",
+      "line": 152,
+      "form": "computed-require",
+      "expression": "require('./' + mod + '.js'",
+      "via": "mod",
+      "listCandidates": [
+        "src/anchor_reward_activation.js",
+        "src/attest_relay_activation.js",
+        "src/checkpoint_commitment_activation.js",
+        "src/cross_chain_royalty_activation.js",
+        "src/equivocation_header.js",
+        "src/price_pair_activation.js",
+        "src/price_sig_tally_activation.js",
+        "src/retraction_signing_activation.js",
+        "src/rollcall_activation.js",
+        "src/snapshot_reorg_buffer.js",
+        "src/stake_weighted_quorum.js",
+        "src/attest_responsible_widening_activation.js",
+        "src/attest_response_mirror_activation.js",
+        "src/attest_zero_conf_activation.js",
+        "src/attest_responsible_widening_activation.js",
+        "src/rollcall_gates_activation.js",
+        "src/xchain_bridge_activation.js",
+        "src/mirror_admission_activation.js",
+        "src/anchor_reward_activation.js",
+        "src/mirror_admission_activation.js"
+      ]
+    },
+    {
+      "repo": "xchain-hub",
+      "file": "xchain-hub/src/CrossChainBridgeEngine.js",
+      "line": 116,
+      "form": "computed-require",
+      "expression": "require('./' + moduleName + '.js'",
+      "via": "moduleName",
+      "listCandidates": []
+    },
+    {
+      "repo": "xchain-hub",
+      "file": "xchain-hub/src/ProviderRegistry.js",
+      "line": 476,
+      "form": "computed-require",
+      "expression": "require('./providers/' + providerId + '.js'",
+      "via": "providerId",
+      "listCandidates": []
+    },
+    {
+      "repo": "xchain-indexer",
+      "file": "xchain-indexer/test/unit/mirror-twin-bigint-signedness.test.js",
+      "line": 142,
+      "form": "root-var",
+      "expression": "path.join(HUB_SQL_DIR, table + '.sql')",
+      "via": "HUB_SQL_DIR"
+    }
+  ]
+}

@@ -1,0 +1,2015 @@
+{
+  "recordedBy": "check-comment-coverage.js analyse() in the platform tooling, pinned by the wave 1 PIN lane",
+  "reproduceWith": "check-comment-coverage.js --sweeps 6d57e322,bf9bf40,882d30a,2e5136c,a78d202 --dir <this checkout> --floors --json",
+  "consumedBy": "nothing reads this file: the gate REGENERATES its floors from git on every run (see WHY THE FLOOR REGENERATES INSTEAD OF BEING STORED in that script). This is the AT1 RECORD of what the floors were when the pass began, so a later reading can be compared against it, not an input the gate consults.",
+  "rev": "641521f7",
+  "revSha": "641521f70b3e4b8eb378ec707618a75111f420ff",
+  "sweeps": [
+    "6d57e322",
+    "bf9bf40",
+    "882d30a",
+    "2e5136c",
+    "a78d202"
+  ],
+  "sweepNote": "five commits: the 2026-06-20 platform sweep (6d57e322, -442 lines over 29 files), the 2026-08-12 platform sweep (bf9bf40), the 2026-08-15 XChainHub rewrite (882d30a) and the two 2026-08-17 internal-reference scrubs. The spec named only the last four, which reproduces exactly 6 files and 17 lines short; adding 6d57e322 is what takes it to the numbers below.",
+  "floorRule": "historicalFloor is the MAX comment-line count for the path across the five sweep PARENTS. floor is the max of that and the count at this revision, which is the number a later wave may not fall below. The M5 gate grades against historicalFloor, because a floor that included HEAD would forgive the very loss this pass exists to repair.",
+  "totals": {
+    "filesWithFloor": 194,
+    "filesShort": 8,
+    "linesShort": 29,
+    "exempt": 0,
+    "unresolved": 0
+  },
+  "short": [
+    {
+      "path": "src/SwapTracker.js",
+      "floor": 30,
+      "has": 24,
+      "missing": 6
+    },
+    {
+      "path": "src/ValidatorIdentity.js",
+      "floor": 39,
+      "has": 33,
+      "missing": 6
+    },
+    {
+      "path": "test/unit/ConsensusEarlyVoteBuffer.test.js",
+      "floor": 38,
+      "has": 32,
+      "missing": 6
+    },
+    {
+      "path": "src/XChainHub.js",
+      "floor": 553,
+      "has": 550,
+      "missing": 3
+    },
+    {
+      "path": "src/capabilities/attestation.js",
+      "floor": 37,
+      "has": 35,
+      "missing": 2
+    },
+    {
+      "path": "src/CapabilityRegistry.js",
+      "floor": 118,
+      "has": 116,
+      "missing": 2
+    },
+    {
+      "path": "src/lib/fullnode_activation.js",
+      "floor": 92,
+      "has": 90,
+      "missing": 2
+    },
+    {
+      "path": "test/regression/oracle-determinism.regression.test.js",
+      "floor": 51,
+      "has": 49,
+      "missing": 2
+    }
+  ],
+  "files": {
+    "src/SwapTracker.js": {
+      "historicalFloor": 30,
+      "headCount": 24,
+      "floor": 30,
+      "shortBy": 6,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "020bc16c2450f5b65a089c84ccdc9a045e7202d5",
+      "sweep": "6d57e322"
+    },
+    "src/ValidatorIdentity.js": {
+      "historicalFloor": 39,
+      "headCount": 33,
+      "floor": 39,
+      "shortBy": 6,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "020bc16c2450f5b65a089c84ccdc9a045e7202d5",
+      "sweep": "6d57e322"
+    },
+    "test/unit/ConsensusEarlyVoteBuffer.test.js": {
+      "historicalFloor": 38,
+      "headCount": 32,
+      "floor": 38,
+      "shortBy": 6,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "src/XChainHub.js": {
+      "historicalFloor": 553,
+      "headCount": 550,
+      "floor": 553,
+      "shortBy": 3,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "ddf866108917711270df18445664c18438ded2e0",
+      "sweep": "882d30a"
+    },
+    "src/capabilities/attestation.js": {
+      "historicalFloor": 37,
+      "headCount": 35,
+      "floor": 37,
+      "shortBy": 2,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/CapabilityRegistry.js": {
+      "historicalFloor": 118,
+      "headCount": 116,
+      "floor": 118,
+      "shortBy": 2,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/fullnode_activation.js": {
+      "historicalFloor": 92,
+      "headCount": 90,
+      "floor": 92,
+      "shortBy": 2,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/regression/oracle-determinism.regression.test.js": {
+      "historicalFloor": 51,
+      "headCount": 49,
+      "floor": 51,
+      "shortBy": 2,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    ".ci-databases": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "2e5136c1a3ff623167284e10490beafbf7402316",
+      "sweep": "a78d202"
+    },
+    ".github/workflows/audit.yml": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    ".github/workflows/ci.yml": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "bin/check-blind-sleeps.js": {
+      "historicalFloor": 63,
+      "headCount": 63,
+      "floor": 63,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "bin/prune-stale-capability-snapshots.js": {
+      "historicalFloor": 34,
+      "headCount": 34,
+      "floor": 34,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "bin/run-db-tiers.sh": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "bin/sync-observability.sh": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "CHANGELOG.md": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "CONFIGURATION.md": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "README.md": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/bft_quorum.js": {
+      "historicalFloor": 51,
+      "headCount": 51,
+      "floor": 51,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/canonical_int.js": {
+      "historicalFloor": 46,
+      "headCount": 46,
+      "floor": 46,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/capability_snapshot_prune.js": {
+      "historicalFloor": 96,
+      "headCount": 96,
+      "floor": 96,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/config_int.js": {
+      "historicalFloor": 36,
+      "headCount": 36,
+      "floor": 36,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/consensus_input_monitor.js": {
+      "historicalFloor": 75,
+      "headCount": 75,
+      "floor": 75,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/quorum_network.js": {
+      "historicalFloor": 31,
+      "headCount": 31,
+      "floor": 31,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/relay_margin.js": {
+      "historicalFloor": 60,
+      "headCount": 60,
+      "floor": 60,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/retraction_bounds.js": {
+      "historicalFloor": 42,
+      "headCount": 42,
+      "floor": 42,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/observability/README.md": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/secret-env.js": {
+      "historicalFloor": 68,
+      "headCount": 68,
+      "floor": 68,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/SlashGovernance.js": {
+      "historicalFloor": 102,
+      "headCount": 102,
+      "floor": 102,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/anchor_published_checkpoints.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/anchor_reward_attestations.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/attestation_validator_stats.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/capability_snapshots.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/governance_votes.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/price_snapshots.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/reorg_attestations.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/sql/state_checkpoints.sql": {
+      "historicalFloor": 0,
+      "headCount": 0,
+      "floor": 0,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/validator_order.js": {
+      "historicalFloor": 53,
+      "headCount": 53,
+      "floor": 53,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/boundary/consensus-activation.boundary.test.js": {
+      "historicalFloor": 14,
+      "headCount": 14,
+      "floor": 14,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/chaos/compound/reorg-during-oracle.chaos.test.js": {
+      "historicalFloor": 26,
+      "headCount": 26,
+      "floor": 26,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/chaos/compound/validator-churn.chaos.test.js": {
+      "historicalFloor": 46,
+      "headCount": 46,
+      "floor": 46,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/helpers/integrationHub.js": {
+      "historicalFloor": 66,
+      "headCount": 66,
+      "floor": 66,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/integration/api/jsonrpc.integration.test.js": {
+      "historicalFloor": 40,
+      "headCount": 40,
+      "floor": 40,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/integration/crosschain/attestation.integration.test.js": {
+      "historicalFloor": 42,
+      "headCount": 42,
+      "floor": 42,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/integration/governance/voteSeqMonotonic.integration.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/integration/oracle/pricePersistence.integration.test.js": {
+      "historicalFloor": 22,
+      "headCount": 22,
+      "floor": 22,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/regression/incentives.regression.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/attest_relay_activation.test.js": {
+      "historicalFloor": 37,
+      "headCount": 37,
+      "floor": 37,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/attestRelayHealth.test.js": {
+      "historicalFloor": 26,
+      "headCount": 26,
+      "floor": 26,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/bft_quorum.test.js": {
+      "historicalFloor": 16,
+      "headCount": 16,
+      "floor": 16,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/bootAuthGate.test.js": {
+      "historicalFloor": 26,
+      "headCount": 26,
+      "floor": 26,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/boundary/boundary-suite-coverage.boundary.test.js": {
+      "historicalFloor": 18,
+      "headCount": 18,
+      "floor": 18,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/boundary/reorgHandler.boundary.test.js": {
+      "historicalFloor": 41,
+      "headCount": 41,
+      "floor": 41,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/boundary/slash.boundary.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/capability_snapshot_prune.test.js": {
+      "historicalFloor": 21,
+      "headCount": 21,
+      "floor": 21,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/chainRegistry.test.js": {
+      "historicalFloor": 43,
+      "headCount": 43,
+      "floor": 43,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/consensusInputMonitor.test.js": {
+      "historicalFloor": 30,
+      "headCount": 30,
+      "floor": 30,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/dexFillQuantizationParity.test.js": {
+      "historicalFloor": 52,
+      "headCount": 52,
+      "floor": 52,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/docs-openrpc.test.js": {
+      "historicalFloor": 4,
+      "headCount": 4,
+      "floor": 4,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/effector_spend_guard.wiring.test.js": {
+      "historicalFloor": 17,
+      "headCount": 17,
+      "floor": 17,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/fullnodeActivationAssert.test.js": {
+      "historicalFloor": 25,
+      "headCount": 25,
+      "floor": 25,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/governanceVoteReplay.test.js": {
+      "historicalFloor": 41,
+      "headCount": 41,
+      "floor": 41,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/hub-schema-version.test.js": {
+      "historicalFloor": 4,
+      "headCount": 4,
+      "floor": 4,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/hubDbStreamHealth.test.js": {
+      "historicalFloor": 22,
+      "headCount": 22,
+      "floor": 22,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/price_sig_tally_activation.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/RetractionConsensus.test.js": {
+      "historicalFloor": 44,
+      "headCount": 44,
+      "floor": 44,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/secret-env.test.js": {
+      "historicalFloor": 5,
+      "headCount": 5,
+      "floor": 5,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/SlashGovernance.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.failover-wake.test.js": {
+      "historicalFloor": 33,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateCheckpointEngine.cadence-latch.test.js": {
+      "historicalFloor": 32,
+      "headCount": 32,
+      "floor": 32,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/validatorOrder.test.js": {
+      "historicalFloor": 27,
+      "headCount": 27,
+      "floor": 27,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/XChainHub.indexerCoinGuard.test.js": {
+      "historicalFloor": 21,
+      "headCount": 21,
+      "floor": 21,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/XchainPriceVendorParity.test.js": {
+      "historicalFloor": 38,
+      "headCount": 38,
+      "floor": 38,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/spend_ceiling.js": {
+      "historicalFloor": 66,
+      "headCount": 67,
+      "floor": 67,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/retraction_signing_activation.js": {
+      "historicalFloor": 42,
+      "headCount": 43,
+      "floor": 43,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/xchain_price_activation.js": {
+      "historicalFloor": 107,
+      "headCount": 108,
+      "floor": 108,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/regression/validator-fixes.regression.test.js": {
+      "historicalFloor": 62,
+      "headCount": 63,
+      "floor": 63,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/Consensus.snapshot-leader.test.js": {
+      "historicalFloor": 62,
+      "headCount": 64,
+      "floor": 64,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateCheckpointEngine.multisource.test.js": {
+      "historicalFloor": 57,
+      "headCount": 59,
+      "floor": 59,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/blindSleepRatchet.test.js": {
+      "historicalFloor": 16,
+      "headCount": 19,
+      "floor": 19,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/DerivedPairs.test.js": {
+      "historicalFloor": 51,
+      "headCount": 54,
+      "floor": 54,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/deviationBand.test.js": {
+      "historicalFloor": 29,
+      "headCount": 32,
+      "floor": 32,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/XchainPriceActivation.test.js": {
+      "historicalFloor": 49,
+      "headCount": 52,
+      "floor": 52,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/auth_posture.js": {
+      "historicalFloor": 52,
+      "headCount": 56,
+      "floor": 56,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/deviation_band.js": {
+      "historicalFloor": 60,
+      "headCount": 64,
+      "floor": 64,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/ReorgHandler.js": {
+      "historicalFloor": 279,
+      "headCount": 283,
+      "floor": 283,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/configurationDoc.test.js": {
+      "historicalFloor": 13,
+      "headCount": 17,
+      "floor": 17,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/price_pair_activation.test.js": {
+      "historicalFloor": 33,
+      "headCount": 37,
+      "floor": 37,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/ReorgHandler.test.js": {
+      "historicalFloor": 106,
+      "headCount": 110,
+      "floor": 110,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/spend_guard.test.js": {
+      "historicalFloor": 30,
+      "headCount": 34,
+      "floor": 34,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/hub-credentials.test.js": {
+      "historicalFloor": 29,
+      "headCount": 34,
+      "floor": 34,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleConsensus.snapshot-leader.test.js": {
+      "historicalFloor": 29,
+      "headCount": 34,
+      "floor": 34,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/Governance.js": {
+      "historicalFloor": 403,
+      "headCount": 410,
+      "floor": 410,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.archive-intent.test.js": {
+      "historicalFloor": 35,
+      "headCount": 42,
+      "floor": 42,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/XChainHub.networkResolution.test.js": {
+      "historicalFloor": 20,
+      "headCount": 27,
+      "floor": 27,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/AttestationSpotChecker.test.js": {
+      "historicalFloor": 64,
+      "headCount": 72,
+      "floor": 72,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/Consensus.test.js": {
+      "historicalFloor": 256,
+      "headCount": 264,
+      "floor": 264,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/observability/metrics.js": {
+      "historicalFloor": 61,
+      "headCount": 70,
+      "floor": 70,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/smoke/hub.smoke.test.js": {
+      "historicalFloor": 34,
+      "headCount": 43,
+      "floor": 43,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleConsensus.membership-gate.test.js": {
+      "historicalFloor": 24,
+      "headCount": 33,
+      "floor": 33,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleConsensusEarlyBuffer.test.js": {
+      "historicalFloor": 31,
+      "headCount": 40,
+      "floor": 40,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/e2e/helpers/cluster.js": {
+      "historicalFloor": 95,
+      "headCount": 105,
+      "floor": 105,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/CapabilitySnapshot.test.js": {
+      "historicalFloor": 137,
+      "headCount": 147,
+      "floor": 147,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/sensitiveReadAuth.test.js": {
+      "historicalFloor": 36,
+      "headCount": 46,
+      "floor": 46,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/SlashDetector.test.js": {
+      "historicalFloor": 73,
+      "headCount": 83,
+      "floor": 83,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/bcmath.js": {
+      "historicalFloor": 54,
+      "headCount": 65,
+      "floor": 65,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/configInt.test.js": {
+      "historicalFloor": 21,
+      "headCount": 32,
+      "floor": 32,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/RewardTracker.test.js": {
+      "historicalFloor": 68,
+      "headCount": 79,
+      "floor": 79,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/examples-doge-signer.test.js": {
+      "historicalFloor": 7,
+      "headCount": 19,
+      "floor": 19,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/HubDbBroadcaster.test.js": {
+      "historicalFloor": 35,
+      "headCount": 47,
+      "floor": 47,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/minStakeCanonicalAssert.test.js": {
+      "historicalFloor": 18,
+      "headCount": 30,
+      "floor": 30,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/checkpoint_commitment_activation.js": {
+      "historicalFloor": 42,
+      "headCount": 55,
+      "floor": 55,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/regression/slashing-rewards.regression.test.js": {
+      "historicalFloor": 27,
+      "headCount": 40,
+      "floor": 40,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/hub-credentials.js": {
+      "historicalFloor": 75,
+      "headCount": 89,
+      "floor": 89,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleRoundExtra.test.js": {
+      "historicalFloor": 77,
+      "headCount": 91,
+      "floor": 91,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/providers/http_get.js": {
+      "historicalFloor": 124,
+      "headCount": 139,
+      "floor": 139,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/CrossChainDexEngine.test.js": {
+      "historicalFloor": 148,
+      "headCount": 163,
+      "floor": 163,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/ProviderRegistry.test.js": {
+      "historicalFloor": 77,
+      "headCount": 92,
+      "floor": 92,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/StateAnchorPublisher.pkg8-signing.test.js": {
+      "historicalFloor": 35,
+      "headCount": 50,
+      "floor": 50,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/coins/index.js": {
+      "historicalFloor": 146,
+      "headCount": 162,
+      "floor": 162,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateCheckpointEngine.cadence-stall.test.js": {
+      "historicalFloor": 33,
+      "headCount": 50,
+      "floor": 50,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/RewardTracker.js": {
+      "historicalFloor": 119,
+      "headCount": 137,
+      "floor": 137,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/XchainPriceSource.test.js": {
+      "historicalFloor": 99,
+      "headCount": 117,
+      "floor": 117,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/helpers/fixtures.js": {
+      "historicalFloor": 25,
+      "headCount": 44,
+      "floor": 44,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OraclePublisher.test.js": {
+      "historicalFloor": 109,
+      "headCount": 129,
+      "floor": 129,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/OracleRound.test.js": {
+      "historicalFloor": 75,
+      "headCount": 95,
+      "floor": 95,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/scheduler_overlap_guards.test.js": {
+      "historicalFloor": 41,
+      "headCount": 61,
+      "floor": 61,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/AttestationRelay.test.js": {
+      "historicalFloor": 179,
+      "headCount": 200,
+      "floor": 200,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleConsensus.propose-validation.test.js": {
+      "historicalFloor": 51,
+      "headCount": 73,
+      "floor": 73,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.constant-derivations.test.js": {
+      "historicalFloor": 38,
+      "headCount": 60,
+      "floor": 60,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateCheckpointEngine.test.js": {
+      "historicalFloor": 124,
+      "headCount": 146,
+      "floor": 146,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/db.test.js": {
+      "historicalFloor": 34,
+      "headCount": 59,
+      "floor": 59,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/security/configuration/dependency-advisories.test.js": {
+      "historicalFloor": 89,
+      "headCount": 114,
+      "floor": 114,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/AttestationSpotChecker.js": {
+      "historicalFloor": 193,
+      "headCount": 219,
+      "floor": 219,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/CrossChainCallEngine.test.js": {
+      "historicalFloor": 157,
+      "headCount": 183,
+      "floor": 183,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/idempotent_broadcast.test.js": {
+      "historicalFloor": 13,
+      "headCount": 39,
+      "floor": 39,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/CapabilitySnapshot.js": {
+      "historicalFloor": 256,
+      "headCount": 285,
+      "floor": 285,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/XchainPriceSource.js": {
+      "historicalFloor": 193,
+      "headCount": 222,
+      "floor": 222,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/FullNodeChallengeRound.test.js": {
+      "historicalFloor": 108,
+      "headCount": 137,
+      "floor": 137,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.broadcast-guard.test.js": {
+      "historicalFloor": 16,
+      "headCount": 45,
+      "floor": 45,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/coins/consensus_pin.js": {
+      "historicalFloor": 57,
+      "headCount": 87,
+      "floor": 87,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/constants.js": {
+      "historicalFloor": 175,
+      "headCount": 205,
+      "floor": 205,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/security/security.test.js": {
+      "historicalFloor": 151,
+      "headCount": 182,
+      "floor": 182,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/CrossChainEngine.test.js": {
+      "historicalFloor": 114,
+      "headCount": 145,
+      "floor": 145,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/coins/DOGE.js": {
+      "historicalFloor": 82,
+      "headCount": 114,
+      "floor": 114,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/coins/LTC.js": {
+      "historicalFloor": 76,
+      "headCount": 108,
+      "floor": 108,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/CrossChainDexConsensus.test.js": {
+      "historicalFloor": 113,
+      "headCount": 147,
+      "floor": 147,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.anchor-intent.test.js": {
+      "historicalFloor": 19,
+      "headCount": 53,
+      "floor": 53,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/OracleConsensus.test.js": {
+      "historicalFloor": 261,
+      "headCount": 296,
+      "floor": 296,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/isKnownSenderFailClosed.test.js": {
+      "historicalFloor": 16,
+      "headCount": 54,
+      "floor": 54,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/RetractionConsensus.js": {
+      "historicalFloor": 114,
+      "headCount": 154,
+      "floor": 154,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/coins/BTC.js": {
+      "historicalFloor": 171,
+      "headCount": 212,
+      "floor": 212,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/CrossChainEngine.js": {
+      "historicalFloor": 201,
+      "headCount": 242,
+      "floor": 242,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/hub-schema-version.js": {
+      "historicalFloor": 46,
+      "headCount": 87,
+      "floor": 87,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/Consensus.js": {
+      "historicalFloor": 530,
+      "headCount": 572,
+      "floor": 572,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/AttestationPublisher.test.js": {
+      "historicalFloor": 157,
+      "headCount": 199,
+      "floor": 199,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "test/unit/PriceAggregator.test.js": {
+      "historicalFloor": 93,
+      "headCount": 140,
+      "floor": 140,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/attestation_escalation.js": {
+      "historicalFloor": 58,
+      "headCount": 107,
+      "floor": 107,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/coins.test.js": {
+      "historicalFloor": 106,
+      "headCount": 157,
+      "floor": 157,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/spend_guard.js": {
+      "historicalFloor": 170,
+      "headCount": 225,
+      "floor": 225,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/XChainHub.test.js": {
+      "historicalFloor": 106,
+      "headCount": 161,
+      "floor": 161,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/observability.test.js": {
+      "historicalFloor": 20,
+      "headCount": 76,
+      "floor": 76,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/observability/logShipper.js": {
+      "historicalFloor": 72,
+      "headCount": 129,
+      "floor": 129,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/llm_provider.test.js": {
+      "historicalFloor": 234,
+      "headCount": 291,
+      "floor": 291,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/ProviderRegistry.js": {
+      "historicalFloor": 159,
+      "headCount": 227,
+      "floor": 227,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/EncoderClient.js": {
+      "historicalFloor": 30,
+      "headCount": 99,
+      "floor": 99,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "020bc16c2450f5b65a089c84ccdc9a045e7202d5",
+      "sweep": "6d57e322"
+    },
+    "src/lib/idempotent_broadcast.js": {
+      "historicalFloor": 57,
+      "headCount": 126,
+      "floor": 126,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/observability/index.js": {
+      "historicalFloor": 73,
+      "headCount": 147,
+      "floor": 147,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/AttestationConsensus.test.js": {
+      "historicalFloor": 220,
+      "headCount": 294,
+      "floor": 294,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/AttestationRelay.js": {
+      "historicalFloor": 479,
+      "headCount": 557,
+      "floor": 557,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/CrossChainDexConsensus.js": {
+      "historicalFloor": 243,
+      "headCount": 323,
+      "floor": 323,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/FullNodeChallengeRound.js": {
+      "historicalFloor": 304,
+      "headCount": 386,
+      "floor": 386,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/AttestationRound.test.js": {
+      "historicalFloor": 118,
+      "headCount": 211,
+      "floor": 211,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "src/PriceFetcher.js": {
+      "historicalFloor": 117,
+      "headCount": 211,
+      "floor": 211,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/AttestationPublisher.js": {
+      "historicalFloor": 476,
+      "headCount": 574,
+      "floor": 574,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "src/CrossChainDexEngine.js": {
+      "historicalFloor": 398,
+      "headCount": 504,
+      "floor": 504,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/SlashDetector.js": {
+      "historicalFloor": 135,
+      "headCount": 241,
+      "floor": 241,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/lib/claude-spawn.js": {
+      "historicalFloor": 90,
+      "headCount": 197,
+      "floor": 197,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/OracleRound.js": {
+      "historicalFloor": 367,
+      "headCount": 492,
+      "floor": 492,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/CrossChainCallEngine.js": {
+      "historicalFloor": 308,
+      "headCount": 448,
+      "floor": 448,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "test/unit/StateAnchorPublisher.test.js": {
+      "historicalFloor": 523,
+      "headCount": 681,
+      "floor": 681,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/StateCheckpointEngine.js": {
+      "historicalFloor": 356,
+      "headCount": 541,
+      "floor": 541,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/anchor_reward_activation.js": {
+      "historicalFloor": 130,
+      "headCount": 337,
+      "floor": 337,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/HubDbBroadcaster.js": {
+      "historicalFloor": 108,
+      "headCount": 318,
+      "floor": 318,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/AttestationRound.js": {
+      "historicalFloor": 308,
+      "headCount": 520,
+      "floor": 520,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "7e4e7f3c2d40790ca32e14570719015f7a3cccb9",
+      "sweep": "2e5136c"
+    },
+    "src/providers/llm.js": {
+      "historicalFloor": 548,
+      "headCount": 764,
+      "floor": 764,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/PeerManager.js": {
+      "historicalFloor": 157,
+      "headCount": 393,
+      "floor": 393,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "020bc16c2450f5b65a089c84ccdc9a045e7202d5",
+      "sweep": "6d57e322"
+    },
+    "src/db.js": {
+      "historicalFloor": 224,
+      "headCount": 493,
+      "floor": 493,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/AttestationConsensus.js": {
+      "historicalFloor": 610,
+      "headCount": 1079,
+      "floor": 1079,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/api.js": {
+      "historicalFloor": 460,
+      "headCount": 955,
+      "floor": 955,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/OracleConsensus.js": {
+      "historicalFloor": 791,
+      "headCount": 1357,
+      "floor": 1357,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/PriceAggregator.js": {
+      "historicalFloor": 259,
+      "headCount": 896,
+      "floor": 896,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/OraclePublisher.js": {
+      "historicalFloor": 304,
+      "headCount": 1331,
+      "floor": 1331,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    },
+    "src/StateAnchorPublisher.js": {
+      "historicalFloor": 1583,
+      "headCount": 2663,
+      "floor": 2663,
+      "shortBy": 0,
+      "historicalPath": null,
+      "scope": "file",
+      "restoreFrom": "56be17d626f2adf549a2fa1003a2db6267ba76a2",
+      "sweep": "bf9bf40"
+    }
+  }
+}

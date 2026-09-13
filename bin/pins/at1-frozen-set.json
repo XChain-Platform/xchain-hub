@@ -1,0 +1,140 @@
+{
+  "recordedBy": "bin/check-frozen-set.js --write",
+  "why": "the paths frozen for this restructure, so a later tree can be checked against them",
+  "globs": [
+    {
+      "glob": "src/*_activation.js",
+      "why": "gate carriers, resolved by computed require"
+    },
+    {
+      "glob": "src/lib/fullnode_activation.js",
+      "why": "a gate carrier that already sits outside the top level"
+    },
+    {
+      "glob": "src/equivocation_header.js",
+      "why": "a SHARED_GATES carrier under a name that is not _activation"
+    },
+    {
+      "glob": "src/snapshot_reorg_buffer.js",
+      "why": "a SHARED_GATES carrier under a name that is not _activation"
+    },
+    {
+      "glob": "src/stake_weighted_quorum.js",
+      "why": "a SHARED_GATES carrier under a name that is not _activation"
+    },
+    {
+      "glob": "src/consensus_rules_digest.js",
+      "why": "the module that computes the requires"
+    },
+    {
+      "glob": "src/coins/**",
+      "why": "byte-vendored to six to ten repos by sync-coins.sh"
+    },
+    {
+      "glob": "src/observability/**",
+      "why": "byte-vendored to six to ten repos by sync-observability.sh"
+    },
+    {
+      "glob": "src/sql/**",
+      "why": "read by path from sibling conformance suites"
+    },
+    {
+      "glob": "src/xchainPrice.js",
+      "why": "vendored twin"
+    },
+    {
+      "glob": "src/xchainPriceQuery.js",
+      "why": "vendored twin"
+    },
+    {
+      "glob": "src/price_batch_compression.js",
+      "why": "vendored twin"
+    },
+    {
+      "glob": "test/fixtures/anchor_canonical_vectors.json",
+      "why": "a frozen protocol vector"
+    },
+    {
+      "glob": "test/fixtures/dex-fill-quantization-vectors.json",
+      "why": "a frozen protocol vector"
+    }
+  ],
+  "movable": [
+    "src/coins/fullnodeComment.test.js"
+  ],
+  "fileCount": 72,
+  "files": [
+    "src/anchor_reward_activation.js",
+    "src/attest_leader_silence_skip_activation.js",
+    "src/attest_relay_activation.js",
+    "src/attest_relay_reject_slot_activation.js",
+    "src/attest_response_mirror_activation.js",
+    "src/attest_responsible_widening_activation.js",
+    "src/attest_zero_conf_activation.js",
+    "src/checkpoint_commitment_activation.js",
+    "src/coins/BTC.js",
+    "src/coins/DOGE.js",
+    "src/coins/LTC.js",
+    "src/coins/consensus_pin.js",
+    "src/coins/index.js",
+    "src/consensus_rules_digest.js",
+    "src/cross_chain_royalty_activation.js",
+    "src/equivocation_header.js",
+    "src/lib/fullnode_activation.js",
+    "src/mirror_admission_activation.js",
+    "src/observability/README.md",
+    "src/observability/index.js",
+    "src/observability/logShipper.js",
+    "src/observability/metrics.js",
+    "src/oracle_clamp_reference_activation.js",
+    "src/price_batch_compression.js",
+    "src/price_pair_activation.js",
+    "src/price_scale_activation.js",
+    "src/price_sig_tally_activation.js",
+    "src/retraction_signing_activation.js",
+    "src/rollcall_activation.js",
+    "src/rollcall_gates_activation.js",
+    "src/snapshot_reorg_buffer.js",
+    "src/sql/anchor_published_archives.sql",
+    "src/sql/anchor_published_checkpoints.sql",
+    "src/sql/anchor_reward_attestations.sql",
+    "src/sql/attest_published_batches.sql",
+    "src/sql/attest_published_requests.sql",
+    "src/sql/attestation_fetch_cache.sql",
+    "src/sql/attestation_responses.sql",
+    "src/sql/attestation_validator_stats.sql",
+    "src/sql/attestations.sql",
+    "src/sql/bridge_transfers.sql",
+    "src/sql/capability_snapshots.sql",
+    "src/sql/configs.sql",
+    "src/sql/consensus_state.sql",
+    "src/sql/cross_chain_calls.sql",
+    "src/sql/cross_chain_matches.sql",
+    "src/sql/governance_proposals.sql",
+    "src/sql/governance_votes.sql",
+    "src/sql/oracle_prices.sql",
+    "src/sql/oracle_published_rounds.sql",
+    "src/sql/oracle_submissions.sql",
+    "src/sql/p2p_peers.sql",
+    "src/sql/policy_snapshots.sql",
+    "src/sql/price_ingest_watermarks.sql",
+    "src/sql/price_snapshots.sql",
+    "src/sql/reorg_attestations.sql",
+    "src/sql/slash_proposals.sql",
+    "src/sql/state_checkpoints.sql",
+    "src/sql/swap_records.sql",
+    "src/sql/telemetry_pings.sql",
+    "src/sql/validator_capabilities.sql",
+    "src/sql/validator_rewards.sql",
+    "src/sql/validators.sql",
+    "src/stake_weighted_quorum.js",
+    "src/token_bridge_activation.js",
+    "src/token_policy_activation.js",
+    "src/xchainPrice.js",
+    "src/xchainPriceQuery.js",
+    "src/xchain_bridge_activation.js",
+    "src/xchain_price_activation.js",
+    "test/fixtures/anchor_canonical_vectors.json",
+    "test/fixtures/dex-fill-quantization-vectors.json"
+  ]
+}
