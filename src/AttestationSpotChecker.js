@@ -63,7 +63,6 @@ const MAX_HISTORY_PER_VALIDATOR   = 64;
 const MAX_QUEUE_SIZE              = 1024;
 const DEFAULT_SCHEDULER_INTERVAL_MS = 60 * 60 * 1000;    // 1h between injection ticks
 const DEFAULT_MAX_INJECTIONS_PER_TICK = 1;
-const STATS_TABLE                = 'attestation_validator_stats';
 
 // Retention window for the durable spot-check outcome table. One row lands per
 // judged (validator, request) and nothing but the reorg rollback ever deleted one,
@@ -559,15 +558,8 @@ class AttestationSpotChecker {
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function') return;
         try {
-            await db.doQuery(
-                'INSERT INTO ' + STATS_TABLE +
-                ' (validator_pubkey, provider_id, request_id, block_index, passed)' +
-                ' VALUES (?, ?, ?, ?, ?)' +
-                ' ON DUPLICATE KEY UPDATE passed = VALUES(passed),' +
-                ' provider_id = VALUES(provider_id), block_index = VALUES(block_index)',
-                [String(pubkey).toLowerCase(), String(providerId), String(requestId),
-                 Number(blockIndex) || 0, passed ? 1 : 0]
-            );
+            await db.setAttestationValidatorStat(String(pubkey).toLowerCase(), String(providerId), String(requestId),
+                Number(blockIndex) || 0, passed ? 1 : 0);
             // A row just landed, which is the only way this table ever grows, so this
             // is where the retention sweep belongs (same reasoning as the sibling
             // publishers' post-write sweeps). Throttled and fire-and-forget inside.
@@ -592,9 +584,7 @@ class AttestationSpotChecker {
         if (!this.statsRetentionMs || this.statsRetentionMs <= 0) return 0;
 
         let windowSec = Math.ceil(Math.max(this.statsRetentionMs, this.failureWindowMs) / 1000);
-        let res = await db.doQuery(
-            'DELETE FROM ' + STATS_TABLE + ' WHERE checked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
-            [windowSec]);
+        let res = await db.deleteAttestationValidatorStatsOlderThan(windowSec);
         let deleted = (res && res.affectedRows) ? Number(res.affectedRows) : 0;
         if (deleted > 0) {
             this.statsPruned += deleted;
@@ -641,8 +631,7 @@ class AttestationSpotChecker {
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function' || !Number.isFinite(h)) return 0;
         try {
-            let res = await db.doQuery(
-                'DELETE FROM ' + STATS_TABLE + ' WHERE block_index > ?', [h]);
+            let res = await db.deleteAttestationValidatorStatsAboveBlock(h);
             let removed = res && (res.affectedRows != null ? res.affectedRows : (Array.isArray(res) ? 0 : 0));
             if (removed) {
                 console.log('AttestationSpotChecker: reorg rollback removed ' + removed +
@@ -664,11 +653,7 @@ class AttestationSpotChecker {
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function') return empty;
         try {
-            let rows = await db.doQuery(
-                'SELECT COUNT(*) AS total,' +
-                ' SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS failed' +
-                ' FROM ' + STATS_TABLE + ' WHERE validator_pubkey = ?',
-                [String(pubkey).toLowerCase()]);
+            let rows = await db.getAttestationValidatorStatTotals(String(pubkey).toLowerCase());
             let r = (rows && rows[0]) || {};
             let total  = Number(r.total) || 0;
             let failed = Number(r.failed) || 0;

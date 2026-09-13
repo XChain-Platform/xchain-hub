@@ -29,6 +29,10 @@
 // to the wire cannot be silently absent from the read that feeds it.
 const abw = require('../lib/attest_batch_wire.js');
 
+// The durable spot-check outcome table the AttestationSpotChecker statements write,
+// prune and aggregate; named once so its four statements cannot address two tables.
+const STATS_TABLE = 'attestation_validator_stats';
+
 // The attestation_responses columns the response mirror writes and selects back, in
 // the order the snapshot route selects them. It is used for BOTH the INSERT and the
 // select-back on purpose: the REST bootstrap and the WS stream must hand a consumer
@@ -269,5 +273,50 @@ module.exports = {
             'SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' ' +
             'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
             [network, requestId, effectiveTime]);
+    },
+
+    // Records one judged spot-check outcome, idempotent per (validator, request).
+    // Moved here from src/AttestationSpotChecker.js:562.
+    //
+    // The row is keyed by the request's creation block so a reorg can roll it back; a
+    // re-judge of the same request overwrites the verdict rather than adding a row.
+    async setAttestationValidatorStat(validatorPubkey, providerId, requestId, blockIndex, passed) {
+        return this.doQuery(
+            'INSERT INTO ' + STATS_TABLE +
+            ' (validator_pubkey, provider_id, request_id, block_index, passed)' +
+            ' VALUES (?, ?, ?, ?, ?)' +
+            ' ON DUPLICATE KEY UPDATE passed = VALUES(passed),' +
+            ' provider_id = VALUES(provider_id), block_index = VALUES(block_index)',
+            [validatorPubkey, providerId, requestId, blockIndex, passed]
+        );
+    },
+
+    // Retention sweep over the spot-check outcomes.
+    // Moved here from src/AttestationSpotChecker.js:595.
+    //
+    // DB-clock arithmetic on BOTH sides: checked_at is written by CURRENT_TIMESTAMP, so
+    // comparing it against a Node-side timestamp would fold host/DB clock skew straight
+    // into the cutoff. The caller floors the window at its rolling failure window.
+    async deleteAttestationValidatorStatsOlderThan(windowSec) {
+        return this.doQuery(
+            'DELETE FROM ' + STATS_TABLE + ' WHERE checked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [windowSec]);
+    },
+
+    // Reorg rollback: every spot-check outcome anchored above `height` is orphaned.
+    // Moved here from src/AttestationSpotChecker.js:644.
+    async deleteAttestationValidatorStatsAboveBlock(height) {
+        return this.doQuery(
+            'DELETE FROM ' + STATS_TABLE + ' WHERE block_index > ?', [height]);
+    },
+
+    // Aggregate outcome counts for one validator: total rows and failed rows.
+    // Moved here from src/AttestationSpotChecker.js:667.
+    async getAttestationValidatorStatTotals(validatorPubkey) {
+        return this.doQuery(
+            'SELECT COUNT(*) AS total,' +
+            ' SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS failed' +
+            ' FROM ' + STATS_TABLE + ' WHERE validator_pubkey = ?',
+            [validatorPubkey]);
     }
 };
