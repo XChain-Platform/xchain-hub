@@ -73,9 +73,9 @@ describe('consensus_rules_digest: the digest', function () {
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', function () {
 
-    it('is sorted, has 19 entries, and contains the three gates this train appends', function () {
+    it('is sorted, has 20 entries, and contains the three gates this train appends', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(19, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(20, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -147,6 +147,50 @@ describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', fu
         expect(crd.activeGatesAt(NaN, 'regtest')).to.deep.equal([]);
         expect(crd.activeGatesAt(undefined, 'regtest')).to.deep.equal([]);
         expect(crd.activeGatesAt(Infinity, 'regtest')).to.deep.equal([]);
+    });
+
+    // XCHAIN_BRIDGE_ACTIVATION is the first COIN-KEYED gate in SHARED_GATES: '<COIN>:<network>'
+    // with the bare network key as fallback, because one testnet height cannot serve TBTC, TLTC
+    // and TDOGE. Both resolutions are load-bearing here: the hub signs a leg against the chain
+    // it was mined on, and the capability set it receives was filtered from a height alone.
+    it('resolves the coin-keyed bridge gate per coin, and network-wide from the earliest armed chain', function () {
+        const KEY = 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION';
+        expect(crd.knownGateKeys()).to.include(KEY);
+        // As shipped: regtest 0 on every chain, every other slot on the far-future sentinel.
+        for (const coin of ['BTC', 'LTC', 'DOGE']) {
+            expect(crd.activeGatesAt(0, 'regtest', coin)).to.include(KEY);
+            expect(crd.activeGatesAt(crd.FAR_FUTURE_HEIGHT_SENTINEL, 'testnet', coin)).to.not.include(KEY);
+        }
+        const GATE    = require.resolve('../../src/xchain_bridge_activation.js');
+        const CRD     = require.resolve('../../src/consensus_rules_digest.js');
+        const real    = require.cache[GATE];
+        const realCrd = require.cache[CRD];
+        try {
+            const stub = Object.create(Object.getPrototypeOf(real));
+            Object.assign(stub, real);
+            stub.exports = Object.assign({}, real.exports, {
+                XCHAIN_BRIDGE_ACTIVATION: {
+                    'BTC:testnet':  100,
+                    'DOGE:testnet': 5000000,
+                    testnet:        crd.FAR_FUTURE_HEIGHT_SENTINEL,
+                    regtest:        0,
+                },
+            });
+            require.cache[GATE] = stub;
+            delete require.cache[CRD];
+            const fresh = require('../../src/consensus_rules_digest.js');
+            expect(fresh.activeGatesAt(150, 'testnet', 'BTC')).to.include(KEY);
+            expect(fresh.activeGatesAt(150, 'testnet', 'DOGE')).to.not.include(KEY);
+            expect(fresh.activeGatesAt(5000000, 'testnet', 'DOGE')).to.include(KEY);
+            expect(fresh.activeGatesAt(99, 'testnet', 'BTC')).to.not.include(KEY);
+            // The bare testnet key is still the sentinel, so resolving it alone would hide an
+            // armed chain from every caller that has only a height and a network.
+            expect(fresh.activeGatesAt(150, 'testnet')).to.include(KEY);
+            expect(fresh.activeGatesAt(99, 'testnet')).to.not.include(KEY);
+        } finally {
+            require.cache[GATE] = real;
+            require.cache[CRD]  = realCrd;
+        }
     });
 });
 
