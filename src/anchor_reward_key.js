@@ -14,7 +14,7 @@
  *
  * The validator_rewards ledger key's ROUND QUALIFIER (hub copy).
  *
- * VENDORED TWIN of xchain-indexer/src/anchor_reward_key.js. The executable region
+ * VENDORED TWIN of xchain-indexer/src/actions/anchor/anchor_reward_key.js. The executable region
  * (from the strict-mode pragma down) is byte-identical and held so by
  * test/unit/anchorRewardKeyTwinParity.test.js; only this header differs, because each
  * side names its OWN call sites. Change the rule in the indexer copy and mirror it here

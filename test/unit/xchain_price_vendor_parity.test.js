@@ -30,7 +30,14 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const VENDORED = ['xchainPrice.js', 'xchainPriceQuery.js', 'price_pair_activation.js'];
+// The hub keeps its vendored copies flat in src/, while the indexer sorted its
+// own tree into feature directories, so the twin's path is no longer the hub's
+// path. Each entry is [hub basename, twin path relative to the indexer's src/].
+const VENDORED = [
+    ['xchainPrice.js',           'consensus/xchainPrice.js'],
+    ['xchainPriceQuery.js',      'consensus/xchainPriceQuery.js'],
+    ['price_pair_activation.js', 'price_pair_activation.js'],
+];
 
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-indexer');
@@ -46,9 +53,11 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
         }
     });
 
-    VENDORED.forEach(function (file) {
+    VENDORED.forEach(function (entry) {
+        const file    = entry[0];
+        const twinRel = entry[1];
         it(file + ' is byte-identical to the indexer twin', function () {
-            const twinPath = path.join(INDEXER_DIR, 'src', file);
+            const twinPath = path.join(INDEXER_DIR, 'src', twinRel);
             // Skip per FILE, not just per sibling-repo. A sibling checkout can exist
             // while a given twin does not: a standalone deploy, or a CI venue serving
             // a sibling from origin while this file is still only local. A
@@ -63,7 +72,7 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
             const hub  = fs.readFileSync(path.join(HUB_SRC, file), 'utf8');
             const twin = fs.readFileSync(twinPath, 'utf8');
             expect(hub).to.equal(twin,
-                file + ' has drifted from xchain-indexer/src/' + file + '; the hub would publish a ' +
+                file + ' has drifted from xchain-indexer/src/' + twinRel + '; the hub would publish a ' +
                 'price the chain data does not support, and this validator would fall outside the ' +
                 'co-sign deviation band');
         });

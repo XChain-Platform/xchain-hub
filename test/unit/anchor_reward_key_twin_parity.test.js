@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * anchorRewardKeyTwinParity: the reward-ledger round qualifier is written twice, once
- * in xchain-indexer/src/anchor_reward_key.js and once in the hub's vendored copy. The
+ * in xchain-indexer/src/actions/anchor/anchor_reward_key.js and once in the hub's vendored copy. The
  * qualifier decides whether two archive rewards are the SAME ledger row, so a drift lets
  * the hub conserve a reward the indexer pays, or refuse to co-sign an archive the indexer
  * derives. The rule drifted once already as prose (the hub carried the blocker text while
@@ -31,7 +31,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const HUB_COPY     = path.join(__dirname, '../../src/anchor_reward_key.js');
-const INDEXER_COPY = path.join(__dirname, '../../../xchain-indexer/src/anchor_reward_key.js');
+const INDEXER_COPY = path.join(__dirname, '../../../xchain-indexer/src/actions/anchor/anchor_reward_key.js');
 
 // Everything from the strict-mode pragma down: the constant, both forms of the rule and
 // the exports. The license/purpose header above it is per-repo by construction.

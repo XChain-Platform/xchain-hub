@@ -55,7 +55,7 @@ const HUB_MODULES = [
 ];
 const INDEXER_MODULES = [
     '../../../xchain-indexer/src/mirror_admission_activation.js',
-    '../../../xchain-indexer/src/ed25519.js'
+    '../../../xchain-indexer/src/consensus/ed25519.js'
 ];
 
 const ROUND   = 5;
@@ -100,7 +100,7 @@ function armTwins() {
     const OracleConsensus = require('../../src/OracleConsensus.js');
     const PriceAggregator = require('../../src/PriceAggregator.js');
     const act             = require('../../src/mirror_admission_activation.js');
-    const indexer         = indexerPaths ? require('../../../xchain-indexer/src/ed25519.js') : null;
+    const indexer         = indexerPaths ? require('../../../xchain-indexer/src/consensus/ed25519.js') : null;
 
     // Put the process back exactly as it was found. The instances built below keep the
     // armed modules they closed over, so the rest of the run still sees the inert tree it

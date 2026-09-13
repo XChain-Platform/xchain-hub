@@ -596,7 +596,7 @@ class AttestationConsensus extends EventEmitter {
         // the rounds the liveness ladder fires for and make it tip-dependent per
         // hub. Clamping to max(1, redundancy) keeps max(quorum, redundancy) at
         // redundancy, which is the bar the indexer verifies against
-        // (xchain-indexer/src/attest_response_verify.js) and the contract the
+        // (xchain-indexer/src/actions/attest/attest_response_verify.js) and the contract the
         // ladder states (attest_responsible_widening_activation.js: widening grows
         // the pool permitted to sign, never the count required to finalize).
         // `quorum` is retained as PBFT scaffolding (and to document intent) but

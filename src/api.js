@@ -186,7 +186,7 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
-// (xchain-indexer src/hub_client.js): what landed on its chain, and the
+// (xchain-indexer src/hub/hub_client.js): what landed on its chain, and the
 // retractions when a reorg takes it back. Every one is a WRITE_METHODS or
 // REORG_WRITE_METHODS member, so the x-api-key tiers apply to them here exactly as
 // on the private port; this set only narrows WHICH methods that port will consider.
@@ -661,7 +661,7 @@ async function startApi(){
     // governance, slashing, swaps, anchor flush, effector spend, and every read)
     // stays reachable only on the private API port.
     //
-    // These are the whole indexer->hub vocabulary (xchain-indexer src/hub_client.js),
+    // These are the whole indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js),
     // and they are not a back door: each is a WRITE_METHODS/REORG_WRITE_METHODS
     // member that has just cleared the x-api-key gate above exactly as it would on
     // the private port, and each payload is validated and signature-checked before

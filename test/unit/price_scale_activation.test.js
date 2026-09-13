@@ -59,7 +59,7 @@ function makeValidator() {
     };
 }
 
-// Mirror of the canonical PRICE v0 payload (xchain-indexer/src/ed25519.js
+// Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js
 // buildPriceV0Payload). The mockHub has no `network`, so the EQUIV header is off
 // and this is the bare-JSON branch.
 function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {

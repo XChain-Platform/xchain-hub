@@ -1450,7 +1450,7 @@ class StateAnchorPublisher {
     // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
     //
     // The mirror alone is not enough reach: HubDbSync holds ONE hubUrl
-    // (xchain-indexer/src/hub_db_sync.js), the row is written only on the ELECTED publisher,
+    // (xchain-indexer/src/hub/hub_db_sync.js), the row is written only on the ELECTED publisher,
     // and the publisher rotates per bundle by hashOrder, so without federation a federation's
     // hubs would hold DISJOINT subsets and an indexer would derive only the subset its own hub
     // published. So the PRODUCER federates: `e` carries the confirmed anchor txid and, on the

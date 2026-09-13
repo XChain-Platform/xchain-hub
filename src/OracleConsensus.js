@@ -2496,7 +2496,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Build the canonical signable payload for a PRICE v0 round.
-    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload and
+    // MUST match xchain-indexer/src/consensus/ed25519.js buildPriceV0Payload and
     // PriceAggregator._buildPriceV0Payload exactly so signatures produced here verify
     // against the same canonical bytes when indexers parse on-chain PRICE v0 actions. The
     // three twins now append an ADMISSION FIELD after the JSON body and before the EQUIV
@@ -2570,7 +2570,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Build the canonical signable payload for a PRICE batch: ONE signature set over
-    // several rounds. THIS IS THE PRODUCER; xchain-indexer/src/ed25519.js
+    // several rounds. THIS IS THE PRODUCER; xchain-indexer/src/consensus/ed25519.js
     // buildPriceBatchPayload and PriceAggregator._buildPriceBatchPayload must match it byte for
     // byte, or the bytes signed here are not the bytes any verifier checks.
     //
