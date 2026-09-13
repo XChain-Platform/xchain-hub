@@ -16,7 +16,7 @@ const fc              = require('fast-check');
 const OracleConsensus = require('../../src/OracleConsensus');
 const { createMockHub }    = require('../helpers/mockHub');
 const { buildSubmissions } = require('../helpers/fixtures');
-const gen                  = require('./generators');
+const gen                  = require('./helpers/generators');
 
 describe('Fuzz: OracleConsensus', function () {
 

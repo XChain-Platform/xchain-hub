@@ -15,7 +15,7 @@ const { expect } = require('chai');
 const fc         = require('fast-check');
 const Governance = require('../../src/Governance');
 const { createMockHub } = require('../helpers/mockHub');
-const gen               = require('./generators');
+const gen               = require('./helpers/generators');
 
 describe('Fuzz: Governance', function () {
 
