@@ -25,4 +25,9 @@
  ********************************************************************/
 
 module.exports = {
+    // Reads rows from slash_proposals.
+    // Moved here from src/SlashGovernance.js:94.
+    async findSlashProposals(validatorPubkey) {
+        return this.doQuery(`SELECT id, validator_pubkey, offense_type, round_number, evidence, created_at FROM slash_proposals WHERE validator_pubkey = ? AND status = 'pending' ORDER BY id ASC`, [validatorPubkey]);
+    }
 };

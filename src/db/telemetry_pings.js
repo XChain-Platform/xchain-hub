@@ -25,4 +25,9 @@
  ********************************************************************/
 
 module.exports = {
+    // Deletes from telemetry_pings.
+    // Moved here from src/api.js:2658.
+    async deleteTelemetryPing(telemetryRetentionDays) {
+        return this.doQuery('DELETE FROM telemetry_pings WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)', [telemetryRetentionDays]);
+    }
 };

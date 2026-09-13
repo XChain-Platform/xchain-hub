@@ -130,5 +130,17 @@ module.exports = {
             "src_action_index = ? AND status <> 'retracted' LIMIT 1",
             [String(network || ''), String(srcChain || ''), Number(srcActionIndex)]);
         return (rows && rows.length) ? String(rows[0].transfer_id) : null;
+    },
+
+    // Reads rows from bridge_transfers.
+    // Moved here from src/api.js:2204.
+    async findBridgeTransfers(since, limit) {
+        return this.doQuery(`SELECT * FROM bridge_transfers WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?`, [since, limit]);
+    },
+
+    // Updates bridge_transfers.
+    // Moved here from src/CrossChainBridgeEngine.js:1157.
+    async updateBridgeTransfer(transfer_id) {
+        return this.doQuery(`UPDATE bridge_transfers SET status = 'retracted' WHERE transfer_id = ?`, [transfer_id]);
     }
 };

@@ -25,4 +25,65 @@
  ********************************************************************/
 
 module.exports = {
+    // Deletes from validator_rewards.
+    // Moved here from src/RewardTracker.js:212.
+    async deleteValidatorReward(roundNumber, rewardType, qualifier) {
+        return this.doQuery('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
+    },
+
+    // Reads rows from validators.
+    // Moved here from src/XChainHub.js:961.
+    async findActiveValidatorChains() {
+        return this.doQuery(`SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey`);
+    },
+
+    // Reads rows from validators.
+    // Moved here from src/XChainHub.js:926, src/XChainHub.js:945.
+    async findActiveValidators() {
+        return this.doQuery(`SELECT signing_pubkey, addr FROM validators WHERE status = 'active' ORDER BY signing_pubkey`);
+    },
+
+    // Reads rows from validator_rewards.
+    // Moved here from src/StateAnchorPublisher.js:3723.
+    async findValidatorRewardsByRewardType(reward_type, round_number, round_qualifier) {
+        return this.doQuery('SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND round_qualifier = ?', [reward_type, round_number, round_qualifier]);
+    },
+
+    // Reads rows from validator_rewards.
+    // Moved here from src/RewardTracker.js:195.
+    async findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier) {
+        return this.doQuery('SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ?', [roundNumber, rewardType, qualifier]);
+    },
+
+    // Reads rows from validators.
+    // Moved here from src/XChainHub.js:862.
+    async findValidatorsByAddr(addr) {
+        return this.doQuery(`SELECT signing_pubkey FROM validators WHERE addr = ? AND status = 'active'`, [addr]);
+    },
+
+    // Reads rows from validators.
+    // Moved here from src/XChainHub.js:1147.
+    async findValidatorsBySigningPubkey(signingPubkey) {
+        return this.doQuery('SELECT * FROM validators WHERE signing_pubkey = ?', [signingPubkey]);
+    },
+
+    // Inserts or updates a row in validators.
+    // Moved here from src/XChainHub.js:836, src/XChainHub.js:871, src/XChainHub.js:1122.
+    async setValidator(signingPubkey, addr, addr2) {
+        return this.doQuery(`INSERT INTO validators (signing_pubkey, addr, status)
+             VALUES (?, ?, 'active')
+             ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`, [signingPubkey, addr, addr2]);
+    },
+
+    // Updates validators.
+    // Moved here from src/XChainHub.js:830, src/XChainHub.js:867.
+    async updateValidatorByAddr(addr, signingPubkey) {
+        return this.doQuery(`UPDATE validators SET status = 'removed', updated_at = NOW() WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'`, [addr, signingPubkey]);
+    },
+
+    // Updates validators.
+    // Moved here from src/SlashGovernance.js:231.
+    async updateValidatorBySigningPubkey(signing_pubkey) {
+        return this.doQuery(`UPDATE validators SET status = 'suspended', updated_at = NOW() WHERE signing_pubkey = ? AND status = 'active'`, [signing_pubkey]);
+    }
 };
