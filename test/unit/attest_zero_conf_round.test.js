@@ -20,6 +20,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const EventEmitter = require('events');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 const zcMod = require('../../src/attest_zero_conf_activation.js');
 
@@ -42,7 +43,7 @@ function makeHub(overrides) {
     let o   = overrides || {};
     let pm  = makePeerManager();
     let hub = {
-        db:                 o.db !== undefined ? o.db : { doQuery: sinon.stub().resolves([]) },
+        db:                 o.db !== undefined ? o.db : { ...DB_METHODS, doQuery: sinon.stub().resolves([]) },
         p2pConfig:          o.p2pConfig || {},
         network:            o.network,
         getPeerManager:     () => pm,
@@ -220,7 +221,10 @@ describe('AttestationRound zero-confirmation flip', function () {
             let hub = makeHub({
                 network: 'regtest',
                 capabilitySnapshot: capSS,
-                db: { doQuery: sinon.stub().resolves(dbRows || []) }
+                // Spread first: _readFetchCache now calls db.findAttestationFetchCache()
+                // instead of issuing SQL inline, and it calls this.doQuery, which stays
+                // the own override below, so every dbRows fixture above still drives it.
+                db: { ...DB_METHODS, doQuery: sinon.stub().resolves(dbRows || []) }
             });
             let reg = makeProviderRegistry();
             let ar  = new AttestationRound(hub, reg);
@@ -275,8 +279,16 @@ describe('AttestationRound zero-confirmation flip', function () {
             let fetchStub = reg.getModule().fetch;
             fetchStub.resetHistory();
             sinon.stub(console, 'log');
+            // _readFetchCache swallows a missing/erroring findAttestationFetchCache into
+            // a silent cache miss (a warn, then treated as no cache), so a regression that
+            // drops the named method back off the double would still look like a pass on
+            // the two assertions below (it just pays the provider once more, on a table
+            // this test never counts). Pin the warn itself so that regresses loudly.
+            let warnStub = sinon.stub(console, 'warn');
             await ar._startRound(request, 500);
             sinon.restore();
+            expect(warnStub.getCalls().some(c => String(c.args[0]).includes('fetch-cache read failed')),
+                'the durable-cache read must not have failed and fallen back').to.be.false;
             expect(fetchStub.called, 'a cache hit must not pay the provider').to.be.false;
             expect(ar.getStats().fetch_count).to.equal(0);
             expect(ar.getStats().fetch_cache_hit_count).to.equal(1);
