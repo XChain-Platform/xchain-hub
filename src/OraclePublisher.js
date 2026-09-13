@@ -117,6 +117,7 @@ const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         LEGACY_BATCH_WINDOW_ROUNDS } = require('./lib/price_batch_cadence.js');
 const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
         PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
+const ah = require('./lib/admission_height.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -1295,8 +1296,12 @@ class OraclePublisher {
     // the signing round both take, so nothing downstream has to re-map it. Pair names
     // are read `coinPair || pair` and prices stringified exactly as the v0 producer
     // does, which is what keeps a v2 round object byte-identical to v0's own.
+    //
+    // The round's admission map rides the event as `admitBlocks` and is carried into the
+    // entry only when present: it is part of the signed batch bytes for an admission-era
+    // round, and absent is the legacy round, which is every round below the activation.
     _bufferEntryFromEvent(event) {
-        return {
+        let entry = {
             round:          parseInt(event.round),
             timestamp:      parseInt(event.btcBlockTime),
             btcBlockHeight: parseInt(event.btcBlockHeight),
@@ -1305,6 +1310,8 @@ class OraclePublisher {
                 price: String(p.price)
             }))
         };
+        if (event.admitBlocks !== null && event.admitBlocks !== undefined) entry.admitBlocks = event.admitBlocks;
+        return entry;
     }
 
     // Append one finalized round to the durable buffer, same open('a') + fsync
@@ -1914,7 +1921,8 @@ class OraclePublisher {
         let rows;
         try {
             rows = await this.db.doQuery(
-                'SELECT round_number, coin_pair, price, reference_block, block_timestamp ' +
+                'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
+                'admit_block_btc, admit_block_ltc, admit_block_doge ' +
                 'FROM price_snapshots WHERE round_number IN (' + placeholders + ') AND status = ? ' +
                 'AND consensus_proof NOT LIKE \'{"batch":%\' ORDER BY round_number ASC, coin_pair ASC',
                 want.concat(['finalized']));
@@ -1930,7 +1938,12 @@ class OraclePublisher {
             if (!Number.isFinite(r) || !Number.isFinite(ts) || !Number.isFinite(anchor)) continue;
             if (row.coin_pair === null || row.coin_pair === undefined || row.price === null || row.price === undefined) continue;
             let entry = derived.get(r);
-            if (!entry) { entry = { round: r, timestamp: ts, btcBlockHeight: anchor, pairs: [] }; derived.set(r, entry); }
+            if (!entry) {
+                entry = { round: r, timestamp: ts, btcBlockHeight: anchor, pairs: [] };
+                let admit = ah.columnsAdmitBlocks(row);
+                if (admit !== null) entry.admitBlocks = admit;
+                derived.set(r, entry);
+            }
             entry.pairs.push({ pair: String(row.coin_pair), price: String(row.price) });
         }
         let restored = 0;
@@ -2313,7 +2326,7 @@ class OraclePublisher {
         try {
             rows = await this.db.doQuery(
                 'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
-                'LEFT(consensus_proof, 8) AS proof_head ' +
+                'LEFT(consensus_proof, 8) AS proof_head, admit_block_btc, admit_block_ltc, admit_block_doge ' +
                 'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
                 'ORDER BY round_number ASC, coin_pair ASC',
                 [first, last, 'finalized']);
@@ -2336,6 +2349,8 @@ class OraclePublisher {
                           // longer be rebuilt here. It is also, by definition, already on
                           // chain. See OracleBatchSigner._deriveWindow.
                           batchSourced: String(row.proof_head || '').indexOf('{"batch"') === 0 };
+                let admit = ah.columnsAdmitBlocks(row);
+                if (admit !== null) entry.admitBlocks = admit;
                 derived.set(r, entry);
             }
             entry.pairs.push({ pair: String(row.coin_pair), price: String(row.price) });
@@ -2432,10 +2447,15 @@ class OraclePublisher {
     // set they never finalized under. OracleBatchSigner._straddlesArmedOracleFlagDay is
     // the receiving-side twin of this, and it refuses SILENTLY, so a leader that skips
     // this split simply never reaches quorum and the window never publishes.
+    //
+    // The mirror admission activation is the third bit: each round carries its own map
+    // era-keyed on its own anchor, and every round in one batch sits in one era, so the
+    // window splits at that boundary exactly as it does at the other two.
     _flagDayKey(btcBlockHeight) {
         let h = Number(btcBlockHeight);
         return (swq.isStakeWeightedQuorumActive(h, this.network) ? '1' : '0') +
-               (pst.isPriceSigTallyVerifyFirstActive(h, this.network) ? '1' : '0');
+               (pst.isPriceSigTallyVerifyFirstActive(h, this.network) ? '1' : '0') +
+               (ah.isAdmissionEra(this.network, h) ? '1' : '0');
     }
 
     _splitByFlagDay(rounds) {
@@ -2613,6 +2633,13 @@ class OraclePublisher {
             parts.push(String(parseInt(r.btcBlockHeight)));
             parts.push(String(pairs.length));
             for (let p of pairs) { parts.push(p.pair); parts.push(p.price); }
+            // The round's ADMIT_BLOCKS slot, present exactly when the round's own anchor is
+            // in the admission era and absent otherwise, which is the declared slot the
+            // parser reads; the builder throws for a map in the wrong era, so no wire is
+            // emitted that its verifiers would refuse.
+            let admit = ah.admissionCanonicalValue('OraclePublisher', this.network, parseInt(r.btcBlockHeight),
+                                                   r.admitBlocks === undefined ? null : r.admitBlocks);
+            if (admit !== null) parts.push(admit);
         }
         parts.push(String(sigs.length));
         for (let s of sigs) { parts.push(s.pubkey); parts.push(s.sig); }

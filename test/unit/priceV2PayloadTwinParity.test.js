@@ -69,8 +69,13 @@ const PREFIX = 'EQUIV|' + eq.ENGINE_TAGS.ORACLE_BATCH + '|' + ANCHOR + '|' + FIR
 
 // Real instances, not prototype stand-ins: both constructors only need a hub with
 // db/network/getPeerManager, so the methods are reached the way production reaches them.
+//
+// Pinned to MAINNET, which is inert at every height in this train, so this describe stays
+// the LEGACY-bytes describe whatever the process was launched with: the batch canonical
+// refuses an era round with no map, and these fixtures carry none on purpose. The armed
+// describe at the bottom of the file drives the admission era through a re-required tree.
 function hubTwins() {
-    const stubHub = { db: null, network: 'regtest', getPeerManager: () => ({}) };
+    const stubHub = { db: null, network: 'mainnet', getPeerManager: () => ({}) };
     return {
         producer: new OracleConsensus(stubHub, {}),
         ingest:   new PriceAggregator(stubHub)
@@ -352,4 +357,74 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
             });
         });
     }
+
+    // The BATCH canonical in the same armed process (row 26): one map PER ROUND, era-keyed on
+    // each round's own anchor, the map the LAST key of its round and spelled by the one
+    // encoder. Drives both eras and both refusal directions across the hub twins, and the
+    // indexer verifier where the sibling resolves. This describe is what makes a hub producer
+    // that drops the key RED inside the hub's own suite rather than only in the indexer's.
+    describe('the BATCH canonical carries one admission map per round', function () {
+        const FIRST = 100, LAST = 101;
+        const MAPS  = [{ DOGE: 5000004, BTC: 799004 }, { LTC: 2400004, BTC: 799005 }];
+        const TAILS = ['BTC:799004,DOGE:5000004', 'BTC:799005,LTC:2400004'];
+
+        // Two rounds at [base, base + 1]; maps[i] on round i when given.
+        function rounds(base, maps) {
+            return [0, 1].map(i => {
+                let r = { round: FIRST + i, timestamp: TIME + i * 600, btcBlockHeight: base + i,
+                          pairs: [{ coinPair: 'XCP/USD', price: 0.4237 }, { pair: 'BTC/USD', price: '61234.5' }] };
+                if (maps && maps[i] !== undefined) r.admitBlocks = maps[i];
+                return r;
+            });
+        }
+        const body = bytes => JSON.parse(bytes.slice(bytes.indexOf('{')));
+
+        it('the hub twins agree, and the indexer verifier with them, in the admission era', function () {
+            let era = rounds(ADMIT_AT, MAPS);
+            let fromProducer = armed.producer._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
+            let fromIngest   = armed.ingest._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
+            assert.strictEqual(fromIngest, fromProducer, 'PriceAggregator diverged from OracleConsensus on an era batch');
+            let b = body(fromProducer);
+            assert.deepStrictEqual(b.rounds.map(r => Object.keys(r)),
+                [['round', 'timestamp', 'btc_block_height', 'pairs', 'admit_blocks'],
+                 ['round', 'timestamp', 'btc_block_height', 'pairs', 'admit_blocks']]);
+            assert.deepStrictEqual(b.rounds.map(r => r.admit_blocks), TAILS);
+            assert.deepStrictEqual(b.rounds.map(r => armed.act.decodeAdmitBlocks(r.admit_blocks)),
+                [{ BTC: 799004, DOGE: 5000004 }, { BTC: 799005, LTC: 2400004 }]);
+            if (armed.indexer)
+                assert.strictEqual(armed.indexer.buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era, NETWORK), fromProducer,
+                    'the indexer verifier diverged from the hub producer on an era batch');
+        });
+
+        it('below the activation the bytes are the pre-admission form exactly, on all twins', function () {
+            let legacy = rounds(LEGACY_AT - 1);
+            let fromProducer = armed.producer._buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy);
+            assert.strictEqual(armed.ingest._buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy), fromProducer);
+            assert.strictEqual(/admit/.test(fromProducer), false);
+            assert.deepStrictEqual(Object.keys(body(fromProducer).rounds[0]), ['round', 'timestamp', 'btc_block_height', 'pairs']);
+            if (armed.indexer)
+                assert.strictEqual(armed.indexer.buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy, NETWORK), fromProducer);
+        });
+
+        it('every twin refuses in both directions: an era round with no map, a legacy round with one', function () {
+            let twins = [['producer', (r, a) => armed.producer._buildPriceBatchPayload(FIRST, LAST, a, r)],
+                         ['ingest',   (r, a) => armed.ingest._buildPriceBatchPayload(FIRST, LAST, a, r)]];
+            if (armed.indexer) twins.push(['indexer', (r, a) => armed.indexer.buildPriceBatchPayload(FIRST, LAST, a, r, NETWORK)]);
+            for (const [name, build] of twins) {
+                assert.throws(() => build(rounds(ADMIT_AT), ADMIT_AT + 1), /has no admit_blocks; refusing to build a legacy canonical/,
+                    name + ' built legacy bytes for an era round');
+                assert.throws(() => build(rounds(LEGACY_AT - 1, MAPS), LEGACY_AT), /was handed admit_blocks .*; refusing to build an admission-era canonical/,
+                    name + ' built era bytes for a legacy round');
+            }
+        });
+
+        it('the map is keyed on EACH round\'s own anchor: a straddling window carries it on the era round only', function () {
+            // The canonical itself does not refuse a straddle (the ingest and the parser do, per
+            // the ruling); it spells exactly what each round's own era says.
+            let mixed = rounds(LEGACY_AT, [undefined, MAPS[1]]);
+            let b = body(armed.producer._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT, mixed));
+            assert.strictEqual(b.rounds[0].admit_blocks, undefined);
+            assert.strictEqual(b.rounds[1].admit_blocks, TAILS[1]);
+        });
+    });
 });

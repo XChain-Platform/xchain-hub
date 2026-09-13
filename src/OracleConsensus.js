@@ -1840,6 +1840,9 @@ class OracleConsensus extends EventEmitter {
                     btcBlockHeight: pending.btcBlockHeight,
                     btcBlockTime:   pending.btcBlockTime,
                     prices:         pending.prices,
+                    // The round's admission map, the one the v0 signatures above cover, so
+                    // the publisher's batch carries the map the producer actually signed.
+                    admitBlocks:    pending.admitBlocks == null ? null : pending.admitBlocks,
                     // SIGNING KEYS, not addrs: the reward/slash consumer pays by key,
                     // so a validator the chain attributes but the registry never saw
                     // is payable for the round it just helped finalize.
@@ -2480,7 +2483,16 @@ class OracleConsensus extends EventEmitter {
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.
+    //
+    // Each round carries ITS OWN admission map (`admitBlocks`), era-keyed on that round's
+    // own anchor and never on the batch anchor: the map means "the heights at which THIS
+    // round's producer observed each chain", and the rounds in an hourly window were
+    // opened at different tips, so one map for the batch would sign a claim no producer
+    // made. In the admission era the entry gains a LAST key, `admit_blocks`, holding the
+    // same canonical spelling the v0 field uses; below it the entry is byte-identical to
+    // the pre-admission form and a map is refused.
     _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
+        let network = this.hub && this.hub.network;
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))
             .map(r => {
@@ -2490,12 +2502,16 @@ class OracleConsensus extends EventEmitter {
                     if (a.pair > b.pair) return 1;
                     return 0;
                 });
-                return {
+                let entry = {
                     round:            parseInt(r.round),
                     timestamp:        parseInt(r.timestamp),
                     btc_block_height: parseInt(r.btcBlockHeight),
                     pairs:            sortedPairs
                 };
+                let admit = ah.admissionCanonicalValue('OracleConsensus', network, parseInt(r.btcBlockHeight),
+                                                       r.admitBlocks === undefined ? null : r.admitBlocks);
+                if (admit !== null) entry.admit_blocks = admit;
+                return entry;
             });
         let raw = JSON.stringify({
             first_round:      parseInt(firstRound),

@@ -127,9 +127,12 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
 
     // Decode one multi-row INSERT's flat params back into per-row objects, in the
     // column order the statement declares.
+    // The three admission columns ride LAST, after created_at, so every positional reader
+    // of the INSERT keeps its index; a legacy round writes them as NULL, never 0.
     const COLS = ['round_number', 'coin_pair', 'price', 'reference_block', 'reference_chain',
                   'block_timestamp', 'validator_count', 'consensus_proof', 'source_chain',
-                  'source_action_index', 'push_generation', 'batch_block_time', 'created_at'];
+                  'source_action_index', 'push_generation', 'batch_block_time', 'created_at',
+                  'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
     function decodeInsert(params) {
         let rows = [];
         for (let i = 0; i < params.length; i += COLS.length) {
@@ -248,8 +251,10 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
             'round_number', 'coin_pair', 'price', 'reference_block', 'reference_chain',
             'block_timestamp', 'validator_count', 'consensus_round', 'consensus_proof',
             'status', 'source_chain', 'source_action_index', 'push_generation',
-            'batch_block_time', 'created_at'
+            'batch_block_time', 'created_at', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'
         ]);
+        // A legacy round (every round below the activation) mirrors NULL admission columns.
+        expect([first.admit_block_btc, first.admit_block_ltc, first.admit_block_doge]).to.deep.equal([null, null, null]);
         // The landing clock is the LANDING BLOCK's own time, which is neither the round's
         // pricing timestamp nor a height: that distinction is the only reason the column
         // exists, so assert it here rather than only that the key is present.

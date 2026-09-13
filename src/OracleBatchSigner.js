@@ -42,6 +42,7 @@ const pst               = require('./price_sig_tally_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
+const ah                = require('./lib/admission_height.js');
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
@@ -503,6 +504,15 @@ class OracleBatchSigner {
                    ', derived ' + mine.btcBlockHeight;
         if(parseInt(theirs.timestamp) !== mine.timestamp)
             return at + 'timestamp proposed ' + parseInt(theirs.timestamp) + ', derived ' + mine.timestamp;
+        // The admission map, spelled through the encoder so the comparison is over the
+        // bytes that would be signed; an unspellable proposed map is named as such rather
+        // than thrown on, because this helper only ever explains a refusal.
+        let spell = (m) => { if(m === null || m === undefined) return '(none)';
+                             try { return ah.encodeAdmitBlocks(m); } catch(e){ return '(unspellable)'; } };
+        let theirAdmit = spell(theirs.admitBlocks != null ? theirs.admitBlocks : theirs.admit_blocks);
+        let mineAdmit  = spell(mine.admitBlocks);
+        if(theirAdmit !== mineAdmit)
+            return at + 'admission map proposed ' + theirAdmit + ', derived ' + mineAdmit;
 
         let theirPairs = new Map((Array.isArray(theirs.pairs) ? theirs.pairs : [])
             .map(p => [String(p.coinPair || p.pair), String(p.price)]));
@@ -549,7 +559,7 @@ class OracleBatchSigner {
     async _deriveWindow(firstRound, lastRound){
         let rows = await this.db.doQuery(
             'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
-            'LEFT(consensus_proof, 8) AS proof_head ' +
+            'LEFT(consensus_proof, 8) AS proof_head, admit_block_btc, admit_block_ltc, admit_block_doge ' +
             'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
             'ORDER BY round_number ASC, coin_pair ASC',
             [firstRound, lastRound, 'finalized']);
@@ -558,18 +568,26 @@ class OracleBatchSigner {
         for(let r of (rows || [])){
             let key = parseInt(r.round_number);
             if(!Number.isFinite(key)) continue;
+            // The round's admission map, read back from the columns the finalizing hub
+            // stored it in; null is a legacy round. Part of the signed batch bytes, so it is
+            // rebuilt from THIS hub's rows exactly as the header fields are and never taken
+            // from the proposal.
+            let admit = ah.columnsAdmitBlocks(r);
             let entry = byRound.get(key);
             if(!entry){
                 entry = { round: key, timestamp: parseInt(r.block_timestamp),
                           btcBlockHeight: parseInt(r.reference_block), pairs: [],
                           batchSourced: String(r.proof_head || '').indexOf('{"batch"') === 0 };
+                if(admit !== null) entry.admitBlocks = admit;
                 byRound.set(key, entry);
             } else if(parseInt(r.block_timestamp) !== entry.timestamp ||
-                      parseInt(r.reference_block) !== entry.btcBlockHeight){
+                      parseInt(r.reference_block) !== entry.btcBlockHeight ||
+                      (admit === null) !== (entry.admitBlocks === undefined) ||
+                      (admit !== null && ah.encodeAdmitBlocks(admit) !== ah.encodeAdmitBlocks(entry.admitBlocks))){
                 // One round's rows are written by a single multi-row INSERT, so a
                 // per-pair disagreement means local corruption. Fail the whole window
                 // closed rather than pick a winner and sign an invented round header.
-                throw new Error('inconsistent anchor/timestamp across round ' + key);
+                throw new Error('inconsistent anchor/timestamp/admission map across round ' + key);
             }
             entry.pairs.push({ pair: String(r.coin_pair), price: String(r.price) });
         }
@@ -579,11 +597,18 @@ class OracleBatchSigner {
     // Both oracle flag days are keyed on a round's own BTC anchor, while a batch
     // resolves them once on the batch anchor. Equal verdicts at the first and last
     // anchor is exactly the condition under which those two readings agree.
+    //
+    // The mirror admission activation is a third such key: each round carries its own
+    // admission map era-keyed on its own anchor, and the ruling is that every round in a
+    // batch sits in one era, so a window straddling it splits at the boundary exactly as
+    // it does at the other two.
     _straddlesArmedOracleFlagDay(firstAnchor, lastAnchor){
         if(swq.isStakeWeightedQuorumActive(firstAnchor, this.network) !==
            swq.isStakeWeightedQuorumActive(lastAnchor, this.network)) return true;
         if(pst.isPriceSigTallyVerifyFirstActive(firstAnchor, this.network) !==
            pst.isPriceSigTallyVerifyFirstActive(lastAnchor, this.network)) return true;
+        if(ah.isAdmissionEra(this.network, firstAnchor) !==
+           ah.isAdmissionEra(this.network, lastAnchor)) return true;
         return false;
     }
 

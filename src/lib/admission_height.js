@@ -64,6 +64,9 @@ const {
     decodeAdmitBlocks,
     isAdmissionEra,
     admissionCanonicalField,
+    admissionCanonicalValue,
+    ADMIT_COLUMN_CHAINS,
+    columnsAdmitBlocks,
 } = require('../mirror_admission_activation.js');
 
 // ---------------------------------------------------------------------------
@@ -123,12 +126,10 @@ function normalizeChain(chain){
 // The mirror COLUMNS the map is stored in, and the map a stored row carries
 // ---------------------------------------------------------------------------
 
-// One nullable BIGINT UNSIGNED column per chain the federation serves, per C28.
-// Adding a chain to the federation adds a column here and in the six .sql twins;
-// it does NOT make rows signed before that chain existed admissible on it, which
-// is C38's fail-closed direction and the reason the map is read back from the
-// columns that are actually set rather than from today's chain list.
-const ADMIT_COLUMN_CHAINS = Object.freeze(['BTC', 'LTC', 'DOGE']);
+// The column list and the column reader live in the twin (ADMIT_COLUMN_CHAINS,
+// columnsAdmitBlocks), because every indexer rebuilds the signed field from the same
+// mirrored columns the hub writes and a second list on this side could drift. Both are
+// re-exported below; what stays here is the in-memory shape a round carries.
 
 /** The mirror column holding chain `c`'s admission height. */
 function admitColumn(chain){
@@ -148,17 +149,7 @@ function admitColumn(chain){
  */
 function rowAdmitBlocks(row){
     let r = row || {};
-    let fromCols = null;
-    for(let c of ADMIT_COLUMN_CHAINS){
-        let v = r['admit_block_' + c.toLowerCase()];
-        if(v === null || v === undefined) continue;
-        let h = Number(v);
-        if(!Number.isSafeInteger(h) || h < 0)
-            throw new Error('admission_height: admit_block_' + c.toLowerCase() + ' = ' + JSON.stringify(v) +
-                ' is not a usable admission height');
-        if(fromCols === null) fromCols = {};
-        fromCols[c] = h;
-    }
+    let fromCols = columnsAdmitBlocks(r);
     let inMem = (r.admit_blocks !== null && r.admit_blocks !== undefined && typeof r.admit_blocks === 'object')
         ? r.admit_blocks : null;
     if(inMem === null) return fromCols;
@@ -422,4 +413,6 @@ module.exports = {
     decodeAdmitBlocks,
     isAdmissionEra,
     admissionCanonicalField,
+    admissionCanonicalValue,
+    columnsAdmitBlocks,
 };

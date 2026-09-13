@@ -372,7 +372,16 @@ class PriceAggregator extends EventEmitter {
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.
+    //
+    // Each round carries ITS OWN admission map (`admitBlocks`), era-keyed on that round's
+    // own anchor and never on the batch anchor: the map means "the heights at which THIS
+    // round's producer observed each chain", and the rounds in an hourly window were
+    // opened at different tips, so one map for the batch would sign a claim no producer
+    // made. In the admission era the entry gains a LAST key, `admit_blocks`, holding the
+    // same canonical spelling the v0 field uses; below it the entry is byte-identical to
+    // the pre-admission form and a map is refused.
     _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
+        let network = this.hub && this.hub.network;
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))
             .map(r => {
@@ -382,12 +391,16 @@ class PriceAggregator extends EventEmitter {
                     if (a.pair > b.pair) return 1;
                     return 0;
                 });
-                return {
+                let entry = {
                     round:            parseInt(r.round),
                     timestamp:        parseInt(r.timestamp),
                     btc_block_height: parseInt(r.btcBlockHeight),
                     pairs:            sortedPairs
                 };
+                let admit = ah.admissionCanonicalValue('PriceAggregator', network, parseInt(r.btcBlockHeight),
+                                                       r.admitBlocks === undefined ? null : r.admitBlocks);
+                if (admit !== null) entry.admit_blocks = admit;
+                return entry;
             });
         let raw = JSON.stringify({
             first_round:      parseInt(firstRound),
@@ -906,7 +919,26 @@ class PriceAggregator extends EventEmitter {
                     return refuse('invalid pairs');
                 }
             }
-            rounds.push({ round, timestamp, btcBlockHeight: roundAnchor, pairs: r.pairs });
+            // The round's admission map, forwarded from the push exactly as the producer
+            // signed it and never rebuilt from this hub's own tips (a re-resolved map would
+            // rebuild bytes no signature covers). Era-keyed on THIS round's own anchor, per
+            // round rather than per batch, because the rounds in one window were opened at
+            // different tips. Shape-checked here so a malformed map reads as a refusal with
+            // a reason rather than as a canonical builder throw; the era rule itself (a map
+            // exactly when the round is in the admission era) is enforced by the canonical
+            // builder below, which refuses in both directions.
+            let admitBlocks = null;
+            if (r.admit_blocks !== undefined && r.admit_blocks !== null) {
+                if (typeof r.admit_blocks !== 'object') return refuse('invalid admit_blocks');
+                let encoded;
+                try { encoded = ah.encodeAdmitBlocks(r.admit_blocks); }
+                catch (e) { return refuse('invalid admit_blocks'); }
+                admitBlocks = ah.decodeAdmitBlocks(encoded);
+                if (admitBlocks === null) return refuse('invalid admit_blocks');
+            }
+            let entry = { round, timestamp, btcBlockHeight: roundAnchor, pairs: r.pairs };
+            if (admitBlocks !== null) entry.admitBlocks = admitBlocks;
+            rounds.push(entry);
         }
 
         // THE HEADER ANCHOR IS CONSTRAINED TO THE LAST ROUND'S OWN ANCHOR (§4), the twin
@@ -932,39 +964,22 @@ class PriceAggregator extends EventEmitter {
         if (priceSigTally.isPriceSigTallyVerifyFirstActive(firstAnchor, network) !==
             priceSigTally.isPriceSigTallyVerifyFirstActive(lastAnchor, network) ||
             swq.isStakeWeightedQuorumActive(firstAnchor, network) !==
-            swq.isStakeWeightedQuorumActive(lastAnchor, network)) {
+            swq.isStakeWeightedQuorumActive(lastAnchor, network) ||
+            ah.isAdmissionEra(network, firstAnchor) !== ah.isAdmissionEra(network, lastAnchor)) {
             return refuse('batch straddles an oracle flag day');
         }
 
-        // ADMISSION ERA, FAIL CLOSED. The v0 ROUND canonical carries the round's admission
-        // map and refuses in both directions, so a single-round push above the activation
-        // either carries the producer's signed map or is rejected. THE BATCH CANONICAL
-        // CARRIES NO SUCH FIELD: _buildPriceBatchPayload serializes only
-        // {round, timestamp, btc_block_height, pairs} per round, so an admission map cannot
-        // ride a batch and nothing a batch carries could be verified against a signature if
-        // it did. Without this check an admission-era batch VERIFIES and stores its rounds
-        // with no admission height at all, i.e. as legacy rows, silently, above the very
-        // activation that is supposed to bind them by height. That is the fail-OPEN
-        // direction and the one this design may never take.
-        //
-        // Judged on the batch anchor, which the check above has already constrained to the
-        // LAST round's own anchor; the rounds are strictly ascending, so no round in the
-        // batch is in the admission era unless this one is. A signed batch is atomic, so
-        // the whole batch is refused rather than the era rounds dropped from it.
-        //
-        // When the batch canonical gains the per-round admission field (a three-way byte
-        // twin: this builder, OracleConsensus._buildPriceBatchPayload and the indexer's
-        // ed25519.buildPriceBatchPayload), this becomes "refuse an admission-era batch whose
-        // rounds carry NO map" and keeps firing for exactly the rows it fires for today.
-        if (ah.isAdmissionEra(network, btcBlockHeight)) {
-            // Never silent: this refuses every batch on the rail once the activation arms,
-            // and an operator reading only "rejected" would hunt a signature bug.
-            console.warn('PriceAggregator: refusing PRICE batch [' + firstRound + '..' + lastRound +
-                '] at anchor ' + btcBlockHeight + ' on ' + String(network) + ': the batch is in the ' +
-                'admission era and the batch canonical has no wire carrier for the admission map, ' +
-                'so its rounds could only be stored as legacy rows above the activation.');
-            return refuse('admission-era batch: the batch canonical carries no admission map');
-        }
+        // ADMISSION ERA, PER ROUND, FAIL CLOSED IN BOTH DIRECTIONS. Every round in the
+        // admission era must carry its own map and every legacy round must carry none; the
+        // batch canonical enforces that inside _buildPriceBatchPayload, which throws for a
+        // mismatch in either direction, and a throw there is a whole-batch refusal here
+        // rather than a stored legacy row. The mirror admission activation is in the
+        // straddle rule above for the same reason the other two gates are: a window whose
+        // rounds sit on both sides of it would carry a mixed set, and the ruling is one map
+        // per round with every round in one era, so the publisher splits at the boundary
+        // exactly as it does at the older gates. Without the per-round rule an admission-era
+        // batch would VERIFY and store its rounds as legacy rows above the very activation
+        // that is supposed to bind them by height, the fail-OPEN direction.
 
         // Structural sig validation: [{ pubkey: 64-hex, sig: 128-hex }, ...]
         if (!Array.isArray(batchData.sigs) || batchData.sigs.length < 1) {
@@ -1043,7 +1058,17 @@ class PriceAggregator extends EventEmitter {
         // ONE verification pass over the batch canonical. _buildPriceBatchPayload is the
         // byte-for-byte twin of the indexer's and OracleConsensus's builders; never
         // inline the JSON here, or the three copies drift and every honest batch fails.
-        let payload      = this._buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
+        let payload;
+        try {
+            payload = this._buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
+        } catch (e) {
+            // The era rule firing: an admission-era round with no map, or a legacy round
+            // handed one. Never silent, or an operator reading only "rejected" hunts a
+            // signature bug on a rail the activation just armed.
+            console.warn('PriceAggregator: refusing PRICE batch [' + firstRound + '..' + lastRound +
+                '] at anchor ' + btcBlockHeight + ' on ' + String(network) + ': ' + (e && e.message));
+            return refuse('admission map does not match the round\'s era');
+        }
         let qualified    = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seenPubkey   = new Set();
         let verifiedSigs = [];
@@ -1121,13 +1146,19 @@ class PriceAggregator extends EventEmitter {
             // round was priced, this is when the chain could first show it. Fee pricing
             // bounds itself on it so a hub-connected node and a chain-only node select
             // the same round (price_fee_batch_landed_activation.js in the indexer).
+            // The round's admission map lands in its per-chain columns, every federation
+            // column named so a legacy round NULLs them rather than leaving a default a later
+            // schema edit could change under a signed row. Appended AFTER created_at so every
+            // positional reader of this INSERT keeps its index.
+            let admitCols = ah.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
             let insertedRows = [];
-            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?)").join(', ');
+            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
             let params = [];
             for (let p of r.pairs) {
                 params.push(r.round, p.pair, p.price, referenceBlock, sourceChain || null, r.timestamp,
                             validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration,
-                            blockTime, createdAt);
+                            blockTime, createdAt,
+                            admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
                 insertedRows.push({
                     round_number:        r.round,
                     coin_pair:           p.pair,
@@ -1143,7 +1174,10 @@ class PriceAggregator extends EventEmitter {
                     source_action_index: sourceActionIndex,
                     push_generation:     pushGeneration,
                     batch_block_time:    blockTime,
-                    created_at:          createdAt
+                    created_at:          createdAt,
+                    admit_block_btc:     admitCols.admit_block_btc,
+                    admit_block_ltc:     admitCols.admit_block_ltc,
+                    admit_block_doge:    admitCols.admit_block_doge
                 });
             }
             // ONE multi-row INSERT PER ROUND, not one for the whole batch: the hub
@@ -1155,7 +1189,7 @@ class PriceAggregator extends EventEmitter {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, batch_block_time, created_at)
+                 push_generation, batch_block_time, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
                     price = VALUES(price), reference_block = VALUES(reference_block),
@@ -1165,7 +1199,9 @@ class PriceAggregator extends EventEmitter {
                     source_action_index = VALUES(source_action_index),
                     push_generation = VALUES(push_generation),
                     batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
-                                          VALUES(batch_block_time), batch_block_time)`;
+                                          VALUES(batch_block_time), batch_block_time),
+                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                    admit_block_doge = VALUES(admit_block_doge)`;
             try {
                 await this.db.doQuery(query, params);
             } catch (err) {

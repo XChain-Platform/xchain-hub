@@ -62,7 +62,9 @@ const NETWORK   = 'regtest';
 const ARMED_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/PriceAggregator.js'
+    '../../src/PriceAggregator.js',
+    '../../src/OracleBatchSigner.js',
+    '../../src/OraclePublisher.js'
 ];
 
 let armed = null;
@@ -74,8 +76,10 @@ function armTwins(atHeight) {
     for (const p of paths) delete require.cache[p];
     process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(atHeight === undefined ? ADMIT_AT : atHeight);
 
-    const PriceAggregator = require('../../src/PriceAggregator.js');
-    const act             = require('../../src/mirror_admission_activation.js');
+    const PriceAggregator  = require('../../src/PriceAggregator.js');
+    const OracleBatchSigner = require('../../src/OracleBatchSigner.js');
+    const OraclePublisher  = require('../../src/OraclePublisher.js');
+    const act              = require('../../src/mirror_admission_activation.js');
 
     // Put the process back exactly as it was found; the classes captured above keep the
     // armed modules they closed over, so arming is scoped to this file.
@@ -86,7 +90,7 @@ function armTwins(atHeight) {
         if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
         else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
     }
-    return { act, PriceAggregator, restore };
+    return { act, PriceAggregator, OracleBatchSigner, OraclePublisher, restore };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,67 +306,225 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
     });
 
     // -----------------------------------------------------------------------
-    // 2. the batch rail: no carrier, so it fails CLOSED
+    // 2. the batch rail (row 26): one map PER ROUND, era-keyed on each round's own
+    //    anchor, refused in both directions, and never straddling the activation
     // -----------------------------------------------------------------------
-    describe('the PRICE batch rail refuses in the admission era rather than storing legacy rows', function () {
+    describe('the PRICE batch rail carries one admission map per round (row 26)', function () {
 
-        const V = validators(4);
+        const V     = validators(4);
+        const MAP5  = { BTC: ADMIT_AT + 3, DOGE: 5000004 };
+        const MAP6  = { BTC: ADMIT_AT + 4, LTC: 2400004 };
 
-        function batchOn(anchor) {
-            return {
+        // Two rounds at [anchor - 1, anchor]; maps[i] is the map on round i (undefined = none).
+        function batchOn(anchor, maps, signWith) {
+            let rounds = [
+                { round: 5, timestamp: 1700000000, btc_block_height: anchor - 1,
+                  pairs: [{ pair: 'BTC/USD', price: '50000' }] },
+                { round: 6, timestamp: 1700000600, btc_block_height: anchor,
+                  pairs: [{ pair: 'BTC/USD', price: '50001' }] }
+            ];
+            if (maps) rounds.forEach((r, i) => { if (maps[i] !== undefined) r.admit_blocks = maps[i]; });
+            let b = {
                 first_round: 5, last_round: 6, btc_block_height: anchor,
                 block_index: 800000, block_time: 1700000000, action_index: 42,
-                rounds: [
-                    { round: 5, timestamp: 1700000000, btc_block_height: anchor - 1,
-                      pairs: [{ pair: 'BTC/USD', price: '50000' }] },
-                    { round: 6, timestamp: 1700000600, btc_block_height: anchor,
-                      pairs: [{ pair: 'BTC/USD', price: '50001' }] }
-                ],
+                rounds: rounds,
                 sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: 'ab'.repeat(64) }))
             };
+            if (signWith) {
+                const canon = signWith._buildPriceBatchPayload(5, 6, anchor, rounds.map(r => ({
+                    round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height,
+                    pairs: r.pairs, admitBlocks: r.admit_blocks })));
+                b.sigs = V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(canon) }));
+            }
+            return b;
         }
 
-        function aggOn(network) {
+        function aggOn(network, queries) {
             const hub = createMockHub({ network });
             hub.capabilitySnapshot = snapshotFor(V);
-            hub.db.doQuery.callsFake(async () => []);
+            hub.db.doQuery.callsFake(async (sql, params) => { if (queries) queries.push([sql, params]); return []; });
             return new armed.PriceAggregator(hub);
         }
 
-        it('refuses the whole batch, naming the missing carrier, and stores nothing', async function () {
-            const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(ADMIT_AT));
+        it('refuses a window that straddles the activation, before any signature is read', async function () {
+            // round 5 at ADMIT_AT - 1 is legacy, round 6 at ADMIT_AT is era: a mixed set.
+            const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(ADMIT_AT, [undefined, MAP6]));
             expect(result.accepted).to.equal(false);
-            expect(result.reason).to.match(/admission-era batch/);
+            expect(result.reason).to.match(/straddles/);
             expect(result.stored).to.equal(0);
-            // Atomic: a signed batch is refused whole, never partly stored.
             expect(result.rejected).to.equal(2);
+        });
+
+        it('refuses an era batch whose rounds carry NO map, whole, storing nothing', async function () {
+            const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(ADMIT_AT + 1));
+            expect(result.accepted).to.equal(false);
+            expect(result.reason).to.match(/admission map does not match the round's era/);
+            expect(result.stored).to.equal(0);
+            expect(result.rejected).to.equal(2);
+        });
+
+        it('refuses a LEGACY batch that was handed a map, the other direction', async function () {
+            const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(LEGACY_AT, [MAP5, MAP6]));
+            expect(result.accepted).to.equal(false);
+            expect(result.reason).to.match(/admission map does not match the round's era/);
+        });
+
+        it('refuses a map the encoder cannot spell rather than throwing on it', async function () {
+            const result = await aggOn(NETWORK).receiveValidatedBatch('BTC',
+                batchOn(ADMIT_AT + 1, [{ BTC: '007' }, MAP6]));
+            expect(result.reason).to.equal('invalid admit_blocks');
         });
 
         it('leaves a batch BELOW the activation on exactly its old road', async function () {
             const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(LEGACY_AT));
-            // It still fails, on its garbage signatures, and that is the point: the
-            // admission check did not fire and the batch reached the verifier as before.
-            expect(result.reason).to.not.match(/admission-era batch/);
+            // It still fails, on its garbage signatures, and that is the point: no
+            // admission rule fired and the batch reached the verifier as before.
+            expect(result.reason).to.not.match(/admission|straddles/);
         });
 
         it('is inert on a network with no activation, at a height far above the armed one', async function () {
             const result = await aggOn('mainnet').receiveValidatedBatch('BTC', batchOn(ADMIT_AT + 1000000));
-            expect(result.reason).to.not.match(/admission-era batch/);
+            expect(result.reason).to.not.match(/admission|straddles/);
         });
 
-        it('the batch canonical still carries NO admission field, which is why the refusal exists', function () {
-            const agg  = aggOn(NETWORK);
-            const b    = batchOn(ADMIT_AT);
-            const rounds = b.rounds.map(r => ({ round: r.round, timestamp: r.timestamp,
-                                                btcBlockHeight: r.btc_block_height, pairs: r.pairs }));
-            const bytes = agg._buildPriceBatchPayload(b.first_round, b.last_round, b.btc_block_height, rounds);
-            // A map handed to the builder cannot reach the bytes: there is no parameter for
-            // it and no per-round key for it. If this ever becomes false, the refusal above
-            // becomes "refuse an era batch whose rounds carry no map" and this case moves.
-            expect(bytes).to.not.match(/BTC:/);
-            assert.deepStrictEqual(
-                Object.keys(JSON.parse(bytes.slice(bytes.indexOf('{')))).sort(),
-                ['btc_block_height', 'first_round', 'last_round', 'rounds']);
+        it('ACCEPTS an era batch whose rounds carry the maps the quorum signed, and stores each map in its round\'s columns', async function () {
+            const queries = [];
+            const agg     = aggOn(NETWORK, queries);
+            const result  = await agg.receiveValidatedBatch('BTC', batchOn(ADMIT_AT + 1, [MAP5, MAP6], agg));
+            expect(result.accepted).to.equal(true, 'reason: ' + result.reason);
+            expect(result.stored).to.equal(2);
+            const inserts = queries.filter(([sql]) => /INSERT INTO price_snapshots/.test(sql));
+            expect(inserts.length).to.equal(2);
+            for (const [sql, params] of inserts) {
+                expect(sql).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge\)/);
+                expect(sql).to.match(/admit_block_doge = VALUES\(admit_block_doge\)/);
+                // 16 params per pair row: the three admission columns ride LAST, after created_at.
+                expect(params.length).to.equal(16);
+            }
+            // round 5: {BTC, DOGE}; round 6: {BTC, LTC}. NULL, never 0, for the absent chain.
+            assert.deepStrictEqual(inserts[0][1].slice(13), [MAP5.BTC, null, MAP5.DOGE]);
+            assert.deepStrictEqual(inserts[1][1].slice(13), [MAP6.BTC, MAP6.LTC, null]);
+        });
+
+        it('REFUSES the same batch when one round\'s map is edited in flight', async function () {
+            const agg = aggOn(NETWORK);
+            const b   = batchOn(ADMIT_AT + 1, [MAP5, MAP6], agg);
+            b.rounds[1].admit_blocks = Object.assign({}, MAP6, { BTC: MAP6.BTC + 1 });
+            const result = await agg.receiveValidatedBatch('BTC', b);
+            expect(result.accepted).to.equal(false, 'an edited admission map verified');
+        });
+
+        it('carries the map as the LAST key of each round, and none below the activation', function () {
+            const agg = aggOn(NETWORK);
+            const era = batchOn(ADMIT_AT + 1, [MAP5, MAP6]);
+            const bytes = agg._buildPriceBatchPayload(5, 6, ADMIT_AT + 1, era.rounds.map(r => ({
+                round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height,
+                pairs: r.pairs, admitBlocks: r.admit_blocks })));
+            const body = JSON.parse(bytes.slice(bytes.indexOf('{')));
+            assert.deepStrictEqual(Object.keys(body.rounds[0]),
+                ['round', 'timestamp', 'btc_block_height', 'pairs', 'admit_blocks']);
+            assert.strictEqual(body.rounds[0].admit_blocks, 'BTC:' + MAP5.BTC + ',DOGE:5000004');
+            assert.strictEqual(body.rounds[1].admit_blocks, 'BTC:' + MAP6.BTC + ',LTC:2400004');
+            assert.deepStrictEqual(armed.act.decodeAdmitBlocks(body.rounds[0].admit_blocks), MAP5);
+
+            const legacy = batchOn(LEGACY_AT);
+            const lbytes = agg._buildPriceBatchPayload(5, 6, LEGACY_AT, legacy.rounds.map(r => ({
+                round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height, pairs: r.pairs })));
+            expect(lbytes).to.not.match(/admit_blocks/);
+            assert.deepStrictEqual(Object.keys(JSON.parse(lbytes.slice(lbytes.indexOf('{'))).rounds[0]),
+                ['round', 'timestamp', 'btc_block_height', 'pairs']);
+        });
+    });
+
+    // -----------------------------------------------------------------------
+    // 2b. the producer side of the batch wire (row 26): the on-chain slot, the split at
+    //     the activation, and the signer rebuilding each round's map from its columns
+    // -----------------------------------------------------------------------
+    describe('the batch producer carries each round\'s map onto the on-chain wire', function () {
+        const os   = require('os');
+        const path = require('path');
+        const fs   = require('fs');
+        const MAP5 = { DOGE: 5000004, BTC: ADMIT_AT + 3 };
+        const MAP6 = { LTC: 2400004, BTC: ADMIT_AT + 4 };
+        let dir, pub, signer;
+
+        function rounds(base, maps) {
+            return [0, 1].map(i => {
+                let r = { round: 5 + i, timestamp: 1700000000 + i * 600, btcBlockHeight: base + i,
+                          pairs: [{ coinPair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }] };
+                if (maps && maps[i] !== undefined) r.admitBlocks = maps[i];
+                return r;
+            });
+        }
+        const SIGS = [{ pubkey: 'ab'.repeat(32), sig: 'cd'.repeat(64) }];
+
+        before(function () {
+            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'row26-pub-'));
+            const hub = {
+                p2pConfig: { PUBLISHER_QUEUE_PATH: path.join(dir, 'publisher-queue.jsonl') },
+                network: NETWORK, db: { doQuery: sinon.stub().resolves([]) },
+                getIdentity: () => null, getPeerManager: () => ({}), capabilitySnapshot: null,
+                oracleConsensus: null, oracleBatchSigner: null
+            };
+            pub    = new armed.OraclePublisher(hub);
+            signer = new armed.OracleBatchSigner(hub);
+        });
+        after(function () {
+            try { if (pub && typeof pub.stop === 'function') pub.stop(); } catch (e) { /* teardown only */ }
+            try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* teardown only */ }
+        });
+
+        it('emits ADMIT_BLOCKS after each era round\'s pairs, spelled by the one encoder, and nothing below the activation', function () {
+            const body = pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT, [MAP5, MAP6]), SIGS).split('|');
+            // FIRST|LAST|ANCHOR|COUNT, then per round ROUND|TS|ANCHOR|PAIR_COUNT|pair|price x2|ADMIT_BLOCKS
+            expect(body.slice(0, 4)).to.deep.equal(['5', '6', String(ADMIT_AT + 1), '2']);
+            expect(body[4 + 8]).to.equal(armed.act.encodeAdmitBlocks(MAP5));
+            expect(body[4 + 9 + 8]).to.equal(armed.act.encodeAdmitBlocks(MAP6));
+            expect(body[4 + 18]).to.equal('1');                       // SIG_COUNT sits right after the second slot
+            const legacy = pub.buildPriceBatchBody(5, 6, LEGACY_AT, rounds(LEGACY_AT - 1), SIGS).split('|');
+            expect(legacy[4 + 8]).to.equal('6');                      // the next ROUND, no slot in between
+            expect(legacy.join('|')).to.not.match(/BTC:/);
+        });
+
+        it('refuses to emit a wire for an era round with no map, so nothing its verifiers would refuse is ever spent on', function () {
+            expect(() => pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT), SIGS))
+                .to.throw(/has no admit_blocks; refusing to build a legacy canonical/);
+        });
+
+        it('splits a window at the activation, so no batch straddles it', function () {
+            expect(pub._flagDayKey(LEGACY_AT)).to.not.equal(pub._flagDayKey(ADMIT_AT));
+            const segments = pub._splitByFlagDay(rounds(LEGACY_AT, [undefined, MAP6]));
+            expect(segments.map(seg => seg.map(r => r.round))).to.deep.equal([[5], [6]]);
+            expect(signer._straddlesArmedOracleFlagDay(LEGACY_AT, ADMIT_AT)).to.equal(true);
+            expect(signer._straddlesArmedOracleFlagDay(ADMIT_AT, ADMIT_AT + 5)).to.equal(false);
+        });
+
+        it('the signer rebuilds each round\'s map from its stored columns, and refuses a round whose pairs disagree', async function () {
+            const row = (round, pair, admit) => Object.assign({ round_number: round, coin_pair: pair, price: '1',
+                reference_block: ADMIT_AT, block_timestamp: 1700000000, proof_head: '[' }, admit);
+            signer.db = { doQuery: sinon.stub().resolves([
+                row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(6, 'BTC/USD', { admit_block_btc: null, admit_block_ltc: null, admit_block_doge: null })
+            ]) };
+            const derived = await signer._deriveWindow(5, 6);
+            expect(derived.map(r => r.admitBlocks)).to.deep.equal([{ BTC: MAP5.BTC, DOGE: MAP5.DOGE }, undefined]);
+            expect(signer.db.doQuery.firstCall.args[0]).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge/);
+
+            signer.db = { doQuery: sinon.stub().resolves([
+                row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC + 1, admit_block_ltc: null, admit_block_doge: MAP5.DOGE })
+            ]) };
+            let err = null;
+            try { await signer._deriveWindow(5, 5); } catch (e) { err = e; }
+            expect(err && err.message).to.match(/inconsistent anchor\/timestamp\/admission map across round 5/);
+        });
+
+        it('the buffer entry carries the finalized round\'s map, and only when the event has one', function () {
+            const base = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: ADMIT_AT, prices: [{ coinPair: 'BTC/USD', price: '1' }] };
+            expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: MAP5 }, base)).admitBlocks).to.deep.equal(MAP5);
+            expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: null }, base))).to.not.have.property('admitBlocks');
+            expect(pub._bufferEntryFromEvent(base)).to.not.have.property('admitBlocks');
         });
     });
 
