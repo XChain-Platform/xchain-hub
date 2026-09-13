@@ -88,6 +88,11 @@
  *   node bin/sibling-reference-map.js --siblings /path/to/platform
  *   node bin/sibling-reference-map.js --pin bin/pins/at1-sibling-reference-map.json \
  *        --base-sha <sha> --note "<what tree this saw>"
+ *   node bin/sibling-reference-map.js --census bin/pins/at1-siblings.json
+ *                                              the per-repo count a wave is
+ *                                              scheduled from: executable sites
+ *                                              against mentions, and which repos
+ *                                              gate a push
  *   SIBLING_MAP_EXTRA_DIRS=<dir>,<dir> node bin/sibling-reference-map.js \
  *        --include-platform-tooling --json
  *
@@ -1174,6 +1179,7 @@ function parseArgs(argv) {
         else if (argv[i] === '--include-platform-tooling') opts.includePlatformTooling = true;
         else if (argv[i] === '--siblings') { opts.siblings = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--pin') { opts.pin = path.resolve(argv[i + 1]); i += 1; }
+        else if (argv[i] === '--census') { opts.census = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--base-sha') { opts.baseSha = argv[i + 1]; i += 1; }
         else if (argv[i] === '--note') { opts.note = argv[i + 1]; i += 1; }
         else if (argv[i] === '--help' || argv[i] === '-h') opts.help = true;
@@ -1202,6 +1208,65 @@ function srcInventoryAt(sha) {
     }
 }
 
+/**
+ * The per-repo census a restructure is actually scheduled from: how many sites
+ * in each sibling would BREAK on a move (a require or a built path) against how
+ * many would merely go stale (a comment or a runbook line).
+ *
+ * The two are kept apart because they cost different things. An executable site
+ * gates a push: the sibling's CI goes red until it is repointed, so the hub half
+ * and the sibling half of the move have to land as a pair. A mention costs a
+ * misleading document, which can follow later in a repo of its own.
+ *
+ * @param {object} map a built reference map
+ * @returns {object} totals, then one entry per referring repo
+ */
+function referenceCensus(map) {
+    const repos = {};
+    let executable = 0;
+    let mentions = 0;
+    for (const [rel, entry] of Object.entries(map.paths)) {
+        for (const ref of entry.referrers) {
+            if (!repos[ref.repo]) {
+                repos[ref.repo] = { executableSites: 0, mentionSites: 0, files: new Set(), paths: new Set() };
+            }
+            const row = repos[ref.repo];
+            // `kind` is the load-or-mention split the map already makes: a require,
+            // an import or a built path is executable, plain prose is not.
+            if (ref.kind === 'text') { row.mentionSites += 1; mentions += 1; } else { row.executableSites += 1; executable += 1; }
+            row.files.add(ref.file);
+            row.paths.add(rel);
+        }
+    }
+    const byRepo = {};
+    for (const name of Object.keys(repos).sort()) {
+        const row = repos[name];
+        byRepo[name] = {
+            executableSites: row.executableSites,
+            mentionSites: row.mentionSites,
+            referringFiles: row.files.size,
+            distinctHubPaths: row.paths.size,
+            // What a move costs here, in one word, so the wave plan can be read
+            // off this file rather than re-derived from the site list.
+            gatesAPush: row.executableSites > 0,
+        };
+    }
+    return {
+        totals: {
+            siblingReposSwept: map.siblingRepos.length,
+            distinctHubPaths: map.distinctPathCount,
+            pathsResolvingToAFile: map.existingPathCount,
+            referenceSites: map.referenceCount,
+            executableSites: executable,
+            mentionSites: mentions,
+            reposGatingAPush: Object.values(byRepo).filter((r) => r.gatesAPush).length,
+            dynamicReferences: map.dynamicReferenceCount,
+        },
+        byRepo,
+        dynamicReferences: map.dynamicReferences,
+    };
+}
+
 function main() {
     const opts = parseArgs(process.argv.slice(2));
     if (opts.help) {
@@ -1219,6 +1284,23 @@ function main() {
         return;
     }
     const map = buildReferenceMap(opts.siblings, { includePlatformTooling: opts.includePlatformTooling });
+    if (opts.census) {
+        const census = Object.assign({
+            censusMetadata: {
+                tool: 'bin/sibling-reference-map.js --census',
+                capturedAt: new Date().toISOString(),
+                hubSha: opts.baseSha || null,
+                siblingsRoot: path.relative(REPO_ROOT, opts.siblings) || '.',
+                note: opts.note || null,
+            },
+        }, referenceCensus(map));
+        fs.mkdirSync(path.dirname(opts.census), { recursive: true });
+        fs.writeFileSync(opts.census, `${JSON.stringify(census, null, 2)}\n`);
+        console.log(`census written: ${opts.census}`);
+        console.log(`  ${census.totals.executableSites} executable sites and ${census.totals.mentionSites} mentions `
+            + `across ${census.totals.siblingReposSwept} repos; ${census.totals.reposGatingAPush} gate a push`);
+        return;
+    }
     if (opts.pin) {
         const pinned = Object.assign({
             pinMetadata: {
@@ -1270,6 +1352,7 @@ if (require.main === module) main();
 
 module.exports = {
     buildReferenceMap,
+    referenceCensus,
     setRepoRoot,
     // The measured checkout, as a call rather than a binding: a consumer that
     // captured the value at require time would keep reading the default after
