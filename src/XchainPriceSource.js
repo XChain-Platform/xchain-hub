@@ -56,7 +56,7 @@
 
 'use strict';
 
-const Database = require('./db.js');
+const Database = require('./db');
 const bcmath   = require('./bcmath.js');
 const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('./xchainPrice.js');
 const { getWindowFills } = require('./xchainPriceQuery.js');
