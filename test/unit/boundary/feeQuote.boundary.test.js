@@ -17,7 +17,7 @@ const proxyquire   = require('proxyquire');
 // Stub all dependencies to isolate XChainHub
 let mockDb;
 const XChainHub = proxyquire('../../../src/XChainHub', {
-    './db.js':              function () { return mockDb; },
+    './db':                 function () { return mockDb; },
     './PeerManager.js':     function () { return null; },
     './Consensus.js':       function () {},
     './ValidatorIdentity.js': function () {},

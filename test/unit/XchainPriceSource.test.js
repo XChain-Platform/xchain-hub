@@ -96,7 +96,7 @@ function hubDouble(finalized = {}) {
 
 function makeSource(rows, finalized, config = CONFIG) {
     const XchainPriceSource = proxyquire('../../src/XchainPriceSource.js', {
-        './db.js': indexerDouble(rows),
+        './db': indexerDouble(rows),
     });
     const hubDb = hubDouble(finalized);
     return { src: new XchainPriceSource(config, hubDb), hubDb };
