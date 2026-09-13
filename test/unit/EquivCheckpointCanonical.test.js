@@ -46,7 +46,7 @@ let sdkErr = null, lightErr = null, anchorErr = null, recoveryErr = null;
 try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
 try { sdkLight = require('../../../xchain-sdk/src/light.js'); } catch (e) { lightErr = e; }
 try { Anchor = require('../../../xchain-indexer/src/actions/anchor.js'); } catch (e) { anchorErr = e; }
-try { AnchorRecovery = require('../../../xchain-indexer/src/recovery.js'); } catch (e) { recoveryErr = e; }
+try { AnchorRecovery = require('../../../xchain-indexer/bin/recovery.js'); } catch (e) { recoveryErr = e; }
 const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
 
 // before() hook shared by every sibling-gated block: escalate to a throw when the
@@ -59,7 +59,7 @@ function requireSiblings() {
         if (!sdkCheckpoint)  missing.push('xchain-sdk/src/checkpoint.js (' + (sdkErr && sdkErr.message) + ')');
         if (!sdkLight)       missing.push('xchain-sdk/src/light.js (' + (lightErr && lightErr.message) + ')');
         if (!Anchor)         missing.push('xchain-indexer/src/actions/anchor.js (' + (anchorErr && anchorErr.message) + ')');
-        if (!AnchorRecovery) missing.push('xchain-indexer/src/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
+        if (!AnchorRecovery) missing.push('xchain-indexer/bin/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
         throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the XCHECKPOINT cross-service parity siblings are unloadable: '
             + missing.join('; '));
     }
