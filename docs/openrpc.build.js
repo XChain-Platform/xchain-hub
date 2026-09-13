@@ -181,7 +181,7 @@ const METHODS = [
     ['getswaps', 'List tracked swaps, optionally filtered by status.', ['status', 'limit']],
     ['getbridgeinvariant', 'Bridge backing invariant, tick -> chain -> {escrow, supply, in_flight, delta, finalized_policy_seq}: the escrow held at ADDRESS.BRIDGE_<chain> on the tick\'s origin chain against that chain\'s supply plus in-flight transfers. Open read tier on purpose (no x-auth): the explorer token page, the wallet move flow and the operator watch item all read it without a federation key. `tick` narrows the map to one tick; without it XCHAIN is always present. The invariant is an INEQUALITY (escrow >= supply + in_flight), so a positive delta is a surplus and only a negative delta is a deficit.', ['tick'], { result: BRIDGE_INVARIANT_RESULT }],
     ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time', 'chain_id'], { auth: true, internal: true }],
-    ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
+    ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation', 'admit_blocks'], { auth: true, internal: true }],
     // Present in the committed spec but missing from this list, so every
     // regeneration silently DELETED it and the drift guard only noticed on the
     // next run. Restored here so `node docs/openrpc.build.js` is idempotent.

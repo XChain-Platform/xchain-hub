@@ -391,10 +391,12 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
 
         expect(result).to.deep.equal({ accepted: true });
         // Uniform 24h delay applies to every publish, first included. push_generation (item 5308)
-        // is the 12th column, stamped from the push payload.
+        // is the 12th column, stamped from the push payload. admit_block is the 13th and is NULL
+        // here because this mock hub has no _resolveAdmissionTip: an unresolvable tip leaves the
+        // column unstamped rather than stamping height 0.
         expect(insertArgs).to.deep.equal([
             'addr1', 'BTC', 'BTC', 'GOLD', 'USD', '1.23', '0.01', 'hi',
-            1700000000, 1700086400, 7, 4
+            1700000000, 1700086400, 7, 4, null
         ]);
         expect(events).to.have.length(1);
         expect(events[0].table).to.equal('oracle_prices');

@@ -1070,7 +1070,7 @@ async function startApi(){
         },
 
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
-        async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index, push_generation}){
+        async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index, push_generation, admit_blocks}){
             if(!source_chain) return {error: "source_chain is required"};
             // THROWN, not returned, on this handler and the three durable push siblings below
             // (pushpricebatch, pushattestbatch, pushoracleprice). Returned, the refusal landed
@@ -1103,7 +1103,16 @@ async function startApi(){
                     block_index:  block_index,
                     // HUB-RETRACT-4: forward the source rollback generation (was dropped here, so
                     // every row was stamped generation 0 and the reorg fence was inert).
-                    push_generation: push_generation
+                    push_generation: push_generation,
+                    // THE ADMISSION MAP'S WIRE CARRIER on this rail. receiveValidatedRound has
+                    // read roundData.admit_blocks since the canonical gained the field, but this
+                    // destructure dropped it, so every pushed round arrived with the map absent
+                    // and read as a LEGACY round however it was signed: above the activation the
+                    // canonical builder then refuses it. Forwarded, never rebuilt here: the
+                    // producer signed THIS map and one re-resolved from the hub's own tips would
+                    // rebuild bytes no signature covers. Absent stays absent, which is exactly
+                    // what a legacy round is.
+                    admit_blocks: admit_blocks
                 });
                 return result;
             } catch (err) {

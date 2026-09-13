@@ -285,6 +285,33 @@ describe('hub pushpricebatch JSON-RPC (PRICE batch ingest, spec section 5.7)', f
             expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
         });
 
+        // THE BATCH PUSH DELIBERATELY CARRIES NO ADMISSION MAP, and this is the case that
+        // says so out loud, because the sibling handler pushpriceround now does carry one.
+        // The difference is not an oversight: the v0 ROUND canonical covers the map, so a
+        // pushed map is verifiable against the producer's signatures, while the BATCH
+        // canonical serializes only {round, timestamp, btc_block_height, pairs} per round.
+        // An admit_blocks on this payload would therefore be an UNSIGNED consensus field
+        // that a relay could rewrite in flight with every signature still verifying, which
+        // is the one thing this rail may never accept. When the batch canonical gains the
+        // field across its three byte-twins (this hub's _buildPriceBatchPayload,
+        // OracleConsensus._buildPriceBatchPayload and the indexer's ed25519 twin), the
+        // handler gains the key and this case becomes its parity assertion.
+        it('does NOT forward an admit_blocks the batch canonical could not have signed', async function () {
+            const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+
+            await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 1, btc_block_height: 100,
+                rounds: [{ round: 1, timestamp: 111, btc_block_height: 100, pairs: [] }],
+                block_time: 1735689600, sigs: [], action_index: 1, block_index: 1, push_generation: 0,
+                admit_blocks: { BTC: 104, DOGE: 5000004, LTC: 2400004 }
+            });
+
+            const payload = receiveValidatedBatch.firstCall.args[1];
+            expect('admit_blocks' in payload).to.equal(false,
+                'an unsigned admission map reached the batch verifier');
+        });
+
         it('returns the aggregator result verbatim on a partial-dedupe outcome', async function () {
             const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
             const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });

@@ -1760,6 +1760,17 @@
               "object"
             ]
           }
+        },
+        {
+          "name": "admit_blocks",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
       ],
       "result": {

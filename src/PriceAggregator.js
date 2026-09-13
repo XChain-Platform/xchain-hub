@@ -46,6 +46,14 @@ const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const roundBandLib      = require('./lib/oracle_round_band.js');
 const snapWrite         = require('./lib/capability_snapshot_write.js');
 const ah                = require('./lib/admission_height.js');
+// The COIN-KEYED producer predicate, taken from the twin rather than from the hub's
+// admission seam above, because the seam does not carry it: every SIGNED rail's era block
+// is a BTC height, so `ah.isAdmissionEra` reads the BTC key and that is all those rails
+// need. oracle_prices is the one unsigned rail and its height is the PUBLISHING chain's,
+// so its era must be judged on that chain's own key or an LTC height would be compared
+// against a BTC activation. HubDbBroadcaster already reaches the twin directly for the
+// same kind of non-canonical read.
+const { isMirrorAdmissionProducerActive } = require('./mirror_admission_activation.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
@@ -928,6 +936,36 @@ class PriceAggregator extends EventEmitter {
             return refuse('batch straddles an oracle flag day');
         }
 
+        // ADMISSION ERA, FAIL CLOSED. The v0 ROUND canonical carries the round's admission
+        // map and refuses in both directions, so a single-round push above the activation
+        // either carries the producer's signed map or is rejected. THE BATCH CANONICAL
+        // CARRIES NO SUCH FIELD: _buildPriceBatchPayload serializes only
+        // {round, timestamp, btc_block_height, pairs} per round, so an admission map cannot
+        // ride a batch and nothing a batch carries could be verified against a signature if
+        // it did. Without this check an admission-era batch VERIFIES and stores its rounds
+        // with no admission height at all, i.e. as legacy rows, silently, above the very
+        // activation that is supposed to bind them by height. That is the fail-OPEN
+        // direction and the one this design may never take.
+        //
+        // Judged on the batch anchor, which the check above has already constrained to the
+        // LAST round's own anchor; the rounds are strictly ascending, so no round in the
+        // batch is in the admission era unless this one is. A signed batch is atomic, so
+        // the whole batch is refused rather than the era rounds dropped from it.
+        //
+        // When the batch canonical gains the per-round admission field (a three-way byte
+        // twin: this builder, OracleConsensus._buildPriceBatchPayload and the indexer's
+        // ed25519.buildPriceBatchPayload), this becomes "refuse an admission-era batch whose
+        // rounds carry NO map" and keeps firing for exactly the rows it fires for today.
+        if (ah.isAdmissionEra(network, btcBlockHeight)) {
+            // Never silent: this refuses every batch on the rail once the activation arms,
+            // and an operator reading only "rejected" would hunt a signature bug.
+            console.warn('PriceAggregator: refusing PRICE batch [' + firstRound + '..' + lastRound +
+                '] at anchor ' + btcBlockHeight + ' on ' + String(network) + ': the batch is in the ' +
+                'admission era and the batch canonical has no wire carrier for the admission map, ' +
+                'so its rounds could only be stored as legacy rows above the activation.');
+            return refuse('admission-era batch: the batch canonical carries no admission map');
+        }
+
         // Structural sig validation: [{ pubkey: 64-hex, sig: 128-hex }, ...]
         if (!Array.isArray(batchData.sigs) || batchData.sigs.length < 1) {
             return refuse('invalid sigs');
@@ -1180,6 +1218,69 @@ class PriceAggregator extends EventEmitter {
         return { accepted: true, stored, duplicates, rejected: 0 };
     }
 
+    // The admission height for ONE PRICE v1 row, or null (R5 (a), spec section 5.4).
+    //
+    // oracle_prices is the family's only UNSIGNED rail: no signatures, no canonical, and
+    // nothing on the wire to stamp a map into. So its admission height is a single scalar on
+    // the PUBLISHING chain, which source_chain already names, and the barrier certifies it
+    // against heights[oracle_prices][source_chain] rather than against the reading chain's
+    // own B. That is why the column is one unqualified `admit_block` and not the three-chain
+    // map every signed rail carries.
+    //
+    // NULL IS THE ONLY FAILURE VALUE, and the distinction matters more here than anywhere
+    // else on this path: isRowReadableAt binds a NULL row by effective_time at every height,
+    // so an unstamped row is exactly today's row, while a zero would be a row admissible at a
+    // block every live chain passed years ago. Every failure this method knows about (an
+    // unusable chain, a hub with no admission resolver, an RPC error, a frozen or absent
+    // decoder tip, a read set the seam refuses) therefore answers null rather than guessing.
+    //
+    // THE ERA IS JUDGED ON THE PUBLISHING CHAIN'S OWN TIP, not on a BTC height, because this
+    // row has no BTC anchor and no height of any kind. That costs nothing in soundness: the
+    // rail is unsigned, so no two hubs have to agree on any bytes, and two hubs that disagree
+    // about whether to stamp produce one height-bound row and one legacy row, both of which
+    // are safe to read. Below the activation this answers null and the row is byte-identical
+    // to today's.
+    async _resolveOracleAdmitBlock(sourceChain) {
+        let readSet;
+        try {
+            // The seam's own rule for this table (publishingChain), including its refusal of a
+            // row carrying no source_chain: a height with no chain to verify it against is not
+            // a weaker stamp, it is an unverifiable one.
+            readSet = ah.admissionReadSet('oracle_prices', { source_chain: sourceChain });
+        } catch (e) {
+            console.warn('PriceAggregator: no admission read set for this PRICE v1 row (' +
+                (e && e.message) + '); storing it as a legacy row.');
+            return null;
+        }
+        let chain = readSet[0];
+
+        if (!this.hub || typeof this.hub._resolveAdmissionTip !== 'function') return null;
+        let tip;
+        try {
+            tip = await this.hub._resolveAdmissionTip(chain);
+        } catch (e) {
+            console.warn('PriceAggregator: the ' + chain + ' admission tip threw (' + (e && e.message) +
+                '); storing this PRICE v1 row as a legacy row.');
+            return null;
+        }
+        // typeof, not a coercing check: Number(null) and Number('') are both 0, so a coerced
+        // guard would read an ABSENT tip as height 0 and stamp 0 + margin. _resolveAdmissionTip
+        // answers null for every failure it handles, and null is not tip zero.
+        if (typeof tip !== 'number' || !Number.isSafeInteger(tip) || tip < 0) return null;
+
+        if (!isMirrorAdmissionProducerActive(chain, this.hub && this.hub.network, tip)) return null;
+
+        try {
+            // tip + admitMarginBlocks('oracle_prices'), through the one stamp definition, so
+            // this rail cannot drift from the margin the barrier certifies it against.
+            return ah.admitBlocks(readSet, { [chain]: tip }, 'oracle_prices')[chain];
+        } catch (e) {
+            console.warn('PriceAggregator: could not stamp an admission height for a ' + chain +
+                ' PRICE v1 row (' + (e && e.message) + '); storing it as a legacy row.');
+            return null;
+        }
+    }
+
     async receiveOraclePrice(sourceChain, priceData) {
         if (!priceData || !priceData.source_address || !priceData.coin || !priceData.tick || !priceData.fiat || !priceData.value) {
             return { accepted: false, reason: 'invalid priceData' };
@@ -1308,13 +1409,28 @@ class PriceAggregator extends EventEmitter {
         let blockTime = parseInt(priceData.block_time, 10);   // gated above; never coerced to 0
         let effectiveAt = blockTime + 86400;
 
+        // THE ADMISSION HEIGHT for this row (R5 (a)), resolved from THIS hub's own ingest
+        // because nothing else can: a PRICE v1 action is user-submitted, carries no
+        // signatures and no canonical, and its wire payload carries no block HEIGHT at all.
+        // NULL on every failure, never 0: a legacy row binds by effective_time at every
+        // height, which is the fail-closed direction, while a zero would admit the row at a
+        // block every live chain passed years ago.
+        let admitBlock = await this._resolveOracleAdmitBlock(sourceChain);
+
         // Generation-monotonic upsert (HUB-RETRACT-4): on the (source_chain, action_index) unique
         // key, a lower-or-equal generation never overwrites a newer row, so a late stale push can
         // neither insert an orphan (fenced above) nor clobber the canonical re-publication here.
         // push_generation is assigned LAST so every column IF reads the pre-update generation.
+        //
+        // admit_block rides the same generation guard as every other column: a re-published
+        // row at a recycled action_index carries the NEW ingest's height, and a stale replay
+        // can never move the height a live reader has already bound against. It is APPENDED
+        // after push_generation rather than slotted beside the other row columns, so every
+        // existing positional read of this args array keeps its index; the UPDATE clause
+        // still assigns it BEFORE push_generation, which is what the IF guards depend on.
         let query = `INSERT INTO oracle_prices
-            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation, admit_block)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
                 source_address = IF(VALUES(push_generation) > push_generation, VALUES(source_address), source_address),
                 coin           = IF(VALUES(push_generation) > push_generation, VALUES(coin), coin),
@@ -1325,12 +1441,13 @@ class PriceAggregator extends EventEmitter {
                 memo           = IF(VALUES(push_generation) > push_generation, VALUES(memo), memo),
                 block_time     = IF(VALUES(push_generation) > push_generation, VALUES(block_time), block_time),
                 effective_at   = IF(VALUES(push_generation) > push_generation, VALUES(effective_at), effective_at),
+                admit_block    = IF(VALUES(push_generation) > push_generation, VALUES(admit_block), admit_block),
                 push_generation = GREATEST(push_generation, VALUES(push_generation))`;
         let args = [
             priceData.source_address, sourceChain || '',
             priceData.coin, priceData.tick, priceData.fiat,
             priceData.value, priceData.fee || null, priceData.memo || null,
-            blockTime, effectiveAt, actionIndex, pushGeneration
+            blockTime, effectiveAt, actionIndex, pushGeneration, admitBlock
         ];
         try {
             await this.db.doQuery(query, args);
@@ -1354,6 +1471,7 @@ class PriceAggregator extends EventEmitter {
                 block_time:     blockTime,
                 effective_at:   effectiveAt,
                 action_index:   actionIndex,   // the validated integer, matching the stored row
+                admit_block:    admitBlock,    // null is the legacy row, and it binds by effective_time
                 push_generation: pushGeneration
             }
         });
