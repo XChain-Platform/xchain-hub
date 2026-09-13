@@ -364,7 +364,10 @@ class RollcallRound {
     // knownGateKeys().join(',') and grows every time a gate is appended to
     // SHARED_GATES, so a hardcoded cap would go stale silently and the first
     // oversize action would be dropped by the decoder with nothing going red.
-    // Today (D88) that is 19 keys / 1076 bytes, header 1228, cap 35.
+    // Today that is 33 keys / 1790 bytes, header 1942, cap 32, re-derived after the bridge
+    // gate and this family's three entries both landed (D88 recorded 19 / 1076 / 1228 / 35).
+    // The cap really does move with the list, which is the point of deriving it: a v1 action
+    // now carries 32 pairs where it carried 35, and the ceiling is still far away.
     //
     // Zero means no pair fits at all, which a GATES list longer than the ceiling
     // would produce; the publish path refuses rather than building an action the
