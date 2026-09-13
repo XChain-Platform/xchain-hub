@@ -941,13 +941,13 @@ class AttestationRound {
     // All three are behaviorally identical (hash-order sort, source===null keep
     // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)
     // normalization). A FOURTH copy exists for the reorg recompute of missed_count:
-    // xchain-indexer/src/rollback.js _responsibleSet, which mirrors attest.js.
+    // xchain-indexer/src/rollback.js responsibleSet, which mirrors attest.js.
     // Any silent change to one copy is a fork surface; always update all four together.
     //
     // All four now run the SAME canonical vectors
     // (xchain-documentation/protocol/test-vectors/responsible_set.json): copies 1 and 3
     // in AttestationRound.test.js, copies 2 and 4 in the indexer's
-    // test/unit/actions/attest-responsible-set-vectors.test.js. Add a vector there when
+    // test/unit/actions/attest_responsible_set_vectors.test.js. Add a vector there when
     // you change the rule, or the copies can drift in a direction every suite calls green.
     //
     // PROVIDER STAKE FLOOR (weighted only): `minStake` is the request

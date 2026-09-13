@@ -906,7 +906,7 @@ class AttestationRelay {
     // MUST byte-match the indexer's Attest._relayRequestCanonical /
     // _relayResponseCanonical. A one-byte disagreement is not a visible failure: the
     // signatures simply never verify and every peer's v3 is dropped as unquorate.
-    // Pinned by xchain-indexer/test/unit/actions/attest-relay.test.js and cross-checked
+    // Pinned by xchain-indexer/test/unit/actions/attest_relay.test.js and cross-checked
     // against the indexer's own implementation in AttestationRelay.canonical.test.js.
     //
     // `view` is deliberately IGNORED. The EQUIV header's VIEW is pinned at 0 because

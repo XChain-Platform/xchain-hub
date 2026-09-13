@@ -981,7 +981,7 @@ describe('StateAnchorPublisher', function () {
     // Frozen wire-byte golden vectors: the PRODUCER half of the hub<->indexer ANCHOR
     // byte-identity contract. The field-order test above hand-asserts one shape; this
     // pins the full v0 wire bytes against a vendored fixture that the indexer parser
-    // asserts the OTHER half of (xchain-indexer test/unit/actions/anchor-golden-vectors.test.js,
+    // asserts the OTHER half of (xchain-indexer test/unit/actions/anchor_golden_vectors.test.js,
     // same anchor_canonical_vectors.json). A field reorder in either repo breaks its own
     // side against the shared frozen string. The builder is invoked via the prototype
     // with a _parseSigs stub so this needs no mesh/DB.
