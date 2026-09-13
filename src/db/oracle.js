@@ -82,5 +82,56 @@ module.exports = {
         let placeholders = rounds.map(() => '?').join(',');
         return this.doQuery(
             'DELETE FROM oracle_published_rounds WHERE round IN (' + placeholders + ')', rounds);
+    },
+
+    // Writes one PRICE v1 oracle row, generation-monotonic.
+    // Moved here from src/PriceAggregator.js:1458.
+    //
+    // On the (source_chain, action_index) unique key, a lower-or-equal generation never
+    // overwrites a newer row, so a late stale push can neither insert an orphan nor clobber
+    // the canonical re-publication. push_generation is assigned LAST so every column IF reads
+    // the pre-update generation. admit_block rides the same generation guard as every other
+    // column, and is bound AFTER push_generation so every existing positional read of these
+    // args keeps its index; the UPDATE clause still assigns it BEFORE push_generation, which
+    // is what the IF guards depend on. `row` carries the values already coerced by the caller.
+    async setOraclePriceByGeneration(row) {
+        let query = `INSERT INTO oracle_prices
+            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation, admit_block)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                source_address = IF(VALUES(push_generation) > push_generation, VALUES(source_address), source_address),
+                coin           = IF(VALUES(push_generation) > push_generation, VALUES(coin), coin),
+                tick           = IF(VALUES(push_generation) > push_generation, VALUES(tick), tick),
+                fiat           = IF(VALUES(push_generation) > push_generation, VALUES(fiat), fiat),
+                value          = IF(VALUES(push_generation) > push_generation, VALUES(value), value),
+                fee            = IF(VALUES(push_generation) > push_generation, VALUES(fee), fee),
+                memo           = IF(VALUES(push_generation) > push_generation, VALUES(memo), memo),
+                block_time     = IF(VALUES(push_generation) > push_generation, VALUES(block_time), block_time),
+                effective_at   = IF(VALUES(push_generation) > push_generation, VALUES(effective_at), effective_at),
+                admit_block    = IF(VALUES(push_generation) > push_generation, VALUES(admit_block), admit_block),
+                push_generation = GREATEST(push_generation, VALUES(push_generation))`;
+        let args = [
+            row.source_address, row.source_chain,
+            row.coin, row.tick, row.fiat,
+            row.value, row.fee, row.memo,
+            row.block_time, row.effective_at, row.action_index, row.push_generation, row.admit_block
+        ];
+        return this.doQuery(query, args);
+    },
+
+    // Deletes a rolled-back source chain's PRICE v1 rows, for a reorg retraction.
+    // Moved here from src/PriceAggregator.js:1610.
+    //
+    // oracle_prices tracks the PRICE v1 action by action_index. `bounded` closes the range at
+    // `to` so a row re-published inside the original open-ended range survives a deferred
+    // retraction; `fenced` limits the delete to rows stamped at or below generation `gen`.
+    // The caller normalizes and validates the bounds; this only binds them.
+    async deleteOraclePricesForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+        let col = 'action_index';
+        let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
+        let args = [sourceChain, from];
+        if (bounded) args.push(to);
+        if (fenced) args.push(gen);
+        return this.doQuery('DELETE FROM oracle_prices WHERE ' + where, args);
     }
 };

@@ -306,8 +306,8 @@ class PriceAggregator extends EventEmitter {
             + (suppressed > 0 ? ' ' + suppressed + ' further rejection(s) for this chain were suppressed since the last warning.' : '')
             + ' The ' + chain + ' price rail is DOWN for as long as this repeats, and the native-fee'
             + ' / XCHAIN-USD path fails with it. If the ' + chain + ' indexer DB was reset or rebuilt,'
-            + ' its push_generations counter restarted at 0 and this fence row is stale: clear it with'
-            + " DELETE FROM price_ingest_watermarks WHERE source_chain = '" + chain + "'"
+            + ' its push_generations counter restarted at 0 and this fence row is stale: clear it'
+            + " with DELETE FROM price_ingest_watermarks WHERE source_chain = '" + chain + "'"
             + " AND network = '" + this._fenceNetwork() + "'"
             + ' on the hub DB. The network clause is what keeps the clear off every OTHER'
             + " network's fence for the same chain, so run it exactly as written."
@@ -693,12 +693,7 @@ class PriceAggregator extends EventEmitter {
             // per-chain columns (NULL for a legacy round, never 0), appended AFTER created_at
             // so every positional reader of this INSERT keeps its index.
             let admitCols = ah.admitBlocksToColumns(roundData.admit_blocks == null ? null : roundData.admit_blocks);
-            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
-            let params = [];
             for (let p of roundData.pairs) {
-                params.push(round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt,
-                            admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
                 insertedRows.push({
                     round_number:        round,
                     coin_pair:           p.pair,
@@ -719,22 +714,9 @@ class PriceAggregator extends EventEmitter {
                     admit_block_doge:    admitCols.admit_block_doge
                 });
             }
-            let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
-                VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE
-                    price = VALUES(price), reference_block = VALUES(reference_block),
-                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
-                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = 'finalized', source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation),
-                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                    admit_block_doge = VALUES(admit_block_doge)`;
             try {
-                await this.db.doQuery(query, params);
+                await this.db.setPushedPriceSnapshotRound(round, roundData.pairs, referenceBlock, sourceChain || null, timestamp,
+                    validatorCount, proofJson, sourceActionIndex, pushGeneration, createdAt, admitCols);
             } catch (err) {
                 console.error('PriceAggregator: error inserting round ' + round + ':', err);
                 return { accepted: false, reason: 'db error' };
@@ -1146,13 +1128,7 @@ class PriceAggregator extends EventEmitter {
             // positional reader of this INSERT keeps its index.
             let admitCols = ah.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
             let insertedRows = [];
-            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
-            let params = [];
             for (let p of r.pairs) {
-                params.push(r.round, p.pair, p.price, referenceBlock, sourceChain || null, r.timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration,
-                            blockTime, createdAt,
-                            admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
                 insertedRows.push({
                     round_number:        r.round,
                     coin_pair:           p.pair,
@@ -1180,24 +1156,9 @@ class PriceAggregator extends EventEmitter {
             // getfeequote reader must not see some pairs of round N beside others of
             // round N-1). Across rounds a partial batch is fine, because each stored
             // round is independently complete and the rest arrive on the next attempt.
-            let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 push_generation, batch_block_time, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
-                VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE
-                    price = VALUES(price), reference_block = VALUES(reference_block),
-                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
-                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = 'finalized', source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation),
-                    batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
-                                          VALUES(batch_block_time), batch_block_time),
-                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                    admit_block_doge = VALUES(admit_block_doge)`;
             try {
-                await this.db.doQuery(query, params);
+                await this.db.setBatchPriceSnapshotRound(r.round, r.pairs, referenceBlock, sourceChain || null, r.timestamp,
+                    validatorCount, proofJson, sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols);
             } catch (err) {
                 console.error('PriceAggregator: error inserting batch round ' + r.round + ':', err);
                 return {
@@ -1447,37 +1408,27 @@ class PriceAggregator extends EventEmitter {
         // Generation-monotonic upsert (HUB-RETRACT-4): on the (source_chain, action_index) unique
         // key, a lower-or-equal generation never overwrites a newer row, so a late stale push can
         // neither insert an orphan (fenced above) nor clobber the canonical re-publication here.
-        // push_generation is assigned LAST so every column IF reads the pre-update generation.
         //
         // admit_block rides the same generation guard as every other column: a re-published
         // row at a recycled action_index carries the NEW ingest's height, and a stale replay
-        // can never move the height a live reader has already bound against. It is APPENDED
-        // after push_generation rather than slotted beside the other row columns, so every
-        // existing positional read of this args array keeps its index; the UPDATE clause
-        // still assigns it BEFORE push_generation, which is what the IF guards depend on.
-        let query = `INSERT INTO oracle_prices
-            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation, admit_block)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                source_address = IF(VALUES(push_generation) > push_generation, VALUES(source_address), source_address),
-                coin           = IF(VALUES(push_generation) > push_generation, VALUES(coin), coin),
-                tick           = IF(VALUES(push_generation) > push_generation, VALUES(tick), tick),
-                fiat           = IF(VALUES(push_generation) > push_generation, VALUES(fiat), fiat),
-                value          = IF(VALUES(push_generation) > push_generation, VALUES(value), value),
-                fee            = IF(VALUES(push_generation) > push_generation, VALUES(fee), fee),
-                memo           = IF(VALUES(push_generation) > push_generation, VALUES(memo), memo),
-                block_time     = IF(VALUES(push_generation) > push_generation, VALUES(block_time), block_time),
-                effective_at   = IF(VALUES(push_generation) > push_generation, VALUES(effective_at), effective_at),
-                admit_block    = IF(VALUES(push_generation) > push_generation, VALUES(admit_block), admit_block),
-                push_generation = GREATEST(push_generation, VALUES(push_generation))`;
-        let args = [
-            priceData.source_address, sourceChain || '',
-            priceData.coin, priceData.tick, priceData.fiat,
-            priceData.value, priceData.fee || null, priceData.memo || null,
-            blockTime, effectiveAt, actionIndex, pushGeneration, admitBlock
-        ];
+        // can never move the height a live reader has already bound against. The statement,
+        // its assignment order and its positional binding live in db.setOraclePriceByGeneration.
         try {
-            await this.db.doQuery(query, args);
+            await this.db.setOraclePriceByGeneration({
+                source_address:  priceData.source_address,
+                source_chain:    sourceChain || '',
+                coin:            priceData.coin,
+                tick:            priceData.tick,
+                fiat:            priceData.fiat,
+                value:           priceData.value,
+                fee:             priceData.fee || null,
+                memo:            priceData.memo || null,
+                block_time:      blockTime,
+                effective_at:    effectiveAt,
+                action_index:    actionIndex,
+                push_generation: pushGeneration,
+                admit_block:     admitBlock
+            });
         } catch (err) {
             console.error('PriceAggregator: error inserting oracle price:', err);
             return { accepted: false, reason: 'db error' };
@@ -1536,17 +1487,11 @@ class PriceAggregator extends EventEmitter {
         if (bounds.error) return { error: bounds.error };
         let { from, to, gen, bounded, fenced } = bounds;
 
-        // Build the shared WHERE tail once; the only per-table difference is the action-index column.
-        let buildArgs = (col) => {
-            let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
-            let args = [sourceChain, from];
-            if (bounded) args.push(to);
-            if (fenced) args.push(gen);
-            return { where, args };
-        };
-
-        // price_snapshots tracks the PRICE v0 round action via source_action_index
-        let snapQ = buildArgs('source_action_index');
+        // The three retraction statements below share one WHERE tail (source chain, the
+        // [from, to] range, the generation fence); the only per-table difference is the
+        // action-index column, so each named method owns its own column: price_snapshots
+        // tracks the PRICE v0 round action via source_action_index, oracle_prices the
+        // PRICE v1 action via action_index.
 
         // D28: the rounds a retracted BATCH carried, read BEFORE the DELETE because
         // afterwards there is nothing left to read them off. Batch-sourced rows are the
@@ -1565,10 +1510,7 @@ class PriceAggregator extends EventEmitter {
         let batchRounds = [];
         if (canClearMarkers) {
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + snapQ.where
-                        + " AND consensus_proof LIKE '{\"batch\":%'",
-                    snapQ.args);
+                let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, from, to, gen, bounded, fenced);
                 for (let row of (rows || [])) {
                     let n = parseInt(row.round_number);
                     if (Number.isFinite(n)) batchRounds.push(n);
@@ -1604,10 +1546,9 @@ class PriceAggregator extends EventEmitter {
             }
         }
 
-        let snapResult = await this.db.doQuery('DELETE FROM price_snapshots WHERE ' + snapQ.where, snapQ.args);
+        let snapResult = await this.db.deletePriceSnapshotsForRetraction(sourceChain, from, to, gen, bounded, fenced);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
-        let oracleQ = buildArgs('action_index');
-        let oracleResult = await this.db.doQuery('DELETE FROM oracle_prices WHERE ' + oracleQ.where, oracleQ.args);
+        let oracleResult = await this.db.deleteOraclePricesForRetraction(sourceChain, from, to, gen, bounded, fenced);
 
         let snapDeleted   = (snapResult   && snapResult.affectedRows   !== undefined) ? Number(snapResult.affectedRows)   : 0;
         let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;

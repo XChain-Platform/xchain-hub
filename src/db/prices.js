@@ -302,5 +302,115 @@ module.exports = {
                  block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
                  status = IF(status = 'skipped', 'skipped', status)`;
         return this.doQuery(query, params);
+    },
+
+    // Writes one externally pushed PRICE v0 round, every pair, in ONE multi-row INSERT.
+    // Moved here from src/PriceAggregator.js:722.
+    //
+    // Upsert, not a plain INSERT: a 'skipped' placeholder row may already occupy this
+    // (round_number, coin_pair) key, and it is overwritten with the real finalized data; for
+    // an already-finalized row this is an idempotent no-op of identical data. created_at is
+    // intentionally NOT overwritten, so it keeps when the hub first recorded the round. One
+    // statement lands the whole round atomically, because the hub Database has no
+    // transaction API. The admission columns are bound AFTER created_at so every positional
+    // reader of these params keeps its index. `referenceChain` fills both reference_chain and
+    // source_chain, as the caller's source chain (or null) did.
+    async setPushedPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
+                                      sourceActionIndex, pushGeneration, createdAt, admitCols) {
+        let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
+        let params = [];
+        for (let p of pairs) {
+            params.push(round, p.pair, p.price, referenceBlock, referenceChain, timestamp,
+                        validatorCount, proofJson, referenceChain, sourceActionIndex, pushGeneration, createdAt,
+                        admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
+        }
+        let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
+                 push_generation, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE
+                    price = VALUES(price), reference_block = VALUES(reference_block),
+                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
+                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
+                    status = 'finalized', source_chain = VALUES(source_chain),
+                    source_action_index = VALUES(source_action_index),
+                    push_generation = VALUES(push_generation),
+                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                    admit_block_doge = VALUES(admit_block_doge)`;
+        return this.doQuery(query, params);
+    },
+
+    // Writes one round of a landed PRICE batch, every pair, in ONE multi-row INSERT.
+    // Moved here from src/PriceAggregator.js:1183.
+    //
+    // One statement PER ROUND, not one for the whole batch: the unit that must never be
+    // observed torn is the round. batch_block_time only ever moves EARLIER (or fills a 0), so
+    // a re-landing of the same round cannot push the fee-pricing bound later. The admission
+    // columns are bound AFTER created_at so every positional reader of these params keeps its
+    // index. `referenceChain` fills both reference_chain and source_chain.
+    async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
+                                     sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {
+        let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
+        let params = [];
+        for (let p of pairs) {
+            params.push(round, p.pair, p.price, referenceBlock, referenceChain, timestamp,
+                        validatorCount, proofJson, referenceChain, sourceActionIndex, pushGeneration,
+                        blockTime, createdAt,
+                        admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
+        }
+        let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
+                 push_generation, batch_block_time, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE
+                    price = VALUES(price), reference_block = VALUES(reference_block),
+                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
+                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
+                    status = 'finalized', source_chain = VALUES(source_chain),
+                    source_action_index = VALUES(source_action_index),
+                    push_generation = VALUES(push_generation),
+                    batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
+                                          VALUES(batch_block_time), batch_block_time),
+                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                    admit_block_doge = VALUES(admit_block_doge)`;
+        return this.doQuery(query, params);
+    },
+
+    // The rounds a retracted PRICE batch carried on a rolled-back source chain.
+    // Moved here from src/PriceAggregator.js:1568.
+    //
+    // Read BEFORE the retraction delete, because afterwards there is nothing left to read them
+    // off. Batch-sourced rows are the ones whose consensus_proof is the {"batch":...} object; a
+    // v0-sourced row's proof is a bare signature ARRAY, so the prefix is an exact discriminator.
+    // price_snapshots tracks the round action via source_action_index; `bounded` and `fenced`
+    // are the caller's already-validated range and generation fence.
+    async findBatchPriceSnapshotRoundsForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+        let col = 'source_action_index';
+        let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
+        let args = [sourceChain, from];
+        if (bounded) args.push(to);
+        if (fenced) args.push(gen);
+        return this.doQuery(
+            'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + where
+                + " AND consensus_proof LIKE '{\"batch\":%'",
+            args);
+    },
+
+    // Deletes a rolled-back source chain's PRICE v0 round rows, for a reorg retraction.
+    // Moved here from src/PriceAggregator.js:1607.
+    //
+    // price_snapshots tracks the round action via source_action_index. `bounded` closes the
+    // range at `to` so a row re-published inside the original open-ended range survives a
+    // deferred retraction; `fenced` limits the delete to rows stamped at or below generation
+    // `gen`. The caller normalizes and validates the bounds; this only binds them.
+    async deletePriceSnapshotsForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+        let col = 'source_action_index';
+        let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
+        let args = [sourceChain, from];
+        if (bounded) args.push(to);
+        if (fenced) args.push(gen);
+        return this.doQuery('DELETE FROM price_snapshots WHERE ' + where, args);
     }
 };
