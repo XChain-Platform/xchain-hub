@@ -371,13 +371,7 @@ class OracleConsensus extends EventEmitter {
             // round. The subquery picks the max finalized round per pair, then the
             // join reads that round's price for the pair. round_number rides along so
             // the entry can be stamped and the merge below can stay monotonic.
-            let rows = await this.db.doQuery(
-                "SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number " +
-                "FROM price_snapshots p " +
-                "JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots " +
-                "      WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m " +
-                "  ON p.coin_pair = m.coin_pair AND p.round_number = m.mx " +
-                "WHERE p.status = 'finalized' AND p.price IS NOT NULL", []);
+            let rows = await this.db.findLatestPriceSnapshotPerPair();
             let seeded = 0;
             for (let r of (rows || [])) {
                 if (r.coin_pair && r.price !== null && r.price !== undefined) {
@@ -2342,8 +2336,7 @@ class OracleConsensus extends EventEmitter {
         // its bootstrap max-id gap detection re-drains the round (item 4459).
         if (this.hub && this.hub.hubDbBroadcaster) {
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
+                let rows = await this.db.findPriceSnapshotsForRound(round);
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
             } catch (e) {
                 console.error('Oracle: post-commit price-round broadcast failed for round ' + round
@@ -2432,9 +2425,7 @@ class OracleConsensus extends EventEmitter {
         let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
         for (let row of rows) {
             if (this.hub && this.hub.hubDbBroadcaster) {
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -2492,8 +2483,7 @@ class OracleConsensus extends EventEmitter {
         // freshly-bootstrapped mirror. Best-effort; never block finalize.
         if (coinPairs.length && this.hub && this.hub.hubDbBroadcaster) {
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
+                let rows = await this.db.findPriceSnapshotsForRound(round);
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
             } catch (e) { /* broadcast is best-effort */ }
         }

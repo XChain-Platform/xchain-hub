@@ -62,5 +62,11 @@ module.exports = {
             'WHERE network = ? AND origin_chain = ? AND tick = ? AND policy_seq = ? LIMIT 1',
             [String(network || ''), String(originChain || ''), String(tick || ''), Number(policySeq)]);
         return (rows && rows.length) ? rows[0] : null;
+    },
+
+    // Reads rows from policy_snapshots.
+    // Moved here from src/api.js:2227.
+    async findPolicySnapshots(since, limit) {
+        return this.doQuery('SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     }
 };

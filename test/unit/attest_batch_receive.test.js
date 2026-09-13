@@ -35,6 +35,7 @@ const { expect } = require('chai');
 const AttestationResponseMirror = require('../../src/AttestationResponseMirror.js');
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const ANCHOR       = 941234;
 const ACTION_INDEX = 55501;
@@ -47,7 +48,7 @@ const WINDOW_END   = 1780003600;
 // ---------------------------------------------------------------------------
 function makeDb(){
     let table = [], nextId = 1, queries = [];
-    return {
+    return { ...DB_METHODS,
         table, queries,
         row(rid){ return table.find(r => r.request_id === rid) || null; },
         async doQuery(sql, args){

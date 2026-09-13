@@ -24,6 +24,7 @@
 
 const { expect }    = require('chai');
 const RewardTracker = require('../../src/RewardTracker');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_LOW  = 'aa'.repeat(32);
 const PK_HIGH = 'bb'.repeat(32);
@@ -36,7 +37,7 @@ const BLOCK   = 100;
 // makes the interleave deterministic rather than timing-dependent.
 function makeTracker() {
     let rows = [];
-    let db = {
+    let db = { ...DB_METHODS,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.indexOf('SELECT validator_pubkey, batch_seq FROM validator_rewards') === 0) {

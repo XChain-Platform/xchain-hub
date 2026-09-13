@@ -26,6 +26,7 @@ const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
 const CrossChainDexEngine  = require('../../src/CrossChainDexEngine.js');
 const AttestationRelay     = require('../../src/AttestationRelay.js');
 const RetractionConsensus  = require('../../src/RetractionConsensus.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK      = 970000;
 const CAPABILITY = 'cross_chain';
@@ -37,7 +38,7 @@ const PK         = 'ab'.repeat(32);
 // the exact stub-based false green the finding's own risk note names.
 function memDb() {
     let snapshots = [];
-    return {
+    return { ...DB_METHODS,
         snapshots,
         async doQuery(sql, params) {
             if (/^INSERT IGNORE INTO capability_snapshots/.test(sql)) {

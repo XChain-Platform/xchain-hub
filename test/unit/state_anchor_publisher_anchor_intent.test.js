@@ -20,12 +20,13 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A db double that routes by SQL shape and records every statement it saw.
 function mkDb(opts){
     opts = opts || {};
     const seen = [];
-    return {
+    return { ...DB_METHODS,
         seen: seen,
         async doQuery(sql, params){
             seen.push({ sql: sql, params: params });
@@ -107,12 +108,12 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         });
 
         it('never throws out of _markAnchorSent: the fee is already spent and the intent still holds', async function () {
-            const pub = mkPub({ async doQuery(){ throw new Error('db down'); } });
+            const pub = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
             await pub._markAnchorSent(mkRow(), 'tx-1');   // resolves rather than rejecting
         });
 
         it('propagates a read failure so the caller fails closed', async function () {
-            const pub = mkPub({ async doQuery(){ throw new Error('db down'); } });
+            const pub = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
             let threw = false;
             try { await pub._getAnchorIntent(mkRow()); } catch(e){ threw = true; }
             expect(threw).to.equal(true);
@@ -257,7 +258,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         // are its predicates, not about a re-implementation of MariaDB.
         function mkRetentionDb(affected, failOnDelete){
             const seen = [];
-            return {
+            return { ...DB_METHODS,
                 seen: seen,
                 async doQuery(sql, params){
                     seen.push({ sql: sql, params: params });

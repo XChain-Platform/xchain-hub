@@ -237,9 +237,7 @@ class CrossChainDexEngine extends EventEmitter {
     async _rebuildCommitted(){
         let next = new Map();
         try {
-            let rows = await this.db.doQuery(
-                "SELECT a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount " +
-                "FROM cross_chain_matches WHERE status = 'finalized'");
+            let rows = await this.db.findCrossChainMatchesByStatus();
             for(let r of rows) this._applyCommit(r, +1, next);
         } catch(e){
             if(!isMissingTableError(e)){
@@ -965,10 +963,7 @@ class CrossChainDexEngine extends EventEmitter {
         // left untouched (status='retracted' guard), preserving the double-finalize dedupe so a
         // genuine duplicate finalize never double-counts a fill.
         if(!inserted){
-            let revive = await this.db.doQuery(
-                "UPDATE cross_chain_matches SET status = 'finalized', validator_signatures = ?, " +
-                "finalizing_view = ?, effective_time = ? WHERE match_id = ? AND status = 'retracted'",
-                [row.validator_signatures, row.finalizing_view, row.effective_time, row.match_id]);
+            let revive = await this.db.updateCrossChainMatchByMatchId(row.validator_signatures, row.finalizing_view, row.effective_time, row.match_id);
             if(revive && Number(revive.affectedRows) > 0) inserted = true;
         }
         // The indexer mirror deliberately does NOT happen here. A throw between the durable
@@ -994,7 +989,7 @@ class CrossChainDexEngine extends EventEmitter {
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
         let failure = null;
         try {
-            let read = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [row.match_id]);
+            let read = await this.db.getCrossChainMatchByMatchId(row.match_id);
             if(read && read.length){
                 b.broadcastRow({ table: 'cross_chain_matches', row: read[0] });
                 return;
@@ -1091,9 +1086,7 @@ class CrossChainDexEngine extends EventEmitter {
                 // (LIMIT 1), so the mirror stream carried one source and the off-BTC
                 // match verifier tallied an under-counted denominator. Inert below SWQ,
                 // where source='' and there is one row per key.
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -1133,7 +1126,7 @@ class CrossChainDexEngine extends EventEmitter {
             "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches WHERE " + where,
             params);
         for(let r of rows){
-            await this.db.doQuery("UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?", [r.match_id]);
+            await this.db.updateCrossChainMatchRetracted(r.match_id);
             this._applyCommit(r, -1);                   // restore both legs' remaining capacity
             this._inflight.delete(r.match_id);
             // Clear the consensus finalized-ring entry (M-13): the match_id is the

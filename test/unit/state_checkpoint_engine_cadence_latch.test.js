@@ -26,6 +26,7 @@ const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const { waitUntil }         = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // Kept for the block-walk loop below, where the settle bounds how often the walk
 // re-ticks rather than standing in for a condition.
@@ -50,7 +51,7 @@ describe('StateCheckpointEngine cadence latch', function () {
     // Minimal in-memory state_checkpoints + capability_snapshots store.
     function memDb() {
         let checkpoints = [], snapshots = [];
-        return {
+        return { ...DB_METHODS,
             checkpoints, snapshots,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT COALESCE(MAX(checkpoint_seq)')) {

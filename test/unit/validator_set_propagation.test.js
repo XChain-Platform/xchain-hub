@@ -22,6 +22,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const XChainHub  = require('../../src/XChainHub');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 describe('XChainHub: validator-set propagation (F1)', function () {
 
@@ -34,7 +35,7 @@ describe('XChainHub: validator-set propagation (F1)', function () {
 
     beforeEach(function () {
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
-        hub.db = { doQuery: sinon.stub().resolves([]) };
+        hub.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
         sinon.stub(hub, '_loadValidatorSet').resolves(SET);
         sinon.stub(hub, '_loadValidatorPubkeys').resolves();
         sinon.stub(hub, '_loadChainPairValidators').resolves({ 'BTC-LTC': [] });

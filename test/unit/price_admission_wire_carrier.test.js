@@ -48,6 +48,7 @@ const { expect }    = require('chai');
 const proxyquire    = require('proxyquire').noPreserveCache();
 const { createMockHub } = require('../helpers/mockHub');
 const { waitUntil }     = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // The regtest activation this suite arms. Keyed on the ROUND's own BTC anchor for the
 // signed rails, and on the PUBLISHING chain's own tip for the unsigned oracle rail, so one
@@ -464,7 +465,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             dir = fs.mkdtempSync(path.join(os.tmpdir(), 'row26-pub-'));
             const hub = {
                 p2pConfig: { PUBLISHER_QUEUE_PATH: path.join(dir, 'publisher-queue.jsonl') },
-                network: NETWORK, db: { doQuery: sinon.stub().resolves([]) },
+                network: NETWORK, db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]) },
                 getIdentity: () => null, getPeerManager: () => ({}), capabilitySnapshot: null,
                 oracleConsensus: null, oracleBatchSigner: null
             };
@@ -504,7 +505,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
         it('the signer rebuilds each round\'s map from its stored columns, and refuses a round whose pairs disagree', async function () {
             const row = (round, pair, admit) => Object.assign({ round_number: round, coin_pair: pair, price: '1',
                 reference_block: ADMIT_AT, block_timestamp: 1700000000, proof_head: '[' }, admit);
-            signer.db = { doQuery: sinon.stub().resolves([
+            signer.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([
                 row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
                 row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
                 row(6, 'BTC/USD', { admit_block_btc: null, admit_block_ltc: null, admit_block_doge: null })
@@ -513,7 +514,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             expect(derived.map(r => r.admitBlocks)).to.deep.equal([{ BTC: MAP5.BTC, DOGE: MAP5.DOGE }, undefined]);
             expect(signer.db.doQuery.firstCall.args[0]).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge/);
 
-            signer.db = { doQuery: sinon.stub().resolves([
+            signer.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([
                 row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
                 row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC + 1, admit_block_ltc: null, admit_block_doge: MAP5.DOGE })
             ]) };

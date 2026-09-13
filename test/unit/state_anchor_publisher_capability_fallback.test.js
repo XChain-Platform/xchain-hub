@@ -12,6 +12,7 @@
 
 const { expect }            = require('chai');
 const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // #1224: _resolveCapabilitySet's local capability_snapshots-table fallback must be
 // gated to seeded/regtest stacks. On mainnet/testnet a null snapshot means THIS
@@ -24,7 +25,7 @@ describe('StateAnchorPublisher._resolveCapabilitySet local-table gating (#1224)'
     function buildPub(network) {
         let queried = { count: 0 };
         let hub = {
-            db: { async doQuery() { queried.count++; return [
+            db: { ...DB_METHODS, async doQuery() { queried.count++; return [
                 { signing_pubkey: 'AA'.repeat(16), amount: '1', source: '' }
             ]; } },
             network,

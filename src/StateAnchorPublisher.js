@@ -1326,9 +1326,7 @@ class StateAnchorPublisher {
             // in-flight publish would overwrite it and leave the fleet holding divergent
             // anchor_txid bytes.
             for(let s of group){
-                await this.db.doQuery(
-                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
-                    [txid, s.chain, s.network, s.block_index, s.checkpoint_seq]);
+                await this.db.updateStateCheckpoint(txid, s.chain, s.network, s.block_index, s.checkpoint_seq);
                 anchored.push({ chain: String(s.chain), network: String(s.network),
                                 block_index: Number(s.block_index), txid: txid });
             }
@@ -1495,11 +1493,7 @@ class StateAnchorPublisher {
         // that was never persisted and could never be re-attempted, permanently forfeiting
         // a confirmed reward on a transient DB error.
         try {
-            await this.db.doQuery(
-                'INSERT IGNORE INTO anchor_reward_attestations ' +
-                '(chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid) ' +
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [rowChain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid]);
+            await this.db.createAnchorRewardAttestation(rowChain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid);
         } catch(err){
             console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
                          rewardType + '/' + roundReference + '): ' + (err && err.message));
@@ -1527,10 +1521,7 @@ class StateAnchorPublisher {
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
         let failure = null;
         try {
-            let rows = await this.db.doQuery(
-                'SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at ' +
-                'FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1',
-                [rowChain, network, rewardType, roundReference, snapshotBlock, publisher]);
+            let rows = await this.db.getAnchorRewardAttestation(rowChain, network, rewardType, roundReference, snapshotBlock, publisher);
             if(rows && rows[0]){
                 b.broadcastRow({ table: 'anchor_reward_attestations', row: rows[0] });
                 return;
@@ -1812,9 +1803,7 @@ class StateAnchorPublisher {
             try {
                 // Re-SELECT our OWN checkpoint row (never a cached copy): _verifyAnchorOnChain
                 // byte-matches the decoded on-chain payload against it.
-                let rows = await this.db.doQuery(
-                    'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                    [String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq)]);
+                let rows = await this.db.getStateCheckpointByChain(String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq));
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
                 let v = await this._verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
                 if(v === 'verified'){
@@ -2165,9 +2154,7 @@ class StateAnchorPublisher {
         // hex digit all fail here.
         let mine = [];
         for(let sec of d.sections){
-            let local = await this.db.doQuery(
-                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                [String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq)]);
+            let local = await this.db.getStateCheckpointByChain(String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq));
             if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
             mine.push(local[0]);
         }
@@ -2355,9 +2342,7 @@ class StateAnchorPublisher {
         let id = this._observedArchiveCheckpoint(batchSeq);
         if(!id) return;
         // Resolve the stashed identity to OUR OWN state_checkpoints row (never the wire).
-        let rows = await this.db.doQuery(
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-            [id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq)]);
+        let rows = await this.db.getStateCheckpointByChain(id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq));
         if(!rows || rows.length === 0) return;
         let cp = this._cpFromRow(rows[0]);
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would
@@ -2485,12 +2470,8 @@ class StateAnchorPublisher {
             return 'none';                                               // not an eligible publisher right now
         }
 
-        let matches = await this.db.doQuery(
-            "SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status " +
-            "ORDER BY match_id ASC LIMIT ?", [this.maxBatch]);
-        let calls = await this.db.doQuery(
-            "SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status " +
-            "ORDER BY call_id ASC, phase ASC LIMIT ?", [this.maxBatch]);
+        let matches = await this.db.findCrossChainMatchesByBatchSeq(this.maxBatch);
+        let calls = await this.db.findCrossChainCallsByBatchSeq(this.maxBatch);
         // Archive transport for the anchor_% reward rails. Read this before touching
         // recovery dedup: the "indexer can never re-derive these" invariant is NOT
         // uniformly true any more, and the difference matters because these rows land
@@ -2556,11 +2537,8 @@ class StateAnchorPublisher {
         // stalled or double-published archive round). checkpoint_seq is quorum-agreed
         // and derived from snapshot_block, so it is the same value on every hub.
         let cps = this.network
-            ? await this.db.doQuery(
-                "SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1",
-                [this.network])
-            : await this.db.doQuery(
-                "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1");
+            ? await this.db.getStateCheckpointByNetwork(this.network)
+            : await this.db.getLatestStateCheckpoint();
         if(!cps || cps.length === 0){
             console.log('StateAnchorPublisher: no state checkpoint yet; archive deferred');
             return 'none';
@@ -2919,9 +2897,7 @@ class StateAnchorPublisher {
                 'and the local capability_snapshots table is not a valid shared source off regtest ' +
                 '(indexer down/misconfigured); failing closed rather than building a divergent archive');
         }
-        let rows = await this.db.doQuery(
-            "SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
-            [Number(block), String(capability)]);
+        let rows = await this.db.findCapabilitySnapshotsBySnapshotBlock(Number(block), String(capability));
         return (rows || []).map(r => ({ pubkey: String(r.signing_pubkey).toLowerCase(), amount: String(r.amount), source: String(r.source != null ? r.source : '') }));
     }
 
@@ -3096,9 +3072,7 @@ class StateAnchorPublisher {
         // from quorum-agreed rows, never from the wire.
         let rows = [];
         for(let sec of d.sections){
-            let r = await this.db.doQuery(
-                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                [String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq)]);
+            let r = await this.db.getStateCheckpointByChain(String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq));
             if(!r || r.length === 0) return;   // no local copy of a section: cannot vet the election
             rows.push(r[0]);
         }
@@ -3194,9 +3168,7 @@ class StateAnchorPublisher {
             try {
                 let rows = [], allStamped = true;
                 for(let sec of d.sections){
-                    let r = await this.db.doQuery(
-                        'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                        [String(sec.chain), String(d.network), Number(sec.block_index), Number(sec.checkpoint_seq)]);
+                    let r = await this.db.getStateCheckpointByChain(String(sec.chain), String(d.network), Number(sec.block_index), Number(sec.checkpoint_seq));
                     if(!r || r.length === 0){ rows = null; break; }   // section gone (reorg): let the TTL clear it
                     if(r[0].anchor_txid == null) allStamped = false;
                     rows.push(r[0]);
@@ -3237,9 +3209,7 @@ class StateAnchorPublisher {
         // stops one BUNDLE_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
         // same height.
         for(let row of rows){
-            await this.db.doQuery(
-                'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
-                [String(d.txid), String(row.chain), String(d.network), Number(row.block_index), Number(row.checkpoint_seq)]);
+            await this.db.updateStateCheckpoint(String(d.txid), String(row.chain), String(d.network), Number(row.block_index), Number(row.checkpoint_seq));
         }
         // The bundle's own block, re-derived from OUR copies of the rows (quorum-agreed
         // state, identical on every hub), never from the wire.
@@ -3501,9 +3471,7 @@ class StateAnchorPublisher {
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
-        let local = await this.db.doQuery(
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
-            [cp.chain, cp.network, Number(cp.block_index)]);
+        let local = await this.db.getStateCheckpointByChainAndNetwork(cp.chain, cp.network, Number(cp.block_index));
         if(!local || local.length === 0) return;
         let mine = this._cpFromRow(local[0]);
         // Rootless compare, deliberately: _archiveCanonical nests
@@ -3557,7 +3525,7 @@ class StateAnchorPublisher {
     // was obliged to emit for the wrapper itself.
     async _verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
         for(let am of archive.matches){
-            let rows = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [am.match_id]);
+            let rows = await this.db.getCrossChainMatchByMatchId(am.match_id);
             if(rows && rows.length > 0){
                 let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
                 let archivedTerms = Object.assign({}, am);
@@ -3595,8 +3563,7 @@ class StateAnchorPublisher {
             }
         }
         for(let ac of (archive.calls || [])){
-            let rows = await this.db.doQuery(
-                'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [ac.call_id, ac.phase]);
+            let rows = await this.db.getCrossChainCallByCallIdAndPhase(ac.call_id, ac.phase);
             if(rows && rows.length > 0){
                 let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
                 let archivedTerms = Object.assign({}, ac);
@@ -3720,10 +3687,7 @@ class StateAnchorPublisher {
             //                                        credit -> NOT signing
             //   - no rows at all                  -> late joiner; re-derivation
             //                                        above already bounds it
-            let local = await this.db.doQuery(
-                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND round_qualifier = ?',
-                [String(rr.reward_type), Number(rr.round_number),
-                 ark.rewardRoundQualifier(rr.reward_type, rr.block_index)]);
+            let local = await this.db.findValidatorRewardsByRewardType(String(rr.reward_type), Number(rr.round_number), ark.rewardRoundQualifier(rr.reward_type, rr.block_index));
             if(local && local.length > 0){
                 let mine = local.find(r => String(r.validator_pubkey).toLowerCase() === pubkey);
                 if(!mine){
@@ -4489,7 +4453,7 @@ class StateAnchorPublisher {
         for(let m of (matches || [])){
             if(!m || m.match_id == null) return false;
             if(m.status === '__partial__') continue;
-            let rows = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [m.match_id]);
+            let rows = await this.db.getCrossChainMatchByMatchId(m.match_id);
             if(rows && rows.length > 0 && String(rows[0].status) !== String(m.status)){
                 console.warn('StateAnchorPublisher: FINALIZED match ' + String(m.match_id).substring(0, 16) +
                              "... announces status '" + m.status + "' but our row holds '" + rows[0].status + "'");
@@ -4499,7 +4463,7 @@ class StateAnchorPublisher {
         for(let c of (calls || [])){
             if(!c || c.call_id == null) return false;
             if(c.status === '__partial__') continue;
-            let rows = await this.db.doQuery('SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [c.call_id, c.phase]);
+            let rows = await this.db.getCrossChainCallByCallIdAndPhase(c.call_id, c.phase);
             if(rows && rows.length > 0 && String(rows[0].status) !== String(c.status)){
                 console.warn('StateAnchorPublisher: FINALIZED call ' + String(c.call_id).substring(0, 16) +
                              "... (" + c.phase + ") announces status '" + c.status + "' but our row holds '" + rows[0].status + "'");
@@ -4641,9 +4605,7 @@ class StateAnchorPublisher {
     async _verifyArchiveCheckpointOnChain(batchSeq, announcedTxid, expect){
         let id = this._observedArchiveCheckpoint(batchSeq);
         if(!id) return 'no-checkpoint-id';
-        let rows = await this.db.doQuery(
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-            [id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq)]);
+        let rows = await this.db.getStateCheckpointByChain(id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq));
         if(!rows || rows.length === 0) return 'absent-local';
         if(!announcedTxid) return 'no-txid';
         // Default version 1 stays exact for the REWARD gate: that caller only runs BELOW
@@ -4756,10 +4718,7 @@ class StateAnchorPublisher {
         // fresh seq. Reward rows are immutable, so batch_seq IS NULL is their
         // only pending test (mirrors the reward selector).
         for(let m of matchIds){
-            await this.db.doQuery(
-                'UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
-                'WHERE match_id = ? AND (batch_seq IS NULL OR archived_status <> status)',
-                [batchSeq, m.status, txid, m.match_id]);
+            await this.db.updateCrossChainMatchByMatchIdAndBatchSeq(batchSeq, m.status, txid, m.match_id);
         }
         // Re-emit the stamped rows on the hub-DB mirror feed: anchor_txid is the one
         // back-filled column the mirror twins carry, and without a re-broadcast a
@@ -4780,10 +4739,7 @@ class StateAnchorPublisher {
             }
         }
         for(let c of (callIds || [])){
-            await this.db.doQuery(
-                'UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
-                'WHERE call_id = ? AND phase = ? AND (batch_seq IS NULL OR archived_status <> status)',
-                [batchSeq, c.status, txid, c.call_id, c.phase]);
+            await this.db.updateCrossChainCall(batchSeq, c.status, txid, c.call_id, c.phase);
         }
         for(let r of (rewardIds || [])){
             // Rows are immutable; batch_seq is the only archive bookkeeping. Qualify the
@@ -4805,12 +4761,7 @@ class StateAnchorPublisher {
         // Spans every batch_seq-bearing table so a fresh seq is unique across
         // matches, calls AND rewards (consensus-uniform: all hubs compute the
         // same next seq from quorum-agreed rows).
-        let r = await this.db.doQuery(
-            'SELECT COALESCE(GREATEST(' +
-            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1), ' +
-            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1), ' +
-            '  COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1)' +
-            '), -1) + 1 AS next_seq');
+        let r = await this.db.getNextAnchorBatchSeq();
         let local = (r && r.length > 0) ? Number(r[0].next_seq) : 0;
         // The rows above are consensus-uniform only once every back-fill has
         // landed. _observedConsumedBatchSeq carries the seqs the federation demonstrably
@@ -4918,9 +4869,7 @@ class StateAnchorPublisher {
             // and anchored nothing, silently.
             if(this.network === 'regtest' && this.db){
                 try {
-                    let rows = await this.db.doQuery(
-                        "SELECT signing_pubkey FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
-                        [Number(blockIndex), 'oracle_publish']);
+                    let rows = await this.db.findCapabilitySnapshotsBySnapshotBlockAndCapability(Number(blockIndex), 'oracle_publish');
                     // Weighted snapshots persist one row per (source, pubkey);
                     // membership and hash-order election need each key once.
                     if(rows && rows.length > 0)
@@ -5540,10 +5489,7 @@ class StateAnchorPublisher {
     // error so the caller FAILS CLOSED (the row stays pending) rather than spending on a
     // checkpoint whose publish history it could not read.
     async _getAnchorIntent(row){
-        let rows = await this.db.doQuery(
-            'SELECT chain, network, checkpoint_seq, txid, intent_at, sent_at FROM anchor_published_checkpoints ' +
-            'WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
-            [row.chain, row.network, Number(row.checkpoint_seq)]);
+        let rows = await this.db.findAnchorPublishedCheckpoints(row.chain, row.network, Number(row.checkpoint_seq));
         return (rows && rows.length > 0) ? rows[0] : null;
     }
 
@@ -5564,10 +5510,7 @@ class StateAnchorPublisher {
     // marker being overwritten is an expired one and the write is this retry opening its
     // own window. Throws on a DB error so the caller fails closed.
     async _recordAnchorIntent(row){
-        await this.db.doQuery(
-            'INSERT INTO anchor_published_checkpoints (chain, network, checkpoint_seq) VALUES (?, ?, ?) ' +
-            'ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL',
-            [row.chain, row.network, Number(row.checkpoint_seq)]);
+        await this.db.setAnchorPublishedCheckpoint(row.chain, row.network, Number(row.checkpoint_seq));
     }
 
     // Record that the broadcast returned a txid. Logged, never thrown: the DOGE fee is
@@ -5575,10 +5518,7 @@ class StateAnchorPublisher {
     // of re-broadcasting, which is the fail-safe direction.
     async _markAnchorSent(row, txid){
         try {
-            await this.db.doQuery(
-                'UPDATE anchor_published_checkpoints SET txid = ?, sent_at = NOW() ' +
-                'WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
-                [txid || null, row.chain, row.network, Number(row.checkpoint_seq)]);
+            await this.db.updateAnchorPublishedCheckpoint(txid || null, row.chain, row.network, Number(row.checkpoint_seq));
         } catch(e){
             console.error('StateAnchorPublisher: anchor for ' + row.chain + '/' + row.network + ' @ ' +
                           row.block_index + ' broadcast as ' + txid + ' but its durable sent marker could not be ' +
@@ -5593,10 +5533,7 @@ class StateAnchorPublisher {
     // by a late or misordered call. Logged, never thrown: leaving the row is fail-closed.
     async _withdrawAnchorIntent(row){
         try {
-            await this.db.doQuery(
-                'DELETE FROM anchor_published_checkpoints ' +
-                'WHERE chain = ? AND network = ? AND checkpoint_seq = ? AND sent_at IS NULL',
-                [row.chain, row.network, Number(row.checkpoint_seq)]);
+            await this.db.deleteAnchorPublishedCheckpoint(row.chain, row.network, Number(row.checkpoint_seq));
         } catch(e){
             console.warn('StateAnchorPublisher: could not withdraw the broadcast intent for ' + row.chain + '/' +
                          row.network + ' @ ' + row.block_index + '; it will hold the row until the TTL expires: ' +
@@ -5631,10 +5568,7 @@ class StateAnchorPublisher {
     // a DB error so the caller FAILS CLOSED (rows stay pending) rather than spending on a
     // batch whose publish history it could not read.
     async _getLiveArchiveIntent(network){
-        let rows = await this.db.doQuery(
-            'SELECT network, batch_seq, txid, intent_at, sent_at FROM anchor_published_archives ' +
-            'WHERE network = ? AND settled_at IS NULL ORDER BY intent_at DESC LIMIT 1',
-            [String(network)]);
+        let rows = await this.db.getAnchorPublishedArchive(String(network));
         return (rows && rows.length > 0) ? rows[0] : null;
     }
 
@@ -5643,10 +5577,7 @@ class StateAnchorPublisher {
     // network, so an existing row for this seq is a stale one and the write is this round
     // opening its own window. Throws on a DB error so the caller fails closed.
     async _recordArchiveIntent(network, batchSeq){
-        await this.db.doQuery(
-            'INSERT INTO anchor_published_archives (network, batch_seq) VALUES (?, ?) ' +
-            'ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL, settled_at = NULL',
-            [String(network), Number(batchSeq)]);
+        await this.db.setAnchorPublishedArchive(String(network), Number(batchSeq));
     }
 
     // Record that the v1 broadcast returned a txid. Logged, never thrown: the DOGE fee is
@@ -5654,9 +5585,7 @@ class StateAnchorPublisher {
     // of re-archiving, which is the fail-safe direction.
     async _markArchiveSent(network, batchSeq, txid){
         try {
-            await this.db.doQuery(
-                'UPDATE anchor_published_archives SET txid = ?, sent_at = NOW() WHERE network = ? AND batch_seq = ?',
-                [txid || null, String(network), Number(batchSeq)]);
+            await this.db.updateAnchorPublishedArchiveByNetwork(txid || null, String(network), Number(batchSeq));
         } catch(e){
             console.error('StateAnchorPublisher: archive batch ' + batchSeq + ' broadcast as ' + txid +
                           ' but its durable sent marker could not be persisted; the intent still holds the ' +
@@ -5670,10 +5599,7 @@ class StateAnchorPublisher {
     // Logged, never thrown: an unsettled marker costs latency (the TTL), never money.
     async _settleArchiveIntent(network, batchSeq){
         try {
-            await this.db.doQuery(
-                'UPDATE anchor_published_archives SET settled_at = NOW() ' +
-                'WHERE network = ? AND batch_seq = ? AND sent_at IS NOT NULL',
-                [String(network), Number(batchSeq)]);
+            await this.db.updateAnchorPublishedArchiveByNetworkAndBatchSeq(String(network), Number(batchSeq));
         } catch(e){
             console.warn('StateAnchorPublisher: could not settle the archive intent for batch ' + batchSeq +
                          '; it will hold ' + network + ' archiving until the TTL expires: ' + (e && e.message));
@@ -5687,9 +5613,7 @@ class StateAnchorPublisher {
     // late or misordered call. Logged, never thrown: leaving the row is fail-closed.
     async _withdrawArchiveIntent(network, batchSeq){
         try {
-            await this.db.doQuery(
-                'DELETE FROM anchor_published_archives WHERE network = ? AND batch_seq = ? AND sent_at IS NULL',
-                [String(network), Number(batchSeq)]);
+            await this.db.deleteAnchorPublishedArchive(String(network), Number(batchSeq));
         } catch(e){
             console.warn('StateAnchorPublisher: could not withdraw the archive broadcast intent for batch ' +
                          batchSeq + '; it will hold ' + network + ' archiving until the TTL expires: ' +

@@ -22,6 +22,7 @@ const { EventEmitter }  = require('events');
 const RetractionConsensus = require('../../src/RetractionConsensus.js');
 const ValidatorIdentity   = require('../../src/ValidatorIdentity.js');
 const { waitUntil }       = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // The golden canonical: MUST byte-match hub_db_sync.js canonicalRetraction()
 // in xchain-indexer / xchain-explorer (their suites sign this same literal).
@@ -48,7 +49,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         broadcastRow(evt){ this.rows.push(evt); }
     };
     let queries = [];
-    let db = { doQuery: async (sql, args) => { queries.push({ sql, args }); return /^SELECT/.test(sql) ? [{ id: 1 }] : []; } };
+    let db = { ...DB_METHODS, doQuery: async (sql, args) => { queries.push({ sql, args }); return /^SELECT/.test(sql) ? [{ id: 1 }] : []; } };
     let vset = validators || [];
     let hub = {
         identity: identity || null,

@@ -25,4 +25,51 @@
  ********************************************************************/
 
 module.exports = {
+    // Deletes from oracle_published_rounds.
+    // Moved here from src/OraclePublisher.js:2878.
+    async deleteOraclePublishedRound(cutoff) {
+        return this.doQuery('DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL', [cutoff]);
+    },
+
+    // Deletes from oracle_submissions.
+    // Moved here from src/OracleRound.js:1199.
+    async deleteOracleSubmission(cutoff) {
+        return this.doQuery('DELETE FROM oracle_submissions WHERE round_number < ?', [cutoff]);
+    },
+
+    // Reads rows from oracle_published_rounds.
+    // Moved here from src/OraclePublisher.js:2798.
+    async findAllOraclePublishedRounds() {
+        return this.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds');
+    },
+
+    // Reads rows from oracle_published_rounds.
+    // Moved here from src/OraclePublisher.js:2746.
+    async findOraclePublishedRoundsByRound(round) {
+        return this.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds WHERE round = ?', [round]);
+    },
+
+    // Reads one row from oracle_prices.
+    // Moved here from src/PriceAggregator.js:1434.
+    async getOraclePrice(source_address, source_chain, actionIndex) {
+        return this.doQuery('SELECT id, push_generation FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1', [source_address, source_chain, actionIndex]);
+    },
+
+    // Reads one row from oracle_prices.
+    // Moved here from src/HubDbBroadcaster.js:636.
+    async getOraclePricesMaxId() {
+        return this.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
+    },
+
+    // Inserts or updates a row in oracle_published_rounds.
+    // Moved here from src/OraclePublisher.js:2758.
+    async setOraclePublishedRound(round) {
+        return this.doQuery('INSERT INTO oracle_published_rounds (round) VALUES (?) ON DUPLICATE KEY UPDATE round = round', [round]);
+    },
+
+    // Updates oracle_published_rounds.
+    // Moved here from src/OraclePublisher.js:2772.
+    async updateOraclePublishedRound(txid, round) {
+        return this.doQuery('UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?', [txid, round]);
+    }
 };

@@ -25,4 +25,13 @@
  ********************************************************************/
 
 module.exports = {
+    // Inserts or updates a row in reorg_attestations.
+    // Moved here from src/ReorgHandler.js:643.
+    async setReorgAttestation(reorgId, chain, reorgHeight, timestamp, affected_chains, validatorCount, proof) {
+        return this.doQuery(`INSERT INTO reorg_attestations
+                (reorg_id, source_chain, reorg_height, reorg_timestamp, affected_chains,
+                 validator_count, consensus_proof, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')
+             ON DUPLICATE KEY UPDATE status = 'confirmed', updated_at = NOW()`, [reorgId, chain, reorgHeight, timestamp, affected_chains, validatorCount, proof]);
+    }
 };

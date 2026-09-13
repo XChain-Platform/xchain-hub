@@ -23,6 +23,7 @@ const { waitUntil }        = require('../helpers/waitUntil');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { summarizeUtxoConfirmations } = require('../../src/lib/utxo_balance');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const ENV_KEYS = ['ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS', 'ANCHOR_CONFIRM_CHECK_MS', 'ANCHOR_CONFIRM_STALE_MS',
     'ANCHOR_STARTUP_FLUSH_MS'];
@@ -40,7 +41,7 @@ function buildPub(utxos, extra) {
         broadcastTx: async () => ({ txid: 'cc'.repeat(32) })
     };
     let hub = Object.assign({
-        db: { async doQuery() { return []; } },
+        db: { ...DB_METHODS, async doQuery() { return []; } },
         network: 'regtest',
         capabilitySnapshot: null,
         capabilityRegistry: null,

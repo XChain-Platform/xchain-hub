@@ -623,10 +623,7 @@ class ReorgHandler extends EventEmitter {
         let floor = Date.now() - this.maxLookbackMs;
         if (bound < floor) bound = floor;
 
-        await this.db.doQuery(
-            "DELETE FROM attestations WHERE source_chain = ? AND created_at > FROM_UNIXTIME(? / 1000)",
-            [chain, bound]
-        );
+        await this.db.deleteAttestation(chain, bound);
 
         // price_snapshots.block_timestamp is Unix SECONDS (OracleConsensus / PriceAggregator
         // write Math.floor(Date.now()/1000)), but the reorg bound is MILLISECONDS
@@ -634,21 +631,10 @@ class ReorgHandler extends EventEmitter {
         // compare in the same unit, matching the attestations DELETE above; without this
         // the seconds column never exceeds the ms literal and the dispute silently matches
         // zero rows.
-        await this.db.doQuery(
-            "UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'",
-            [bound]
-        );
+        await this.db.updatePriceSnapshotByBlockTimestamp(bound);
 
         let affectedChains = this._getAffectedChains(chain);
-        await this.db.doQuery(
-            `INSERT INTO reorg_attestations
-                (reorg_id, source_chain, reorg_height, reorg_timestamp, affected_chains,
-                 validator_count, consensus_proof, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')
-             ON DUPLICATE KEY UPDATE status = 'confirmed', updated_at = NOW()`,
-            [reorgId, chain, reorgHeight, timestamp,
-             JSON.stringify(affectedChains), validatorCount, proof]
-        );
+        await this.db.setReorgAttestation(reorgId, chain, reorgHeight, timestamp, JSON.stringify(affectedChains), validatorCount, proof);
 
         this.processed.add(reorgId);
 

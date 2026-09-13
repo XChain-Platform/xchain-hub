@@ -414,10 +414,7 @@ class AttestationRound {
     async _readFetchCache(rid){
         if(!this.db || typeof this.db.doQuery !== 'function') return null;
         try {
-            let rows = await this.db.doQuery(
-                'SELECT status, body, meta FROM attestation_fetch_cache ' +
-                'WHERE request_id = ? AND created_at >= FROM_UNIXTIME(?)',
-                [rid, this._cacheCutoffEpochSec()]);
+            let rows = await this.db.findAttestationFetchCache(rid, this._cacheCutoffEpochSec());
             let row = (rows && rows.length) ? rows[0] : null;
             if(!row) return null;
             // Providers return { body: Buffer, meta: string } and agree() drops a
@@ -445,14 +442,7 @@ class AttestationRound {
             if(!Buffer.isBuffer(body)) body = Buffer.from(String(body));
             let meta = (fetched && fetched.meta !== null && fetched.meta !== undefined)
                 ? String(fetched.meta) : '';
-            await this.db.doQuery(
-                'INSERT INTO attestation_fetch_cache ' +
-                '(request_id, provider_id, status, body, meta, model) VALUES (?, ?, ?, ?, ?, ?) ' +
-                'ON DUPLICATE KEY UPDATE provider_id = VALUES(provider_id), status = VALUES(status), ' +
-                'body = VALUES(body), meta = VALUES(meta), model = VALUES(model), ' +
-                'created_at = CURRENT_TIMESTAMP',
-                [rid, String(providerId || ''), String(status || 'ok'), body, meta,
-                 model ? String(model) : null]);
+            await this.db.setAttestationFetchCache(rid, String(providerId || ''), String(status || 'ok'), body, meta, model ? String(model) : null);
         } catch (e) {
             console.warn('AttestationRound: fetch-cache write failed for ' + String(rid).substring(0,16) +
                          '...; a restart may re-pay this fetch:', e && e.message ? e.message : e);
@@ -464,9 +454,7 @@ class AttestationRound {
     async _evictStaleFetchCache(){
         if(!this.db || typeof this.db.doQuery !== 'function') return;
         try {
-            await this.db.doQuery(
-                'DELETE FROM attestation_fetch_cache WHERE created_at < FROM_UNIXTIME(?)',
-                [this._cacheCutoffEpochSec()]);
+            await this.db.deleteAttestationFetchCache(this._cacheCutoffEpochSec());
         } catch (e) {
             console.warn('AttestationRound: fetch-cache eviction failed:', e && e.message ? e.message : e);
         }

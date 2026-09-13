@@ -1154,8 +1154,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         let rows = await this.db.doQuery(
             'SELECT transfer_id FROM bridge_transfers WHERE ' + where, params);
         for(let r of rows){
-            await this.db.doQuery(
-                "UPDATE bridge_transfers SET status = 'retracted' WHERE transfer_id = ?", [r.transfer_id]);
+            await this.db.updateBridgeTransfer(r.transfer_id);
             this._releaseSourceLegGuard(r.transfer_id);
             // Clear the consensus finalized-ring entry: the transfer_id is the round id, and
             // without this a transfer re-formed after this reorg could never re-finalize.
@@ -1402,9 +1401,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             this.db, capability, block, validators, await this._resolveBtcChainId(network));
         for(let row of rows){
             if(this.broadcaster){
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

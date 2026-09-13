@@ -24,6 +24,7 @@ const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const swq                  = require('../../src/stake_weighted_quorum');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = {
     chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
@@ -35,7 +36,7 @@ function buildPub(opts) {
     opts = opts || {};
     let identity = opts.identity !== undefined ? opts.identity : new ValidatorIdentity('11'.repeat(32));
     let hub = {
-        db: { queries: [], async doQuery(sql, params) {
+        db: { ...DB_METHODS, queries: [], async doQuery(sql, params) {
             this.queries.push({ sql, params });
             return opts.doQuery ? await opts.doQuery(sql, params) : [];
         } },
@@ -161,7 +162,7 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key', 
     it('selects the highest checkpoint_seq, not the highest AUTO_INCREMENT id', async () => {
         let identity = new ValidatorIdentity('11'.repeat(32));
         let me = identity.getPubkeyHex().toLowerCase();
-        let { pub } = buildPub({
+        let { pub } = buildPub({ ...DB_METHODS,
             identity,
             async doQuery(sql) {
                 // The cargo that carries the round to the wrapper pick is a pending
@@ -192,7 +193,7 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key', 
         let identity = new ValidatorIdentity('11'.repeat(32));
         let me = identity.getPubkeyHex().toLowerCase();
         let seen = [];
-        let { pub } = buildPub({
+        let { pub } = buildPub({ ...DB_METHODS,
             identity,
             async doQuery(sql) {
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) { seen.push(sql); return orderRows(sql).slice(0, 1); }
@@ -301,7 +302,7 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
         let rows = [Object.assign({ chain: 'BTC', block_index: 494, checkpoint_seq: 7 }, base),
                     Object.assign({ chain: 'LTC', block_index: 990, checkpoint_seq: 7 }, base)];
         let updates = [];
-        let { pub } = buildPub({
+        let { pub } = buildPub({ ...DB_METHODS,
             identity,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) {

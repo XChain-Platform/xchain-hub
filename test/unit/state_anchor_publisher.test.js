@@ -142,7 +142,7 @@ function parseV7Tail(payload) {
 // In-memory hub DB for the publisher's query surface.
 function memDb() {
     let matches = [], checkpoints = [], snapshots = [], calls = [], rewardRows = [];
-    return {
+    return { ...DB_METHODS,
         matches, checkpoints, snapshots, calls, rewardRows,
         async doQuery(sql, params) {
             params = params || [];
@@ -261,6 +261,7 @@ function memDb() {
 }
 
 const arMod = require('../../src/anchor_reward_activation.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 describe('StateAnchorPublisher', function () {
 
@@ -1879,7 +1880,7 @@ describe('StateAnchorPublisher', function () {
         const CANON = 'XANC|test|canonical';
         function weightedPub() {
             return new StateAnchorPublisher({
-                db: { async doQuery() { return []; } },
+                db: { ...DB_METHODS, async doQuery() { return []; } },
                 network: 'regtest',                                   // activation = 0 → weighted on
                 getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
                 getIdentity: () => null,
@@ -3100,7 +3101,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
     function makePub(){
         const queries = [];
         const broadcast = [];
-        const db = { async doQuery(sql, params){ queries.push({ sql, params }); return sql.indexOf('SELECT') === 0 ? [{ id: 1, publisher: params[5] }] : { affectedRows: 1 }; } };
+        const db = { ...DB_METHODS, async doQuery(sql, params){ queries.push({ sql, params }); return sql.indexOf('SELECT') === 0 ? [{ id: 1, publisher: params[5] }] : { affectedRows: 1 }; } };
         const hub = { db, getIdentity: () => null, hubDbBroadcaster: { broadcastRow: (ev) => broadcast.push(ev) } };
         return { pub: new StateAnchorPublisher(hub), queries, broadcast };
     }
@@ -3159,7 +3160,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     function makeRewardPub() {
         const queries = [];
         const broadcast = [];
-        const db = {
+        const db = { ...DB_METHODS,
             async doQuery(sql, params) {
                 queries.push({ sql, params });
                 if (sql.indexOf('SELECT * FROM state_checkpoints') === 0) return [Object.assign({}, CP_ROW)];
@@ -3340,7 +3341,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const queries   = [];
         const broadcast = [];
         const sent      = [];
-        const db = {
+        const db = { ...DB_METHODS,
             async doQuery(sql, params) {
                 queries.push({ sql, params });
                 if (sql.indexOf('SELECT * FROM state_checkpoints') === 0) return [Object.assign({}, CP_ROW)];

@@ -323,16 +323,10 @@ class Governance extends EventEmitter {
         if (rationale && rationale.length > 2000)
             throw new Error('rationale exceeds maximum length of 2000 characters');
 
-        let active = await this.db.doQuery(
-            "SELECT id FROM governance_proposals WHERE parameter = ? AND status = 'voting'",
-            [parameter]
-        );
+        let active = await this.db.findGovernanceProposalsByParameter(parameter);
         if (active.length > 0) throw new Error('Active proposal already exists for ' + parameter);
 
-        let rejected = await this.db.doQuery(
-            "SELECT voting_end FROM governance_proposals WHERE parameter = ? AND status = 'failed' ORDER BY voting_end DESC LIMIT 1",
-            [parameter]
-        );
+        let rejected = await this.db.getGovernanceProposalByParameter(parameter);
         if (rejected.length > 0) {
             let cooldownEnd = new Date(rejected[0].voting_end).getTime() + (COOLDOWN_DAYS * 86400000);
             if (Date.now() < cooldownEnd) {
@@ -369,14 +363,7 @@ class Governance extends EventEmitter {
         let snapshot     = this._buildValidatorSnapshot();
         let snapshotJson = JSON.stringify(snapshot);
 
-        await this.db.doQuery(
-            `INSERT INTO governance_proposals
-                (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end, activation_block, validator_snapshot)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', ?, ?, ?, ?)`,
-            [proposalId, proposerPubkey, parameter, currentValue, proposedValue,
-             rationale || '', now, votingEnd, activation, snapshotJson]
-        );
+        await this.db.createGovernanceProposalByProposalId(proposalId, proposerPubkey, parameter, currentValue, proposedValue, rationale || '', now, votingEnd, activation, snapshotJson);
 
         this.peerManager.broadcast(GOV_PROPOSE, {
             proposalId, parameter, currentValue, proposedValue, rationale,
@@ -400,10 +387,7 @@ class Governance extends EventEmitter {
         let isValidatorVoter = this.validatorSet.some(v => v.pubkey === voterPubkey);
         if (!isValidatorVoter) throw new Error('Voter is not an active validator');
 
-        let proposals = await this.db.doQuery(
-            "SELECT * FROM governance_proposals WHERE proposal_id = ? AND status = 'voting'",
-            [proposalId]
-        );
+        let proposals = await this.db.findGovernanceProposalsByProposalIdInVoting(proposalId);
         if (proposals.length === 0) throw new Error('Proposal not found or not in voting state');
 
         let proposal = proposals[0];
@@ -424,10 +408,7 @@ class Governance extends EventEmitter {
         // that stepped backwards, would otherwise tie and be refused as
         // non-increasing, leaving the voter unable to change their vote.
         let priorSeq = 0;
-        let priorRows = await this.db.doQuery(
-            "SELECT vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ? LIMIT 1",
-            [proposalId, voterPubkey]
-        ) || [];
+        let priorRows = await this.db.getGovernanceVote(proposalId, voterPubkey) || [];
         if (priorRows.length) priorSeq = normalizeVoteSeq(Number(priorRows[0].vote_seq));
         let seq = Math.max(Date.now(), priorSeq + 1);
 
@@ -490,15 +471,10 @@ class Governance extends EventEmitter {
     }
 
     async getProposal(proposalId) {
-        let proposals = await this.db.doQuery(
-            "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposalId]
-        );
+        let proposals = await this.db.findGovernanceProposalsByProposalId(proposalId);
         if (proposals.length === 0) return null;
 
-        let votes = await this.db.doQuery(
-            "SELECT voter_pubkey, vote, created_at FROM governance_votes WHERE proposal_id = ?",
-            [proposalId]
-        );
+        let votes = await this.db.findGovernanceVotesWithCreatedAt(proposalId);
 
         return { proposal: proposals[0], votes: votes };
     }
@@ -690,10 +666,7 @@ class Governance extends EventEmitter {
         // Fail-open on a DB read error so a transient hiccup never drops an honest
         // proposal.
         try {
-            let rejected = await this.db.doQuery(
-                "SELECT voting_end FROM governance_proposals WHERE parameter = ? AND status = 'failed' ORDER BY voting_end DESC LIMIT 1",
-                [parameter]
-            );
+            let rejected = await this.db.getGovernanceProposalByParameter(parameter);
             if (rejected.length > 0) {
                 let cooldownEnd = new Date(rejected[0].voting_end).getTime() + (COOLDOWN_DAYS * 86400000);
                 if (Date.now() < cooldownEnd) {
@@ -708,14 +681,7 @@ class Governance extends EventEmitter {
                 proposalId, parameter, e && e.message ? e.message : e);
         }
 
-        this.db.doQuery(
-            `INSERT IGNORE INTO governance_proposals
-                (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end, activation_block, validator_snapshot)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?, ?)`,
-            [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
-             rationale || '', localVotingEnd, activation, snapshotJson]
-        ).catch(e => console.error('Governance: failed to persist inbound proposal %s:', proposalId, e));
+        this.db.createGovernanceProposalByProposalIdAndProposerPubkey(proposalId, proposerPubkey || '', parameter, currentValue, proposedValue, rationale || '', localVotingEnd, activation, snapshotJson).catch(e => console.error('Governance: failed to persist inbound proposal %s:', proposalId, e));
         // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
         // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
         // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
@@ -730,16 +696,7 @@ class Governance extends EventEmitter {
     // stored seq monotonic even when a superseded copy arrives late, so the
     // stale copy cannot lower the bar for the next replay.
     async _upsertVote(proposalId, voterPubkey, vote, signature, seq) {
-        return this.db.doQuery(
-            `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature, vote_seq)
-             VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                 vote       = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), VALUES(vote), vote),
-                 signature  = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), VALUES(signature), signature),
-                 created_at = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), NOW(), created_at),
-                 vote_seq   = GREATEST(COALESCE(vote_seq, 0), VALUES(vote_seq))`,
-            [proposalId, voterPubkey, vote, String(signature || ''), seq]
-        );
+        return this.db.setGovernanceVote(proposalId, voterPubkey, vote, String(signature || ''), seq);
     }
 
     async _handleVote(envelope) {
@@ -788,9 +745,7 @@ class Governance extends EventEmitter {
         // proposal this hub never recorded (no row) is dropped rather than counted blind.
         let prows;
         try {
-            prows = await this.db.doQuery(
-                "SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1",
-                [proposalId]);
+            prows = await this.db.getGovernanceProposalElectorateInVoting(proposalId);
         } catch (e) {
             console.error('Governance: failed to look up proposal for inbound vote %s:', proposalId, e && e.message ? e.message : e);
             return;
@@ -858,8 +813,7 @@ class Governance extends EventEmitter {
         // voting_end, so a follower receiving the result is already past it too.
         let prows;
         try {
-            prows = await this.db.doQuery(
-                'SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
+            prows = await this.db.getGovernanceProposalElectorate(proposalId);
         } catch (e) { return; }
         if (!prows.length || new Date(prows[0].voting_end).getTime() > Date.now()) return;
 
@@ -879,8 +833,7 @@ class Governance extends EventEmitter {
             await this._ingestResultVotes(proposalId, envelope.data.votes, electorate);
             let votes;
             try {
-                votes = await this.db.doQuery(
-                    "SELECT voter_pubkey, vote FROM governance_votes WHERE proposal_id = ?", [proposalId]);
+                votes = await this.db.findGovernanceVotes(proposalId);
             } catch (e) { return; }
             let localResult = this._computeTally(votes, electorate).approved ? 'passed' : 'failed';
             if (localResult !== status) {
@@ -896,10 +849,7 @@ class Governance extends EventEmitter {
         // _tallyProposal -- affects 0 rows here and does not double-emit.
         let res;
         try {
-            res = await this.db.doQuery(
-                "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
-                [applyStatus, proposalId]
-            );
+            res = await this.db.updateGovernanceProposal(applyStatus, proposalId);
         } catch (e) { return; }
 
         // A passed proposal's 'proposal:finalized' listeners (capability hot-reload, provider
@@ -909,10 +859,7 @@ class Governance extends EventEmitter {
         // Emit on the same transition + payload shape the leader uses in _tallyProposal.
         if (applyStatus === 'passed' && res && res.affectedRows > 0) {
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT parameter, current_value, proposed_value, activation_block FROM governance_proposals WHERE proposal_id = ? LIMIT 1',
-                    [proposalId]
-                );
+                let rows = await this.db.getGovernanceProposalParameterChange(proposalId);
                 if (rows.length) {
                     this.emit('proposal:finalized', {
                         proposalId: proposalId,
@@ -980,9 +927,7 @@ class Governance extends EventEmitter {
     async _checkExpiredProposals() {
         let expired;
         try {
-            expired = await this.db.doQuery(
-                "SELECT * FROM governance_proposals WHERE status = 'voting' AND voting_end <= NOW()"
-            );
+            expired = await this.db.findGovernanceProposalsByStatusAndVotingEnd();
         } catch (e) {
             // Tally check runs on a timer, so don't crash -- but log the error.
             // A systematic failure here (schema drift, column mismatch) would
@@ -1011,10 +956,7 @@ class Governance extends EventEmitter {
         // they re-tally locally (R2-H2), not accept the leader's status blind.
         // vote_seq travels with the evidence: a follower re-verifying these
         // signatures must rebuild the exact signed bytes, which now include seq.
-        let votes = await this.db.doQuery(
-            "SELECT voter_pubkey, vote, signature, vote_seq FROM governance_votes WHERE proposal_id = ?",
-            [proposal.proposal_id]
-        );
+        let votes = await this.db.findGovernanceVotesWithSignature(proposal.proposal_id);
 
         // R2-M2: tally against the proposal's LOCKED electorate (snapshot), not the
         // live mutable validatorSet, so a set churn mid-vote cannot move the
@@ -1031,10 +973,7 @@ class Governance extends EventEmitter {
         // it; the status='voting' WHERE clause makes only one UPDATE affect a row, but
         // without this affectedRows check both passes would broadcast GOV_RESULT and
         // emit proposal:finalized, double-applying on the leader. Mirrors _handleResult.
-        let res = await this.db.doQuery(
-            "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
-            [newStatus, proposal.proposal_id]
-        );
+        let res = await this.db.updateGovernanceProposal(newStatus, proposal.proposal_id);
         if (!res || !res.affectedRows) return;
 
         this.peerManager.broadcast(GOV_RESULT, {

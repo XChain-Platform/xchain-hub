@@ -523,10 +523,7 @@ class PriceAggregator extends EventEmitter {
         // round for the same round_number can still arrive from a peer chain that
         // did reach quorum, and it must be allowed to overwrite the placeholders
         // (see the ON DUPLICATE KEY UPDATE on the insert below).
-        let existing = await this.db.doQuery(
-            "SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1",
-            [round]
-        );
+        let existing = await this.db.getPriceSnapshotByRoundNumber(round);
         if (existing && existing.length > 0) {
             return { accepted: false, reason: 'duplicate' };
         }
@@ -779,22 +776,12 @@ class PriceAggregator extends EventEmitter {
         let landed = Number(blockTime);
         if (!Number.isSafeInteger(landed) || landed <= 0) return 0;
         try {
-            await this.db.doQuery(
-                "UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? " +
-                "AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)",
-                [landed, round, landed]
-            );
+            await this.db.updatePriceSnapshotByRoundNumber(landed, round, landed);
             // Re-read rather than trust an affected-row count: the mirror applier is an
             // upsert keyed on (round_number, coin_pair), so it needs the WHOLE row, and
             // selecting the rows that now carry THIS clock also skips the no-op case
             // without asking the driver for a count it does not uniformly report.
-            let rows = await this.db.doQuery(
-                'SELECT round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, ' +
-                'validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index, ' +
-                'push_generation, batch_block_time, created_at FROM price_snapshots ' +
-                'WHERE round_number = ? AND batch_block_time = ?',
-                [round, landed]
-            );
+            let rows = await this.db.findPriceSnapshotsByRoundNumberAndBatchBlockTime(round, landed);
             for (let row of (rows || [])) {
                 this.emit('row:inserted', { table: 'price_snapshots', row: row });
             }
@@ -1128,10 +1115,7 @@ class PriceAggregator extends EventEmitter {
             // failover double-publish; that round is a duplicate and the REST of the batch
             // still lands. 'skipped' placeholder rows are not duplicates and are overwritten
             // by the upsert below, exactly as on the v0 path.
-            let existing = await this.db.doQuery(
-                "SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1",
-                [r.round]
-            );
+            let existing = await this.db.getPriceSnapshotByRoundNumber(r.round);
             if (existing && existing.length > 0) {
                 duplicates++;
                 // The round is already finalized HERE, but this batch is how the round
@@ -1431,10 +1415,7 @@ class PriceAggregator extends EventEmitter {
         // at a recycled action_index is NOT a duplicate: it is the canonical re-publication and must
         // supersede a stale row that escaped retraction (the monotonic upsert below overwrites only
         // when strictly newer). An equal-or-older generation is a true idempotent duplicate.
-        let existing = await this.db.doQuery(
-            'SELECT id, push_generation FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1',
-            [priceData.source_address, sourceChain || '', actionIndex]
-        );
+        let existing = await this.db.getOraclePrice(priceData.source_address, sourceChain || '', actionIndex);
         if (existing && existing.length > 0) {
             let existingGen = parseInt(existing[0].push_generation) || 0;
             if (pushGeneration <= existingGen) {
@@ -2039,9 +2020,7 @@ class PriceAggregator extends EventEmitter {
         try {
             if (this.hub && this.hub.hubDbBroadcaster) {
                 for (let row of rows) {
-                    let r = await this.db.doQuery(
-                        'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                        [block, capability, row.signing_pubkey, row.source]);
+                    let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                     if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
                 }
             }

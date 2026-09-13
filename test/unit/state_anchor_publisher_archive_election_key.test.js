@@ -27,12 +27,13 @@
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7, snapshot_block: 100 };
 
 function mkPub(nextSeqRow){
     const identity = new ValidatorIdentity('11'.repeat(32));
-    const db = { async doQuery(sql){
+    const db = { ...DB_METHODS, async doQuery(sql){
         if(sql.indexOf('COALESCE(GREATEST(') !== -1) return [{ next_seq: nextSeqRow }];
         return [];
     } };

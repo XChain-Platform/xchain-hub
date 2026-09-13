@@ -721,10 +721,7 @@ class CrossChainEngine extends EventEmitter {
     }
 
     async _getStoredAttestation(attestationId) {
-        let rows = await this.db.doQuery(
-            "SELECT * FROM attestations WHERE attestation_id = ? LIMIT 1",
-            [attestationId]
-        );
+        let rows = await this.db.getAttestation(attestationId);
         return rows.length > 0 ? rows[0] : null;
     }
 

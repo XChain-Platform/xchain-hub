@@ -39,6 +39,7 @@ const { waitUntil } = require('../helpers/waitUntil');
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
 const CrossChainDexEngine  = require('../../src/CrossChainDexEngine.js');
 const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A plausible regtest block-1 hash (lowercase 64 hex) and a foreign one.
 const LOCAL_ID   = '00000000c937983704a73af28acdec37b049d214adbda81d7e2a3dd146f6ed09';
@@ -132,7 +133,7 @@ async function bootApi(hubDb, hubNetwork) {
 // programmable getChainTip and a record of the SQL it was asked for.
 function snapshotDb() {
     const seenSql = [];
-    return {
+    return { ...DB_METHODS,
         seenSql,
         chainTip: null,
         chainTipThrows: false,
@@ -399,7 +400,7 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
         function engineWith(getChainTip) {
             const eng = Object.create(CrossChainDexEngine.prototype);
             eng.network = 'regtest';
-            eng.db = { doQuery: sinon.stub().resolves({ affectedRows: 1 }) };
+            eng.db = { ...DB_METHODS, doQuery: sinon.stub().resolves({ affectedRows: 1 }) };
             if (getChainTip) eng.db.getChainTip = getChainTip;
             return eng;
         }
@@ -456,7 +457,7 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
         function engineWith(chainId) {
             const eng = Object.create(CrossChainCallEngine.prototype);
             eng.network = 'regtest';
-            eng.db = {
+            eng.db = { ...DB_METHODS,
                 doQuery: sinon.stub().resolves({ affectedRows: 1 }),
                 getChainTip: sinon.stub().resolves(chainId === null ? null : { blockHeight: 131, blockTime: 1, chainId: chainId })
             };
@@ -506,7 +507,12 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
             { pubkey: 'bb'.repeat(32), weight: '20', source: 'src-b' }
         ];
         function memDb(getChainTip) {
-            const db = { calls: [], async doQuery(sql, params) { this.calls.push({ sql: String(sql), params }); return []; } };
+            const db = { ...DB_METHODS, calls: [], async doQuery(sql, params) { this.calls.push({ sql: String(sql), params }); return []; } };
+            // The spread is here for the named query methods only. getChainTip
+            // came with it, and one case below is precisely "a database layer
+            // that exposes no getChainTip at all", so it goes back off unless
+            // this fixture was asked for one.
+            delete db.getChainTip;
             if (getChainTip) db.getChainTip = getChainTip;
             return db;
         }

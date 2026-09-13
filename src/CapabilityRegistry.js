@@ -182,11 +182,7 @@ class CapabilityRegistry {
     async loadGovernanceHistory() {
         let rows;
         try {
-            rows = await this.db.doQuery(
-                `SELECT parameter, proposed_value, activation_block
-                   FROM governance_proposals
-                  WHERE status = 'passed' AND activation_block IS NOT NULL
-                  ORDER BY activation_block ASC, id ASC`, []);
+            rows = await this.db.findGovernanceProposalsByStatus();
         } catch (e) {
             // A transient read failure here silently falls back to genesis-only
             // thresholds. Log the error so the operator can see it rather than

@@ -27,6 +27,7 @@ const { expect }        = require('chai');
 const OracleBatchSigner = require('../../src/OracleBatchSigner');
 const OracleConsensus   = require('../../src/OracleConsensus');
 const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // The REAL canonical builder, taken off the class rather than reimplemented.
 // _buildPriceBatchPayload is pure (it reads no instance state), so binding it to a
@@ -82,7 +83,7 @@ function snapshotRows(rounds) {
 
 // In-memory stand-in for the hub Database over the ONE query the signer runs.
 function memDb(rows) {
-    return {
+    return { ...DB_METHODS,
         rows: rows,
         queries: 0,
         async doQuery(sql, params) {

@@ -29,6 +29,7 @@
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK = 100;
 const CP_ROW = {
@@ -54,7 +55,7 @@ function mkDb(opts){
     const seen     = [];
     const archives = opts.archives || [];
     const rows     = opts.rows || {};
-    return {
+    return { ...DB_METHODS,
         seen: seen,
         archives: archives,
         async doQuery(sql, params){
@@ -181,7 +182,7 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
         });
 
         it('never throws out of the post-send writes: the fee is already spent and the intent still holds', async function () {
-            const { pub } = mkPub({ async doQuery(){ throw new Error('db down'); } });
+            const { pub } = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
             await pub._markArchiveSent('regtest', 7, 'tx-1');
             await pub._settleArchiveIntent('regtest', 7);
             await pub._withdrawArchiveIntent('regtest', 7);

@@ -20,6 +20,7 @@ const sinon           = require('sinon');
 const { expect }      = require('chai');
 const OracleConsensus = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const ROUND      = 5;              // deliberately NOT the anchor: a local round number
 const BTC_ANCHOR = 900000;         // the BTC-anchored snapshot block the round resolves at
@@ -33,7 +34,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
     function makeDb() {
         let rows  = [];
         let calls = [];
-        return {
+        return { ...DB_METHODS,
             rows: rows,
             calls: calls,
             doQuery: async function (sql, params) {

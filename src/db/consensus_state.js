@@ -36,5 +36,17 @@ module.exports = {
         if(!rows || rows.length === 0) return 0;
         let seq = parseInt(rows[0].value, 10);
         return Number.isNaN(seq) ? 0 : seq;
+    },
+
+    // Reads rows from consensus_state.
+    // Moved here from src/Consensus.js:1356.
+    async findConsensusState(key_name) {
+        return this.doQuery('SELECT value FROM consensus_state WHERE key_name = ?', [key_name]);
+    },
+
+    // Inserts or updates a row in consensus_state.
+    // Moved here from src/Consensus.js:1379.
+    async setConsensusState(key_name, value, value2) {
+        return this.doQuery('INSERT INTO consensus_state (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()', [key_name, value, value2]);
     }
 };

@@ -613,11 +613,7 @@ class AttestationPublisher {
     async _getPublishedMarker(rid){
         let db = this._db();
         if (!db) return null;
-        let rows = await db.doQuery(
-            'SELECT request_id, txid, sent_at, sent_statuses, intent_status ' +
-            'FROM attest_published_requests WHERE request_id = ?',
-            [rid]
-        );
+        let rows = await db.findAttestPublishedRequestsByRequestId(rid);
         return (rows && rows.length > 0) ? rows[0] : null;
     }
 
@@ -629,11 +625,7 @@ class AttestationPublisher {
     async _recordPublishIntent(rid, status){
         let db = this._db();
         if (!db) return;
-        await db.doQuery(
-            'INSERT INTO attest_published_requests (request_id, intent_status) VALUES (?, ?) ' +
-            'ON DUPLICATE KEY UPDATE intent_status = VALUES(intent_status)',
-            [rid, String(status || 'ok')]
-        );
+        await db.setAttestPublishedRequest(rid, String(status || 'ok'));
     }
 
     // Durably record that the broadcast COMPLETED: add the status to the published set,
@@ -648,13 +640,7 @@ class AttestationPublisher {
         if (!db) return;
         let st = String(status || 'ok');
         try {
-            await db.doQuery(
-                'UPDATE attest_published_requests SET txid = ?, sent_at = NOW(), intent_status = NULL, ' +
-                "sent_statuses = IF(FIND_IN_SET(?, COALESCE(sent_statuses, '')) > 0, sent_statuses, " +
-                "CONCAT_WS(',', NULLIF(sent_statuses, ''), ?)) " +
-                'WHERE request_id = ?',
-                [txid || null, st, st, rid]
-            );
+            await db.updateAttestPublishedRequestByRequestId(txid || null, st, st, rid);
             // The table just grew by one confirmed row, which is the only thing the
             // retention sweep has to age out; arm it for the next sweep pass.
             this._markersAddedSinceSweep = true;
@@ -677,8 +663,7 @@ class AttestationPublisher {
     async _hydratePublishedMarkers(){
         let db = this._db();
         if (!db) return;
-        let rows = await db.doQuery(
-            'SELECT request_id, sent_at, sent_statuses, intent_status FROM attest_published_requests', []);
+        let rows = await db.findAllAttestPublishedRequests();
         let quarantined = [];
         for (let r of (rows || [])){
             let rid   = String(r.request_id).toLowerCase();
@@ -720,15 +705,8 @@ class AttestationPublisher {
         let db = this._db();
         if (!db) return;
         try {
-            await db.doQuery(
-                'UPDATE attest_published_requests SET intent_status = NULL ' +
-                'WHERE request_id = ? AND intent_status = ?',
-                [rid, String(status || 'ok')]
-            );
-            await db.doQuery(
-                'DELETE FROM attest_published_requests WHERE request_id = ? AND sent_at IS NULL',
-                [rid]
-            );
+            await db.updateAttestPublishedRequestByRequestIdAndIntentStatus(rid, String(status || 'ok'));
+            await db.deleteAttestPublishedRequest(rid);
         } catch (e) {
             console.error('AttestationPublisher: could not withdraw the publish-intent marker for %s... ' +
                 'after a definitive send failure; a restart will QUARANTINE it ' +

@@ -24,6 +24,7 @@ const OracleConsensus = require('../../src/OracleConsensus');
 const OracleRound     = require('../../src/OracleRound');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 function snapshotOf(validators, blockIndex) {
     return {
@@ -116,7 +117,7 @@ describe('OracleRound.getSubmissionsInfo exports the diversity counter', functio
     function roundWith(consensus) {
         const round = Object.create(OracleRound.prototype);
         round.submissions     = new Map();
-        round.db              = { doQuery: async () => [] };
+        round.db              = { ...DB_METHODS, doQuery: async () => [] };
         round.oracleConsensus = consensus;
         return round;
     }

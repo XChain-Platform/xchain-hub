@@ -1118,9 +1118,7 @@ class AttestationRelay {
                 // (LIMIT 1), so the mirror stream carried one source. This writer has no
                 // caller today; the widening goes in now so the next one does not inherit
                 // the drift. Inert below SWQ, where source='' and there is one row per key.
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

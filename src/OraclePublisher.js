@@ -1476,10 +1476,7 @@ class OraclePublisher {
         if (!this.db) return 0;
         let rows;
         try {
-            rows = await this.db.doQuery(
-                'SELECT DISTINCT round_number, consensus_proof FROM price_snapshots WHERE round_number >= ? ' +
-                'AND round_number <= ? AND consensus_proof LIKE \'{"batch":%\'',
-                [first, last]);
+            rows = await this.db.findPriceSnapshotsByRoundNumberAndConsensusProof(first, last);
         } catch (e) {
             console.warn('OraclePublisher: cannot check for an on-chain batch covering rounds ' +
                 first + '..' + last + '; leaving them buffered: ', e && e.message);
@@ -1666,9 +1663,7 @@ class OraclePublisher {
     async _windowObservedOnChain(first, last) {
         if (!this.db) return true;
         try {
-            let rows = await this.db.doQuery(
-                'SELECT 1 AS seen FROM price_snapshots WHERE round_number >= ? AND round_number <= ? ' +
-                'AND consensus_proof LIKE \'{"batch":%\' LIMIT 1', [first, last]);
+            let rows = await this.db.hasPriceSnapshotsByRoundNumber(first, last);
             return !!(rows && rows.length);
         } catch (e) {
             console.warn('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
@@ -1685,8 +1680,7 @@ class OraclePublisher {
         if (this._observationProven) return true;
         if (!this.db) return false;
         try {
-            let rows = await this.db.doQuery(
-                'SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE \'{"batch":%\' LIMIT 1');
+            let rows = await this.db.hasPriceSnapshotsByConsensusProof();
             if (rows && rows.length) this._observationProven = true;
         } catch (e) {
             console.warn('OraclePublisher: cannot confirm the on-chain observation feed; ' +
@@ -2324,12 +2318,7 @@ class OraclePublisher {
         if (!this.db) return 0;
         let rows;
         try {
-            rows = await this.db.doQuery(
-                'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
-                'LEFT(consensus_proof, 8) AS proof_head, admit_block_btc, admit_block_ltc, admit_block_doge ' +
-                'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
-                'ORDER BY round_number ASC, coin_pair ASC',
-                [first, last, 'finalized']);
+            rows = await this.db.findPriceSnapshotsByRoundNumber(first, last, 'finalized');
         } catch (e) {
             console.warn('OraclePublisher: cannot reconcile the buffered copy of window [' + first +
                 ',' + last + '] against price_snapshots; proposing the buffer as-is: ', e && e.message);
@@ -2416,10 +2405,7 @@ class OraclePublisher {
         if (!this.db) return true;
         let rows;
         try {
-            rows = await this.db.doQuery(
-                'SELECT DISTINCT round_number, block_timestamp FROM price_snapshots ' +
-                'WHERE round_number >= ? AND round_number <= ? AND status = ?',
-                [first, last, 'finalized']);
+            rows = await this.db.findPriceSnapshotsByRoundNumberAndStatus(first, last, 'finalized');
         } catch (e) {
             console.warn('OraclePublisher: cannot self-check window [' + first + ',' + last +
                 '] against price_snapshots; withholding the batch (fail closed): ', e && e.message);
@@ -2743,10 +2729,7 @@ class OraclePublisher {
     // cannot prove the round is unpublished).
     async _getPublishedMarker(round) {
         if (!this.db) return null;
-        let rows = await this.db.doQuery(
-            'SELECT round, txid, sent_at FROM oracle_published_rounds WHERE round = ?',
-            [round]
-        );
+        let rows = await this.db.findOraclePublishedRoundsByRound(round);
         return (rows && rows.length > 0) ? rows[0] : null;
     }
 
@@ -2755,11 +2738,7 @@ class OraclePublisher {
     // caller fails closed. No-op when no DB is wired.
     async _recordPublishIntent(round) {
         if (!this.db) return;
-        await this.db.doQuery(
-            'INSERT INTO oracle_published_rounds (round) VALUES (?) ' +
-            'ON DUPLICATE KEY UPDATE round = round',
-            [round]
-        );
+        await this.db.setOraclePublishedRound(round);
     }
 
     // Durably record that a round's broadcast COMPLETED (sets sent_at + txid). Called
@@ -2769,10 +2748,7 @@ class OraclePublisher {
     async _markPublished(round, txid) {
         if (!this.db) return;
         try {
-            await this.db.doQuery(
-                'UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?',
-                [txid, round]
-            );
+            await this.db.updateOraclePublishedRound(txid, round);
         } catch (e) {
             console.error('OraclePublisher: broadcast for round ' + round + ' succeeded but its durable ' +
                 'sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this round. ' +
@@ -2795,7 +2771,7 @@ class OraclePublisher {
     // row is the only record of which wire carried that round.
     async _hydratePublishedMarkers() {
         if (!this.db) return;
-        let rows = await this.db.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds', []);
+        let rows = await this.db.findAllOraclePublishedRounds();
         let quarantined = [];
         // Highest CONFIRMED row seen, which is the publication a restarted hub reports.
         let newest = null;
@@ -2875,9 +2851,7 @@ class OraclePublisher {
         }
         if (cutoff <= 0) return 0;
 
-        let result = await this.db.doQuery(
-            'DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL',
-            [cutoff]);
+        let result = await this.db.deleteOraclePublishedRound(cutoff);
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
         if (deleted > 0) {
             this.publishedRoundsPruned += deleted;

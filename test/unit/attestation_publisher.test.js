@@ -31,6 +31,7 @@ const nock  = require('nock');
 const { expect } = require('chai');
 const AttestationPublisher = require('../../src/AttestationPublisher');
 const { waitUntil } = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const MY_PUB     = 'aa'.repeat(32);
 const LEADER_PUB = 'bb'.repeat(32);
@@ -1783,7 +1784,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
     // entry per completed publication and `intent_status` names the armed one.
     function makeMarkerDb(rows, failOn) {
         const calls = [];
-        return {
+        return { ...DB_METHODS,
             calls,
             doQuery: async (sql, params) => {
                 calls.push({ sql, params });
@@ -2145,7 +2146,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
     // in its predicates) rather than about a re-implementation of MariaDB.
     function mkDb(affected, failOnDelete) {
         const seen = [];
-        return {
+        return { ...DB_METHODS,
             seen,
             doQuery: async (sql, params) => {
                 seen.push({ sql, params });

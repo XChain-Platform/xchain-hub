@@ -13,6 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const ProviderRegistry   = require('../../src/ProviderRegistry');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -560,7 +561,7 @@ describe('ProviderRegistry', function () {
         });
 
         it('genesis stays pinned to DEFAULTS even when the configs table raised the live floor', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([
                     row('llm', JSON.stringify({ provider_id: 'llm', min_stake_xchain: '99999' }))
                 ]),
@@ -624,7 +625,7 @@ describe('ProviderRegistry', function () {
             // governance hotReload of an unrelated proposal) re-parses the configs table
             // into the live def, and a restarted hub would otherwise disagree with a
             // long-running one about which state machine a historical block runs.
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([
                     row('llm', JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' }))
                 ]),
@@ -638,7 +639,7 @@ describe('ProviderRegistry', function () {
         });
 
         it('anchors a full-def governance strategy change at its activation block', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
@@ -677,7 +678,7 @@ describe('ProviderRegistry', function () {
 
     describe('loadGovernanceHistory', function () {
         it('anchors a full-def proposal floor at its activation block', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
@@ -707,7 +708,7 @@ describe('ProviderRegistry', function () {
                 { parameter: 'ATTESTATION_PROVIDER:llm', activationBlock: 7000,
                   newValue: JSON.stringify(proposal) });
 
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
@@ -724,7 +725,7 @@ describe('ProviderRegistry', function () {
         });
 
         it('leaves the floor untouched for a bare additional_config proposal', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 8000,
@@ -738,7 +739,7 @@ describe('ProviderRegistry', function () {
 
 
         it('seeds genesis then layers passed ATTESTATION_PROVIDER proposals by activation_block', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 3000,
@@ -755,7 +756,7 @@ describe('ProviderRegistry', function () {
         });
 
         it('accepts a bare additional_config object as proposed_value', async function () {
-            let db = {
+            let db = { ...DB_METHODS,
                 getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 4000,

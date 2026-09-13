@@ -28,6 +28,7 @@
 const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -49,7 +50,7 @@ describe('StateCheckpointEngine cadence stall meter', function () {
     // as the cadence-latch suite; unknown SELECTs fall through to []).
     function memDb() {
         let checkpoints = [], snapshots = [];
-        return {
+        return { ...DB_METHODS,
             checkpoints, snapshots,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT MAX(checkpoint_seq)')) {
@@ -272,7 +273,7 @@ describe('StateCheckpointEngine frozen-tip livelock meter', function () {
             validators: pubkeys.map(p => ({ pubkey: p, amount: '1' }))
         };
         const hub = {
-            db: { async doQuery() { return []; } },
+            db: { ...DB_METHODS, async doQuery() { return []; } },
             network: 'regtest',
             p2pConfig: {
                 CHECKPOINT_CHAINS: 'BTC', CHECKPOINT_CONFIRMATIONS: '0',

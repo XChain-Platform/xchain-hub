@@ -26,6 +26,7 @@
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK  = 100;
 const CP_ROW = {
@@ -49,7 +50,7 @@ const ENV_KEYS = ['ANCHOR_RANK_WAKE_MS', 'ANCHOR_ELECTION_TOLERANCE_BLOCKS', 'AN
 function buildPub() {
     let identity = new ValidatorIdentity('11'.repeat(32));
     let hub = {
-        db: {
+        db: { ...DB_METHODS,
             async doQuery(sql) {
                 if (sql.indexOf('FROM cross_chain_matches WHERE batch_seq IS NULL') !== -1) return [MATCH_ROW];
                 if (sql.indexOf('FROM state_checkpoints') !== -1) return [CP_ROW];

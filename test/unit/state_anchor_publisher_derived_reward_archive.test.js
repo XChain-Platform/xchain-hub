@@ -18,13 +18,14 @@ const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const ar                   = require('../../src/anchor_reward_activation');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK = 100;
 
 function mkPub(network, rewardRows, hits){
     const identity = new ValidatorIdentity('11'.repeat(32));
     const pub = new StateAnchorPublisher({
-        db: {
+        db: { ...DB_METHODS,
             async doQuery(sql, params){
                 hits.push(sql);
                 if(sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1) return rewardRows;
@@ -110,7 +111,7 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
         function mkSelector(network, rows, maxBatch, hits){
             const identity = new ValidatorIdentity('11'.repeat(32));
             const pub = new StateAnchorPublisher({
-                db: {
+                db: { ...DB_METHODS,
                     async doQuery(sql, params){
                         hits.push({ sql, params });
                         if(sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') === -1) return [];

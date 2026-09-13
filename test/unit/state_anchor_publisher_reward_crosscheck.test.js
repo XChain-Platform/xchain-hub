@@ -32,6 +32,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_WINNER = 'aa'.repeat(32);   // W: the row every honest hub derives + holds
 const PK_OTHER  = 'bb'.repeat(32);   // X: an eligible publisher that did NOT win
@@ -57,7 +58,7 @@ function archivedReward(pk, over) {
 }
 
 function makePublisher(localRewardRows, oraclePublishSet) {
-    const db = {
+    const db = { ...DB_METHODS,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT validator_pubkey, amount, block_index FROM validator_rewards')) {

@@ -42,6 +42,7 @@ const PriceAggregator = require('../../src/PriceAggregator');
 const OracleConsensus = require('../../src/OracleConsensus');
 const swq             = require('../../src/stake_weighted_quorum.js');
 const { createMockHub } = require('../helpers/mockHub');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A real Ed25519 validator key, in the 64-hex lowercase shape the BTC indexer serves
 // and capability_snapshots.signing_pubkey stores.
@@ -71,7 +72,7 @@ function makeWeightSet(n) {
 function makeFakeDb() {
     let store   = new Map();
     let queries = [];
-    return {
+    return { ...DB_METHODS,
         store,
         queries,
         getChainTip: async () => ({ chainId: 'ff'.repeat(32), blockHeight: 1 }),
@@ -733,7 +734,7 @@ describe('XChainHub.start() arms the price capability derivation', function () {
     });
 
     beforeEach(function () {
-        mockDb = {
+        mockDb = { ...DB_METHODS,
             doQuery:        sinon.stub().resolves([]),
             createDatabase: sinon.stub().resolves(true),
             verifyTables:   sinon.stub().resolves(true),
