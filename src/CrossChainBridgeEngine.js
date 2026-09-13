@@ -174,13 +174,19 @@ class CrossChainBridgeEngine extends EventEmitter {
         this._inflight = new Set();
 
         // SOURCE LEG guard: at most one in-flight round per (network, src_chain,
-        // src_action_index). transfer_id folds snapshot_block into its preimage on purpose
-        // (section 6, the DEX stranding fix), so the SAME source leg polled a cycle later at
-        // a new BTC height derives a DIFFERENT id and _inflight above cannot see the earlier
-        // round is still running for it. This closes that window: a leg is guarded from
-        // propose through finalize/abandon/defer, however many heights the round spans.
+        // src_action_index). transfer_id is now a pure function of the source leg (no
+        // snapshot_block in the preimage, see _deriveTransferId), so this key and the
+        // _inflight key above name the same round; the guard is kept as the independent
+        // refusal the follower path (_validateTransfer) consults, and so that a transfer_id
+        // whose preimage ever widens again cannot silently reopen the double-round window.
+        // A leg is guarded from propose through finalize/abandon/defer.
         this._inflightSourceLegs  = new Set();
         this._inflightTransferLeg = new Map();  // transfer_id -> source leg key, for release
+
+        // Legs whose early return in _maybeFinalizeTransfer has already been logged, keyed
+        // `<leg>|<reason>`, so a 15 s poll reports a held or refused leg ONCE per process
+        // instead of every tick. Bounded FIFO: a long-lived hub sees many legs.
+        this._earlyReturnLogged = new Set();
 
         // Live pending legs from the LAST completed poll, keyed `<tick>|<dest_chain>`, as
         // an array of decimal amount strings. A lock that is mined but not yet at depth has
@@ -359,12 +365,22 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!res || !Array.isArray(res.transfers) || !res.network) return;
         let latest = Number(res.latest_block_index);
         if(!Number.isFinite(latest)) return;
+        let network = String(res.network);
+        // Legs this hub has ALREADY finalized are neither in flight nor proposable, whatever
+        // the indexer still lists: its mirror of bridge_transfers can lag the hub's own
+        // write by a mirror round trip, and a lagging (or unfiltered) answer would count a
+        // settled leg into the invariant's in-flight term a second time, on top of the
+        // finalized-but-not-yet-effective rows getInFlightBridgeTransfers already sums.
+        // One set read per chain per poll, keyed on the source action index.
+        let persisted = await this.db.getBridgeTransferSourceIndexes(
+            network, coin, res.transfers.map(t => Number(t && t.src_action_index)));
         for(let t of res.transfers){
-            // Every pending leg is in flight from the moment its source is mined, whether or
-            // not it has reached depth: the origin escrow already holds the value and the
-            // destination has not minted it.
+            if(persisted.has(Number(t && t.src_action_index))) continue;
+            // Every other pending leg is in flight from the moment its source is mined,
+            // whether or not it has reached depth: the origin escrow already holds the value
+            // and the destination has not minted it.
             this._recordPending(pendingOut, t);
-            try { await this._maybeFinalizeTransfer(coin, String(res.network), latest, snapshotBlock, t); }
+            try { await this._maybeFinalizeTransfer(coin, network, latest, snapshotBlock, t); }
             catch(e){ console.warn('CrossChainBridge: transfer round failed for ' + coin + ':' +
                                    String(t && t.src_action_index) + ': ' + (e && e.message)); }
         }
@@ -398,6 +414,9 @@ class CrossChainBridgeEngine extends EventEmitter {
     // no-op duplicate), so a leg is never left guarded under a transfer_id whose round has
     // already ended.
     _releaseSourceLegGuard(transferId){
+        // The consensus lowercases every round id it emits; a sha256 hex digest already is,
+        // so this is a no-op on an honest id and a guarantee for the Map lookup below.
+        transferId = String(transferId).toLowerCase();
         this._inflight.delete(transferId);
         let legKey = this._inflightTransferLeg.get(transferId);
         if(legKey){
@@ -406,20 +425,34 @@ class CrossChainBridgeEngine extends EventEmitter {
         }
     }
 
+    // One line per (leg, reason) per process for a leg the poll saw and did not propose.
+    // A silent early return makes a hub that "stops proposing" read exactly like one that
+    // is refusing, so every hold below says why, in the log.
+    _logHeld(coin, t, reason){
+        let leg = coin + ':' + String(t && t.src_action_index);
+        let key = leg + '|' + reason;
+        if(this._earlyReturnLogged.has(key)) return;
+        if(this._earlyReturnLogged.size >= 10000)
+            this._earlyReturnLogged.delete(this._earlyReturnLogged.values().next().value);
+        this._earlyReturnLogged.add(key);
+        console.log('CrossChainBridge: not proposing ' + leg + ' (' + reason + ')');
+    }
+
     async _maybeFinalizeTransfer(coin, network, latestBlock, snapshotBlock, t){
         if(!t) return;
         let kind = String(t.transfer_kind || '');
-        if(kind !== 'lock' && kind !== 'burn') return;
+        if(kind !== 'lock' && kind !== 'burn') return this._logHeld(coin, t, 'transfer_kind ' + kind + ' is not a source leg');
         let destChain = String(t.dest_chain || '');
-        if(!ALLOWED_CHAINS.includes(destChain) || destChain === coin) return;
+        if(!ALLOWED_CHAINS.includes(destChain) || destChain === coin) return this._logHeld(coin, t, 'dest_chain ' + destChain + ' is not bridgeable from ' + coin);
         let tick = String(t.tick || '');
-        if(!tick) return;
+        if(!tick) return this._logHeld(coin, t, 'no tick');
         // A general-token leg needs the token-bridge gate as well as the bridge gate; the
         // base spec's own legs are XCHAIN and ride the bridge gate alone. The parity test
         // pins TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key, so
         // this can never arm v3/v4 without an engine behind it. The token map is
         // network-keyed and the snapshot block is BTC's, so the coin travels with the height.
-        if(tick !== 'XCHAIN' && !this._gateActive('token', snapshotBlock, 'BTC')) return;
+        if(tick !== 'XCHAIN' && !this._gateActive('token', snapshotBlock, 'BTC'))
+            return this._logHeld(coin, t, 'token bridge not active at snapshot_block ' + snapshotBlock);
 
         // The SOURCE CHAIN's own flag day, read at the height this leg was mined, which is
         // the same (block, coin) pair the indexer verdicts the action against. The map is
@@ -428,34 +461,35 @@ class CrossChainBridgeEngine extends EventEmitter {
         // this the hub would sign an LTC leg the moment BTC crossed its instant. The
         // follower re-applies the identical test in _validateTransfer, so proposer and
         // validator refuse on the same height rather than disagreeing across the boundary.
-        if(!this._gateActive('bridge', Number(t.block_index), coin)) return;
+        if(!this._gateActive('bridge', Number(t.block_index), coin))
+            return this._logHeld(coin, t, 'bridge not active on ' + coin + ' at block ' + t.block_index);
 
         let srcActionIndex = Number(t.src_action_index);
-        if(!Number.isInteger(srcActionIndex) || srcActionIndex <= 0) return;
+        if(!Number.isInteger(srcActionIndex) || srcActionIndex <= 0) return this._logHeld(coin, t, 'src_action_index is not a positive integer');
 
         // Confirmation gate: the only defence against signing a reorg-able source leg. An
         // applied mint is final on a destination that did not reorg (D16), so the depth is
         // the attacker's price for that loss.
         let depth = latestBlock - Number(t.block_index) + 1;
-        if(!Number.isFinite(depth) || depth < this._effectiveDepth(coin, t.min_depth)) return;
+        if(!Number.isFinite(depth) || depth < this._effectiveDepth(coin, t.min_depth))
+            // The reason carries the floor, never the current depth: a depth that grows by one
+            // per block would defeat the once-per-reason memo and log every block until it clears.
+            return this._logHeld(coin, t, 'below depth ' + this._effectiveDepth(coin, t.min_depth));
 
         // The origin chain of this tick, learned from the leg's own kind: a lock is mined on
         // the chain the token is native to, a burn on a chain that holds a copy.
         this._tickOrigin.set(network + '|' + tick, kind === 'lock' ? coin : destChain);
 
-        let transferId = this._deriveTransferId(network, coin, srcActionIndex, destChain,
-                                                String(t.dest_address || ''), snapshotBlock);
-        if(this._inflight.has(transferId)) return;
-        // Source-leg guard, keyed WITHOUT snapshot_block (unlike transferId above): the same
-        // leg offered again next poll cycle, before this round has finalized or persisted,
-        // derives a DIFFERENT transferId and would otherwise sail past the check above and
-        // open a second round for one lock (DEFECT 1: BTC action 95 finalized at both 1017
-        // and 1018). This is the proposer's own refusal; _validateTransfer below is the
-        // follower's independent one, so a proposer that skipped this cannot get a
-        // duplicate signed either.
+        let transferId = this._deriveTransferId(network, coin, srcActionIndex, destChain, String(t.dest_address || ''));
+        if(this._inflight.has(transferId)) return this._logHeld(coin, t, 'round ' + transferId.substring(0, 16) + '... still in flight');
+        // Source-leg guard, the proposer's own refusal of a second round for one lock
+        // (DEFECT 1: BTC action 95 finalized at both 1017 and 1018 when the id still moved
+        // with the snapshot height); _validateTransfer below is the follower's independent
+        // one, so a proposer that skipped this cannot get a duplicate signed either.
         let sourceLegKey = network + '|' + coin + ':' + srcActionIndex;
-        if(this._inflightSourceLegs.has(sourceLegKey)) return;
-        if(await this.db.bridgeTransferExistsForSource(network, coin, srcActionIndex)) return;
+        if(this._inflightSourceLegs.has(sourceLegKey)) return this._logHeld(coin, t, 'source leg guarded by an open round');
+        if(await this.db.bridgeTransferExistsForSource(network, coin, srcActionIndex))
+            return this._logHeld(coin, t, 'already finalized in bridge_transfers');
 
         let row = {
             transfer_id:          transferId,
@@ -479,9 +513,9 @@ class CrossChainBridgeEngine extends EventEmitter {
             // retraction is refused outright, so a follower pins this to its own view below.
             push_generation:      Number(t.push_generation) || 0
         };
-        if(!Number.isInteger(row.decimals) || row.decimals < 0 || row.decimals > 18) return;
-        if(!row.src_address || !row.dest_address) return;
-        if(bc.bclte(this._normalizeAmount(row.amount) || '0', 0)) return;
+        if(!Number.isInteger(row.decimals) || row.decimals < 0 || row.decimals > 18) return this._logHeld(coin, t, 'decimals ' + t.decimals + ' out of range');
+        if(!row.src_address || !row.dest_address) return this._logHeld(coin, t, 'missing src_address or dest_address');
+        if(bc.bclte(this._normalizeAmount(row.amount) || '0', 0)) return this._logHeld(coin, t, 'amount ' + t.amount + ' is not positive');
 
         // A transfer is read by dest_chain alone, so its map has one entry.
         if(!await this._stampAdmission('bridge_transfers', row, 'transfer ' + transferId)) return;
@@ -786,15 +820,26 @@ class CrossChainBridgeEngine extends EventEmitter {
         return raw;
     }
 
-    // sha256(network | src_chain:src_action_index | dest_chain:dest_address | snapshot_block),
-    // the _deriveMatchId shape with snapshot_block INSIDE the preimage on purpose: the DEX
-    // had to patch a stranding bug where a retracted row kept the id a re-formed match
-    // needed, and the revive in db.insertBridgeTransfer is the other half of that fix.
-    _deriveTransferId(network, srcChain, srcActionIndex, destChain, destAddress, snapshotBlock){
-        let s = String(network || '') +
+    // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
+    // id per source leg for the life of the chain, the CrossChainCallEngine._roundId shape
+    // (a tagged preimage over the leg's own identity, nothing a hub reads from its own
+    // clock or tip). snapshot_block is deliberately NOT in it. Every hub reads the BTC tip
+    // from its own poll tick, so with the height inside the preimage three hubs whose
+    // polls straddled one BTC block opened three rounds for one leg under three ids; a
+    // PROPOSE for an id a follower never opened is buffered until it expires, and under a
+    // stake-weighted quorum of equal validators every round needs every hub, so the leg
+    // died at the round lifetime, every time, until a restart aligned the first polls.
+    // The height is a leader-choice field now: the followers adopt it through the
+    // consensus' snapshot rebind and _validateTransfer bounds it to their own view.
+    //
+    // A retracted row keeps this id for the re-mined leg, which is what the revive branch
+    // of db.insertBridgeTransfer is for. The id is hub-internal: the indexer verifies the
+    // signatures over the mirrored row and never re-derives it.
+    _deriveTransferId(network, srcChain, srcActionIndex, destChain, destAddress){
+        let s = 'XBRIDGE' +
+                '|' + String(network || '') +
                 '|' + String(srcChain) + ':' + String(srcActionIndex) +
-                '|' + String(destChain) + ':' + String(destAddress) +
-                '|' + String(snapshotBlock);
+                '|' + String(destChain) + ':' + String(destAddress);
         return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
     }
 
@@ -830,6 +875,10 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!Number.isFinite(Number(row.effective_time)) ||
            Number(row.effective_time) - now > 3600 ||
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
+        // snapshot_block is the leader's own tip view, not part of either id, so this window
+        // is the only thing that stops a Byzantine leader pinning an ancient validator set:
+        // the CrossChainCallEngine.validateProposedMatch rule, the same 144 blocks, applied
+        // to both families before any per-family gate reads the height.
         let myBlock = await this._resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_BLOCK_TOLERANCE) return false;
         // The snapshot block is a BTC height (the anchor that selects the validator set), so
@@ -854,15 +903,16 @@ class CrossChainBridgeEngine extends EventEmitter {
         // persisted, non-retracted record for. Comparing ids rather than just existence lets
         // a re-validation of the SAME already-persisted round (an identical transfer_id,
         // e.g. a retried FINAL_SYNC) through, and refuses only a genuinely different one.
+        // With the id a pure function of the leg, "different" now means a forged preimage.
         let existingId = await this.db.getBridgeTransferIdForSource(row.network, row.src_chain, Number(row.src_action_index));
         if(existingId && String(existingId).toLowerCase() !== String(row.transfer_id).toLowerCase()) return false;
 
         // Second half of the same refusal, for the window the database cannot speak to: a
         // round this hub already has OPEN for the leg has written nothing, so the read above
-        // returns null. On a view change between two consecutive snapshot heights the new
-        // leader re-derives a DIFFERENT transfer_id for the same leg and the mesh would
-        // co-sign both. Exempt the row of THIS hub's own open round (its transfer_id maps to
-        // the same leg key), or a self-validating leader would refuse its own proposal.
+        // returns null. The row of THIS hub's own open round is exempt (its transfer_id maps
+        // to the same leg key), and because every honest hub derives the one id for a leg,
+        // a leader's row for a leg this hub opened a round for at its OWN tip carries that
+        // same id and is co-signed: the leader's snapshot_block is adopted, not matched.
         let legKey = String(row.network || '') + '|' + String(row.src_chain || '') + ':' + Number(row.src_action_index);
         if(this._inflightSourceLegs.has(legKey) &&
            this._inflightTransferLeg.get(String(row.transfer_id).toLowerCase()) !== legKey) return false;
@@ -899,8 +949,10 @@ class CrossChainBridgeEngine extends EventEmitter {
             (Number(leg.push_generation) || 0) === (Number(row.push_generation) || 0);
         if(!fieldsMatch) return false;
 
+        // The id re-derives from the leg alone; the leader's snapshot_block was bounded to
+        // this hub's own tip window in validateProposedMatch and is otherwise adopted.
         let derived = this._deriveTransferId(row.network, row.src_chain, Number(row.src_action_index),
-                                             row.dest_chain, row.dest_address, Number(row.snapshot_block));
+                                             row.dest_chain, row.dest_address);
         return String(derived).toLowerCase() === String(row.transfer_id).toLowerCase();
     }
 

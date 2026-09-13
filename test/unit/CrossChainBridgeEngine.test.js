@@ -42,7 +42,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').dige
 function memDb(){
     const calls = [];
     const state = { insertAffected: 1, reviveAffected: 0, pairs: [], inflight: [], seq: 0, atSeq: null,
-                    exists: false, rows: [], sourceTransferId: null };
+                    exists: false, rows: [], sourceTransferId: null, persistedIndexes: [] };
     const db = Object.create(Database.prototype);
     db.calls = calls;
     db.state = state;
@@ -56,6 +56,10 @@ function memDb(){
         if(sql.startsWith('SELECT DISTINCT tick, src_chain, dest_chain')) return state.pairs;
         if(sql.startsWith('SELECT tick, dest_chain, amount FROM bridge_transfers')) return state.inflight;
         if(sql.startsWith('SELECT 1 FROM bridge_transfers')) return state.exists ? [{ 1: 1 }] : [];
+        // The per-poll persisted-leg read answers with the intersection of what was asked
+        // for and what the test says is held, the way the IN (...) does.
+        if(sql.startsWith('SELECT src_action_index FROM bridge_transfers'))
+            return state.persistedIndexes.filter(i => params.slice(2).includes(i)).map(i => ({ src_action_index: i }));
         // Both getBridgeTransferIdForSource and retractTransfersForReorg's SELECT share the
         // 'SELECT transfer_id FROM bridge_transfers WHERE' prefix; distinguish by the clause
         // each one actually builds (network = ? is the source-leg reader, status = 'finalized'
@@ -161,10 +165,14 @@ describe('CrossChainBridgeEngine', function(){
             expect(() => engine._canonicalMatch({ snapshot_block: 1 }, 0)).to.throw(/exactly one/);
         });
 
-        it('derives transfer_id and snapshot_id from the spec preimages', function(){
+        // transfer_id is tagged and SNAPSHOT-FREE, the XCALL round-id shape: one id per
+        // source leg however many BTC heights the hubs read it at. snapshot_id keeps the
+        // height, because a policy snapshot is a reading AT a height and a later reading is
+        // a new row by design.
+        it('derives transfer_id from the leg alone and snapshot_id from the spec preimage', function(){
             const { engine } = makeEngine();
-            expect(engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDest', 150))
-                .to.equal(sha256('regtest|BTC:41|DOGE:nDest|150'));
+            expect(engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDest'))
+                .to.equal(sha256('XBRIDGE|regtest|BTC:41|DOGE:nDest'));
             expect(engine._deriveSnapshotId('regtest', 'BTC', 'FUFU', 2, 150))
                 .to.equal(sha256('regtest|BTC:FUFU|2|150'));
         });
@@ -257,7 +265,7 @@ describe('CrossChainBridgeEngine', function(){
                                          block_index: 100 })]
             });
             const row = {
-                transfer_id: engine._deriveTransferId('regtest', 'DOGE', 41, 'BTC', 'nDestAddress', 150),
+                transfer_id: engine._deriveTransferId('regtest', 'DOGE', 41, 'BTC', 'nDestAddress'),
                 snapshot_block: 150, tick: 'XCHAIN', decimals: 8,
                 src_chain: 'DOGE', src_action_index: 41, src_address: 'mSrcAddress',
                 dest_chain: 'BTC', dest_address: 'nDestAddress', amount: '5.00000000',
@@ -317,7 +325,7 @@ describe('CrossChainBridgeEngine', function(){
             const { engine } = makeEngine();
             await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
             const [roundId, ctx] = engine.transferConsensus.propose.firstCall.args;
-            expect(roundId).to.equal(sha256('regtest|BTC:41|DOGE:nDestAddress|150'));
+            expect(roundId).to.equal(sha256('XBRIDGE|regtest|BTC:41|DOGE:nDestAddress'));
             expect(ctx.row.transfer_id).to.equal(roundId);
             expect(ctx.row.tick).to.equal('XCHAIN');
             expect(ctx.row.decimals).to.equal(8);
@@ -342,23 +350,86 @@ describe('CrossChainBridgeEngine', function(){
         });
 
         // DEFECT 1 (row 15 drive 11, 2026-09-12): BTC action 95 finalized at BOTH snapshot
-        // blocks 1017 and 1018 because _deriveTransferId folds snapshot_block into the id
-        // (section 6, on purpose), so the SAME source leg polled a cycle later derives a
-        // DIFFERENT id and slipped past both the plain _inflight set and the
-        // persisted-rows-only db check. Reproduces the rail's exact shape: one leg offered
-        // at two consecutive heights before the first round has written anything.
+        // blocks 1017 and 1018 when _deriveTransferId still folded snapshot_block into the
+        // id, so the SAME source leg polled a cycle later derived a DIFFERENT id and slipped
+        // past both the plain _inflight set and the persisted-rows-only db check. The id is
+        // snapshot-free now, so the two guards name the same round; the shape is kept as the
+        // regression: one leg offered at two consecutive heights before the first round has
+        // written anything opens exactly one round.
         it('refuses a second round for a source leg still in flight at a new snapshot height (DEFECT 1, drive 11)', async function(){
             const { engine, db } = makeEngine();
             await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             const firstId = engine.transferConsensus.propose.firstCall.args[0];
-            expect(firstId).to.equal(sha256('regtest|BTC:95|DOGE:nDestAddress|1017'));
+            expect(firstId).to.equal(sha256('XBRIDGE|regtest|BTC:95|DOGE:nDestAddress'));
             expect(db.state.exists).to.equal(false); // proves this is NOT the persisted-row check
-            // Same leg, next poll cycle, one BTC block later: a new snapshot_block derives a
-            // new transfer_id, and the first round has not persisted (or even finished PBFT).
             await engine._maybeFinalizeTransfer('BTC', 'regtest', 201, 1018, pendingLeg({ src_action_index: 95 }));
             expect(engine.transferConsensus.propose.calledOnce,
                    'must not open a second round for one source leg at a new snapshot height').to.equal(true);
+        });
+
+        // Row 41 (drives 15 and 17): three venue hubs whose 15 s polls straddled one 20 s
+        // BTC block opened three rounds for AT2's burn under three ids, every PROPOSE was
+        // buffered by followers that never opened that id, and each round died at its
+        // lifetime. Two engines one BTC block apart must name ONE round for a leg.
+        it('derives the SAME transfer_id for one leg from BTC views one block apart (row 41)', async function(){
+            const a = makeEngine({ btcBlock: 150 });
+            const b = makeEngine({ btcBlock: 151 });
+            await a.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await b.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg());
+            const idA = a.engine.transferConsensus.propose.firstCall.args[0];
+            const idB = b.engine.transferConsensus.propose.firstCall.args[0];
+            expect(idA, 'two hubs one BTC block apart must open the same round for one leg').to.equal(idB);
+            // The height each hub read is still the row's leader-choice field.
+            expect(a.engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(150);
+            expect(b.engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(151);
+        });
+
+        // The consensus emits match:abandoned with the LOWERCASED round id when a round
+        // outlives its lifetime; the handler must release the leg so the next poll can
+        // re-propose it, or the leg is wedged until a restart (the drive-15 signature).
+        it('releases the source-leg guard on match:abandoned so the next poll re-proposes', async function(){
+            const { hub } = makeEngine();
+            // A REAL consensus emitter, with only the network round stubbed out, so the
+            // constructor's own handler wiring is what the test drives.
+            const engine = new CrossChainBridgeEngine(hub);
+            engine.activation = { bridge: () => true, token: () => true, policy: () => true };
+            engine.transferConsensus.propose = sinon.stub().resolves();
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            const id = engine.transferConsensus.propose.firstCall.args[0];
+            expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 201, 151, pendingLeg());
+            expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
+            engine.transferConsensus.emit('match:abandoned', { matchId: id.toLowerCase() });
+            expect(engine._inflight.has(id)).to.equal(false);
+            expect(engine._inflightSourceLegs.has('regtest|BTC:41'), 'abandon must release the leg').to.equal(false);
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 202, 152, pendingLeg());
+            expect(engine.transferConsensus.propose.callCount, 'the leg must be re-proposed after an abandon').to.equal(2);
+            expect(engine.transferConsensus.propose.secondCall.args[0]).to.equal(id);
+        });
+
+        // A hub that holds a leg is indistinguishable from one that stopped polling unless
+        // it says why. Once per (leg, reason) per process: a 15 s poll must not flood.
+        it('logs why a leg is not proposed, once per leg and reason rather than once per poll', async function(){
+            const { engine } = makeEngine();
+            const log = sinon.stub(console, 'log');
+            // BTC floor is 6: block 100 at latest 104 is depth 4, held.
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            // The next block moves the depth to 5 of 6 and must NOT produce a second line.
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg());
+            const held = log.getCalls().map(c => String(c.args[0])).filter(s => s.includes('not proposing BTC:41'));
+            expect(held).to.have.length(1);
+            expect(held[0]).to.contain('below depth 6');
+            // A different reason for the same leg is a different line, and a different leg
+            // with the same reason is too.
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ amount: '0', block_index: 90 }));
+            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ src_action_index: 42 }));
+            const all = log.getCalls().map(c => String(c.args[0])).filter(s => s.includes('not proposing'));
+            expect(all).to.have.length(3);
+            expect(all[1]).to.contain('BTC:41').and.to.contain('amount 0 is not positive');
+            expect(all[2]).to.contain('BTC:42').and.to.contain('below depth 6');
         });
 
         it('releases the source-leg guard once the round writes, so the leg is governed by the persisted check', async function(){
@@ -403,6 +474,45 @@ describe('CrossChainBridgeEngine', function(){
     });
 
     // ---------------------------------------------------------------------
+    describe('the pending poll against legs this hub already holds', function(){
+
+        function pendingPage(legs){
+            return { latest_block_index: 200, network: 'regtest', transfers: legs };
+        }
+
+        // Row 42, the hub half: the indexer's pending read can list a leg this hub has
+        // already finalized (its mirror of bridge_transfers lags the hub's own write, and an
+        // unfiltered read lists every valid leg the chain ever carried). Counting it into
+        // the poll's in-flight view double counts it on top of the finalized rows the DB
+        // half already sums, and the invariant then reads a deficit on a healthy bridge.
+        it('drops a leg it already holds from both the in-flight view and the round attempt', async function(){
+            const { engine, db } = makeEngine();
+            db.state.persistedIndexes = [41];
+            engine._indexerCall = sinon.stub().resolves(pendingPage([
+                pendingLeg({ src_action_index: 41, amount: '5.00000000' }),
+                pendingLeg({ src_action_index: 42, amount: '7.00000000' })
+            ]));
+            const pending = new Map();
+            await engine._pollPendingTransfers('BTC', 150, pending);
+            expect(pending.get('XCHAIN|DOGE')).to.deep.equal(['7.00000000']);
+            expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
+            expect(engine.transferConsensus.propose.firstCall.args[1].row.src_action_index).to.equal(42);
+        });
+
+        it('reads the persisted set ONCE per chain per poll, keyed on the page it was handed', async function(){
+            const { engine, db } = makeEngine();
+            engine._indexerCall = sinon.stub().resolves(pendingPage([
+                pendingLeg({ src_action_index: 41 }), pendingLeg({ src_action_index: 42 }), pendingLeg({ src_action_index: 43 })
+            ]));
+            await engine._pollPendingTransfers('BTC', 150, new Map());
+            const reads = db.calls.filter(c => c.sql.startsWith('SELECT src_action_index FROM bridge_transfers'));
+            expect(reads).to.have.length(1);
+            expect(reads[0].params).to.deep.equal(['regtest', 'BTC', 41, 42, 43]);
+            expect(reads[0].sql).to.contain("status <> 'retracted'");
+        });
+    });
+
+    // ---------------------------------------------------------------------
     describe('follower verification of a proposed transfer', function(){
 
         function proposedRow(engine, over){
@@ -415,7 +525,7 @@ describe('CrossChainBridgeEngine', function(){
             }, over);
             row.transfer_id = over && over.transfer_id ? over.transfer_id :
                 engine._deriveTransferId(row.network, row.src_chain, row.src_action_index,
-                                         row.dest_chain, row.dest_address, row.snapshot_block);
+                                         row.dest_chain, row.dest_address);
             return row;
         }
 
@@ -434,17 +544,16 @@ describe('CrossChainBridgeEngine', function(){
 
         // DEFECT 1's follower half (row 15 drive 11): _validateTransfer had NO
         // source-uniqueness test, so a mesh that already finalized one transfer for a source
-        // leg would co-sign a SECOND one for the same leg at a new snapshot_block without
-        // hesitation, which is how BTC action 95 minted twice on the destination.
+        // leg would co-sign a SECOND one for the same leg under another id without
+        // hesitation, which is how BTC action 95 minted twice on the destination. An honest
+        // hub can no longer derive a second id for a leg, so the shape is a persisted record
+        // under an id the proposed row does not carry: refused before the leg is even read.
         it('refuses to co-sign a duplicate transfer for a leg it already holds a persisted record for (DEFECT 1, drive 11)', async function(){
             const { engine, db } = makeEngine();
             withLeg(engine, {});
-            db.state.sourceTransferId = engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDestAddress', 1017);
-            const duplicateRow = proposedRow(engine, {
-                snapshot_block: 1018,
-                transfer_id: engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDestAddress', 1018)
-            });
-            expect(await engine._validateTransfer(duplicateRow)).to.equal(false);
+            db.state.sourceTransferId = 'e'.repeat(64);
+            expect(await engine._validateTransfer(proposedRow(engine, { snapshot_block: 1018 }))).to.equal(false);
+            expect(engine._indexerCall.called, 'the persisted-record refusal comes before the leg read').to.equal(false);
         });
 
         // Negative control for the check above: re-validating the SAME row this hub already
@@ -458,11 +567,10 @@ describe('CrossChainBridgeEngine', function(){
             expect(await engine._validateTransfer(row)).to.equal(true);
         });
 
-        // The two-hub view-change race DEFECT 1 also opens, which the persisted-row read
-        // alone cannot close: hub A has a round OPEN for source leg 41 (nothing written yet,
-        // so getBridgeTransferIdForSource is null), the view changes between two consecutive
-        // BTC snapshot heights, and hub B becomes leader and proposes the SAME leg at the new
-        // height under a different transfer_id. If hub A consults only the database it
+        // The two-hub race DEFECT 1 also opens, which the persisted-row read alone cannot
+        // close: hub A has a round OPEN for source leg 41 (nothing written yet, so
+        // getBridgeTransferIdForSource is null) and a leader proposes the SAME leg under a
+        // transfer_id that is not the one A opened. If A consults only the database it
         // co-signs, and the mesh finalizes two transfers for one lock inside the window.
         it('refuses to co-sign a duplicate for a source leg its OWN round still has in flight', async function(){
             const { engine, db } = makeEngine();
@@ -471,13 +579,43 @@ describe('CrossChainBridgeEngine', function(){
             expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
             expect(db.state.sourceTransferId).to.equal(null); // nothing persisted: the DB read cannot refuse
             withLeg(engine, {});
-            const peerRow = proposedRow(engine, {
-                snapshot_block: 151,
-                transfer_id: engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDestAddress', 151)
-            });
+            const peerRow = proposedRow(engine, { snapshot_block: 151, transfer_id: 'e'.repeat(64) });
             expect(await engine._validateTransfer(peerRow),
                    'must not co-sign a second transfer for a leg this hub already has a round open for')
                 .to.equal(false);
+            expect(engine._indexerCall.called, 'the in-flight refusal comes before the leg read').to.equal(false);
+        });
+
+        // Row 41, the follower half of the one-id-per-leg rule and the exact drive-15 shape:
+        // this hub opened its round for leg 41 at ITS tip (150), the leader read the tip one
+        // block later (151) and proposed the same leg with snapshot_block 151. The ids agree,
+        // so the in-flight exemption applies, the leader's height is adopted as a
+        // leader-choice field, and the row is co-signed instead of buffered to death.
+        it('co-signs the leader\'s row for a leg it has in flight when the snapshot heights differ by a block (row 41)', async function(){
+            const follower = makeEngine({ btcBlock: 150 });
+            const leader   = makeEngine({ btcBlock: 151 });
+            await follower.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
+            await leader.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg({ src_action_index: 41 }));
+            const leaderRow = leader.engine.transferConsensus.propose.firstCall.args[1].row;
+            expect(leaderRow.snapshot_block).to.equal(151);
+            expect(leaderRow.transfer_id).to.equal(follower.engine.transferConsensus.propose.firstCall.args[0]);
+            withLeg(follower.engine, { src_action_index: 41 });
+            expect(await follower.engine.validateProposedMatch(leaderRow),
+                   'a follower must co-sign the leader\'s row for its own in-flight leg at the leader\'s height')
+                .to.equal(true);
+        });
+
+        // snapshot_block is adopted from the leader, so the window is the only bound on it:
+        // the XCALL rail's 144 blocks either side of this hub's own tip view. Both edges,
+        // both directions, against a tip of 150.
+        it('bounds the leader\'s snapshot_block to 144 blocks of its own tip, either side', async function(){
+            const { engine } = makeEngine({ btcBlock: 150 });
+            for(const [block, ok] of [[294, true], [295, false], [6, true], [5, false]]){
+                withLeg(engine, {});
+                // eslint-disable-next-line no-await-in-loop
+                expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: block })),
+                       'snapshot_block ' + block + ' against tip 150').to.equal(ok);
+            }
         });
 
         // Negative control for the in-flight refusal: the row of the hub's OWN open round

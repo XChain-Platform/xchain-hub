@@ -1346,12 +1346,18 @@ class Database {
     // finalization and a duplicate finalize (restart race, a second hub) is a no-op.
     //
     // INSERT IGNORE plus a revive of a retracted row: the cross_chain_matches rule
-    // verbatim (CrossChainDexEngine._insertMatchRow). transfer_id folds snapshot_block
-    // into its preimage, so a source leg reorged out and re-mined while the BTC tip has
-    // not moved re-derives the IDENTICAL id; without the revive the IGNORE would no-op
-    // against the stale 'retracted' row and the re-formed transfer would strand,
-    // unmirrored, until the tip advanced. A row already 'finalized' is left untouched by
-    // the status guard, which is what keeps the double-finalize dedupe.
+    // verbatim (CrossChainDexEngine._insertMatchRow). transfer_id is a pure function of
+    // the source leg, so a leg reorged out and re-mined ALWAYS re-derives the identical id;
+    // without the revive the IGNORE would no-op against the stale 'retracted' row and the
+    // re-formed transfer would strand, unmirrored, for good. A row already 'finalized' is
+    // left untouched by the status guard, which is what keeps the double-finalize dedupe.
+    //
+    // The revive rewrites EVERY column the new round chose, not just the signatures: the
+    // signatures cover the canonical at the new round's snapshot_block and effective_time,
+    // so a revived row that kept the retracted round's height is a row whose signature set
+    // no indexer can verify against the capability snapshot it names. push_generation is
+    // the re-mined leg's fence (the follower pinned it to its own indexer view) and the
+    // chain id is re-stamped for the same reason it is stamped at all.
     async insertBridgeTransfer(row){
         let cols = Database.BRIDGE_TRANSFER_COLUMNS;
         let res = await this.doQuery(
@@ -1361,8 +1367,10 @@ class Database {
         if(res && Number(res.affectedRows) > 0) return true;
         let revive = await this.doQuery(
             "UPDATE bridge_transfers SET status = 'finalized', validator_signatures = ?, " +
-            "finalizing_view = ?, effective_time = ? WHERE transfer_id = ? AND status = 'retracted'",
-            [row.validator_signatures, row.finalizing_view, row.effective_time, row.transfer_id]);
+            'finalizing_view = ?, effective_time = ?, snapshot_block = ?, push_generation = ?, ' +
+            "btc_chain_id = ? WHERE transfer_id = ? AND status = 'retracted'",
+            [row.validator_signatures, row.finalizing_view, row.effective_time, row.snapshot_block,
+             row.push_generation, row.btc_chain_id, row.transfer_id]);
         return !!(revive && Number(revive.affectedRows) > 0);
     }
 
@@ -1434,8 +1442,8 @@ class Database {
 
     // True when this hub already holds a non-retracted record for a source leg, so the
     // poll does not re-propose a round for a transfer it has finalized. Keyed on
-    // (src_chain, src_action_index), which is unique per source leg whatever the
-    // snapshot_block the id folded in.
+    // (src_chain, src_action_index), the leg's own identity, the same key transfer_id is
+    // derived from.
     async bridgeTransferExistsForSource(network, srcChain, srcActionIndex){
         let rows = await this.doQuery(
             'SELECT 1 FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
@@ -1444,12 +1452,28 @@ class Database {
         return !!(rows && rows.length);
     }
 
+    // The subset of `srcActionIndexes` this hub holds a non-retracted record for on one
+    // source chain, as a Set of numbers. The poll reads this ONCE per chain per tick over
+    // the page the indexer returned, so a leg the hub has already finalized (which a lagging
+    // indexer mirror can still list as pending) is dropped from both the round attempt and
+    // the invariant's in-flight term without a query per leg. Non-integer inputs are
+    // dropped before the query rather than bound, so a malformed page cannot widen the IN.
+    async getBridgeTransferSourceIndexes(network, srcChain, srcActionIndexes){
+        let wanted = [...new Set((srcActionIndexes || []).filter(n => Number.isInteger(n)))];
+        if(!wanted.length) return new Set();
+        let rows = await this.doQuery(
+            'SELECT src_action_index FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
+            "status <> 'retracted' AND src_action_index IN (" + wanted.map(() => '?').join(', ') + ')',
+            [String(network || ''), String(srcChain || '')].concat(wanted));
+        return new Set((rows || []).map(r => Number(r.src_action_index)));
+    }
+
     // The transfer_id of this hub's persisted, non-retracted record for one source leg, or
     // null when it holds none. A follower's _validateTransfer reads this rather than
     // bridgeTransferExistsForSource's boolean because it has to tell "this row IS the
     // persisted record" (same id, a legitimate re-validation) from "a record for this leg
-    // already exists under a DIFFERENT id" (the duplicate-finalization shape: the same
-    // source leg re-derives a new transfer_id at every snapshot_block, section 6).
+    // already exists under a DIFFERENT id" (a preimage the honest derivation never yields,
+    // now that the id is a function of the leg alone).
     async getBridgeTransferIdForSource(network, srcChain, srcActionIndex){
         let rows = await this.doQuery(
             'SELECT transfer_id FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
