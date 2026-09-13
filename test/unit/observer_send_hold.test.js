@@ -56,7 +56,9 @@ describe('observer hub does not author into rounds it cannot sign', function () 
             P2P_MSG_DEDUP_TTL: 60000,
             P2P_HEARTBEAT_INTERVAL: 15000
         };
-        dbStub = { doQuery: sinon.stub().resolves([]) };
+        // The named db methods run against the stubbed doQuery, so a peer
+        // upsert such as setP2pPeer resolves instead of throwing.
+        dbStub = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
         pm = new PeerManager(config, dbStub);
         pm.setIdentity(new ValidatorIdentity(me.privkeyHex));
 
