@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The hub publishes a per-table per-chain admission height watermark on the mirror heartbeat, the ready frame and all ten REST snapshot pages, bounded by each rail's round-abandon timeout.  
-- A finalization arriving after its round was abandoned for admission purposes is refused rather than broadcast to the mirror.
+- A finalization arriving after its round was abandoned for admission purposes is refused rather than broadcast to the mirror.  
+- The PRICE v0 canonical carries the round's per-chain admission map behind the mirror-admission activation, spelled identically by the producer and both verifiers.  
+- The admission canonical encoder moved into the activation twin, so the hub and every indexer build the signed field from one definition per repo.
 
 ### Fixed
 - A hub whose signing key is outside the chain-effective signer set no longer broadcasts into rounds it cannot sign or opens checkpoint rounds it cannot lead, and says so once per set change; it keeps receiving, relaying and serving.

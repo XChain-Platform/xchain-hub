@@ -45,6 +45,7 @@ const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const roundBandLib      = require('./lib/oracle_round_band.js');
 const snapWrite         = require('./lib/capability_snapshot_write.js');
+const ah                = require('./lib/admission_height.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
@@ -310,7 +311,13 @@ class PriceAggregator extends EventEmitter {
     // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload (and
     // OracleConsensus._buildPriceV0Payload) exactly; validators signed these
     // bytes, so any divergence here rejects every legitimate round.
-    _buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
+    //
+    // `admitBlocks` is the round's admission map, the per-chain heights at which the round
+    // becomes readable. This is the VERIFIER half: the map must be the one the producer
+    // signed, so it is read off the round being verified rather than resolved from this
+    // hub's own tips, which would rebuild heights no signature covers. Omitted is the
+    // legacy round, which is every round below the activation.
+    _buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight, admitBlocks) {
         let sortedPairs = pairs
             .map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }))
             .sort((a, b) => {
@@ -324,6 +331,13 @@ class PriceAggregator extends EventEmitter {
             btc_block_height: parseInt(btcBlockHeight),
             pairs:            sortedPairs
         });
+        // The admission map, height-gated on the round's OWN BTC anchor and never on a
+        // consumer's height, so the era for a round is fixed when it is signed and the two
+        // eras can never share a signature. Refuses in BOTH directions. Appended to the
+        // body BEFORE the EQUIV wrapper, the same position every other rail puts it in, so
+        // the wrapper stays a pure function of the bytes it wraps.
+        raw += ah.admissionCanonicalField('PriceAggregator', this.hub && this.hub.network,
+                                          btcBlockHeight, admitBlocks);
         // EQUIV header (WI-2 bump 2): gated on the round's BTC block HEIGHT + the hub's
         // network, byte-matching ed25519.buildPriceV0Payload. The height is in the signed
         // content and on-chain wire so every service flips on the same anchor (#4232).
@@ -551,7 +565,19 @@ class PriceAggregator extends EventEmitter {
         // fatal (same semantics as the indexer's PRICE v0 parser), so any
         // round the indexer accepted on-chain also verifies here, but only
         // cryptographically-valid sigs from snapshot members count for quorum.
-        let payload    = this._buildPriceV0Payload(round, timestamp, roundData.pairs, btcBlockHeight);
+        // The admission map comes off the pushed round, because the producer signed THAT
+        // map and a map re-resolved from this hub's own tips would rebuild bytes no
+        // signature covers. An absent map is the legacy round. A map the canonical encoder
+        // refuses is a REJECTED push and never a thrown request: the era gate and the
+        // spelling rules both report through this reason, so an operator sees which round
+        // was refused instead of a 500 on the ingest path.
+        let payload;
+        try {
+            payload = this._buildPriceV0Payload(round, timestamp, roundData.pairs, btcBlockHeight,
+                                                roundData.admit_blocks);
+        } catch (e) {
+            return { accepted: false, reason: 'admission map unusable: ' + e.message };
+        }
         let qualified  = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seenPubkey = new Set();
         let verifiedSigs = [];

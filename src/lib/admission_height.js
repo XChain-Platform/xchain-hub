@@ -22,14 +22,14 @@
  * height axis: every mirrored row carries a signed ADMISSION HEIGHT per chain
  * that reads it, and chain C binds the row at B when admit_blocks[C] <= B.
  *
- * This module is the hub-side producer of that map. The consensus CONSTANTS and
- * the activation predicates live in mirror_admission_activation.js, the
- * byte-identical twin shared with the indexer and the explorer; nothing here is
- * re-derived from them and nothing here is duplicated into them, because this
- * file carries hub-only knowledge (the read sets, the canonical encoding, the
- * refusal policy) that the vendored client must not grow a dependency on.
+ * This module is the hub-side producer of that map. The consensus CONSTANTS, the
+ * activation predicates AND the canonical encoder live in
+ * mirror_admission_activation.js, the byte-identical twin shared with the indexer and
+ * the explorer; nothing here is re-derived from them and nothing here is duplicated
+ * into them, because this file carries hub-only knowledge (the read sets, the mirror
+ * columns, the refusal policy) that the vendored client must not grow a dependency on.
  *
- * Four things live here, and each one is a separate failure the design names:
+ * Three things live here, and each one is a separate failure the design names:
  *
  *   1. THE READ SETS (section 5.1). Which chains read a row decides which chains
  *      its map must cover. Measured from the consuming selects, not guessed.
@@ -38,19 +38,32 @@
  *      admission axis rather than a duration that has to be converted per chain.
  *   3. THE FOLLOWER BOUND, per chain. A flat block window would collapse DOGE's
  *      clock-skew tolerance from an hour to six minutes and refuse honest rows.
- *   4. THE CANONICAL ENCODING, which must be injective or one honest quorum's
- *      signatures validate over two different maps.
+ *
+ * The canonical ENCODING, which must be injective or one honest quorum's signatures
+ * validate over two different maps, is the one piece that moved out: the hub signs those
+ * bytes and every indexer rebuilds them, so it belongs in the twin and is re-exported at
+ * the bottom of this file.
  *
  **********************************************************************/
 
 'use strict';
 
+// The canonical ENCODER and the era gate moved into the twin when the price rail joined
+// the family: the hub signs those bytes and every indexer rebuilds them, so a hub-only
+// encoder would have needed a second copy in the indexer that no parity suite could hold
+// (they compare exported constants, and two copies of a function drift green). They are
+// re-exported at the bottom of this file so this module stays the hub's one admission
+// seam, with exactly one DEFINITION of each per repo.
 const {
     ADMIT_MIN_FUTURE_BLOCKS,
     admitMarginBlocks,
     admitMaxFutureBlocks,
     isAdmitBlockInFollowerBound,
-    isMirrorAdmissionProducerActive,
+    CHAIN_CODE_RE,
+    encodeAdmitBlocks,
+    decodeAdmitBlocks,
+    isAdmissionEra,
+    admissionCanonicalField,
 } = require('../mirror_admission_activation.js');
 
 // ---------------------------------------------------------------------------
@@ -94,16 +107,6 @@ const ADMISSION_READ_SETS = Object.freeze({
     oracle_prices:              Object.freeze({ publishingChain: true }),
     price_snapshots:            Object.freeze({ every: true }),
 });
-
-// A chain code is a closed vocabulary: upper-case letters and digits, nothing
-// else. The canonical encoding's injectivity argument rests on that (no ':' and
-// no ',' can appear inside a code), so the check is here and not only in a test.
-const CHAIN_CODE_RE = /^[A-Z0-9]{1,10}$/;
-
-// Canonical base-10 spelling of a non-negative integer: digits only, no sign, no
-// leading zeros. Same rule lib/canonical_int.js applies to the hub's other signed
-// integers, restricted to non-negative because a height never is.
-const CANONICAL_HEIGHT_RE = /^(?:0|[1-9][0-9]*)$/;
 
 /**
  * Normalise a chain code the way the rest of the admission path spells it.
@@ -363,149 +366,11 @@ function checkAdmitBlocks(readSet, map, ownTips){
     return { ok: true, chain: null, reason: null };
 }
 
-// ---------------------------------------------------------------------------
-// The canonical encoding, and why it is injective
-// ---------------------------------------------------------------------------
-
-/*
- * attest_response_canonical.js:20-55 states the rule an appended canonical field
- * must satisfy, from the case it was written for: concatenated bare,
- * `meta="X" effective=1234` and `meta="X1" effective=234` produce identical
- * bytes, so one honest quorum's signatures would validate over two different
- * values. Two things together fix it, and neither alone: a '|' separator, and a
- * canonical integer spelling.
- *
- * A MAP is strictly harder than one integer, because the field itself now has
- * internal structure that could be re-split. Three properties make this encoding
- * injective, and the test suite drives all three:
- *
- *   1. The chain-code vocabulary is CLOSED upper-case alphanumerics, so neither
- *      ':' nor ',' nor '|' can occur inside a code, and no alternative split of
- *      the field can move a delimiter.
- *   2. Every height is canonically spelled, so 'BTC:1,X:23' and 'BTC:12,X:3' are
- *      different byte strings for different maps (they are), and a map has
- *      exactly ONE spelling: '007' can never appear.
- *   3. Codes are in ASCII order, so {BTC, DOGE} has one encoding rather than two.
- *
- * Without (3) an honest leader and an honest follower could build the same map
- * into different bytes purely from Object key order, which is an insertion-order
- * artefact of how the row was read.
- */
-
-/**
- * Encode an admission map as canonical bytes: `CODE:digits` joined by ',', codes
- * in ASCII order. Throws on anything it cannot spell canonically, because an
- * unspellable map must never reach a signature.
- */
-function encodeAdmitBlocks(map){
-    if(!map || typeof map !== 'object')
-        throw new Error('admission_height: cannot encode a non-object admission map');
-    let codes = Object.keys(map);
-    if(codes.length === 0)
-        throw new Error('admission_height: refusing to encode an EMPTY admission map; a row with no ' +
-            'admission height on any chain is a legacy row, and a legacy row carries no field at all');
-
-    let parts = [];
-    for(let code of codes.slice().sort()){
-        if(!CHAIN_CODE_RE.test(code))
-            throw new Error('admission_height: chain code ' + JSON.stringify(code) +
-                ' is outside the closed vocabulary the encoding is injective over');
-        let v = map[code];
-        // Checked on the RAW spelling, never on Number(v): coercing first hides
-        // the spelling under test, exactly as lib/canonical_int.js explains.
-        let s = (typeof v === 'number') ? (Number.isSafeInteger(v) ? String(v) : null)
-              : (typeof v === 'string') ? v : null;
-        if(s === null || !CANONICAL_HEIGHT_RE.test(s))
-            throw new Error('admission_height: admit_blocks[' + code + '] = ' + JSON.stringify(v) +
-                ' is not a canonically spelled non-negative integer height');
-        parts.push(code + ':' + s);
-    }
-    return parts.join(',');
-}
-
-/**
- * Decode canonical admission bytes back to a map, or null when the bytes are not
- * the unique canonical encoding of any map.
- *
- * The decoder is strict on purpose: it is the executable statement of what the
- * encoder's injectivity claim means. Round-tripping every encoded map and
- * refusing every non-canonical variant (leading zeros, out-of-order codes, a
- * repeated code, an empty field) is what the test suite checks, and a decoder
- * that accepted variants would make that check vacuous.
- */
-function decodeAdmitBlocks(field){
-    if(typeof field !== 'string' || field === '') return null;
-    let parts = field.split(',');
-    let map = {};
-    let prev = null;
-    for(let p of parts){
-        let m = /^([A-Z0-9]{1,10}):((?:0|[1-9][0-9]*))$/.exec(p);
-        if(!m) return null;
-        let code = m[1];
-        if(prev !== null && !(code > prev)) return null;   // out of order, or a repeat
-        prev = code;
-        let h = Number(m[2]);
-        if(!Number.isSafeInteger(h)) return null;
-        map[code] = h;
-    }
-    return map;
-}
-
-// ---------------------------------------------------------------------------
-// The height-gated era check, one per canonical builder
-// ---------------------------------------------------------------------------
-
-/**
- * Is this row in the admission era?
- *
- * Keyed on the ROW's own BTC block (snapshot_block for matches, calls, bridge
- * transfers and policy snapshots; the request's block for attest responses) and
- * never on a consumer's height, so the rule for a given row is fixed the moment
- * it is produced and the two eras can never share a signature.
- *
- * The activation key's COIN is BTC for every rail, because every one of those
- * era blocks IS a BTC height. The map is keyed by (coin, network) so that the
- * CONSUMER side can arm chain by chain; the producer side reads the BTC key.
- */
-function isAdmissionEra(network, eraBlock){
-    return isMirrorAdmissionProducerActive('BTC', network, eraBlock);
-}
-
-/**
- * The canonical tail for a row's admission map: '' below the activation, and
- * '|' + the encoded map at or above it.
- *
- * REFUSES IN BOTH DIRECTIONS, exactly as AttestationConsensus._buildCanonical
- * does for the mirror era (`:1990-2014`). Building a legacy canonical for a
- * modern row strands the row (its signatures reproduce over bytes no verifier
- * rebuilds); building a modern canonical for a legacy row forks a from-genesis
- * replay. Neither can be recovered from downstream, so both throw where the
- * caller that got it wrong is still on the stack.
- *
- * No per-rail canonical VERSION field is minted for this, and none exists
- * anywhere in the hub: this height-gated era check IS the versioning, and a
- * version integer would duplicate the gate while giving a Byzantine leader a
- * second field to disagree about.
- *
- * @param {string} label the engine's canonical tag, for the refusal message
- * @param {string} network the row's network, half the activation key
- * @param {number} eraBlock the ROW's own BTC block
- * @param {object|null} map the row's admission map, or null for a legacy row
- * @returns {string} '' or '|' + encodeAdmitBlocks(map)
- */
-function admissionCanonicalField(label, network, eraBlock, map){
-    let era = isAdmissionEra(network, eraBlock);
-    let has = (map !== null && map !== undefined);
-    if(era && !has)
-        throw new Error(label + ': admission-era row at block ' + String(eraBlock) + ' on ' + String(network) +
-            ' has no admit_blocks; refusing to build a legacy canonical');
-    if(!era && has)
-        throw new Error(label + ': legacy-era row at block ' + String(eraBlock) + ' on ' + String(network) +
-            ' was handed admit_blocks ' + JSON.stringify(map) + '; refusing to build an admission-era canonical');
-    if(!era) return '';
-    return '|' + encodeAdmitBlocks(map);
-}
-
+// Re-exported from the twin, where the ENCODER and the era gate live so the hub and every
+// indexer build the field from one definition per repo. Named here because this module is
+// the hub's admission seam: the engines' canonical builders reach the field through it and
+// never require the twin directly, so the hub-only knowledge (read sets, columns, refusal
+// policy) and the shared bytes stay one import for a caller and two files for a reviewer.
 module.exports = {
     ADMISSION_READ_SETS,
     ADMIT_COLUMN_CHAINS,

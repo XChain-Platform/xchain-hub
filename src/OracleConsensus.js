@@ -42,6 +42,7 @@ const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admissi
 const { canonicalValidatorOrder } = require('./validator_order.js');
 const snapWrite         = require('./lib/capability_snapshot_write.js');
 const { noteDrop, noteRoundLost } = require('./consensusDiagnostics');
+const ah                = require('./lib/admission_height.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -2420,9 +2421,18 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Build the canonical signable payload for a PRICE v0 round.
-    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload exactly so signatures
-    // produced here verify against the same canonical bytes when indexers parse on-chain PRICE v0 actions.
-    _buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight) {
+    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload and
+    // PriceAggregator._buildPriceV0Payload exactly so signatures produced here verify
+    // against the same canonical bytes when indexers parse on-chain PRICE v0 actions. The
+    // three twins now append an ADMISSION FIELD after the JSON body and before the EQUIV
+    // wrapper; all three spell it the same way or the price rail stops.
+    //
+    // `admitBlocks` is this round's admission map, the per-chain heights at which the
+    // round becomes readable. A price round is read on every chain, so its map names every
+    // chain the federation serves, and omitting it is the LEGACY row: correct at every
+    // height below the activation and refused above it, because a round signed without the
+    // heights its consumers bind on is a round no verifier can rebuild.
+    _buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
         let pairs = prices.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }));
         let sortedPairs = [...pairs].sort((a, b) => {
             if (a.pair < b.pair) return -1;
@@ -2435,6 +2445,13 @@ class OracleConsensus extends EventEmitter {
             btc_block_height: parseInt(btcBlockHeight),
             pairs:            sortedPairs
         });
+        // The admission map, height-gated on the round's OWN BTC anchor and never on a
+        // consumer's height, so the era for a round is fixed when it is signed and the two
+        // eras can never share a signature. Refuses in BOTH directions. Appended to the
+        // body BEFORE the EQUIV wrapper, the same position every other rail puts it in, so
+        // the wrapper stays a pure function of the bytes it wraps.
+        raw += ah.admissionCanonicalField('OracleConsensus', this.hub && this.hub.network,
+                                          btcBlockHeight, admitBlocks);
         // EQUIV header (WI-2 bump 2): gated on the round's BTC block HEIGHT + the hub's
         // network, byte-matching ed25519.buildPriceV0Payload. The height is in the signed
         // content and the on-chain wire so every indexer reconstructs identical bytes and
@@ -2496,12 +2513,15 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Sign the canonical PRICE v0 payload with the local validator identity
-    // Returns { pubkey, sig } or null if no identity is configured
-    _signPriceV0(round, btcBlockTime, prices, btcBlockHeight) {
+    // Returns { pubkey, sig } or null if no identity is configured.
+    // `admitBlocks` is the round's admission map, forwarded to the canonical builder so a
+    // signature always covers the heights the round is admitted at; omitted is the legacy
+    // round, which is every round below the activation.
+    _signPriceV0(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
         let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
         if (!identity) return null;
         try {
-            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight);
+            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks);
             let sigHex  = identity.sign(payload);
             return { pubkey: identity.getPubkeyHex(), sig: sigHex };
         } catch (e) {
@@ -2532,7 +2552,11 @@ class OracleConsensus extends EventEmitter {
             return false;
         }
         try {
-            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight);
+            // The ROUND's pinned admission map, never a freshly read one: every message of
+            // one round must verify against the same heights, or two tip readings inside a
+            // round would split the signatures over two canonicals.
+            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices,
+                                                    pending.btcBlockHeight, pending.admitBlocks);
             let ok = ValidatorIdentity.verify(payload, sigHex, pubkeyHex);
             if (ok) {
                 pending.signatures.set(pubkeyHex, sigHex);

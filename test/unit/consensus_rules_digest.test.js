@@ -73,9 +73,9 @@ describe('consensus_rules_digest: the digest', function () {
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', function () {
 
-    it('is sorted, has 27 entries, and contains the gates the last two trains append', function () {
+    it('is sorted, has 33 entries, and contains the gates the last three trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(27, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(33, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -90,8 +90,51 @@ describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', fu
             'mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS',
             'mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS',
             'anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION',
-            'anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S'
+            'anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S',
+            // The admission canonical encoder and its era gate. The price rail made the
+            // encoder a cross-repo byte-twin, so an upgraded hub signing the admission
+            // field must read as a rules mismatch against peers that cannot rebuild it.
+            'mirror_admission_activation.CHAIN_CODE_RE',
+            'mirror_admission_activation.CANONICAL_HEIGHT_RE',
+            'mirror_admission_activation.encodeAdmitBlocks',
+            'mirror_admission_activation.decodeAdmitBlocks',
+            'mirror_admission_activation.isAdmissionEra',
+            'mirror_admission_activation.admissionCanonicalField'
         ]);
+    });
+
+    // The deploy-wave alarm, pinned to a value rather than only to itself. Cross-repo
+    // equality alone cannot see a move both repos make together, which is exactly what a
+    // one-train edit to a shared gate looks like, and the digest an un-upgraded peer
+    // advertises is a literal on the wire. Re-derive with
+    // `node -e "console.log(require('./src/consensus_rules_digest.js').computeConsensusRulesDigest().digest)"`
+    // whenever a gate is deliberately added, and change it in the indexer suite in the SAME
+    // edit: the two values are one number.
+    //
+    // Computed with the regtest admission arming CLEARED, because that one gate resolves from
+    // the environment: a venue process launched armed has a different, equally correct digest,
+    // and a pin that moved with a drill lever would be a test of the launcher. The pinned value
+    // is the fleet's: every shipped process reads the unarmed maps.
+    it('digests to the pinned value, which moved when the admission encoder was registered', function () {
+        // Every gate module, not just the admission one: the family's arming lever is shared,
+        // so the anchor-attest gate resolves from the same variable and a cached copy of it
+        // would keep a drill's heights in the digest after the variable was cleared.
+        const paths = [require.resolve('../../src/consensus_rules_digest.js')].concat(
+            [...new Set(crd.SHARED_GATES.map(g => g[0]))].map(m => require.resolve('../../src/' + m + '.js')));
+        const saved = paths.map(p => [p, require.cache[p]]);
+        const env   = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+        try {
+            delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+            for (const [p] of saved) delete require.cache[p];
+            const fresh = require('../../src/consensus_rules_digest.js');
+            expect(fresh.computeConsensusRulesDigest().digest)
+                .to.equal('26ba9cce1936d6c38518489b35e3ceb558746ffb466cea90f65b39adf49b2036',
+                    'the consensus rules digest moved; a gate was added, removed or reordered');
+        } finally {
+            for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
+            if (env === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = env;
+        }
     });
 
     // The append is at the END, and this is what "at the end" has to mean operationally: the
@@ -112,8 +155,8 @@ describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', fu
         expect(mods.slice(0, PRE_EXISTING.length),
             'a SHARED_GATES entry was inserted mid-list; that reorders the preimage of every gate after it')
             .to.deep.equal(PRE_EXISTING);
-        expect(mods.slice(PRE_EXISTING.length), 'the family must be the LAST two entries')
-            .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation']);
+        expect(mods.slice(PRE_EXISTING.length), 'the family must be the LAST three entries, the encoder registration last of all')
+            .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation']);
     });
 
     // The 2026-09-09 genesis-arm ruling left no SHIPPED gate on the far-future sentinel,
