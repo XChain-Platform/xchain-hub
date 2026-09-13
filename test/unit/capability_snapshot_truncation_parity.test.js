@@ -22,6 +22,7 @@ const { expect } = require('chai');
 
 const swq       = require('../../src/stake_weighted_quorum.js');
 const snapWrite = require('../../src/lib/capability_snapshot_write.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const OracleConsensus       = require('../../src/OracleConsensus.js');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
@@ -64,6 +65,10 @@ const countSnapshot = truncated => ({
 function makeDb() {
     let inserts = [], rows = [];
     return {
+        // The named query methods, so the writer's db.createCapabilitySnapshots()
+        // reaches the doQuery below and this fixture still records the same
+        // statement with the same args.
+        ...DB_METHODS,
         inserts, rows,
         doQuery: async function (sql, params) {
             if (/INSERT IGNORE INTO capability_snapshots/i.test(sql)) {
