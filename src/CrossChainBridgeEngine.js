@@ -1110,7 +1110,16 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(b.subscribers && b.subscribers.size === 0) return;
         let failure = null;
         try {
-            let read = await this.db.doQuery('SELECT * FROM ' + table + ' WHERE ' + keyColumn + ' = ? LIMIT 1', [keyValue]);
+            // The table and key are a switch between the two committed-row reads this engine
+            // streams, never text spliced into a statement. An unknown pair is the same
+            // undeliverable-row event as an empty read, so it takes the resync path below.
+            let read;
+            if(table === 'bridge_transfers' && keyColumn === 'transfer_id')
+                read = await this.db.getBridgeTransferByTransferId(keyValue);
+            else if(table === 'policy_snapshots' && keyColumn === 'snapshot_id')
+                read = await this.db.getPolicySnapshotBySnapshotId(keyValue);
+            else
+                throw new Error('no mirror read for ' + table + '.' + keyColumn);
             if(read && read.length){
                 b.broadcastRow({ table: table, row: read[0] });
                 return;
@@ -1145,14 +1154,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
-        let where = "status = 'finalized' AND src_chain = ? AND src_action_index >= ?" +
-                    (bounded ? ' AND src_action_index <= ?' : '') +
-                    (fenced  ? ' AND push_generation <= ?' : '');
-        let params = [chain, from];
-        if(bounded) params.push(to);
-        if(fenced)  params.push(gen);
-        let rows = await this.db.doQuery(
-            'SELECT transfer_id FROM bridge_transfers WHERE ' + where, params);
+        let rows = await this.db.findFinalizedBridgeTransferIdsForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){
             await this.db.updateBridgeTransfer(r.transfer_id);
             this._releaseSourceLegGuard(r.transfer_id);
