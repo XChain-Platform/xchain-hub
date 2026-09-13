@@ -603,6 +603,8 @@ offer/call is eligible for matching). Each variable also resolves from
 | `XDEX_POLL_MS` | No | `15000` | Poll interval (ms) for match/relay discovery. |
 | `XDEX_MIN_CONFIRMATIONS` | No | per-coin | Flat confirmation-depth override applied to every coin. Consensus-affecting. **May only RAISE the depth on mainnet and testnet**, the same clamp `XCHAIN_CONFIRMATIONS_<COIN>` carries; only regtest honours a lowered value. |
 | `XDEX_MIN_CONFIRMATIONS_<COIN>` | No | per-coin (BTC `6`, LTC `12`, DOGE `60`) | Per-coin confirmation depth (e.g. `XDEX_MIN_CONFIRMATIONS_DOGE`). Takes precedence over the flat variable. Consensus-affecting, and clamped up to the per-coin default on mainnet and testnet exactly as the flat knob is. |
+| `XDEX_ROUND_TIMEOUT_MS` | No | `120000` | How long a cross-chain round may sit before it is treated as timed out. Also bounds how far the mirror height watermark may trail: a round still open past this is what the watermark's round-abandon rule discards. |
+| `XDEX_ROUND_MAX_LIFETIME_MS` | No | `XDEX_ROUND_TIMEOUT_MS` × 4 | Hard ceiling on a round's total lifetime, after which it is abandoned however many retries remain. Keeps the height watermark's trail bounded in code rather than by convention. |
 | `XDEX_SEED_LOCAL_VALIDATOR` | Regtest only | `false` | `1`/`true` seeds `capability_snapshots` with this hub's own identity so single-node regtest stacks can finalize without an indexer-backed snapshot. Ignored off regtest. |
 | `XDEX_SNAPSHOT_BLOCK` | Regtest only | _unset_ | Fixed deterministic snapshot-block anchor for regtest drills (also read by `StateCheckpointEngine` / `CrossChainCallEngine`). Ignored off regtest. |
 

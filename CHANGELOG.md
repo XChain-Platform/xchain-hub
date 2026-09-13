@@ -11,9 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The hub publishes a per-table per-chain admission height watermark on the mirror heartbeat, the ready frame and all ten REST snapshot pages, bounded by each rail's round-abandon timeout.  
 - A finalization arriving after its round was abandoned for admission purposes is refused rather than broadcast to the mirror.  
 - The PRICE v0 canonical carries the round's per-chain admission map behind the mirror-admission activation, spelled identically by the producer and both verifiers.  
-- The admission canonical encoder moved into the activation twin, so the hub and every indexer build the signed field from one definition per repo.
+- The admission canonical encoder moved into the activation twin, so the hub and every indexer build the signed field from one definition per repo.  
+- Hub followers bound a proposed row's admission map against their own chain tips and refuse to co-sign when it does not hold.  
+- The PRICE v0 round push carries the producer's signed admission map through to the verifier.  
+- A PRICE v1 oracle price is stamped with its publishing chain's admission height, or left unstamped when no tip resolves.
 
 ### Fixed
+- The PRICE batch ingest refuses an admission-era batch instead of verifying it and storing its rounds as legacy rows.  
 - A hub whose signing key is outside the chain-effective signer set no longer broadcasts into rounds it cannot sign or opens checkpoint rounds it cannot lead, and says so once per set change; it keeps receiving, relaying and serving.
 - The PRICE v0 payload builder now accepts a coinPair-keyed pair the same as a pair-keyed one, matching the hub's other two v0 payload copies byte for byte.
 - A bridge source leg finalizes as exactly one transfer however many snapshot heights it spans, so the destination chain mints or releases once per lock or burn.

@@ -22,6 +22,10 @@
  * The indexer twin is resolved by monorepo-relative path: a standalone hub checkout
  * skips that comparison (unless XCHAIN_REQUIRE_SIBLINGS=1) and still compares the hub's
  * own two copies against each other.
+ *
+ * TWO CANONICALS, TWO ERA RULES. The BATCH canonical carries no admission map, so the first
+ * describe is era-free and stays so. The SINGLE-ROUND canonical does carry one, so the second
+ * describe ARMS the admission activation itself and drives both eras; see its own header.
  ********************************************************************/
 
 'use strict';
@@ -183,18 +187,96 @@ describe('PRICE v0 canonical: three-way twin parity', function () {
 
 // The single-round PRICE v0 canonical is a separate write from the batch above (its own
 // builders: OracleConsensus._buildPriceV0Payload, PriceAggregator._buildPriceV0Payload,
-// xchain-indexer ed25519.buildPriceV0Payload), gated on EQUIV_HEADER_ACTIVATION rather than
-// unconditional. `regtest` activates the header at height 0, so hubTwins()'s stub network
-// exercises the header on every height without touching production thresholds.
+// xchain-indexer ed25519.buildPriceV0Payload) and, unlike the batch, it carries the round's
+// ADMISSION MAP. That makes it ERA-KEYED on the round's own BTC anchor: below the producer
+// activation the bytes are legacy and carry no field, at or above it the field is present,
+// and a builder handed the wrong shape for its era REFUSES rather than signing bytes its
+// twins cannot rebuild. So this describe drives BOTH eras, and its subject, the coinPair /
+// pair spelling split, is asserted in each of them.
+//
+// THE DESCRIBE ARMS ITSELF, the same way priceV0CanonicalAdmission.test.js does. The
+// activation resolves from the environment at MODULE LOAD, so setting process.env after the
+// first require arms nothing: the only seam that works is purging the activation twin, the
+// hub's admission seam and everything that closed over them from the require cache,
+// re-requiring under the variable, and putting every cache entry and the variable back
+// byte-exact. Without the arming this describe was green only because every activation map
+// in the tree is inert, and it would have gone red the first time one was armed.
 describe('PRICE v0 single-round canonical: three-way twin parity', function () {
 
-    let hub;
-    before(function () { hub = hubTwins(); });
+    // Keyed on the ROUND's own BTC anchor, so ONE armed describe drives both eras: 798999 is
+    // a legacy round and 799000 an admission-era one. 799000 is the anchor the price ingest
+    // path is already exercised at, so no other flag day on this rail moves underneath.
+    const ADMIT_AT  = 799000;
+    const LEGACY_AT = ADMIT_AT - 1;
 
     const ROUND   = 5;
     const TIME    = 1756199400;
-    const HEIGHT  = 799000;
-    const NETWORK = 'regtest';   // matches hubTwins()'s stub hub.network
+    const NETWORK = 'regtest';   // matches the stub hub these twins are built on
+
+    // Insertion order deliberately NOT ASCII order: the encoder sorts, so the field's bytes
+    // are fixed whatever order the caller assembled the map in.
+    function admitMap() { return { DOGE: 5000004, BTC: 799004, LTC: 2400004 }; }
+    const ADMIT_TAIL = '|BTC:799004,DOGE:5000004,LTC:2400004';
+
+    // Every module that closed over the activation, in dependency order: the twin itself,
+    // the hub's admission seam that re-exports its encoder, and the two builders that call
+    // through the seam. Purging only the twin would leave the builders holding the inert one.
+    const HUB_MODULES = [
+        '../../src/mirror_admission_activation.js',
+        '../../src/lib/admission_height.js',
+        '../../src/OracleConsensus.js',
+        '../../src/PriceAggregator.js'
+    ];
+    const INDEXER_MODULES = [
+        '../../../xchain-indexer/src/mirror_admission_activation.js',
+        '../../../xchain-indexer/src/ed25519.js'
+    ];
+
+    function armTwins() {
+        const hubPaths = HUB_MODULES.map(m => require.resolve(m));
+        let indexerPaths = null;
+        try { indexerPaths = INDEXER_MODULES.map(m => require.resolve(m)); }
+        catch (e) {
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                throw new Error('PRICE v0 single-round parity cannot run: xchain-indexer sibling missing (' + e.message + ')');
+        }
+
+        const paths    = hubPaths.concat(indexerPaths || []);
+        const saved    = paths.map(p => [p, require.cache[p]]);
+        const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+        for (const p of paths) delete require.cache[p];
+        process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
+
+        const ArmedOracleConsensus = require('../../src/OracleConsensus.js');
+        const ArmedPriceAggregator = require('../../src/PriceAggregator.js');
+        const act                  = require('../../src/mirror_admission_activation.js');
+        const indexer              = indexerPaths ? require('../../../xchain-indexer/src/ed25519.js') : null;
+
+        // Put the process back exactly as it was found. The instances built below keep the
+        // armed modules they closed over, so the batch describe above and every other file in
+        // the run still see the inert tree they were written against: the arming is scoped to
+        // this describe and never to the process.
+        function restore() {
+            for (const [p, mod] of saved) {
+                if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
+            }
+            if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
+        }
+
+        const stubHub = { db: null, network: NETWORK, getPeerManager: () => ({}) };
+        return {
+            act:      act,
+            indexer:  indexer,
+            producer: new ArmedOracleConsensus(stubHub, {}),
+            ingest:   new ArmedPriceAggregator(stubHub),
+            restore:  restore
+        };
+    }
+
+    let armed = null;
+    before(function () { armed = armTwins(); });
+    after(function () { if (armed) armed.restore(); armed = null; });
 
     function pairsCoinKeyed() {
         return [
@@ -208,35 +290,66 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
         return pairsCoinKeyed().map(p => ({ pair: p.coinPair || p.pair, price: p.price }));
     }
 
-    it('the hub twins agree with each other on a coinPair-keyed round', function () {
-        assert.strictEqual(
-            hub.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
-            hub.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
-            'PriceAggregator diverged from the OracleConsensus producer on a coinPair-keyed round');
+    it('is ARMED, so neither era block below is the other one in disguise', function () {
+        assert.strictEqual(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, ADMIT_AT), true,
+            'the admission-era cases would be vacuous: the activation did not arm');
+        assert.strictEqual(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, LEGACY_AT), false,
+            'the legacy cases would be vacuous: ' + LEGACY_AT + ' is not below the armed height');
     });
 
-    it('a coinPair-keyed round matches the pair-keyed form on both hub twins', function () {
-        for (const [name, twin] of [['producer', hub.producer], ['ingest', hub.ingest]]) {
-            assert.strictEqual(
-                twin._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT),
-                twin._buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), HEIGHT),
-                'hub ' + name + ' spells coinPair and pair to different bytes');
-        }
-    });
+    // The same subject in both eras. `map()` is the round's admission map: absent below the
+    // activation, where the legacy bytes must stay untouched, and present at or above it.
+    for (const era of [
+        { name: 'below the activation, where the round is legacy',            height: LEGACY_AT, map: () => undefined, tail: null },
+        { name: 'at the activation, where the round carries an admission map', height: ADMIT_AT,  map: admitMap,       tail: ADMIT_TAIL },
+    ]) {
+        describe(era.name, function () {
 
-    describe('against the indexer verifier twin', function () {
+            // The era is DRIVEN, not merely named. Without this case both blocks could be
+            // running the legacy path and the whole two-era structure would prove nothing.
+            it('puts the admission field on the signed bytes exactly in its own era', function () {
+                let canonical = armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map());
+                if (era.tail === null) {
+                    assert.ok(canonical.endsWith('}'), 'a legacy round ends at its JSON body: ' + canonical.slice(-40));
+                    assert.ok(!/BTC:799004/.test(canonical), 'a legacy round carries no admission field: ' + canonical.slice(-60));
+                } else {
+                    assert.ok(canonical.endsWith(era.tail), 'the admission field is missing from the signed bytes: ' + canonical.slice(-60));
+                }
+            });
 
-        it('all three twins emit identical bytes for a coinPair-keyed round', function () {
-            let ed25519 = loadIndexerTwin(this);
-            if (!ed25519) return;
+            it('the hub twins agree with each other on a coinPair-keyed round', function () {
+                assert.strictEqual(
+                    armed.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                    armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                    'PriceAggregator diverged from the OracleConsensus producer on a coinPair-keyed round');
+            });
 
-            let expected = ed25519.buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), NETWORK, HEIGHT);
-            assert.strictEqual(ed25519.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), NETWORK, HEIGHT), expected,
-                'indexer verifier: coinPair input must match pair input');
-            assert.strictEqual(hub.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT), expected,
-                'OracleConsensus (PRODUCER) diverged from the indexer verifier on a coinPair-keyed round');
-            assert.strictEqual(hub.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), HEIGHT), expected,
-                'PriceAggregator (hub ingest verifier) diverged from the indexer verifier on a coinPair-keyed round');
+            it('a coinPair-keyed round matches the pair-keyed form on both hub twins', function () {
+                for (const [name, twin] of [['producer', armed.producer], ['ingest', armed.ingest]]) {
+                    assert.strictEqual(
+                        twin._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                        twin._buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), era.height, era.map()),
+                        'hub ' + name + ' spells coinPair and pair to different bytes');
+                }
+            });
+
+            describe('against the indexer verifier twin', function () {
+
+                it('all three twins emit identical bytes for a coinPair-keyed round', function () {
+                    if (!armed.indexer) { this.skip(); return; }
+
+                    let expected = armed.indexer.buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), NETWORK, era.height, era.map());
+                    assert.strictEqual(
+                        armed.indexer.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), NETWORK, era.height, era.map()), expected,
+                        'indexer verifier: coinPair input must match pair input');
+                    assert.strictEqual(
+                        armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
+                        'OracleConsensus (PRODUCER) diverged from the indexer verifier on a coinPair-keyed round');
+                    assert.strictEqual(
+                        armed.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
+                        'PriceAggregator (hub ingest verifier) diverged from the indexer verifier on a coinPair-keyed round');
+                });
+            });
         });
-    });
+    }
 });
