@@ -292,21 +292,15 @@ class CrossChainEngine extends EventEmitter {
 
     // Get stored attestations
     async getAttestations(status, limit) {
-        let query = "SELECT * FROM attestations";
-        let args = [];
-        if (status) {
-            query += " WHERE status = ?";
-            args.push(status);
-        }
-        query += " ORDER BY created_at DESC LIMIT ?";
-        args.push(limit || 50);
-        return await this.db.doQuery(query, args);
+        // Two statements, not one built string: an absent status drops the WHERE
+        // clause entirely rather than matching on a null.
+        if (status) return await this.db.findAttestationsByStatus(status, limit || 50);
+        return await this.db.findAttestations(limit || 50);
     }
 
     // Get a specific attestation
     async getAttestation(sourceChain, sourceActionIndex) {
-        let query = "SELECT * FROM attestations WHERE source_chain = ? AND source_action_index = ? ORDER BY created_at DESC LIMIT 1";
-        let rows = await this.db.doQuery(query, [sourceChain, sourceActionIndex]);
+        let rows = await this.db.getAttestationBySourceAction(sourceChain, sourceActionIndex);
         return rows.length > 0 ? rows[0] : null;
     }
 
@@ -707,17 +701,12 @@ class CrossChainEngine extends EventEmitter {
     }
 
     async _storeAttestation(attestation) {
-        let query = `INSERT INTO attestations
-            (attestation_id, source_chain, source_action_index, dest_chain,
-             confirmations, status, validator_count, consensus_proof)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE status = ?, validator_count = ?, consensus_proof = ?, updated_at = NOW()`;
-        await this.db.doQuery(query, [
+        await this.db.setAttestation(
             attestation.attestationId, attestation.sourceChain, attestation.sourceActionIndex,
             attestation.destChain, attestation.confirmations, attestation.status,
             attestation.validatorCount, attestation.consensusProof,
             attestation.status, attestation.validatorCount, attestation.consensusProof
-        ]);
+        );
     }
 
     async _getStoredAttestation(attestationId) {

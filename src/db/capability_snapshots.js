@@ -24,6 +24,12 @@
  *
  ********************************************************************/
 
+// The mirror's table and column list, moved here with the statement they belong to
+// from src/lib/capability_snapshot_write.js. capability_snapshots carries no network
+// column: the set belongs to the hub, not to a chain network.
+const TABLE   = 'capability_snapshots';
+const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source, btc_chain_id)';
+
 module.exports = {
     // Reads rows from capability_snapshots.
     // Moved here from src/api.js:2116.
@@ -53,5 +59,28 @@ module.exports = {
     // Moved here from src/HubDbBroadcaster.js:647.
     async getCapabilitySnapshotsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
+    },
+
+    // Writes a whole normalized validator set into capability_snapshots in ONE
+    // statement. Moved here from src/lib/capability_snapshot_write.js:126, which
+    // keeps the normalization, the truncation refusal and the identity resolve.
+    //
+    // Do NOT chunk this into several statements. InnoDB rolls a failed statement
+    // back whole and, under autocommit, the statement IS the transaction, so one
+    // statement is what makes the mirror all-or-nothing; chunking would silently
+    // reopen the partial-commit window the shared writer exists to close, and a
+    // partial set carries no completeness marker, so a verifier reads it COMPLETE.
+    //
+    // The row count is the only thing the caller's set changes about the statement:
+    // every value, btc_chain_id included, is bound.
+    async createCapabilitySnapshots(rows, btcChainId) {
+        let args = [];
+        for(let r of rows)
+            args.push(r.snapshot_block, r.capability, r.signing_pubkey, r.amount, r.source, btcChainId);
+
+        return this.doQuery(
+            'INSERT IGNORE INTO ' + TABLE + ' ' + COLUMNS + ' VALUES ' +
+            rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', '),
+            args);
     }
 };

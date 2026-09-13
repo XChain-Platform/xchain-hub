@@ -868,17 +868,16 @@ class XChainHub {
     async deregisterValidator({ signingPubkey, addr }){
         if(!signingPubkey && !addr)
             throw new Error('signing_pubkey or addr is required');
-        let where, args;
+        // The key wins when both are given; each identifier has its own statement, so
+        // neither column name is ever assembled into SQL here.
+        let res;
         if(signingPubkey){
             if(!/^[0-9a-fA-F]{64}$/.test(signingPubkey))
                 throw new Error('Invalid signing pubkey (must be 64 hex chars)');
-            where = 'signing_pubkey = ?'; args = [signingPubkey];
+            res = await this.db.updateValidatorRemovedBySigningPubkey(signingPubkey);
         } else {
-            where = 'addr = ?'; args = [addr];
+            res = await this.db.updateValidatorRemovedByAddr(addr);
         }
-        let res = await this.db.doQuery(
-            "UPDATE validators SET status = 'removed', updated_at = NOW() WHERE " + where + " AND status = 'active'",
-            args);
         await this._loadValidatorPubkeys();
         await this._propagateValidatorSet();
 
@@ -965,12 +964,8 @@ class XChainHub {
     // consumers must never see skipped/disputed rows). 'all' adds skipped and disputed
     // rows so health consumers see failure states instead of an older finalized round.
     async getPriceSnapshots(limit, status) {
-        if (status === 'all') {
-            let query = "SELECT * FROM price_snapshots ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
-            return await this.db.doQuery(query, [limit || 50]);
-        }
-        let query = "SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
-        return await this.db.doQuery(query, [limit || 50]);
+        if (status === 'all') return await this.db.findPriceSnapshotsAnyStatus(limit || 50);
+        return await this.db.findPriceSnapshotsFinalized(limit || 50);
     }
 
     // Per-round PRESENCE over a range of oracle rounds: for each round,
@@ -1065,8 +1060,7 @@ class XChainHub {
     // { row, fresh, stale, missing, ageSeconds, maxAgeSeconds }. A snapshot with no
     // usable block_timestamp is never aged out, since its age is unknown.
     async getPriceStatus(coinPair) {
-        let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
-        let rows = await this.db.doQuery(query, [coinPair]);
+        let rows = await this.db.getFinalizedPriceSnapshotByCoinPair(coinPair);
         let maxAge = this._oracleMaxAgeSeconds(coinPair);
         if (rows.length === 0)
             return { row: null, fresh: false, stale: false, missing: true, ageSeconds: null, maxAgeSeconds: maxAge };
@@ -1109,8 +1103,7 @@ class XChainHub {
     // `chains` rides along with addr/status: the documented getvalidators response has
     // always carried it, and omitting it left the explorer's chains column blank.
     async getValidators() {
-        let query = "SELECT signing_pubkey, addr, chains, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey";
-        return await this.db.doQuery(query);
+        return await this.db.findActiveValidatorRoster();
     }
 
     async getValidatorStatus(signingPubkey) {

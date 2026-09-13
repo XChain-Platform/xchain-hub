@@ -31,6 +31,7 @@ const { expect }            = require('chai');
 const PeerManager           = require('../../src/PeerManager');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const { DB_METHODS }        = require('../helpers/mockHub.js');
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -323,6 +324,9 @@ describe('observer hub does not author into rounds it cannot sign', function () 
         const indexerCalls = [];
         const db = {
             checkpoints,
+            // The shared capability snapshot writer's one named statement, so the
+            // tick's mirror write still lands in the doQuery below.
+            createCapabilitySnapshots: DB_METHODS.createCapabilitySnapshots,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT MAX(checkpoint_seq)')) return [{ max_seq: null }];
                 if (sql.startsWith('SELECT MAX(snapshot_block)')) return [{ last_block: null }];

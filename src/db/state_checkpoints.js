@@ -24,6 +24,21 @@
  *
  ********************************************************************/
 
+// The newest anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
+// checkpoint ORDINAL (seq divided by the cadence step) is divisible by the anchor stride.
+// Moved here from src/StateAnchorPublisher.js:1065.
+//
+// The SQL is unchanged from the per-chain era ON PURPOSE (D24). The
+// `anchor_txid IS NULL` predicate sits OUTSIDE the MAX subquery: pushing it in
+// would resurrect older un-anchored seqs that the chained hashes have already
+// superseded. Do not move it.
+const PENDING_ANCHOR_CHECKPOINTS_SQL =
+    'SELECT sc.* FROM state_checkpoints sc JOIN (' +
+    '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
+    '  WHERE MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
+    ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
+    'WHERE sc.anchor_txid IS NULL';
+
 module.exports = {
     // Inserts a row into state_checkpoints.
     // Moved here from src/StateCheckpointEngine.js:907.
@@ -95,5 +110,19 @@ module.exports = {
     // Moved here from src/StateAnchorPublisher.js:1329, src/StateAnchorPublisher.js:3240.
     async updateStateCheckpoint(txid, chain, network, block_index, checkpoint_seq) {
         return this.doQuery('UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL', [txid, chain, network, block_index, checkpoint_seq]);
+    },
+
+    // Reads the pending anchor checkpoints across every network, for a hub with no
+    // configured network (the legacy unscoped behavior).
+    // Moved here from src/StateAnchorPublisher.js:1065, the unscoped branch.
+    async findAnchorEligibleUnanchoredCheckpoints(checkpointIntervalBlocks, anchorEveryNCheckpoints) {
+        return this.doQuery(PENDING_ANCHOR_CHECKPOINTS_SQL, [checkpointIntervalBlocks, anchorEveryNCheckpoints]);
+    },
+
+    // Reads the pending anchor checkpoints of one network, so a hub DB carrying rows from a
+    // prior network deployment never re-elects publishers for a dead network's checkpoints.
+    // Moved here from src/StateAnchorPublisher.js:1065, the network-scoped branch.
+    async findAnchorEligibleUnanchoredCheckpointsByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
+        return this.doQuery(PENDING_ANCHOR_CHECKPOINTS_SQL + ' AND sc.network = ?', [checkpointIntervalBlocks, anchorEveryNCheckpoints, network]);
     }
 };

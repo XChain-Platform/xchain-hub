@@ -13,7 +13,7 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 const eq             = require('../../src/equivocation_header.js');
 const ccr            = require('../../src/cross_chain_royalty_activation.js');
 
@@ -41,6 +41,9 @@ function loadModule() {
 function makeDexHub(overrides) {
     let hub = createMockHub(overrides);
     hub.db = {
+        // The shared capability snapshot writer's one named statement, so its
+        // insert still reaches the doQuery stub below with the same SQL and args.
+        createCapabilitySnapshots: DB_METHODS.createCapabilitySnapshots,
         doQuery: sinon.stub().resolves([]),
         ...(overrides && overrides.db ? overrides.db : {})
     };

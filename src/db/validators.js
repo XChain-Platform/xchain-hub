@@ -248,12 +248,65 @@ module.exports = {
         return this.doQuery(`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total FROM validator_rewards`);
     },
 
-    // Reads rows from validator_capabilities: every capability row for one pubkey.
-    // Moved here from src/CapabilityRegistry.js:389.
-    async findValidatorCapabilitiesByPubkey(conn, signingPubkey) {
-        return conn.query(`SELECT capability, qualified, self_test_ok, enabled, self_test_at, self_test_msg
-                 FROM validator_capabilities
-                 WHERE signing_pubkey=?`,
-            [signingPubkey]);
+    // Marks the active validators row for one signing key 'removed'.
+    // Moved here from src/XChainHub.js:879, the deregister branch keyed on the key.
+    async updateValidatorRemovedBySigningPubkey(signingPubkey) {
+        return this.doQuery("UPDATE validators SET status = 'removed', updated_at = NOW() WHERE signing_pubkey = ? AND status = 'active'", [signingPubkey]);
+    },
+
+    // Marks the active validators row(s) at one address 'removed'.
+    // Moved here from src/XChainHub.js:879, the deregister branch keyed on the address.
+    // Deliberately unbounded by key: deregistering by address retires whatever active
+    // row that address currently carries, which is how a rotated-away key is cleared.
+    async updateValidatorRemovedByAddr(addr) {
+        return this.doQuery("UPDATE validators SET status = 'removed', updated_at = NOW() WHERE addr = ? AND status = 'active'", [addr]);
+    },
+
+    // Reads the active validator roster the getvalidators RPC answers with.
+    // Moved here from src/XChainHub.js:1112. Wider than findActiveValidators and
+    // findActiveValidatorChains: `chains` rides along with addr and status because
+    // the documented response has always carried it.
+    async findActiveValidatorRoster() {
+        return this.doQuery("SELECT signing_pubkey, addr, chains, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey");
+    },
+
+    // Stamps the archive batch_seq on one not-yet-archived validator_rewards row.
+    // Moved here from src/StateAnchorPublisher.js:4753, the branch for a FINALIZED from a
+    // peer predating the round qualifier.
+    async updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, validatorPubkey) {
+        return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey]);
+    },
+
+    // Stamps the archive batch_seq on one not-yet-archived validator_rewards row, matched
+    // on its round qualifier too, so a rebase-reissued archive seq cannot mark its twin.
+    // Moved here from src/StateAnchorPublisher.js:4753, the qualified branch.
+    async updateValidatorRewardArchiveBatchSeqByQualifier(batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier) {
+        return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND round_qualifier = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier]);
+    },
+
+    // Reads a page of pending anchor reward rows for the archive, for a hub with no
+    // flag-days to bind (unscoped or unknown network). Moved here from
+    // src/StateAnchorPublisher.js:2505, the branch with no exclusion clause.
+    async findArchivableAnchorRewards(maxBatch) {
+        return this.doQuery(
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" + " " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
+            [maxBatch]);
+    },
+
+    // Reads a page of pending anchor reward rows for the archive, excluding every row the
+    // indexer credits from on-chain bytes at or above this hub's two flag-days, so
+    // eligibility applies BEFORE the LIMIT. The exclusion clause is built here beside the
+    // query it filters, so StateAnchorPublisher passes only the bound values. The reward
+    // types and both flag-days are bound; the anchor type count is all the list changes.
+    async findArchivableAnchorRewardsBelowFlagDays(anchorRewardTypes, anchorFlagDay, archiveRewardType, archiveFlagDay, maxBatch) {
+        return this.doQuery(
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" +
+            " AND NOT (reward_type IN (" +
+                anchorRewardTypes.map(() => '?').join(', ') +
+            ") AND block_index >= ?)" +
+            " AND NOT (reward_type = ? AND block_index >= ?)" + " " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
+            anchorRewardTypes.concat([anchorFlagDay, archiveRewardType, archiveFlagDay, maxBatch]));
     }
 };

@@ -42,9 +42,6 @@
  *
  ********************************************************************/
 
-const TABLE   = 'capability_snapshots';
-const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source, btc_chain_id)';
-
 /**
  * Normalize a resolved validator set into snapshot rows, exactly as the six in-loop
  * copies did. Split out so a caller can broadcast the same values it wrote without
@@ -119,16 +116,12 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     let chainId = (btcChainId === undefined) ? await resolveBtcChainId(db)
                                              : (btcChainId || null);
 
-    let args = [];
-    for(let r of rows)
-        args.push(r.snapshot_block, r.capability, r.signing_pubkey, r.amount, r.source, chainId);
-
-    await db.doQuery(
-        'INSERT IGNORE INTO ' + TABLE + ' ' + COLUMNS + ' VALUES ' +
-        rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', '),
-        args);
+    // One statement, in db/capability_snapshots.js: the single-statement shape is
+    // what makes the mirror all-or-nothing, and the reason it must not be chunked
+    // is recorded beside the statement itself.
+    await db.createCapabilitySnapshots(rows, chainId);
 
     return rows;
 }
 
-module.exports = { TABLE, COLUMNS, normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };
+module.exports = { normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };

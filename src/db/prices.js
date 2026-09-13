@@ -218,5 +218,24 @@ module.exports = {
     // Moved here from src/PriceAggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
+    },
+
+    // Reads the newest price_snapshots rows in every status, skipped and disputed
+    // included, for health consumers. Moved here from src/XChainHub.js:969, the
+    // status 'all' branch.
+    async findPriceSnapshotsAnyStatus(limit) {
+        return this.doQuery("SELECT * FROM price_snapshots ORDER BY round_number DESC, coin_pair ASC LIMIT ?", [limit]);
+    },
+
+    // Reads the newest finalized price_snapshots rows, the historical default that fee
+    // and price consumers rely on. Moved here from src/XChainHub.js:972.
+    async findPriceSnapshotsFinalized(limit) {
+        return this.doQuery("SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?", [limit]);
+    },
+
+    // Reads the newest finalized price_snapshots row for one coin pair.
+    // Moved here from src/XChainHub.js:1068.
+    async getFinalizedPriceSnapshotByCoinPair(coinPair) {
+        return this.doQuery("SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1", [coinPair]);
     }
 };

@@ -26,6 +26,7 @@ const fs                   = require('fs');
 const path                 = require('path');
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
+const { DB_METHODS }       = require('../helpers/mockHub.js');
 
 const BLOCK      = 953200;
 const CAPABILITY = 'oracle_publish';
@@ -43,6 +44,10 @@ function memDb(failAt) {
     let rows  = [];
     let seen  = 0;
     return {
+        // The named query methods, so the writer's db.createCapabilitySnapshots()
+        // reaches the doQuery below and this fixture still sees the one statement
+        // with the same args in the same order.
+        ...DB_METHODS,
         rows: () => rows,
         statements: () => seen,
         async doQuery(sql, params) {

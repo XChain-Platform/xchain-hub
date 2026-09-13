@@ -48,45 +48,33 @@ class SwapTracker {
     }
 
     async initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex) {
-        let query = `INSERT INTO swap_records
-            (source_chain, source_action_index, dest_chain, dest_action_index, status)
-            VALUES (?, ?, ?, ?, 'initiated')
-            ON DUPLICATE KEY UPDATE dest_chain = ?, dest_action_index = ?, updated_at = NOW()`;
-        await this.db.doQuery(query, [
+        await this.db.createSwapRecord(
             sourceChain, sourceActionIndex, destChain, destActionIndex || null,
             destChain, destActionIndex || null
-        ]);
+        );
         console.log('SWAP: Initiated ' + sourceChain + ':' + sourceActionIndex + ' → ' + destChain);
     }
 
     async getSwap(sourceChain, sourceActionIndex) {
-        let query = "SELECT * FROM swap_records WHERE source_chain = ? AND source_action_index = ? LIMIT 1";
-        let rows = await this.db.doQuery(query, [sourceChain, sourceActionIndex]);
+        let rows = await this.db.getSwapRecordBySourceAction(sourceChain, sourceActionIndex);
         return rows.length > 0 ? rows[0] : null;
     }
 
     async getSwaps(status, limit) {
-        let query = "SELECT * FROM swap_records";
-        let args = [];
-        if (status) {
-            query += " WHERE status = ?";
-            args.push(status);
-        }
-        query += " ORDER BY created_at DESC LIMIT ?";
-        args.push(limit || 50);
-        return await this.db.doQuery(query, args);
+        // Two statements, not one built string: an absent status drops the WHERE
+        // clause entirely rather than matching on a null.
+        if (status) return await this.db.findSwapRecordsByStatus(status, limit || 50);
+        return await this.db.findSwapRecords(limit || 50);
     }
 
     async updateSwapStatus(sourceChain, sourceActionIndex, status, attestationId) {
-        let query = "UPDATE swap_records SET status = ?";
-        let args = [status];
+        // An absent attestation id leaves the column untouched, so the write that
+        // carries one is a separate statement rather than a stamped null.
         if (attestationId) {
-            query += ", attestation_id = ?";
-            args.push(attestationId);
+            await this.db.updateSwapRecordStatusAndAttestation(status, attestationId, sourceChain, sourceActionIndex);
+            return;
         }
-        query += ", updated_at = NOW() WHERE source_chain = ? AND source_action_index = ?";
-        args.push(sourceChain, sourceActionIndex);
-        await this.db.doQuery(query, args);
+        await this.db.updateSwapRecordStatus(status, sourceChain, sourceActionIndex);
     }
 
     // Called when an attestation is finalized; progresses matching swap to 'attested'
