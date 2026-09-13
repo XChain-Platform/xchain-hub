@@ -28,6 +28,7 @@
 
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const { XCHAIN_PRICE_BOOTSTRAP_SATS, PRICE_MAX } = require('../../src/constants.js');
 
@@ -84,7 +85,9 @@ function indexerDouble(rows = {}) {
 
 // Stand in for the hub's own DB, answering the finalized-price lookups.
 function hubDouble(finalized = {}) {
-    return {
+    // DB_METHODS first: the source calls a named query method, which routes its
+    // statement through the doQuery below.
+    return { ...DB_METHODS,
         queries: [],
         async doQuery(sql, args) {
             this.queries.push({ sql, args });

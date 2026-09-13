@@ -75,19 +75,6 @@ const BTC_PAIR    = 'BTC/USD';
 // does not vendor that file, and pinned by test against the pair name above.
 const GAS_TICK = 'XCHAIN';
 
-// Latest FINALIZED price for a pair strictly BELOW a round number.
-//
-// Strictly below, and keyed on the round rather than "the newest row I have", because
-// §4 requires the winsorization anchor to be consensus-derived: rounds finalize
-// asynchronously, so two honest validators reading "latest finalized" at different
-// instants would clamp band-edge fills against different references and diverge past
-// the co-sign band, turning every thin round into a slashing lottery. Walking back
-// from R-1 is deterministic for everyone.
-const LAST_FINALIZED_SQL =
-    `SELECT price FROM price_snapshots
-     WHERE coin_pair = ? AND round_number < ? AND status = 'finalized' AND price IS NOT NULL
-     ORDER BY round_number DESC LIMIT 1`;
-
 class XchainPriceSource {
 
     /**
@@ -218,9 +205,12 @@ class XchainPriceSource {
         this.indexerDb = null;
     }
 
+    // Latest FINALIZED price for a pair strictly below `round`: the consensus-derived
+    // winsorization anchor (db.getLatestFinalizedPriceBelowRound records why it is keyed
+    // on the round rather than on the newest row this hub holds).
     async _lastFinalized(pair, round) {
         if (!this.hubDb) return null;
-        let rows = await this.hubDb.doQuery(LAST_FINALIZED_SQL, [pair, round]);
+        let rows = await this.hubDb.getLatestFinalizedPriceBelowRound(pair, round);
         if (!rows || !rows.length) return null;
         let v = String(rows[0].price);
         try { return bcmath.bcgt(v, '0') ? v : null; } catch (e) { return null; }
@@ -448,4 +438,3 @@ class XchainPriceSource {
 module.exports = XchainPriceSource;
 module.exports.XCHAIN_PAIR = XCHAIN_PAIR;
 module.exports.GAS_TICK    = GAS_TICK;
-module.exports.LAST_FINALIZED_SQL = LAST_FINALIZED_SQL;

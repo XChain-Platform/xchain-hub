@@ -218,5 +218,21 @@ module.exports = {
     // Moved here from src/PriceAggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
+    },
+
+    // Latest FINALIZED price for a pair strictly BELOW a round number.
+    // Moved here from src/XchainPriceSource.js:86 (it was LAST_FINALIZED_SQL there).
+    //
+    // Strictly below, and keyed on the round rather than "the newest row I have", because
+    // §4 requires the winsorization anchor to be consensus-derived: rounds finalize
+    // asynchronously, so two honest validators reading "latest finalized" at different
+    // instants would clamp band-edge fills against different references and diverge past
+    // the co-sign band, turning every thin round into a slashing lottery. Walking back
+    // from R-1 is deterministic for everyone.
+    async getLatestFinalizedPriceBelowRound(pair, round) {
+        return this.doQuery(
+    `SELECT price FROM price_snapshots
+     WHERE coin_pair = ? AND round_number < ? AND status = 'finalized' AND price IS NOT NULL
+     ORDER BY round_number DESC LIMIT 1`, [pair, round]);
     }
 };
