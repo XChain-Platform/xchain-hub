@@ -321,6 +321,53 @@ describe('Boundary: Trimmed Median Aggregation', function () {
     });
 
     // -----------------------------------------------------------------
+    // Item 7663: the even-count median rounds ONCE, and the gate is unconditional
+    // -----------------------------------------------------------------
+
+    describe('even-count median rounds once', function () {
+
+        // Two IDENTICAL sub-8-decimal submissions. Each quantizes to 0.00000014, so the
+        // pair is unanimous. The old scale-8 add plus scale-8 divide rounded twice and
+        // produced 0.00000015 - one ulp outside the camp's own value - which a co-signer
+        // re-deriving over the proposer-excluded set scored at 6.667% and rejected,
+        // wedging the whole round.
+        it('keeps a unanimous sub-ulp pair on its own quantized value', function () {
+            const bcmath = require('../../../src/bcmath.js');
+            // The premise, executed rather than asserted: both middles quantize to the
+            // same price, and the OLD double-rounded form did not.
+            expect(bcmath.bcformat('0.0000001425', 8)).to.equal('0.00000014');
+            expect(bcmath.bcformat(bcmath.bcdiv(
+                bcmath.bcadd('0.0000001425', '0.0000001425', 8), '2', 8), 8)).to.equal('0.00000015');
+
+            let subs = submissionsForPair(['0.0000001425', '0.0000001425'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.00000014');
+        });
+
+        // The now-unconditional gate must not drop a pair every submitter agreed on:
+        // lo === hi implies median === lo, so both band calls score 0.
+        it('still publishes the unanimous sub-ulp pair rather than dropping it', function () {
+            let subs = submissionsForPair(['0.0000001425', '0.0000001425'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.not.be.null;
+        });
+
+        // Rounding once is inert at 8 decimals: this is the existing published-value
+        // contract restated at the ulp boundary, where a change would show up first.
+        it('is inert for 8-decimal producers at the rounding boundary', function () {
+            expect(oc._aggregate(submissionsForPair(['1.00000001', '1.00000002']), 'BTC/USD'))
+                .to.equal('1.00000002');
+            expect(oc._aggregate(submissionsForPair(['1.00000001', '1.00000004']), 'BTC/USD'))
+                .to.equal('1.00000003');
+        });
+
+        // The gate lost its short-circuit, not its teeth: a real two-camp disagreement
+        // beyond the 5% band is still dropped.
+        it('still drops two 8-decimal middles that disagree beyond the band', function () {
+            let subs = submissionsForPair(['100.00000000', '120.00000000'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _aggregateAll boundary
     // -----------------------------------------------------------------
 

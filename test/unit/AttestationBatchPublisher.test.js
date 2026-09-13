@@ -84,9 +84,13 @@ function makeDb(){
                 markers.splice(idx, 1);
                 return { affectedRows: 1 };
             }
-            if(/SELECT MAX\(window_start\)/i.test(sql)){
+            // The floor read. BOTH aggregates are answered from the same row set, so a
+            // publisher that went back to flooring on the newest marker reads a real
+            // value here rather than an undefined the test would silently coerce.
+            if(/SELECT MIN\(window_start\)/i.test(sql)){
+                let oldest = markers.reduce((m, r) => Math.min(m, Number(r.window_start)), Infinity);
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
-                return [{ newest: newest || null }];
+                return [{ oldest: Number.isFinite(oldest) ? oldest : null, newest: newest || null }];
             }
             if(/SELECT window_start FROM attest_published_batches/i.test(sql)){
                 return markers.filter(m => m.status === args[1]).map(m => ({ window_start: m.window_start }));
@@ -321,6 +325,99 @@ describe('AttestationBatchPublisher', function () {
             await p.start();
             expect(p._windowTimer, 'an unarmed network must arm no window timer').to.equal(null);
             p.stop();
+        });
+    });
+
+    // ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+    describe('_resolveFloorWindow', function () {
+
+        function markerAt(windowStart, status){
+            return { network: 'regtest', window_start: windowStart, window_end: windowStart + WINDOW_S,
+                     batch_key: 'k' + windowStart, row_count: 0, status: status || 'landed' };
+        }
+
+        it('still starts a hub with no markers at the window in progress', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = new AttestationBatchPublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._nowSeconds = () => now;
+
+            expect(await p._resolveFloorWindow()).to.equal(p.windowStartFor(now));
+            p._floorWindow = await p._resolveFloorWindow();
+            expect(await p._pendingWindows(now),
+                'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
+        });
+
+        it('retries a window the sweep walked past, below a newer marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            // Birth two windows back, the window after it left behind, the newest one done.
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S), markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p._resolveFloorWindow();
+
+            expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
+                .to.equal(now - 3 * WINDOW_S);
+            let pending = await p._pendingWindows(now);
+            expect(pending.map(w => w.windowStart),
+                'the skipped window is inside the catch-up horizon and must come back')
+                .to.deep.equal([now - 2 * WINDOW_S]);
+            // And the gap is no longer silent.
+            expect(p.stats.coverageGapsDetected).to.equal(1);
+            expect(p.getStats().coverageGapWindows).to.equal(1);
+        });
+
+        it('never re-exposes a window older than the hub\'s first marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            // First marker one window back: the three horizon windows below it predate
+            // this hub, and publishing them would be three empty coverage heads at fee cost.
+            hub.db.markers.push(markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p._resolveFloorWindow();
+
+            expect(p._floorWindow).to.equal(now - WINDOW_S);
+            expect(await p._pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        });
+
+        it('reports no gap when every horizon window already carries a marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            for(let i = 4; i >= 1; i--) hub.db.markers.push(markerAt(now - i * WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p._resolveFloorWindow();
+
+            expect(await p._pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        });
+
+        it('still quarantines an intent-only marker sitting below the lowered floor', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S),
+                                markerAt(now - 2 * WINDOW_S, 'intent'),
+                                markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p._resolveFloorWindow();
+
+            expect(await p._pendingWindows(now),
+                'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);
+            expect(p.stats.windowsQuarantined).to.equal(1);
         });
     });
 

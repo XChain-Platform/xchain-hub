@@ -93,6 +93,7 @@ const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const { abandonBuild }           = require('./lib/encoder_reservation.js');
 
 // ~10 min. Translates the rank-staggered takeover window from BTC blocks (the
 // unit the window anchor is denominated in) into wall-clock, the same way
@@ -715,19 +716,34 @@ class OraclePublisher {
         if (!psbtResult || !psbtResult.psbt) {
             throw new Error('encoder returned no PSBT');
         }
-        // 2b. Refuse phase 1 of a two-transaction encoding. P2SH answers a FUNDING tx
-        // whose payload only becomes readable when a reveal spends it, and this pipeline
-        // has no reveal: broadcasting it publishes an undecodable PRICE and strands the
-        // carrier value. Thrown BEFORE the wallet hook, so nothing is signed and no fee
-        // is spent. See lib/two_phase_guard.js.
-        assertSingleTxEncoding(psbtResult, 'OraclePublisher');
+        // A SUCCESSFUL create_tx reserved every input it selected and handed back the
+        // receipt on psbtResult.reservation; the encoder's selection skips those outpoints
+        // until its own 5-minute TTL. Every exit below abandons the build BEFORE
+        // broadcast_tx (the send lives in _defaultBroadcast, one frame up), so each one
+        // must hand the claims back or this publishing address is unavailable to the other
+        // publishers and to wallet operations for the rest of that window - and a pass that
+        // keeps retrying reserves a fresh set of outputs each time without ever sending.
+        // The release is deliberately confined to this pre-broadcast section: past the
+        // send, holding the inputs is what stops a second build double-spending a
+        // transaction that may already have landed.
+        try {
+            // 2b. Refuse phase 1 of a two-transaction encoding. P2SH answers a FUNDING tx
+            // whose payload only becomes readable when a reveal spends it, and this pipeline
+            // has no reveal: broadcasting it publishes an undecodable PRICE and strands the
+            // carrier value. Thrown BEFORE the wallet hook, so nothing is signed and no fee
+            // is spent. See lib/two_phase_guard.js.
+            assertSingleTxEncoding(psbtResult, 'OraclePublisher');
 
-        // 3. Sign the PSBT via the operator-provided wallet hook
-        let txHex = await this.walletSignFn(psbtResult.psbt);
-        if (!txHex || typeof txHex !== 'string') {
-            throw new Error('wallet sign hook returned invalid tx hex');
+            // 3. Sign the PSBT via the operator-provided wallet hook
+            let txHex = await this.walletSignFn(psbtResult.psbt);
+            if (!txHex || typeof txHex !== 'string') {
+                throw new Error('wallet sign hook returned invalid tx hex');
+            }
+            return txHex;
+        } catch (e) {
+            await abandonBuild(this.encoder, psbtResult, 'OraclePublisher');
+            throw e;                                  // the refusal is what the caller must see
         }
-        return txHex;
     }
 
     // Which inputs create_tx may spend for the wire being built, as

@@ -2047,7 +2047,20 @@ class OracleConsensus extends EventEmitter {
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let median;
         if (values.length % 2 === 0) {
-            median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
+            // Round ONCE (item 7663). The sum and the quotient carry scale 18 and only the
+            // final bcformat quantizes to the published 8. The previous scale-8 add plus
+            // scale-8 divide rounded twice, and near the 8-decimal ulp that put the median
+            // one ulp OUTSIDE the value both middles agree on: two submissions of
+            // 0.0000001425 each quantize to 0.00000014, while bcadd(...,8) gave 0.00000029
+            // and halving that gave 0.00000015. A co-signer re-deriving over the
+            // proposer-excluded set lands on 0.00000014 and the band in _handlePropose
+            // scores 6.667%, rejecting the WHOLE proposal, so one pair wedged the round.
+            // Rounding once restores the invariant the even-split gate below relies on:
+            // quantization is monotone, so if both middles quantize to X, so does their
+            // exact mean. Inert for 8-decimal producers (the scale-8 add was already exact
+            // for them); it moves the published value only for finer-than-8-decimal input.
+            // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+            median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 18), '2', 18), 8);
         } else {
             median = bcmath.bcformat(values[mid].s, 8);
         }
@@ -2066,18 +2079,19 @@ class OracleConsensus extends EventEmitter {
         if (values.length % 2 === 0) {
             // sorted ascending, both > 0; quantized to the published scale (see above)
             let lo = bcmath.bcformat(values[mid - 1].s, 8), hi = bcmath.bcformat(values[mid].s, 8);
-            // Only a DISAGREEMENT is gated. When both middles quantize to the same price
-            // there is one camp, not two, and the mean is that camp's own value: this gate
-            // has nothing to say. It is scoped that way deliberately rather than by
-            // accident, because the median is computed by rounding the SUM to 8 decimals
-            // and then rounding the quotient again, and at magnitudes near the 8-decimal
-            // ulp that double rounding can land a unanimous set one ulp off its own value
-            // (1.425e-7 -> 0.00000015). That is a defect in the median arithmetic, which
-            // is federation-uniform and out of scope here; leave its behaviour exactly as
-            // it is rather than change it silently under a gate change.
-            if (lo !== hi &&
-                (devband.exceedsBand(lo, median, ORACLE_DEVIATION_THRESHOLD, 18) ||
-                 devband.exceedsBand(hi, median, ORACLE_DEVIATION_THRESHOLD, 18))) {
+            // The gate is UNCONDITIONAL (item 7663). No short-circuit for the case where
+            // both middles quantize to the same price, even though one camp cannot
+            // disagree with itself: that reasoning holds only while the median is rounded
+            // twice, and under double rounding the skip fires in exactly the unanimous
+            // case where the published median can sit one ulp off the camp's own value,
+            // making the one check that catches it the one being skipped. With the median
+            // rounded once above, lo === hi implies median === lo, and both band calls
+            // measure a value against itself and score 0, so the unconditional form
+            // costs no pair that would publish today. What it buys is a standing guarantee
+            // that the leader never federation-signs a price its own middle submissions
+            // would withhold on, whatever later sub-ulp divergence reaches this point.
+            if (devband.exceedsBand(lo, median, ORACLE_DEVIATION_THRESHOLD, 18) ||
+                devband.exceedsBand(hi, median, ORACLE_DEVIATION_THRESHOLD, 18)) {
                 console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
                     + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
                     + lo + ' vs ' + hi + '), so the published price ' + median

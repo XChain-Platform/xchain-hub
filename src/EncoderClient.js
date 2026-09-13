@@ -152,6 +152,18 @@ class EncoderClient {
     async broadcastTx(txHex) {
         return this._call('broadcast_tx', { tx_hex: txHex });
     }
+
+    // Hand a build's input claims back to the encoder. create_tx RESERVES the inputs it
+    // selected and returns the receipt as `result.reservation` ({ id, ... }); selection
+    // skips reserved inputs until the encoder's own 5-minute TTL expires. A pipeline that
+    // abandons a successful build before broadcasting must therefore return the ticket, or
+    // it holds a funded address hostage from every other publisher for that window.
+    // Ownership is stamped into the ticket, so this can never free another caller's claims,
+    // and the encoder answers rather than errors for an unknown, expired or
+    // already-released id. Callers go through lib/encoder_reservation.abandonBuild.
+    async releaseInputs(reservationId) {
+        return this._call('release_inputs', { reservationId: reservationId });
+    }
 }
 
 module.exports = EncoderClient;

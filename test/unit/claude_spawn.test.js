@@ -320,6 +320,73 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(out.result).to.equal('the verdict');
     });
 
+    // Review board #7755: the CLI's result envelope DOES carry a top-level stop_reason
+    // (the shipped CLI emits it on the type:"result" frame, alongside end_turn / tool_use
+    // / stop_sequence / refusal), so without a check on it a refusal or a truncated
+    // answer arriving with is_error false and non-empty text resolves as a sound
+    // verdict. The two direct HTTP transports reject those outcomes even when text is
+    // (providers/llm.js refusal and truncation branches); this transport signs its text
+    // into on-chain attestation answers, so it must not be the lane that accepts them.
+    it('fails closed on stop_reason=refusal alongside result text', async function () {
+        let jsonOut = JSON.stringify({
+            is_error: false, subtype: 'success', result: 'I cannot help with that',
+            stop_reason: 'refusal'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err, 'a refusal must not resolve as a verdict').to.exist;
+        expect(err.kind).to.equal('refusal');
+        expect(err.transient, 'a reached-model refusal must not re-judge').to.equal(false);
+    });
+
+    for (const stop of ['max_tokens', 'model_context_window_exceeded']) {
+        it('fails closed on stop_reason=' + stop + ' (a truncated verdict can still parse)', async function () {
+            let jsonOut = JSON.stringify({
+                is_error: false, subtype: 'success', result: '{"verdict":"eq',
+                stop_reason: stop
+            });
+            let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+            let err;
+            try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+            catch (e) { err = e; }
+            expect(err, 'truncated text must not resolve').to.exist;
+            expect(err.kind).to.equal('truncation');
+            expect(err.transient).to.equal(false);
+        });
+    }
+
+    it('is a NO-OP on an envelope with no stop_reason key at all', async function () {
+        let jsonOut = JSON.stringify({ is_error: false, subtype: 'success', result: 'the verdict' });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let out = await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        expect(out.result, 'absence must behave exactly as before').to.equal('the verdict');
+    });
+
+    for (const stop of ['end_turn', 'tool_use', 'stop_sequence', 'tool_deferred']) {
+        it('resolves normally on stop_reason=' + stop + ' (reject-known-bad, not allow-known-good)', async function () {
+            let jsonOut = JSON.stringify({
+                is_error: false, subtype: 'success', result: 'the verdict', stop_reason: stop
+            });
+            let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+            let out = await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+            expect(out.result).to.equal('the verdict');
+        });
+    }
+
+    it('does NOT walk nested per-turn messages for a stop_reason', async function () {
+        // An agent loop can hit max_tokens on an INTERMEDIATE turn and still produce a
+        // complete final answer, so only the top-level field may decide.
+        let jsonOut = JSON.stringify({
+            is_error: false, subtype: 'success', result: 'the complete verdict',
+            messages: [{ type: 'assistant', message: { stop_reason: 'max_tokens' } }]
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let out = await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        expect(out.result).to.equal('the complete verdict');
+    });
+
     it('classifies a timeout as a transport failure (transient=true)', async function () {
         // Never emit close: let the internal timeout fire.
         let { runClaudePrint } = loadClaudeSpawn({ noClose: true });
@@ -480,6 +547,123 @@ describe('claude-spawn runClaudePrint()', function () {
 
     it('keeps an unrecognised non-zero exit hard', async function () {
         let { runClaudePrint } = loadClaudeSpawn({ exitCode: 2, stderr: 'exceeded --max-budget-usd' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
+    // ── the documented result-envelope fields (item 7756) ─────────────────────
+    // The CLI's JSON result carries the vendor's HTTP status on api_error_status and
+    // its diagnostics on errors[]. Neither was read, so a 529 arriving in the shape the
+    // CLI actually emits (empty stderr, no legacy status field) classified hard and
+    // stopped the judge chain. api_error_status rides on the SUCCESS-shaped result, so
+    // the exit-0 branches are routed through the same classifier.
+
+    it('classifies api_error_status 529 on a non-zero exit as transient', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'success', is_error: true,
+            api_error_status: 529, result: ''
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    it('classifies a 429 carried only in errors[] as transient', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'error_during_execution', is_error: true,
+            errors: ['API Error: 429 rate_limit_error']
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    it('routes an exit-0 availability failure with no result text to transient', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'error_during_execution', is_error: true,
+            api_error_status: 503, result: ''
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    it('routes an exit-0 availability failure carrying result text to transient', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'success', is_error: true,
+            api_error_status: 503, result: 'partial'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    // Refusal precedence survives the new route in both directions: a refusal subtype
+    // short-circuits before the classifier, and refusal WORDING outranks a status token.
+    it('keeps an exit-0 refusal hard even when it carries an availability status', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'refusal', is_error: true,
+            api_error_status: 529, result: 'blocked'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+        expect(err.kind).to.equal('refusal');
+    });
+
+    it('keeps a refusal phrase in errors[] hard despite a status token beside it', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'error_during_execution', is_error: true,
+            errors: ['API Error: 529', 'blocked by our content policy']
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient, 'a refusal must not advance the judge chain').to.equal(false);
+    });
+
+    // The exit-0 route must not turn every session failure into a retry: an exhausted
+    // turn budget is an outcome, not an outage, and it keeps today's hard classification.
+    it('keeps an exit-0 max-turns failure hard', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'error_max_turns', is_error: true, result: 'partial'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout, stderr: '' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
+    // A judge verdict that happens to mention a status token must not re-ask another
+    // model: the exit-0 route reads the envelope's own fields, never the result text.
+    it('does not read result text as a status token on the exit-0 route', async function () {
+        let stdout = JSON.stringify({
+            type: 'result', subtype: 'error_during_execution', is_error: true,
+            result: 'The claim cites HTTP 503 and is unsupported.'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout, stderr: '' });
         let err;
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
         catch (e) { err = e; }

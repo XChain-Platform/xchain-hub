@@ -731,6 +731,87 @@ describe('AttestationRound', function () {
             expect(ar.seen.size).to.equal(0);
         });
 
+        // ── HTTP-200 JSON-RPC rejections are not silent (item 7650) ──────────
+        // The catch above this branch logs transport failures, so an indexer that is
+        // DOWN was visible while one answering 200 with `Method not found` was not:
+        // the poll returned without a word and every counter stayed frozen at its last
+        // value while the request feed admitted nothing.
+
+        it('logs and counts a top-level JSON-RPC error with no result', async function () {
+            let warn = sinon.stub(console, 'warn');
+            axiosStub.post.resolves({ data: { jsonrpc: '2.0', id: 1,
+                error: { code: -32601, message: 'Method not found' } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+
+            await ar._pollPending();
+
+            expect(ar.pollRpcErrorCount).to.equal(1);
+            expect(ar.seen.size, 'no request is admitted on an error response').to.equal(0);
+            expect(warn.called, 'the rejection is logged at warning level').to.be.true;
+            let line = warn.getCall(0).args.join(' ');
+            expect(line).to.include('getpendingattestation_requests');
+            expect(line).to.include('http://idx/rpc');
+        });
+
+        it('logs and counts an error nested in the result', async function () {
+            let warn = sinon.stub(console, 'warn');
+            axiosStub.post.resolves({ data: { result: { error: { message: 'index not ready' } } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+
+            await ar._pollPending();
+
+            expect(ar.pollRpcErrorCount).to.equal(1);
+            expect(warn.called).to.be.true;
+            expect(warn.getCall(0).args.join(' ')).to.include('index not ready');
+        });
+
+        it('counts every rejection but throttles the warning', async function () {
+            let warn = sinon.stub(console, 'warn');
+            axiosStub.post.resolves({ data: { error: { message: 'Method not found' } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+
+            await ar._pollPending();
+            await ar._pollPending();
+            await ar._pollPending();
+
+            expect(ar.pollRpcErrorCount, 'the counter moves on every poll').to.equal(3);
+            expect(warn.callCount, 'the log does not flood at the poll cadence').to.equal(1);
+        });
+
+        it('stamps the last successful poll and clears the reported age', async function () {
+            axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+
+            expect(ar.getStats().last_successful_poll_age_ms,
+                'null, not a large number, before any poll has succeeded').to.equal(null);
+
+            await ar._pollPending();
+
+            expect(ar.lastPollOkAt).to.be.a('number');
+            expect(ar.getStats().last_successful_poll_age_ms).to.be.a('number');
+            expect(ar.getStats().last_successful_poll_age_ms).to.be.at.least(0);
+            expect(ar.getStats().poll_rpc_error_count).to.equal(0);
+        });
+
+        it('leaves the successful-poll stamp alone when a later poll is rejected', async function () {
+            sinon.stub(console, 'warn');
+            axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            await ar._pollPending();
+            let stampedAt = ar.lastPollOkAt;
+
+            axiosStub.post.resolves({ data: { error: { message: 'Method not found' } } });
+            await ar._pollPending();
+
+            expect(ar.lastPollOkAt, 'a rejection must not look like a success').to.equal(stampedAt);
+            expect(ar.getStats().poll_rpc_error_count).to.equal(1);
+        });
+
         // The batch publisher anchors on this tip when no indexer pushed a chain_tips
         // row to the hub, so the poll has to record it even on a page with no requests.
         it('records the BTC tip the poll reported, and stop() forgets it', async function () {

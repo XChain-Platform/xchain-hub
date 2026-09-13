@@ -213,9 +213,14 @@ class AttestationBatchPublisher {
         // 'pushed' (a chain_tips row) or 'observed' (the attestation poll's tip) once
         // an anchor has resolved; null before. Logged on every change, read by stats.
         this._anchorSource  = null;
+        // The newest window this hub holds a marker for, read once with the floor, and
+        // the windows already reported as gaps below it (report-once, like _quarantined).
+        this._newestMarkerWindow = null;
+        this._coverageGaps       = new Set();
 
         this.stats = {
             windowsPublished: 0, windowsEmpty: 0, windowsDeferred: 0,
+            coverageGapsDetected: 0,
             windowsDeadLettered: 0, windowsQuarantined: 0, windowsRefusalRetried: 0,
             wiresBroadcast: 0, rowsPublished: 0,
             signRounds: 0, signQuorums: 0, signTimeouts: 0,
@@ -374,20 +379,36 @@ class AttestationBatchPublisher {
         return { attempted, published };
     }
 
-    // The oldest window this hub will consider. A RESTART resumes from the window after
-    // its newest marker, so the windows it was down for are still caught up (bounded by
-    // MAX_CATCHUP_WINDOWS). A hub with no markers at all is NEW, and backfilling windows
-    // that closed before it existed would publish empty coverage heads for hours it has
-    // no rows for, so it starts at the window in progress when it booted. Null means no
-    // floor, which is what a direct sweep with no start() gets.
+    // The oldest window this hub will consider. A hub with no markers at all is NEW, and
+    // backfilling windows that closed before it existed would publish empty coverage
+    // heads for hours it has no rows for, so it starts at the window in progress when it
+    // booted. A hub that HAS markers floors on its OLDEST one: everything below that
+    // predates its participation, and everything above is decided per window by
+    // _pendingWindows's own marker lookup. Null means no floor, which is what a direct
+    // sweep with no start() gets.
+    //
+    // THE FLOOR IS NOT A COMPLETION WATERMARK, and deriving it from the NEWEST marker
+    // made it one. sweep() walks on past a window _publishWindow could not do (a failed
+    // anchor read, no signing quorum, the spend guard, or simply not this hub's rank
+    // yet), so a newer window can carry a marker while an older one carries none. A floor
+    // at newest+windowS then reads that newer marker as proof the older window resolved,
+    // and the restart drops it below the floor forever even though it is still inside the
+    // catch-up horizon. Flooring on the oldest marker keeps the anti-backfill job the
+    // comment above describes and makes no claim about completion.
     async _resolveFloorWindow(){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this._nowSeconds());
         let rows = await db.doQuery(
-            'SELECT MAX(window_start) AS newest FROM attest_published_batches WHERE network = ?',
+            'SELECT MIN(window_start) AS oldest, MAX(window_start) AS newest ' +
+            'FROM attest_published_batches WHERE network = ?',
             [this.network]);
+        let oldest = (rows && rows.length) ? Number(rows[0].oldest) : NaN;
         let newest = (rows && rows.length) ? Number(rows[0].newest) : NaN;
-        if(Number.isFinite(newest) && newest > 0) return newest + this.windowS;
+        // Read by _pendingWindows only to tell a routine catch-up from a coverage GAP: a
+        // pending window BELOW a marker this hub already holds is one the sweep left
+        // behind, and without this marker that condition is silent.
+        this._newestMarkerWindow = (Number.isFinite(newest) && newest > 0) ? newest : null;
+        if(Number.isFinite(oldest) && oldest > 0) return oldest;
         return this.windowStartFor(this._nowSeconds());
     }
 
@@ -416,6 +437,18 @@ class AttestationBatchPublisher {
                         'covering this window and replay by hand if none landed.');
                 }
                 continue;
+            }
+            // A pending window older than a marker this hub already holds is a window an
+            // earlier sweep gave up on and walked past. Say so once per window: nothing
+            // else reports it, and only the oldest-marker floor keeps it retryable.
+            if(this._newestMarkerWindow !== null && start < this._newestMarkerWindow &&
+               !this._coverageGaps.has(start)){
+                this._coverageGaps.add(start);
+                this.stats.coverageGapsDetected++;
+                console.error('AttestationBatchPublisher: window ' + start + ' has no batch marker while ' +
+                    'window ' + this._newestMarkerWindow + ' does; an earlier sweep left it behind. It is ' +
+                    'being retried now, but a window that falls out of the ' + MAX_CATCHUP_WINDOWS +
+                    '-window catch-up horizon needs a manual replay.');
             }
             out.push({ windowStart: start, age: i - 1 });
         }
@@ -1380,6 +1413,9 @@ class AttestationBatchPublisher {
             enabled:       this.enabled,
             armed:         this.isArmedNetwork(),
             quarantinedWindows: this._quarantined.size,
+            // Windows an earlier sweep walked past that are being caught up now. A count
+            // that keeps rising is a publish path failing, not a busy federation.
+            coverageGapWindows: this._coverageGaps.size,
             // Windows currently mid-retry after a provably-unsent head refusal, and the
             // bound they latch at. A count that sits at the bound is a refusal that is not
             // transient, and the CRITICAL line names it.

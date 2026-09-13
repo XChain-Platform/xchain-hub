@@ -540,7 +540,14 @@ class AttestationResponseMirror {
         let quorum = await this._verifyBatchQuorum(batchData, anchor, sigs);
         if(!quorum.ok) return refuse(quorum.error);
 
-        let stored = 0, duplicates = 0, linked = 0, skipped = 0;
+        // `skipped` and `writeFailures` are deliberately NOT the same count. A row the
+        // parser refused is structurally unusable and a replay carries the same bytes
+        // into the same verdict, so failing the batch on one would wedge the pusher
+        // forever (durable push types carry no attempt cap). A row whose WRITE threw is
+        // the opposite: nothing about the payload is wrong and the next attempt may well
+        // store it, so the batch must be answered as a retryable failure or the pusher
+        // deletes the only copy that exists.
+        let stored = 0, duplicates = 0, linked = 0, skipped = 0, writeFailures = 0;
         for(let raw of batchData.rows){
             // The batch's row fields ARE the gossip payload's fields, so the structural
             // parse is shared rather than written twice: a row the gossip path would not
@@ -556,6 +563,11 @@ class AttestationResponseMirror {
                 console.error('AttestationResponseMirror: batch row ' + row.request_id.substring(0, 16) +
                               '... could not be written: ' + (err && err.message ? err.message : err));
                 skipped++;
+                writeFailures++;
+                // Keep going rather than returning early: the good rows in this batch
+                // still land, and every effect here is idempotent (INSERT IGNORE on the
+                // natural key, set-once link), so the retry replays the whole body and
+                // only the missing rows change anything.
                 continue;
             }
             if(inserted) stored++;
@@ -579,8 +591,15 @@ class AttestationResponseMirror {
         // Tell the publisher the window is covered, so no hub pays to publish a window
         // some hub has already landed. Best-effort and never fatal: the rows are what
         // matter here, and a missing marker costs at most one duplicate batch.
+        //
+        // WITHHELD ON A WRITE FAULT. This marker is authoritative for the whole
+        // federation, so writing it after a partial absorb tells every hub the window is
+        // covered when rows of it are missing, and nothing re-publishes it afterwards.
         let publisher = this.hub && this.hub.attestationBatchPublisher;
-        if(publisher && typeof publisher.recordLandedWindow === 'function'){
+        if(writeFailures > 0){
+            console.warn('AttestationResponseMirror: withholding the landed marker for window ' +
+                         windowStart + ': ' + writeFailures + ' row(s) of this batch could not be written');
+        } else if(publisher && typeof publisher.recordLandedWindow === 'function'){
             try {
                 await publisher.recordLandedWindow(windowStart, windowEnd,
                     batchData.txid == null ? null : String(batchData.txid), batchData.rows.length);
@@ -593,6 +612,12 @@ class AttestationResponseMirror {
         console.log('AttestationResponseMirror: absorbed batch for window ' + windowStart + '-' + windowEnd +
                     ' from ' + (sourceChain || 'unknown') + ' action ' + actionIndex + ' (' + stored +
                     ' new, ' + duplicates + ' held, ' + linked + ' linked, ' + skipped + ' unusable)');
+        // 'db error' is the wording the sibling price-batch handler already answers the
+        // same condition with, and it is deliberately outside the pusher's
+        // TERMINAL_HUB_REJECTIONS set (hub_client.js), so the queued row is RETAINED and
+        // re-delivered rather than dropped as a verdict on its payload.
+        if(writeFailures > 0)
+            return { accepted: false, stored, duplicates, linked, rejected: skipped, reason: 'db error' };
         return { accepted: true, stored, duplicates, linked, rejected: skipped, reason: null };
     }
 

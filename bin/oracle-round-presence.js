@@ -28,12 +28,41 @@
  *
  * Read-only: it broadcasts nothing and writes nothing.
  *
- * Exit codes: 0 agreed, 1 divergent, 2 could not reach enough hubs.
+ * Exit codes: 0 agreed, 1 divergent, 2 could not compare (an invalid invocation,
+ * or fewer than two distinct hubs with a usable answer).
  */
 'use strict';
 
 const axios = require('axios');
 const { comparePresence } = require('../src/lib/oracle_round_presence.js');
+
+// The URL string is the only hub identity there is: presence answers carry no hub id,
+// so two DNS aliases of one host stay indistinguishable and this does not pretend
+// otherwise. Collapsing the exact repeats is what stops `--hubs A,A` from clearing the
+// two-hub gate, comparing a hub to itself, and printing agreement.
+function dedupeHubs(list) {
+    const seen = new Set();
+    const out = [];
+    for (const hub of list) {
+        const key = hub.replace(/\/+$/, '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(hub);
+    }
+    return out;
+}
+
+// Explicit bounds are validated before any request, because Number('oops') is NaN and
+// JSON.stringify writes NaN as null: every hub would then resolve its own upper bound
+// and the run would still print an agreed/divergent verdict over ranges that never
+// matched. Returns the normalized number, or an error string naming the flag.
+function numericFlag(flag, raw, min) {
+    if (raw === null || raw === undefined) return { value: null };
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < min)
+        return { error: flag + ' must be a whole number >= ' + min + '; got "' + raw + '"' };
+    return { value: n };
+}
 
 // Argv and env are read here and nowhere else, so the orchestration below can be
 // driven from a test. The range-pinning property this tool exists for lives only in
@@ -45,8 +74,8 @@ function parseArgs(argv, env) {
         return i === -1 || i === list.length - 1 ? fallback : list[i + 1];
     };
     return {
-        hubs: String(arg('hubs', (env && env.HUB_RPC_URLS) || ''))
-            .split(',').map(s => s.trim()).filter(Boolean),
+        hubs: dedupeHubs(String(arg('hubs', (env && env.HUB_RPC_URLS) || ''))
+            .split(',').map(s => s.trim()).filter(Boolean)),
         from: arg('from', null),
         to: arg('to', null),
         limit: arg('limit', null),
@@ -77,22 +106,35 @@ async function ask(hub, params) {
 async function main(opts) {
     const { hubs: HUBS, from: FROM, to: TO, limit: LIMIT, json: JSON_OUT } = opts;
     if (HUBS.length < 2) {
-        console.error('Name at least two hubs: --hubs http://h1:4000,http://h2:4000 ' +
+        console.error('Name at least two DISTINCT hubs: --hubs http://h1:4000,http://h2:4000 ' +
             '(or set HUB_RPC_URLS). Comparing one hub to itself proves nothing.');
+        return 2;
+    }
+
+    const bounds = {};
+    for (const [flag, key, raw, min] of [['--from', 'from', FROM, 0],
+                                        ['--to', 'to', TO, 0],
+                                        ['--limit', 'limit', LIMIT, 1]]) {
+        const parsed = numericFlag(flag, raw, min);
+        if (parsed.error) { console.error(parsed.error); return 2; }
+        bounds[key] = parsed.value;
+    }
+    if (bounds.from !== null && bounds.to !== null && bounds.from > bounds.to) {
+        console.error('--from must not be greater than --to; got ' + bounds.from + ' and ' + bounds.to);
         return 2;
     }
 
     // Resolve the range from the first hub that reports a usable one, then pin it for
     // everyone. Advancing past an empty answer is the point: a freshly resynced or
     // wiped hub listed first would otherwise abort every run of the check.
-    let range = { from_round: FROM, to_round: TO, limit: LIMIT };
+    let range = { from_round: bounds.from, to_round: bounds.to, limit: bounds.limit };
     if (range.from_round === null || range.to_round === null) {
         let anchor = null;
         let empty = 0;
         let unreached = 0;
         for (const hub of HUBS) {
             let presence = null;
-            try { presence = await ask(hub, { from_round: FROM, to_round: TO, limit: LIMIT }); }
+            try { presence = await ask(hub, { from_round: bounds.from, to_round: bounds.to, limit: bounds.limit }); }
             catch (err) {
                 unreached++;
                 console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err));
@@ -109,17 +151,28 @@ async function main(opts) {
         }
         range = { from_round: anchor.from_round, to_round: anchor.to_round };
     } else {
-        range = { from_round: Number(FROM), to_round: Number(TO) };
+        range = { from_round: bounds.from, to_round: bounds.to };
     }
 
     const answers = [];
     const unreachable = [];
     for (const hub of HUBS) {
-        try { answers.push({ hub, presence: await ask(hub, range) }); }
-        catch (err) { unreachable.push({ hub, error: (err && err.message) || String(err) }); }
+        let presence = null;
+        try { presence = await ask(hub, range); }
+        catch (err) { unreachable.push({ hub, error: (err && err.message) || String(err) }); continue; }
+        // Usable means exactly what comparePresence counts as usable. Counting raw
+        // replies here while the comparison re-filters for a rounds array lets two
+        // hubs, one of them malformed (version skew, a mangling proxy), leave ONE
+        // view to be reported as federation agreement.
+        if (!presence || !Array.isArray(presence.rounds)) {
+            unreachable.push({ hub, error: 'answered without a rounds array' });
+            continue;
+        }
+        answers.push({ hub, presence });
     }
     if (answers.length < 2) {
-        console.error('Reached ' + answers.length + ' hub(s); need at least two to compare.');
+        console.error('Reached ' + answers.length + ' hub(s) with a usable answer; ' +
+            'need at least two to compare.');
         return 2;
     }
 

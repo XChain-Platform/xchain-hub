@@ -75,6 +75,28 @@ describe('oracle_round_presence: per-round presence and divergence', function ()
             let s = summarizeRoundPresence([row(7, 'weird-new-status')], 7, 7);
             expect(s.rounds[0].status).to.equal('missing');
         });
+
+        it('refuses a bound at or past 2^53, which no increment can advance past', function () {
+            // A finite bound is not a reachable one: at 2^53 `r + 1 === r`, so the
+            // old comparison-driven loop spun forever pushing entries. If this
+            // regresses the assertion is never reached, because the call never
+            // returns; that is the shape of the failure, not a silent wrong value.
+            let s = summarizeRoundPresence([], 9007199254740992, 9007199254740992);
+            expect(s.rounds).to.deep.equal([]);
+            expect(s.missing).to.deep.equal([]);
+            expect(s.digest).to.be.null;
+        });
+
+        it('refuses a huge float bound for the same reason', function () {
+            expect(summarizeRoundPresence([], 1e300, 1e300).digest).to.be.null;
+            expect(summarizeRoundPresence([], 0, 1e300).digest).to.be.null;
+        });
+
+        it('never emits more than MAX_RANGE rounds, whatever span a caller hands in', function () {
+            let s = summarizeRoundPresence([], 0, MAX_RANGE * 10);
+            expect(s.rounds.length).to.equal(MAX_RANGE);
+            expect(s.rounds[s.rounds.length - 1].round).to.equal(MAX_RANGE - 1);
+        });
     });
 
     describe('presenceDigest()', function () {
@@ -136,7 +158,31 @@ describe('oracle_round_presence: per-round presence and divergence', function ()
             let c = comparePresence([{ hub: 'validator01', presence: V3 }]);
             expect(c.hubs).to.equal(1);
             expect(c.divergent).to.deep.equal([]);
+            // The verdict itself, not just the hub count. One unchallenged answer
+            // diverges from nothing, and calling that agreement is a false all-clear
+            // on the exact federation check this module exists for.
+            expect(c.agreed).to.be.false;
             expect(comparePresence([]).agreed).to.be.false;
+        });
+
+        it('counts one vote per hub identity, so a repeated endpoint is not a second opinion', function () {
+            // Statuses are keyed by the hub string, so the same URL twice would
+            // overwrite its own entry, diverge from nothing and clear the gate.
+            let c = comparePresence([
+                { hub: 'validator01', presence: V3 },
+                { hub: 'validator01', presence: V3 }
+            ]);
+            expect(c.hubs).to.equal(1);
+            expect(c.agreed).to.be.false;
+        });
+
+        it('drops an answer with no rounds array instead of counting it toward the gate', function () {
+            let c = comparePresence([
+                { hub: 'validator01', presence: V3 },
+                { hub: 'validator03', presence: { digest: 'x' } }
+            ]);
+            expect(c.hubs).to.equal(1);
+            expect(c.agreed).to.be.false;
         });
 
         it('treats a hub that omitted a round entirely as missing for that round', function () {

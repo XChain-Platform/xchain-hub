@@ -976,13 +976,21 @@ async function startApi(){
         // they ended; unequal ones are localised by `missing` and the per-round
         // statuses. bin/oracle-round-presence.js does exactly that across a fleet.
         async getoracleroundpresence({from_round, to_round, limit}){
-            for (let [name, v] of [['from_round', from_round], ['to_round', to_round], ['limit', limit]]) {
-                if (v !== undefined && v !== null && !Number.isFinite(Number(v)))
-                    return {error: name + ' must be a number'};
+            // Safe integers, not merely finite ones. A bound at or past 2^53 survives
+            // both Number.isFinite and strictInt's Number.isInteger, and the presence
+            // fold cannot increment past it: one unauthenticated call pinned the event
+            // loop. Omitted bounds stay legal, since the hub anchors those itself.
+            for (let [name, v] of [['from_round', from_round], ['to_round', to_round]]) {
+                if (v === undefined || v === null) continue;
+                let n = strictInt(v);
+                if (n === null || !Number.isSafeInteger(n) || n < 0)
+                    return {error: name + ' must be a non-negative integer'};
             }
-            let limNum = Number(limit);
-            if (limit !== undefined && limit !== null && (limNum <= 0 || limNum > roundPresence.MAX_RANGE))
-                return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
+            if (limit !== undefined && limit !== null) {
+                let n = strictInt(limit);
+                if (n === null || n < 1 || n > roundPresence.MAX_RANGE)
+                    return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
+            }
             try {
                 return await hub.getOracleRoundPresence(from_round, to_round, limit);
             } catch (err) {

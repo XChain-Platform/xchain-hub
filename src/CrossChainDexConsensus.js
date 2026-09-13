@@ -395,8 +395,59 @@ class CrossChainDexConsensus extends EventEmitter {
             case this.types.COMMIT:      this._handleCommit(envelope);     break;
             case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
             case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
-            case this.types.FINAL_SYNC:  this._handleFinalSync(envelope);  break;
+            case this.types.FINAL_SYNC:  this._handleFinalSync(envelope).catch(e => console.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
         }
+    }
+
+    // Re-resolve the round's membership, quorum and activation mode at the snapshot a
+    // newly offered row DECLARES, so a vote is never counted against a set the row did
+    // not name. Returns null when the row declares the snapshot the round already holds
+    // (nothing to rebind), the new binding when it resolved, and false when the caller
+    // must refuse the row. Refusal is the fail-closed side of every ambiguity here: an
+    // unresolvable, empty, single-validator or truncated-weighted set cannot be measured
+    // the way the indexer consumers measure it, and finalizing under the round's stale
+    // set would publish a row those consumers retire.
+    async _rebindSnapshot(pending, row){
+        let sameBlock   = String(row.snapshot_block) === String(pending.row.snapshot_block);
+        let sameNetwork = String(row.network || '')  === String(pending.row.network || '');
+        if(sameBlock && sameNetwork) return null;
+        if(typeof this.engine._resolveCapabilityValidators !== 'function'){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ' because this engine cannot re-resolve the cross_chain set');
+            return false;
+        }
+        let raw = null;
+        try { raw = await this.engine._resolveCapabilityValidators('cross_chain', Number(row.snapshot_block), row.network); }
+        catch(e){ raw = null; }
+        if(!Array.isArray(raw) || raw.length === 0){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ': the cross_chain set there resolved empty');
+            return false;
+        }
+        let weighted = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
+        // Same SWQ-TRUNC parity propose() enforces: a truncated weighted snapshot
+        // under-counts S, so the strict two-thirds bar could pass a round the full set
+        // rejects. The count path stays proceed-on-truncation there, and does here too.
+        if(weighted && raw.truncated === true){
+            console.error('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ' over a TRUNCATED weighted cross_chain snapshot; raise VALIDATOR_QUERY_LIMIT');
+            return false;
+        }
+        let validators = raw.map(v => ({
+            pubkey: String(v.pubkey).toLowerCase(),
+            source: String(v.source != null ? v.source : ''),
+            weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'))
+        }));
+        let quorum = bftQuorumOrSingle(validators.length, 0);
+        // quorum 0 is the single-operator fast path propose() takes at round OPEN, over
+        // a snapshot this hub read for itself. Mid-round it would mean adopting a
+        // stranger's row and then ratifying it alone, so it is refused here.
+        if(quorum === 0){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ': the declared snapshot collapses to a single-validator quorum mid-round');
+            return false;
+        }
+        return { validators, quorum, weighted };
     }
 
     async _handlePropose(envelope){
@@ -450,8 +501,34 @@ class CrossChainDexConsensus extends EventEmitter {
             // value, not re-voting the same value under a new view.
             let sameValueNewView = (this.engine._canonicalMatch(pending.row, view) === canonical);
             if(pending._commitSent && !sameValueNewView) return;
+            // The MEMBERSHIP travels with the row. snapshot_block is a leader-choice
+            // field, and the XCALL rail accepts a leader block within its confirmation
+            // window of the local tip, so the adopted row can declare a different
+            // snapshot than the one this round opened over. Every consumer re-derives
+            // the set at the row's DECLARED snapshot_block and measures the signatures
+            // against THAT (xchain-indexer actions/xcall.js, recovery.js), so tallying
+            // against the pre-adoption set can clear a threshold the declared snapshot
+            // never authorised: across a stake activation or a membership change, four
+            // signatures out of the old set finalize a row the new seven-member set
+            // needs five for. Rebind before a single vote is counted, and fail CLOSED
+            // (leave the round to its timer and view change) when the set cannot be
+            // resolved, rather than counting votes under a set nobody will accept.
+            let rebound = await this._rebindSnapshot(pending, row);
+            if(rebound === false) return;
+            // The resolve above is a real await, so re-check the round is still the one
+            // we started on before mutating it.
+            if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return;
+            // The proposing leader has to be a member of the set the row declares. Its
+            // signature is one of the ones the indexer will measure, and a signature
+            // from outside the declared set is discarded there.
+            if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)) return;
             pending.row       = row;
             pending.canonical = canonical;
+            if(rebound){
+                pending.validators = rebound.validators;
+                pending.quorum     = rebound.quorum;
+                pending.weighted   = rebound.weighted;
+            }
             pending.signatures.clear();   // any collected sigs were over the old canonical
             pending.prepares.clear();
             pending.commits.clear();
@@ -715,7 +792,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // round the federation already finalized. The quorum signatures over the
     // canonical ARE the proof (the same proof the indexers verify), so a
     // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
-    _handleFinalSync(envelope){
+    async _handleFinalSync(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
@@ -724,27 +801,60 @@ class CrossChainDexConsensus extends EventEmitter {
 
         let row = d.row;
         if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
-        let canonical = this.engine._canonicalMatch(row, Number(d.view) || 0);   // sigs were taken at the finalizing view
+        let syncView  = Number(d.view) || 0;                                    // the view the offered proof was signed at
+        let canonical = this.engine._canonicalMatch(row, syncView);   // sigs were taken at the finalizing view
+
+        // The proof is measured against the set the OFFERED row declares, not the one
+        // this stuck round happens to hold. Same reason as the PROPOSE adoption above:
+        // the offered row can name a different snapshot_block, and a proof that clears
+        // the local round's threshold can sit under the threshold its own declared
+        // snapshot sets. An unresolvable declared set refuses the sync outright and
+        // leaves the round to its timer, rather than ratifying an unmeasurable proof.
+        let rebound = await this._rebindSnapshot(pending, row);
+        if(rebound === false) return;
+        // A rebind is a real await, so re-check the round before measuring anything.
+        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return;
+        let setValidators = rebound ? rebound.validators : pending.validators;
+        let setQuorum     = rebound ? rebound.quorum     : pending.quorum;
+        let setWeighted   = rebound ? rebound.weighted   : pending.weighted;
 
         let offered = Array.isArray(d.signatures) ? d.signatures : [];
         let verified = new Map();
         for(let s of offered){
             if(!s || !s.pubkey || !s.sig) continue;
             let pk = String(s.pubkey).toLowerCase();
-            if(!pending.validators.some(v => v.pubkey === pk)) continue;
+            if(!setValidators.some(v => v.pubkey === pk)) continue;
             if(!ValidatorIdentity.verify(canonical, String(s.sig), pk)) continue;
             verified.set(pk, String(s.sig));
         }
-        // The offered signatures must themselves clear the round's quorum (weighted
-        // at/above activation, else >=2f+1). A forged sync would need a real quorum.
-        let proofOk = pending.weighted
-            ? swq.meetsStakeThreshold(pending.validators, verified.keys())
-            : (verified.size >= Math.max(pending.quorum, 1));
+        // The offered signatures must themselves clear the declared snapshot's quorum
+        // (weighted at/above activation, else >=2f+1). A forged sync would need a real
+        // quorum of the set the row names.
+        let proofOk = setWeighted
+            ? swq.meetsStakeThreshold(setValidators, verified.keys())
+            : (verified.size >= Math.max(setQuorum, 1));
         if(!proofOk) return;                                               // not a quorum proof; ignore
 
         pending.row        = row;
         pending.canonical  = canonical;
         pending.signatures = verified;
+        // Keep the round's binding with the row it adopted, so anything that reads the
+        // set after this (leader election on a later message, the finalize emit) sees
+        // the snapshot the published row declares.
+        if(rebound){
+            pending.validators = rebound.validators;
+            pending.quorum     = rebound.quorum;
+            pending.weighted   = rebound.weighted;
+        }
+        // Finalize under the view the proof VERIFIED at, never our local one. _finalize
+        // emits pending.view and _markFinalized caches it for the next straggler, so a
+        // node that had already rotated would otherwise publish these signatures under a
+        // view whose EQUIV canonical none of them cover (persisted as finalizing_view,
+        // mirrored, and folded into the anchor archive). Lowering the view is safe and
+        // deliberate: _finalize sets pending.finalized, and _handleViewChange /
+        // _handleNewView both short-circuit on a finalized round, so the monotonic-view
+        // guard is never consulted for this round again. Taking the higher view is the bug.
+        pending.view       = syncView;
         console.log('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
         this._finalize(rid);
     }

@@ -436,6 +436,45 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(victim.consensus.pending.get(mid).finalized).to.equal(false);
     });
 
+    it('FINAL_SYNC: a straggler finalizes under the PROOF view, not its own rotated view', async function () {
+        // The catch-up path verifies the offered proof against the canonical rebuilt at
+        // the PROOF's view, so it adopts that view and not only row/canonical/signatures.
+        // A pending.view left at whatever the straggler rotated to is what _finalize
+        // emits and _markFinalized caches, so with the EQUIV header active the node
+        // publishes a quorum proof under a view none of its signatures cover and re-serves
+        // the same wrong view to the NEXT straggler. Every other FINAL_SYNC test runs at
+        // view 0, where the two views coincide and nothing can diverge.
+        const equivCanonical = (r, view) => canonicalMatch(r) + '|EQ|' + Number(view || 0);
+        let bus = buildMesh(4, { drop: () => true, canonical: equivCanonical });   // isolated victim
+        await startAll(bus);
+        let mid = 'd5'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+
+        // Drive the isolated straggler ahead of the proof: it view-changed twice while
+        // the rest of the federation finalized at view 0.
+        victim.consensus.pending.get(mid).view = 2;
+
+        // A real quorum proof (3 of 4) taken at view 0.
+        let signers = [bus.nodes[1], bus.nodes[2], bus.nodes[3]];
+        let proofCanon = equivCanonical(row, 0);
+        // _handleMessage fires the FINAL_SYNC branch and forgets it (the handler is
+        // async: an offered row can declare a different snapshot, which has to be
+        // re-resolved before its proof is measured), so drive the handler directly and
+        // let its completion be the verdict.
+        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: signers[0].pubkey,
+            data: { matchId: mid, row, view: 0, signatures: signers.map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(proofCanon) })) } });
+
+        expect(victim.finalized.length, 'the straggler caught up').to.equal(1);
+        let ev = victim.finalized[0];
+        expect(ev.view, 'finalized under the proof view, not the local rotated view').to.equal(0);
+        expect(ev.signatures.length).to.be.at.least(3);
+        expect(ev.signatures.every(s => ValidatorIdentity.verify(equivCanonical(ev.row, ev.view), s.sig, s.pubkey)),
+            'every published signature verifies under the view it was published at').to.be.true;
+        expect(victim.consensus.finalizedRows.get(mid).view,
+            'the cached state-transfer payload re-serves the proof view to the next straggler').to.equal(0);
+    });
+
     it('guard: COMMIT votes without a verifying signature never count toward quorum', async function () {
         // Counting unverified commits let a node whose canonical diverged
         // "finalize" with zero collected signatures (live finding: hub1 wrote a
@@ -558,6 +597,161 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         victim.consensus.pending.get(mid).viewChanges.set(nextView, voters);
         victim.consensus._handleMessage(nv);
         expect(victim.consensus.pending.get(mid).view).to.equal(nextView);
+    });
+
+    // Adopting the leader's row moved pending.row and pending.canonical but left
+    // pending.validators / quorum / weighted bound to the snapshot the round OPENED
+    // over. snapshot_block is a leader-choice field, so the adopted row can declare a
+    // different one, and the indexer consumers re-derive the set at the row's DECLARED
+    // block: a four-signature finalize under the old set is a row the seven-member set
+    // at the declared block needed five for, and every consumer retires it.
+    function reboundMesh(extraCount) {
+        let bus = buildMesh(4);
+        let extra = [];
+        for (let i = 0; i < extraCount; i++) {
+            let id = new ValidatorIdentity(String(50 + i).repeat(32).slice(0, 64));
+            extra.push(id.getPubkeyHex().toLowerCase());
+        }
+        // The set at the DECLARED block: the four mesh members plus `extraCount` more,
+        // each its own staking source so the weighted tally does not dedupe them away.
+        let declared = bus.nodes.map(nd => nd.pubkey).concat(extra)
+            .map(pk => ({ pubkey: pk, source: 'src:' + pk, weight: '1', amount: '1' }));
+        bus.nodes.forEach(nd => {
+            nd.consensus.engine._resolveCapabilityValidators = async () => declared.slice();
+        });
+        return bus;
+    }
+
+    async function drivePropose(bus, victim, mid, proposedRow) {
+        let leaderPk = leaderPubkey(bus, mid, 0);
+        let leaderNode = bus.nodes.find(nd => nd.pubkey === leaderPk);
+        let sig = leaderNode.identity.sign(canonicalMatch(proposedRow));
+        await victim.consensus._handlePropose({ type: 'XDEX_MATCH_PROPOSE', sender: leaderPk,
+            data: { matchId: mid, view: 0, row: proposedRow, sig_pubkey: leaderPk, sig } });
+    }
+
+    it('rebinds membership and quorum to the snapshot the adopted row declares', async function () {
+        let bus = reboundMesh(3);
+        await startAll(bus);
+        let mid = '1a'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let pending = victim.consensus.pending.get(mid);
+        expect(pending.validators.length, 'round opens over the four-member set').to.equal(4);
+        expect(pending.quorum).to.equal(3);
+
+        await drivePropose(bus, victim, mid, Object.assign({}, row, { snapshot_block: 101 }));
+
+        pending = victim.consensus.pending.get(mid);
+        expect(pending.row.snapshot_block, 'the leader row was adopted').to.equal(101);
+        expect(pending.validators.length, 'membership follows the declared snapshot').to.equal(7);
+        expect(pending.quorum, 'and so does the threshold').to.equal(5);
+    });
+
+    // The negative half of the pair, and the one that makes the case above evidence
+    // rather than an assertion about a code path nothing enters: with the round still
+    // bound to the four-member set, three signatures cleared the bar. Against the
+    // seven-member set the row declares, the same three do not.
+    it('the pre-adoption set would have cleared a bar the declared snapshot does not', async function () {
+        let bus = reboundMesh(3);
+        await startAll(bus);
+        let mid = '2b'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let pending = victim.consensus.pending.get(mid);
+        let threeOfFour = new Set(bus.nodes.slice(0, 3).map(nd => nd.pubkey));
+        expect(victim.consensus._meetsQuorum(pending, threeOfFour),
+            'three of the four-member set is a quorum there').to.be.true;
+
+        await drivePropose(bus, victim, mid, Object.assign({}, row, { snapshot_block: 101 }));
+
+        pending = victim.consensus.pending.get(mid);
+        expect(victim.consensus._meetsQuorum(pending, threeOfFour),
+            'the same three do not carry the seven-member set the row declares').to.be.false;
+    });
+
+    it('refuses a row whose declared snapshot cannot be resolved, rather than voting under the old set', async function () {
+        let bus = buildMesh(4);
+        bus.nodes.forEach(nd => {
+            nd.consensus.engine._resolveCapabilityValidators = async () => [];
+        });
+        await startAll(bus);
+        let mid = '3c'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let before = victim.consensus.pending.get(mid).signatures.size;
+
+        await drivePropose(bus, victim, mid, Object.assign({}, row, { snapshot_block: 101 }));
+
+        let pending = victim.consensus.pending.get(mid);
+        expect(pending.row.snapshot_block, 'the unresolvable row is not adopted').to.equal(100);
+        expect(pending.signatures.size, 'and no signature was added for it').to.equal(before);
+        expect(pending.validators.length).to.equal(4);
+    });
+
+    it('refuses a row from a leader outside the set its own declared snapshot names', async function () {
+        let bus = buildMesh(4);
+        let mid = '4d'.repeat(32), row = sampleRow(mid);
+        let leaderPk = leaderPubkey(bus, mid, 0);
+        // The declared snapshot drops the proposing leader. Its signature is one an
+        // indexer discards, so the round must not count it either.
+        bus.nodes.forEach(nd => {
+            nd.consensus.engine._resolveCapabilityValidators = async () =>
+                bus.nodes.filter(x => x.pubkey !== leaderPk)
+                    .map(x => ({ pubkey: x.pubkey, source: 'src:' + x.pubkey, weight: '1', amount: '1' }));
+        });
+        await startAll(bus);
+        let victim = bus.nodes.find(nd => nd.pubkey !== leaderPk);
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let before = victim.consensus.pending.get(mid).signatures.size;
+
+        await drivePropose(bus, victim, mid, Object.assign({}, row, { snapshot_block: 101 }));
+
+        let pending = victim.consensus.pending.get(mid);
+        expect(pending.row.snapshot_block).to.equal(100);
+        expect(pending.signatures.size).to.equal(before);
+    });
+
+    // FINAL_SYNC took the same shortcut: it measured a straggler-rescue proof against
+    // the stuck round's set instead of the one the offered row declares.
+    it('FINAL_SYNC measures the offered proof against the snapshot the offered row declares', async function () {
+        let bus = reboundMesh(3);
+        await startAll(bus);
+        let mid = '5e'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+
+        let syncRow = Object.assign({}, row, { snapshot_block: 101 });
+        let canon = canonicalMatch(syncRow);
+        // Three real signatures: a quorum of the four-member set the round holds, and
+        // short of the seven-member set the offered row declares.
+        let signatures = bus.nodes.slice(0, 3).map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(canon) }));
+        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
+            data: { matchId: mid, view: 0, row: syncRow, signatures } });
+
+        expect(victim.finalized.length, 'an under-quorum proof must not finalize the round').to.equal(0);
+        expect(victim.consensus.pending.get(mid).row.snapshot_block).to.equal(100);
+    });
+
+    it('FINAL_SYNC still finalizes on a proof that carries the declared snapshot', async function () {
+        let bus = reboundMesh(3);
+        await startAll(bus);
+        let mid = '6f'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+
+        let syncRow = Object.assign({}, row, { snapshot_block: 101 });
+        let canon = canonicalMatch(syncRow);
+        // The three extra members of the declared set sign too, so the proof carries
+        // five of seven distinct sources and clears the declared bar.
+        let extraIds = [];
+        for (let i = 0; i < 3; i++) extraIds.push(new ValidatorIdentity(String(50 + i).repeat(32).slice(0, 64)));
+        let signatures = bus.nodes.slice(0, 2).map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(canon) }))
+            .concat(extraIds.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canon) })));
+        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
+            data: { matchId: mid, view: 0, row: syncRow, signatures } });
+
+        expect(victim.finalized.length, 'a real quorum of the declared set still rescues the round').to.equal(1);
     });
 
     it('A-F5: _bufferEarlyMessage caps distinct ids (FIFO) and drops oversized envelopes', function () {

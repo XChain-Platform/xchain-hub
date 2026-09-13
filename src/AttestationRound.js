@@ -189,6 +189,24 @@ class AttestationRound {
         this.fetchCacheHitCount = 0;   // rounds served from the durable cache instead
         this.finalizedSkipCount = 0;   // re-polls refused on the finalized ring before any fetch
 
+        // Poll-rejection accounting (item 7650). An indexer that answers HTTP 200 with a
+        // JSON-RPC error - an unknown method on an incompatible build is the shape that
+        // costs the most - never reaches the catch above that logs transport failures, so
+        // without this counter the quieter failure leaves the poll in silence: no counter
+        // moves, no line is written, and every counter below stays frozen at its last
+        // value while the request feed admits nothing. Monotonic for the
+        // process life for the same reason fetchCount is: consumers alert on a rise, and
+        // a restart is exactly when the evicting maps are empty.
+        this.pollRpcErrorCount = 0;
+        // Timestamp of the last poll whose JSON-RPC result was usable. Null until one
+        // succeeds, which is also the observer-only steady state, so getStats reports the
+        // age as null rather than as a huge number that reads like a stall.
+        this.lastPollOkAt      = null;
+        // Warn throttle for the above. A broken indexer is broken on every tick, and at
+        // the default cadence that is a line every few seconds forever; log the first
+        // occurrence and then at most one per pollMs-scaled window.
+        this._pollRpcWarnAt    = 0;
+
         // Boot-time ordering assertion for the zero-confirmation flag day (spec
         // §3.2 a): zero-conf must sit at or above both the mirror and the widening
         // heights, or a request between the heights is served at the tip under rules
@@ -311,7 +329,28 @@ class AttestationRound {
         }
 
         let result = res && res.data && res.data.result;
-        if(!result || result.error) return;
+        if(!result || result.error){
+            // The indexer answered, so nothing above catches this: an HTTP-200 JSON-RPC
+            // rejection (top-level error with no result, or an error nested in the
+            // result) would otherwise return in silence. Count it and say so, leaving the
+            // early return, the cursor and the in-flight guard untouched: this is
+            // instrumentation, not a behaviour change, and no request may be admitted on
+            // an error response. Detail wording follows CapabilitySnapshot.rpcErrorDetail:
+            // the useful part is WHICH of the two cases happened.
+            this.pollRpcErrorCount++;
+            let now    = Date.now();
+            let detail = !result
+                ? 'no JSON-RPC result (empty or non-JSON body)'
+                : 'a JSON-RPC error: ' + String((result.error && (result.error.message || result.error))).slice(0, 200);
+            if(this._pollRpcWarnAt === 0 || now - this._pollRpcWarnAt >= this.pollMs){
+                this._pollRpcWarnAt = now;
+                console.warn('AttestationRound: getpendingattestation_requests returned ' + detail +
+                    ' from BTC indexer at ' + url + ' - no attestation requests are being admitted' +
+                    ' (rejections so far: ' + this.pollRpcErrorCount + ')');
+            }
+            return;
+        }
+        this.lastPollOkAt = Date.now();
         let latestBlock = Number(result.latest_block_index) || 0;
         let requests    = result.requests || [];
         if(latestBlock > 0) this.observedTip = { blockHeight: latestBlock, observedAt: Date.now() };
@@ -1017,7 +1056,15 @@ class AttestationRound {
             // responsible hub after a re-mine and expects 1.
             fetch_count:           this.fetchCount,
             fetch_cache_hit_count: this.fetchCacheHitCount,
-            finalized_skip_count:  this.finalizedSkipCount
+            finalized_skip_count:  this.finalizedSkipCount,
+            // Poll health (item 7650). Every counter above is frozen by a feed that
+            // admits nothing, so a consumer watching only those reads a stalled hub as a
+            // quiet one. These two say the opposite thing: the count rises while the
+            // indexer rejects, and the age grows while nothing succeeds. Age is null,
+            // never a large number, when no poll has ever succeeded, so a consumer
+            // cannot mistake a hub that just booted for one that has been stalled.
+            poll_rpc_error_count:        this.pollRpcErrorCount,
+            last_successful_poll_age_ms: this.lastPollOkAt === null ? null : (Date.now() - this.lastPollOkAt)
         };
         // Expose the non-ok publication-throttle ring health so an
         // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries

@@ -305,5 +305,57 @@ describe('pushattestbatch: the hub receive half', function () {
         expect(result.stored).to.equal(1);
         expect(result.rejected).to.equal(1);
         expect(hub.db.row(good.request_id)).to.not.equal(null);
+        // The other half of the contract the write-fault cases below pin: an unusable row
+        // must NOT withhold the marker, or the pusher retries a body that can never change.
+        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount).to.equal(1);
+    });
+
+    // A transient write fault is the one failure a REPLAY can clear, so it must not be
+    // answered as an accepted delivery: the pusher keys its outbox delete on
+    // `accepted !== false`, and deleting on a false success destroys the only copy of a
+    // chain-only rebuild's rows.
+    it('answers a batch whose row write threw with a retryable failure, not an accept', async function () {
+        let signers = identities(2);
+        let db = makeDb();
+        let good = makeRow(), doomed = makeRow();
+        let inner = db.doQuery.bind(db);
+        db.doQuery = async function(sql, args){
+            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql) &&
+               args.indexOf(doomed.request_id) !== -1)
+                throw new Error('Deadlock found when trying to get lock');
+            return inner(sql, args);
+        };
+        let hub = makeHub({ signers, db });
+        let mirror = new AttestationResponseMirror(hub);
+
+        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([good, doomed], signers));
+
+        expect(result.accepted, 'a write fault must not read as a delivery').to.equal(false);
+        // Outside hub_client.js's TERMINAL_HUB_REJECTIONS, so the queued row is retained.
+        expect(result.reason).to.equal('db error');
+        // The rows that did write still count, because the replay dedupes them.
+        expect(result.stored).to.equal(1);
+        expect(db.row(good.request_id)).to.not.equal(null);
+        expect(db.row(doomed.request_id)).to.equal(null);
+    });
+
+    it('withholds the federation-wide landed marker when a row write threw', async function () {
+        let signers = identities(2);
+        let db = makeDb();
+        let doomed = makeRow();
+        let inner = db.doQuery.bind(db);
+        db.doQuery = async function(sql, args){
+            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql))
+                throw new Error('Deadlock found when trying to get lock');
+            return inner(sql, args);
+        };
+        let hub = makeHub({ signers, db });
+        let mirror = new AttestationResponseMirror(hub);
+
+        await mirror.receiveValidatedBatch('DOGE', makeBatch([doomed], signers));
+
+        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount,
+            'a window with missing rows must not be marked covered for the whole federation')
+            .to.equal(0);
     });
 });

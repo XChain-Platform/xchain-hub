@@ -97,4 +97,104 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
                 'a below-flag-day row must reach the checkpoint wrapper selection').to.equal(true);
         });
     });
+
+    // Derived rows are NEVER stamped with a batch_seq, so they stay eligible for the
+    // pending-reward SELECT forever and their number grows by one on every archive
+    // publish. With the LIMIT applied before the JS filter, a maxBatch-sized block of
+    // them owned the page permanently and the below-flag-day rows sorted behind them
+    // stopped being reachable at all, losing their only recovery transport.
+    describe('the pending-reward page is narrowed before its LIMIT', () => {
+
+        // A fake that actually executes the statement: it honours the bound thresholds,
+        // the ORDER BY and the LIMIT. A fake that ignored them could not go red here.
+        function mkSelector(network, rows, maxBatch, hits){
+            const identity = new ValidatorIdentity('11'.repeat(32));
+            const pub = new StateAnchorPublisher({
+                db: {
+                    async doQuery(sql, params){
+                        hits.push({ sql, params });
+                        if(sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') === -1) return [];
+                        let p = (params || []).slice();
+                        let limit = p.pop();
+                        let out = rows.slice();
+                        while(p.length){
+                            // Each NOT clause is (types..., threshold); the archive clause
+                            // carries exactly one type.
+                            let threshold = null, types = [];
+                            while(p.length && typeof p[0] === 'string') types.push(p.shift());
+                            threshold = p.shift();
+                            out = out.filter(r => !(types.indexOf(r.reward_type) !== -1 &&
+                                                    Number(r.block_index) >= Number(threshold)));
+                        }
+                        // CASE-INSENSITIVE, because the column's collation is: under
+                        // MariaDB's default 'anchor_archive' sorts BEFORE 'anchor_LTC',
+                        // and a case-sensitive JS compare puts them the other way round,
+                        // which would make the starvation case below unable to go red.
+                        out.sort((a, b) => {
+                            let x = String(a.reward_type).toLowerCase();
+                            let y = String(b.reward_type).toLowerCase();
+                            return x < y ? -1 : x > y ? 1 : a.round_number - b.round_number;
+                        });
+                        return out.slice(0, limit);
+                    }
+                },
+                network, p2pConfig: {},
+                getIdentity: () => identity,
+                getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
+                _resolveBtcLatestBlock: async () => BLOCK
+            });
+            pub.maxBatch = maxBatch;
+            const me = identity.getPubkeyHex().toLowerCase();
+            pub._getActiveOraclePublishPubkeys = async () => [me];
+            return pub;
+        }
+
+        it('reaches a legacy reward sitting behind a full page of never-archivable rows', async () => {
+            const hits = [];
+            const aboveArchive = ar.ARCHIVE_REWARD_ACTIVATION.mainnet + 1;
+            const belowAnchor  = ar.ANCHOR_REWARD_ACTIVATION.mainnet - 1;
+            // 'anchor_LTC' sorts AFTER 'anchor_archive' under this ORDER BY, which is why
+            // two derived rows and a maxBatch of 2 starved it before the narrowing.
+            const rows = [row('anchor_archive', aboveArchive), row('anchor_archive', aboveArchive + 1),
+                          row('anchor_LTC', belowAnchor)];
+            rows[1].round_number = 2;
+            const pub = mkSelector('mainnet', rows, 2, hits);
+
+            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+
+            expect(hits.some(h => h.sql.indexOf('FROM state_checkpoints') !== -1),
+                'the starved legacy reward must reach the checkpoint wrapper selection').to.equal(true);
+        });
+
+        it('binds this hub\'s own two flag-days, and keeps the unnarrowed form off-network', async () => {
+            let hits = [];
+            let pub = mkSelector('mainnet', [], 5, hits);
+            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            let q = hits.find(h => h.sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1);
+            expect(q.sql).to.contain('AND NOT (reward_type IN (?, ?, ?, ?) AND block_index >= ?)');
+            expect(q.sql).to.contain('AND NOT (reward_type = ? AND block_index >= ?)');
+            expect(q.params).to.deep.equal(['anchor_BTC', 'anchor_LTC', 'anchor_DOGE', 'anchor_bundle',
+                                            ar.ANCHOR_REWARD_ACTIVATION.mainnet,
+                                            'anchor_archive', ar.ARCHIVE_REWARD_ACTIVATION.mainnet, 5]);
+
+            // An unscoped hub has no thresholds to bind, and _isChainDerivedReward answers
+            // false for every row there, so the selector must stay exactly as it was.
+            hits = [];
+            pub = mkSelector('', [], 5, hits);
+            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            q = hits.find(h => h.sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1);
+            expect(q.sql).to.not.contain('AND NOT (');
+            expect(q.params).to.deep.equal([5]);
+        });
+
+        it('excludes every anchor row on regtest, where both flag-days sit at 0', async () => {
+            // Intended, not a regression: it is exactly what the JS filter already
+            // produced there, only now the LIMIT never sees those rows.
+            const hits = [];
+            const pub = mkSelector('regtest', [row('anchor_archive', 5), row('anchor_BTC', 5)], 5, hits);
+            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            expect(hits.some(h => h.sql.indexOf('FROM state_checkpoints') !== -1),
+                'nothing on regtest is archive cargo, so no wrapper is selected').to.equal(false);
+        });
+    });
 });

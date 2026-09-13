@@ -29,6 +29,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 
 const CP = {
     chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
@@ -57,7 +58,11 @@ function mkPub(indexerReply) {
     pub.peerManager = null;      // skips the XANC_FINALIZED announce
     pub.dogeAddress = 'Dpub1';
     pub.indexers    = { DOGE: { url: 'http://indexer.invalid' } };
-    pub.spendGuard  = { isPaused: () => false, allow: () => true, record(){}, noteBlocked: () => '' };
+    // Await-safe gate double: _broadcastWithRetry reserves once per call and settles
+    // that token on each exit, so the stub mirrors reserve()/commit()/release()
+    // rather than the old allow()/record() pair.
+    pub.spendGuard  = { isPaused: () => false, reserve: () => ({ id: 1 }), commit(){}, release(){},
+                        noteBlocked: () => '' };
     // Durable-intent marker: exercised by its own suite; inert here.
     pub._getLiveArchiveIntent  = async () => null;
     pub._recordArchiveIntent   = async () => {};
@@ -73,12 +78,20 @@ function mkPub(indexerReply) {
     return { pub, sent, backfills };
 }
 
+// The sole member of this fixture's signing set, with a REAL key. _publishArchive's
+// on-chain-validity gate runs _quorumVerified over the round's own signatures with no
+// `validators.length === 1` short-circuit in front of it, so a placeholder signature
+// string fails the gate and stamps every row '__partial__' - which is a verdict about
+// quorum, not about the existence check these cases are actually pinning.
+const SOLE = new ValidatorIdentity('33'.repeat(32));
+const SOLE_PK = SOLE.getPubkeyHex().toLowerCase();
+
 function mkRound(sent) {
     return {
         cp: CP, batchSeq: ROUND_SEQ, count: COUNT, crc: CRC, chunks: CHUNKS.slice(),
         canonical: 'canonical', quorum: 1, weighted: false,
-        validators: [{ pubkey: 'aa'.repeat(32), amount: '1', source: '' }],
-        signatures: new Map([['aa'.repeat(32), 'sig']]),
+        validators: [{ pubkey: SOLE_PK, amount: '1', source: '' }],
+        signatures: new Map([[SOLE_PK, SOLE.sign('canonical')]]),
         matchIds: [{ id: 1, status: 'settled' }], callIds: [], rewardIds: [],
         signer: { broadcastFn: async (p) => { sent.push(p); return { txid: 'fresh-tx-' + sent.length }; } }
     };

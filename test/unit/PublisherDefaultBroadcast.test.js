@@ -238,3 +238,115 @@ describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction enco
         expect(result.txid).to.equal('broadcast-txid');
     });
 });
+
+// Review board #7752: an abandoned build kept the encoder's input reservation.
+//
+// create_tx is not read-only. A SUCCESSFUL build reserves every input it selected and
+// returns the receipt on result.reservation; the encoder's own selection then skips those
+// outpoints for five minutes. The refusal above happens AFTER that build (it has to: the
+// verdict is read off the encoder's answer, never off the requested encoding), and nothing
+// handed the ticket back - so a refused pass made a funded publishing address unavailable
+// to every other publisher and to wallet operations for the rest of the TTL, and a retry
+// loop reserved a fresh set of outputs each time without ever broadcasting.
+//
+// The release is confined to the pre-broadcast section on purpose. Past the send, holding
+// the inputs is the protective behaviour: releasing there would invite a second build that
+// double-spends a transaction which may already have landed.
+describe('Publisher _defaultBroadcast: releases the encoder reservation of an abandoned build', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    // A create_tx answer shaped the way the real encoder answers: `reservation` rides on
+    // every successful build, whatever the encoding.
+    function reservingEncoder(over) {
+        const encoder = makeMockEncoder();
+        const inner = encoder.createTx;
+        encoder.createTx = function (args) {
+            return inner.call(this, args).then(() => Object.assign({
+                psbt: 'deadbeef', reservation: { id: 'f'.repeat(32) }
+            }, over || {}));
+        };
+        encoder.releaseInputs = sinon.stub().resolves({ found: true });
+        return encoder;
+    }
+
+    function oraclePub(encoder, walletSign) {
+        const pub = new OraclePublisher({});
+        pub.encoder       = encoder;
+        pub.walletSignFn  = walletSign || sinon.stub().resolves('00'.repeat(32));
+        pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
+        pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
+        return pub;
+    }
+
+    it('hands the ticket back when the two-phase guard refuses the build', async function () {
+        const encoder = reservingEncoder({ encoding: 'P2SH', carrierScripts: ['00ff'] });
+        const pub = oraclePub(encoder);
+
+        let threw = null;
+        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+
+        expect(threw, 'the refusal must still surface').to.be.an('error');
+        expect(threw.message).to.contain('two-transaction');
+        expect(encoder.releaseInputs.calledOnce, 'the reserved inputs must not be held to TTL').to.equal(true);
+        expect(encoder.releaseInputs.firstCall.args[0]).to.equal('f'.repeat(32));
+        expect(encoder.broadcastTx.called, 'nothing was sent').to.equal(false);
+    });
+
+    it('hands the ticket back when the wallet hook fails after a good build', async function () {
+        const encoder = reservingEncoder({ encoding: 'OP_RETURN' });
+        const pub = oraclePub(encoder, sinon.stub().rejects(new Error('signer offline')));
+
+        let threw = null;
+        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+
+        expect(threw.message).to.contain('signer offline');
+        expect(encoder.releaseInputs.calledOnce,
+               'a wallet-sign abandon strands the same reservation').to.equal(true);
+    });
+
+    it('does NOT release once the transaction has been broadcast', async function () {
+        const encoder = reservingEncoder({ encoding: 'OP_RETURN' });
+        const pub = oraclePub(encoder);
+
+        const result = await pub._defaultBroadcast('PRICE|0|...');
+        expect(result.txid).to.equal('broadcast-txid');
+        expect(encoder.releaseInputs.called,
+               'the inputs a sent transaction spends must stay claimed').to.equal(false);
+    });
+
+    it('does not release after an AMBIGUOUS send, where holding the inputs is protective', async function () {
+        const encoder = reservingEncoder({ encoding: 'OP_RETURN' });
+        encoder.broadcastTx = sinon.stub().rejects(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+        const pub = oraclePub(encoder);
+
+        let threw = null;
+        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+
+        expect(threw, 'the send failure surfaces').to.be.an('error');
+        expect(encoder.releaseInputs.called,
+               'a send that may have landed must not have its inputs freed for a second build').to.equal(false);
+    });
+
+    it('is inert when the encoder minted no reservation (older encoder)', async function () {
+        const encoder = reservingEncoder({ encoding: 'P2SH', carrierScripts: ['00ff'], reservation: undefined });
+        const pub = oraclePub(encoder);
+
+        let threw = null;
+        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+
+        expect(threw.message).to.contain('two-transaction');
+        expect(encoder.releaseInputs.called, 'nothing to release, nothing called').to.equal(false);
+    });
+
+    it('a failing release never replaces the refusal the caller must see', async function () {
+        const encoder = reservingEncoder({ encoding: 'P2SH', carrierScripts: ['00ff'] });
+        encoder.releaseInputs = sinon.stub().rejects(new Error('encoder unreachable'));
+        const pub = oraclePub(encoder);
+
+        let threw = null;
+        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+
+        expect(threw.message, 'best effort: the TTL is the backstop').to.contain('two-transaction');
+    });
+});

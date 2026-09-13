@@ -133,6 +133,37 @@ describe('getoracleroundpresence JSON-RPC method', function () {
         expect(impl.called).to.equal(false);
     });
 
+    it('refuses a bound at or past 2^53, which pins the event loop in the fold', async function () {
+        // Number.isFinite and strictInt's Number.isInteger are BOTH true for 2^53,
+        // so only the explicit safe-integer check closes this. The fold cannot
+        // increment past such a bound, and this is a public read: one unauthenticated
+        // request wedged the process.
+        const impl = sinon.stub().resolves(ANSWER);
+        const c = await bootController(impl);
+        for (const bad of [9007199254740992, 1e300, '9007199254740992']) {
+            expect((await c.getoracleroundpresence({ from_round: bad, to_round: bad })).error)
+                .to.contain('from_round');
+        }
+        expect(impl.called).to.equal(false);
+    });
+
+    it('refuses a negative, fractional or boolean bound before touching the hub', async function () {
+        const impl = sinon.stub().resolves(ANSWER);
+        const c = await bootController(impl);
+        expect((await c.getoracleroundpresence({ from_round: -1 })).error).to.contain('from_round');
+        expect((await c.getoracleroundpresence({ from_round: 1.5 })).error).to.contain('from_round');
+        expect((await c.getoracleroundpresence({ to_round: true })).error).to.contain('to_round');
+        expect((await c.getoracleroundpresence({ to_round: '12abc' })).error).to.contain('to_round');
+        expect(impl.called).to.equal(false);
+    });
+
+    it('still forwards an ordinary numeric-string range unchanged', async function () {
+        const impl = sinon.stub().resolves(ANSWER);
+        const c = await bootController(impl);
+        await c.getoracleroundpresence({ from_round: '25', to_round: '27', limit: '3' });
+        expect(impl.firstCall.args).to.deep.equal(['25', '27', '3']);
+    });
+
     it('refuses a limit outside the supported span before touching the hub', async function () {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);

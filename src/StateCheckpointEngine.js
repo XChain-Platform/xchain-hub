@@ -123,8 +123,25 @@ class StateCheckpointEngine extends EventEmitter {
         // own, wider tolerance. Mirrors CrossChainCallEngine's snapshot_block bound
         // (a day of BTC blocks, ~144), the closest analog. Fail-closed: a SIGN_REQ
         // whose snapshot_block deviates from our own BTC tip beyond this is declined.
+        // Validated, not bare parseInt: a nonnumeric operator value yields NaN, and
+        // `Math.abs(myBtc - snapshot_block) > NaN` is ALWAYS false, so the guard below
+        // silently stops firing and any leader-supplied snapshot_block is accepted (a
+        // 9,900-block-stale one reaches validator-set resolution). A disabled safety bound
+        // must never be the outcome of a typo. Non-negative clamp rather than
+        // positiveIntConfig, because 0 is meaningful here: it demands an exact
+        // snapshot_block match, and widening that back to the default would LOOSEN the
+        // bound the operator asked to tighten. Same idiom as `confirmations` above.
         this.cosignToleranceBlocks = parseInt(process.env.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS
             || cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS || String(CHECKPOINT_COSIGN_TOLERANCE_BLOCKS));
+        if(!(this.cosignToleranceBlocks >= 0)){
+            console.warn('config: CHECKPOINT_COSIGN_TOLERANCE_BLOCKS="' +
+                         String(process.env.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS ||
+                                cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS) +
+                         '" is not a non-negative integer; using the default (' +
+                         CHECKPOINT_COSIGN_TOLERANCE_BLOCKS + '). An unvalidated value would ' +
+                         'disable the co-sign snapshot freshness guard outright.');
+            this.cosignToleranceBlocks = CHECKPOINT_COSIGN_TOLERANCE_BLOCKS;
+        }
         this.chains = String(process.env.CHECKPOINT_CHAINS || cfg.CHECKPOINT_CHAINS || ALLOWED_CHAINS.join(','))
             .split(',').map(c => c.trim().toUpperCase()).filter(c => ALLOWED_CHAINS.includes(c));
 

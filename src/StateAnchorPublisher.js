@@ -89,6 +89,7 @@ const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins, summarizeUtxoConfirmations } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const { abandonBuild }           = require('./lib/encoder_reservation.js');
 const { resolveCheckpointIntervalBlocks } = require('./lib/checkpoint_cadence.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
@@ -98,6 +99,12 @@ const ckpt                  = require('./checkpoint_commitment_activation.js');
 const ccr                   = require('./cross_chain_royalty_activation.js');
 const ar                    = require('./anchor_reward_activation.js');
 const ark                   = require('./anchor_reward_key.js');
+
+// The reward types the indexer re-derives from chain above a flag-day, split by WHICH
+// flag-day judges them. One definition, read by both forms of the eligibility rule
+// (_isChainDerivedReward and its SQL twin), so a new type cannot be added to one alone.
+const ANCHOR_FLAG_DAY_REWARD_TYPES = ['anchor_BTC', 'anchor_LTC', 'anchor_DOGE', 'anchor_bundle'];
+const ARCHIVE_FLAG_DAY_REWARD_TYPE = ark.ARCHIVE_REWARD_TYPE;
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
@@ -1479,24 +1486,63 @@ class StateAnchorPublisher {
         // caller that did not go through that proof: a null column is a row nothing
         // downstream can prove, and the BTC indexer derives nothing from it.
         let txid = (dogeAnchorTxid == null || dogeAnchorTxid === '') ? null : String(dogeAnchorTxid).toLowerCase();
+        // DURABILITY and DELIVERY are different failures and are handled differently.
+        //
+        // The INSERT is a precondition, so it FAILS CLOSED and propagates: the one caller
+        // that queues (the deferred drain) keeps its pending entry on a throw and retries
+        // under its own TTL, which is idempotent because the statement is INSERT IGNORE
+        // against uq_reward_tuple. Swallowing it here logged 'row written' over a reward
+        // that was never persisted and could never be re-attempted, permanently forfeiting
+        // a confirmed reward on a transient DB error.
         try {
             await this.db.doQuery(
                 'INSERT IGNORE INTO anchor_reward_attestations ' +
                 '(chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid) ' +
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [rowChain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid]);
+        } catch(err){
+            console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
+                         rewardType + '/' + roundReference + '): ' + (err && err.message));
+            throw err;   // nothing to federate: peers must not be told about a row we failed to hold
+        }
+        // The row is now durable, so a read-back or broadcast failure must NOT fail the
+        // caller or retain the queue entry: it is an undeliverable COMMITTED row, repaired
+        // by forcing subscriber resync rather than retried.
+        await this._broadcastRewardAttestationRow(rowChain, network, rewardType, roundReference, snapshotBlock, publisher);
+        if(e && e.federate) this._federateRewardAttestation(e, sigs, txid);
+    }
+
+    // Stream an anchor_reward_attestations row this hub has ALREADY committed to hub-DB
+    // mirror subscribers. Never throws: the row is durable, so a delivery failure must not
+    // fail the write or block federation. A throw from the read-back and a zero-row result
+    // are the same undeliverable-row event, and dropAllForResync is the sanctioned repair
+    // (StateCheckpointEngine._broadcastRowOrResync and CrossChainCallEngine._mirrorCallRow
+    // are the in-repo precedents, each a local copy by house convention). Without it the
+    // heartbeat watermark certifies completeness past a committed attestation row an
+    // attached indexer never received, and that table mints COLLECT-spendable rewards, so
+    // producer and mirror end up disagreeing about reward availability.
+    async _broadcastRewardAttestationRow(rowChain, network, rewardType, roundReference, snapshotBlock, publisher){
+        let b = this.hub && this.hub.hubDbBroadcaster;
+        if(!b || typeof b.broadcastRow !== 'function') return;
+        if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
+        let failure = null;
+        try {
             let rows = await this.db.doQuery(
                 'SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at ' +
                 'FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1',
                 [rowChain, network, rewardType, roundReference, snapshotBlock, publisher]);
-            if(rows && rows[0] && this.hub.hubDbBroadcaster && typeof this.hub.hubDbBroadcaster.broadcastRow === 'function')
-                this.hub.hubDbBroadcaster.broadcastRow({ table: 'anchor_reward_attestations', row: rows[0] });
+            if(rows && rows[0]){
+                b.broadcastRow({ table: 'anchor_reward_attestations', row: rows[0] });
+                return;
+            }
+            failure = 'the committed row read back empty';
         } catch(err){
-            console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
-                         rewardType + '/' + roundReference + '): ' + (err && err.message));
-            return;   // nothing to federate: peers must not be told about a row we failed to hold
+            failure = (err && err.message) ? err.message : String(err);
         }
-        if(e && e.federate) this._federateRewardAttestation(e, sigs, txid);
+        console.error('StateAnchorPublisher: could not stream a committed anchor_reward_attestations row ' +
+                      'to mirror subscribers (' + failure + '); forcing subscriber resync');
+        try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('anchor_reward_attestations mirror gap'); }
+        catch(_e){ /* the repair itself must never fail a committed attestation row */ }
     }
 
     // Federate a CONFIRMED reward attestation to every peer (AML #4170).
@@ -1734,14 +1780,29 @@ class StateAnchorPublisher {
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
                 let v = await this._verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
                 if(v === 'verified'){
-                    this._deferredRewardAttest.delete(key);
                     // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
                     // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's
                     // getanchorconfirmations check) binds the reward to. `e` also carries the
                     // publisher's federate flag, so the fan-out happens at the confirmed write.
-                    await this._recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
-                                                        Number(e.snapshotBlock), e.publisher, e.attestSigs,
-                                                        String(e.txid).toLowerCase(), e);
+                    //
+                    // The entry is dropped only AFTER the write succeeds. Deleting first and
+                    // then awaiting made a transient INSERT error a PERMANENT reward forfeit
+                    // that logged success: the write swallowed the error, the queue no longer
+                    // held the entry, and nothing retried. Retrying is safe and idempotent
+                    // (INSERT IGNORE on uq_reward_tuple), the existing announceRetryTtlMs TTL
+                    // bounds it, and a persistence failure is logged distinctly from the
+                    // re-verification catch below, which is about _verifyAnchorOnChain.
+                    try {
+                        await this._recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
+                                                            Number(e.snapshotBlock), e.publisher, e.attestSigs,
+                                                            String(e.txid).toLowerCase(), e);
+                    } catch(werr){
+                        console.warn('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE ' +
+                                     'but its row FAILED to persist (' + (werr && werr.message) + '); entry retained ' +
+                                     'for a later drain (no reward is lost to a transient write error)');
+                        continue;
+                    }
+                    this._deferredRewardAttest.delete(key);
                     console.log('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
                 } else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     this._deferredRewardAttest.delete(key);
@@ -2287,6 +2348,31 @@ class StateAnchorPublisher {
         this._checkArchiveAttestQuorum();
     }
 
+    // The SQL twin of _isChainDerivedReward, for the pending-reward selector, which has
+    // to apply eligibility BEFORE its LIMIT. Emitted from the same two constants the
+    // predicate reads, on the sqlRoundQualifier precedent, so the two forms cannot
+    // disagree about which reward type is judged against which flag-day.
+    //
+    // Thresholds are read HERE rather than cached on the instance: both maps are mutable
+    // module state that configuration and tests re-pin. When either is not a finite
+    // number the hub is unscoped or on an unknown network, which is exactly when
+    // _isChainDerivedReward answers false for everything, so the clause is empty and the
+    // selector keeps its original unnarrowed form.
+    _derivedRewardExclusionSql(){
+        let anchorFlagDay  = Number(ar.ANCHOR_REWARD_ACTIVATION[this.network]);
+        let archiveFlagDay = Number(ar.ARCHIVE_REWARD_ACTIVATION[this.network]);
+        if(!Number.isFinite(anchorFlagDay) || !Number.isFinite(archiveFlagDay))
+            return { clause: '', params: [] };
+        return {
+            clause: " AND NOT (reward_type IN (" +
+                        ANCHOR_FLAG_DAY_REWARD_TYPES.map(() => '?').join(', ') +
+                    ") AND block_index >= ?)" +
+                    " AND NOT (reward_type = ? AND block_index >= ?)",
+            params: ANCHOR_FLAG_DAY_REWARD_TYPES.concat([anchorFlagDay,
+                                                         ARCHIVE_FLAG_DAY_REWARD_TYPE, archiveFlagDay])
+        };
+    }
+
     // A validator_rewards row the indexer credits from on-chain bytes is not archive
     // cargo: anchor_<CHAIN>/anchor_bundle at/above ANCHOR_REWARD_ACTIVATION, anchor_archive
     // at/above ARCHIVE_REWARD_ACTIVATION, judged on the row's block_index and this hub's
@@ -2298,9 +2384,9 @@ class StateAnchorPublisher {
         if(!row || row.block_index === null || row.block_index === undefined || row.block_index === '') return false;
         let block = Number(row.block_index);
         if(!Number.isFinite(block)) return false;
-        if(/^anchor_(BTC|LTC|DOGE)$/.test(type) || type === 'anchor_bundle')
+        if(ANCHOR_FLAG_DAY_REWARD_TYPES.indexOf(type) !== -1)
             return ar.isAnchorRewardActive(block, this.network);
-        if(type === 'anchor_archive')
+        if(type === ARCHIVE_FLAG_DAY_REWARD_TYPE)
             return ar.isArchiveRewardActive(block, this.network);
         return false;
     }
@@ -2389,13 +2475,24 @@ class StateAnchorPublisher {
         // (oracle_round/attest_fee rows are indexer-derived and NEVER archived.)
         // Rows are immutable, so batch_seq IS NULL is the only pending test;
         // pre-upgrade rows without a deterministic block_index stay local.
+        // ELIGIBILITY BEFORE LIMIT. Derived rows keep batch_seq NULL forever by design, so
+        // they stay eligible for this SELECT on every round and their number only grows
+        // (each archive publish records another anchor_archive). Filtered after the LIMIT,
+        // a maxBatch-sized block of them occupied the page permanently, and an older
+        // below-flag-day reward sorted behind them was never examined again: those rows
+        // have no chain parse, so the archive is their ONLY recovery transport, and
+        // nothing else clears the blockers.
+        let exclusion = this._derivedRewardExclusionSql();
         let rewards = await this.db.doQuery(
-            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL " +
-            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?", [this.maxBatch]);
-        // Derived rows are dropped here, not in the SQL, because they keep batch_seq NULL
-        // on purpose: rows are immutable and nothing else reads NULL as "unarchived" for them.
-        // Archiving them was self-feeding: each archive publish records an anchor_archive
-        // reward, which the next flush archived alone, one reward-only ANCHOR per restart.
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" +
+            exclusion.clause + " " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
+            exclusion.params.concat([this.maxBatch]));
+        // RETAINED, and now redundant on purpose: the SQL narrows the page, this
+        // guarantees the invariant for an unscoped hub (empty clause) and for any row the
+        // SQL form judged differently. Archiving a derived row was self-feeding: each
+        // archive publish records an anchor_archive reward, which the next flush archived
+        // alone, one reward-only ANCHOR per restart.
         rewards = (rewards || []).filter(r => !this._isChainDerivedReward(r));
         if((!matches || matches.length === 0) && (!calls || calls.length === 0) && (!rewards || rewards.length === 0)){ this._pendingMatches = 0; return 'none'; }
         matches = matches || [];
@@ -2575,8 +2672,19 @@ class StateAnchorPublisher {
         // signing set. A leader elected for liveness but absent from the
         // snapshot_block set must not inflate the local quorum with a signature
         // the indexer will drop on-chain.
+        //
+        // Membership binds the SINGLE-member set too, so no `snapCount <= 1` disjunct
+        // short-circuits this test: a one-member set is not a degenerate self-sign,
+        // because the one member may be validator A while the election (a DIFFERENT
+        // resolver at a DIFFERENT height, see above) picked replacement publisher B.
+        // anchor.js filters B's seeded signature out by snapshot membership and records
+        // the v1 'invalid: insufficient valid signatures (0/1)', while full-parse recovery
+        // throws on the same wrapper - and this hub would dequeue the settled rows behind
+        // it. The two sibling attestation rounds prove membership before their own
+        // singleton fast path (_runPublisherAttestationRound /
+        // _runArchiveAttestationRound); this round holds the same guard.
         let signatures = new Map();
-        if(snapCount <= 1 || signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
+        if(signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
         // Full {pubkey, source, weight} set so _checkArchiveQuorum can tally
         // distinct-source stake (weight carries the source's stake when weighted).
@@ -2598,6 +2706,21 @@ class StateAnchorPublisher {
         };
 
         if(snapCount <= 1){                                                   // single-node: self-sign suffices
+            // ... but only when the self-signature actually satisfies quorum. snapCount is
+            // exactly 1 here (0 deferred above), so quorum is 1 and this holds iff the seed
+            // above fired, i.e. iff this leader IS the sole member. A non-member leader holds
+            // nothing, so publishing would broadcast a v1 with zero qualified signatures and
+            // dequeue the settled rows behind an anchor no verifier can confirm. Defer
+            // instead, exactly as the snapCount === 0 branch does: the rows stay pending and
+            // a later flush re-archives them under a fresh batch seq, either once the signing
+            // set resolves to include this hub or under a leader that is already a member.
+            if(signatures.size < quorum){
+                console.warn('StateAnchorPublisher: single-member oracle_publish set at snapshot_block ' +
+                             Number(cp.snapshot_block) + ' (batch ' + batchSeq + ') does not contain this ' +
+                             'publisher; deferring the archive round rather than self-publishing a v1 the ' +
+                             'indexer records invalid (rows stay pending)');
+                return 'none';
+            }
             // A held publish never archived anything, so the pending counter must NOT be
             // cleared: the rows really are still pending and the next flush re-checks.
             let result;
@@ -3892,17 +4015,23 @@ class StateAnchorPublisher {
         // round could not satisfy), the on-chain v1 is stored `invalid`; dequeuing
         // the rows anyway would strand settled cross_chain_matches/calls in an
         // unrecoverable hole. Treat it exactly like a lost chunk: keep the rows
-        // pending so a later round re-archives them under a fresh batch seq. The
-        // GENUINE single-node degenerate (validators.length === 1) keeps today's
-        // behavior (the indexer stores those as recoverable 'unverified').
-        // === 1, not <= 1: an EMPTY declared signing set is not a single-node quorum.
-        // _startArchiveRound now defers a snapCount === 0 round outright, so this is
-        // defense-in-depth for any other path into _publishArchive; it fails closed
-        // (an empty set gives qualified 0 -> bftQuorumOrSingle(0, 1) === 1 > 0 valid
-        // signers), so the rows stay pending instead of being dequeued against a v1
-        // no verifier can ever confirm.
-        let onChainValid = (round.validators.length === 1) ||
-                           this._quorumVerified(round.canonical, sigs, round.validators, round.weighted);
+        // pending so a later round re-archives them under a fresh batch seq.
+        //
+        // _quorumVerified is the SOLE verdict. A `round.validators.length === 1`
+        // short-circuit used to sit in front of it, justified by the claim that the
+        // indexer stores single-validator anchors as recoverable 'unverified'. It does
+        // not: anchor.js reaches 'unverified' only when it mirrors NO oracle_publish
+        // snapshot at all (oracleN === 0). With a one-member set and a signature from
+        // outside it, its membership filter yields zero valid signers and the anchor
+        // records 'invalid: insufficient valid signatures (0/1)', while full-parse
+        // recovery throws on the same wrapper - so the bypass dequeued settled rows
+        // behind an anchor neither the live indexer nor recovery can ever reconstruct.
+        // The legitimate single-node federation is unaffected: a sole member that signed
+        // its own archive clears _quorumVerified on its own (bftQuorumOrSingle(1, 1) === 1).
+        // A weighted singleton whose stake is zero, blank-sourced or truncated now fails
+        // closed, which is parity with anchor.js reaching the same verdict on the same
+        // bytes, not a regression: the rows stay pending instead of being stranded.
+        let onChainValid = this._quorumVerified(round.canonical, sigs, round.validators, round.weighted);
 
         // A partially-published archive is unrecoverable (recovery refuses
         // incomplete batches), so the rows must NOT be marked archived. Back-fill
@@ -4833,98 +4962,151 @@ class StateAnchorPublisher {
         attempts = attempts || 5;
         // flush() checks the pause + per-window
         // ceiling ONCE, but a single flush broadcasts N times (one per pending
-        // checkpoint plus one per archive chunk), each recording a spend. Re-gate
-        // per broadcast here so the ceiling and the runtime pause bind every send,
-        // not just the first: once record() has consumed the window budget an
-        // exhausted ceiling stops the remaining sends (fail-closed, like the sibling
-        // AttestationPublisher which gates allow() immediately before each send).
-        // Retries of the SAME payload do not re-consume (record() only fires on a
-        // successful fresh send below), so gating once at entry is per row/chunk.
-        if(this.spendGuard.isPaused()){
+        // checkpoint plus one per archive chunk), each spending a fee. Gate per
+        // broadcast here so the ceiling and the runtime pause bind every send, not
+        // just the first (fail-closed, like the sibling AttestationPublisher).
+        //
+        // The gate is a RESERVATION, not the old allow()/await/record() pair:
+        // allow() and record() straddle the awaited send, so concurrent flushes all
+        // read the same pre-send budget and all spend, and every exit that did not
+        // reach record() charged nothing even when the transaction had gone out
+        // (a lost ACK spends a real fee). reserve() runs the same gates, consumes
+        // the budget in one synchronous turn and PERSISTS it before the send
+        // (spend_guard.js:259-268); the reservation IS the record, so record() must
+        // never be called on this path or the spend is counted twice.
+        //
+        // Retries of the SAME payload do not re-reserve: one call publishes at most
+        // one transaction, so the reservation is per row/chunk and is settled exactly
+        // once on whichever exit the call takes. commit() on every outcome where the
+        // transaction may have reached the node (including both ambiguous exits:
+        // over-charging a send that never landed fails closed and ages out within one
+        // window), release() only on definitive never-sent exits.
+        let token = this.spendGuard.reserve();
+        if(!token){
             let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
             err.spendBlocked = true;
             throw err;
         }
-        if(!this.spendGuard.allow()){
-            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush (per-send ceiling)');
-            err.spendBlocked = true;
-            throw err;
-        }
-        let lastErr = null;
-        // Explicit attempt counter rather than a `for` step: a rate-limit wait below
-        // retries WITHOUT consuming an attempt (the encoder is telling us when to come
-        // back, which is not a transient send failure), and `delayMs` carries the wait
-        // that branch chose so the loop top never double-sleeps it with the flat delay.
-        let attempt = 0;
-        let delayMs = 0;
-        let rateLimitWaits = 0;
-        while(attempt < attempts){
-            if(delayMs > 0) await this._sleep(delayMs);
-            delayMs = this.chunkRetryDelayMs;
-            if(existsCheck){
-                let found;
-                try { found = await existsCheck(); }
-                catch(e){ found = undefined; }   // undetermined
-                if(found && found.exists){
-                    console.log('StateAnchorPublisher: anchor already on-chain (txid ' +
-                                (found.txid || '?') + '); adopting instead of re-broadcasting');
-                    return found;
+        try {
+            let lastErr = null;
+            // Explicit attempt counter rather than a `for` step: a rate-limit wait below
+            // retries WITHOUT consuming an attempt (the encoder is telling us when to come
+            // back, which is not a transient send failure), and `delayMs` carries the wait
+            // that branch chose so the loop top never double-sleeps it with the flat delay.
+            let attempt = 0;
+            let delayMs = 0;
+            let rateLimitWaits = 0;
+            while(attempt < attempts){
+                if(delayMs > 0) await this._sleep(delayMs);
+                delayMs = this.chunkRetryDelayMs;
+                if(existsCheck){
+                    let found;
+                    try { found = await existsCheck(); }
+                    catch(e){ found = undefined; }   // undetermined
+                    if(found && found.exists){
+                        console.log('StateAnchorPublisher: anchor already on-chain (txid ' +
+                                    (found.txid || '?') + '); adopting instead of re-broadcasting');
+                        this.spendGuard.release(token);   // nothing was sent in this call
+                        return found;
+                    }
+                    // Undetermined + a send may already have gone out: never risk it.
+                    if(found === undefined && lastErr && lastErr.anchorAmbiguousSend){
+                        this.spendGuard.commit(token);    // the send may have landed
+                        throw lastErr;
+                    }
                 }
-                // Undetermined + a send may already have gone out: never risk it.
-                if(found === undefined && lastErr && lastErr.anchorAmbiguousSend) throw lastErr;
-            }
-            try {
-                let sent = await broadcaster(payload);
-                // A fresh broadcast actually spent a fee; charge the window
-                // budget. The adopt paths above (existsCheck hit) return an already
-                // on-chain tx and deliberately do NOT record (no new spend).
-                this.spendGuard.record();
-                return sent;
-            }
-            catch(e){
-                lastErr = e;
-                // No confirmed input to build from. Pre-send, nothing was signed or
-                // sent, and a 2.5 s retry cannot confirm an output; surface it as the
-                // deferral it is instead of burning the attempt budget on it.
-                if(e && e.anchorNoConfirmedUtxo) throw e;
-                if(e && e.anchorAmbiguousSend){
-                    // The send may have been accepted; give the anchor a bounded
-                    // window to reach the indexer's mined view, then defer.
-                    if(existsCheck){
-                        for(let p = 0; p < this.ambiguousPollAttempts; p++){
-                            await new Promise(r => setTimeout(r, this.ambiguousPollDelayMs));
-                            let found = null;
-                            try { found = await existsCheck(); } catch(_e){ found = null; }
-                            if(found && found.exists){
-                                console.log('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
-                                            (found.txid || '?') + '); adopting');
-                                return found;
+                // Re-read the operator pause before EVERY attempt. The pause is an
+                // out-of-band runtime toggle (the control RPC flips an in-memory flag),
+                // so the entry reservation cannot see one asserted during the awaited
+                // retry delay or existence check above, and an operator halt has to stop
+                // the sends that have not gone out yet. Only the PAUSE is re-read: the
+                // ceiling stays gated once per row/chunk because a retry of the same
+                // payload consumes no new budget, and re-gating it would refuse
+                // legitimate retries. Same idiom as RollcallRound's per-chunk re-check.
+                if(this.spendGuard.isPaused()){
+                    // An earlier ambiguous attempt keeps its own error: the caller
+                    // withdraws the anchor intent markers for every failure NOT flagged
+                    // anchorAmbiguousSend, and dropping them after a send that may have
+                    // reached the network invites a second anchor for the same payload.
+                    if(lastErr && lastErr.anchorAmbiguousSend){
+                        this.spendGuard.commit(token);
+                        throw lastErr;
+                    }
+                    this.spendGuard.release(token);       // this attempt never went out
+                    let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
+                    err.spendBlocked = true;
+                    throw err;
+                }
+                try {
+                    let sent = await broadcaster(payload);
+                    // A fresh broadcast actually spent a fee; keep the reserved budget
+                    // as the recorded spend. The adopt path above returns an already
+                    // on-chain tx and deliberately releases instead (no new spend).
+                    this.spendGuard.commit(token);
+                    return sent;
+                }
+                catch(e){
+                    lastErr = e;
+                    // No confirmed input to build from. Pre-send, nothing was signed or
+                    // sent, and a 2.5 s retry cannot confirm an output; surface it as the
+                    // deferral it is instead of burning the attempt budget on it.
+                    if(e && e.anchorNoConfirmedUtxo){
+                        this.spendGuard.release(token);   // pre-send; nothing left the hub
+                        throw e;
+                    }
+                    if(e && e.anchorAmbiguousSend){
+                        // The send may have been accepted; give the anchor a bounded
+                        // window to reach the indexer's mined view, then defer. Either
+                        // way the fee is treated as spent.
+                        if(existsCheck){
+                            for(let p = 0; p < this.ambiguousPollAttempts; p++){
+                                await new Promise(r => setTimeout(r, this.ambiguousPollDelayMs));
+                                let found = null;
+                                try { found = await existsCheck(); } catch(_e){ found = null; }
+                                if(found && found.exists){
+                                    console.log('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
+                                                (found.txid || '?') + '); adopting');
+                                    this.spendGuard.commit(token);   // our send is what landed
+                                    return found;
+                                }
                             }
                         }
+                        this.spendGuard.commit(token);
+                        throw e;   // defer to a later flush; never rebuild+re-broadcast
                     }
-                    throw e;   // defer to a later flush; never rebuild+re-broadcast
+                    // Encoder rate limiting. Safe to retry by the shared classifier's own
+                    // rule: a sub-500 response is a definitive refusal, so nothing reached
+                    // the coin node and no double spend is possible. The reservation was
+                    // taken once at method entry and covers the whole call, so a free
+                    // retry here re-charges nothing.
+                    let rlWaitMs = this._rateLimitWaitMs(e);
+                    if(rlWaitMs !== null){
+                        if(rateLimitWaits >= this.rateLimitMaxWaits){
+                            this.spendGuard.release(token);   // definitive refusal; never sent
+                            throw e;
+                        }
+                        rateLimitWaits++;
+                        delayMs = rlWaitMs;
+                        console.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
+                                     'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
+                                     this.rateLimitMaxWaitMs + 'ms), ' +
+                                     (this.rateLimitMaxWaits - rateLimitWaits) + ' rate-limit wait(s) left ' +
+                                     'before this anchor defers to a later flush');
+                        continue;   // deliberately does NOT consume an attempt
+                    }
+                    attempt++;
                 }
-                // Encoder rate limiting. Safe to retry by the shared classifier's own
-                // rule: a sub-500 response is a definitive refusal, so nothing reached
-                // the coin node and no double spend is possible. The spend guard was
-                // consumed once at method entry and record() only fires on a successful
-                // fresh send, so a free retry here re-charges neither.
-                let rlWaitMs = this._rateLimitWaitMs(e);
-                if(rlWaitMs !== null){
-                    if(rateLimitWaits >= this.rateLimitMaxWaits) throw e;
-                    rateLimitWaits++;
-                    delayMs = rlWaitMs;
-                    console.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
-                                 'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
-                                 this.rateLimitMaxWaitMs + 'ms), ' +
-                                 (this.rateLimitMaxWaits - rateLimitWaits) + ' rate-limit wait(s) left ' +
-                                 'before this anchor defers to a later flush');
-                    continue;   // deliberately does NOT consume an attempt
-                }
-                attempt++;
             }
+            // Retries only continue on definitive failures, so an exhausted loop sent
+            // nothing; the release below hands the budget back.
+            throw lastErr || new Error('broadcast failed');
         }
-        throw lastErr || new Error('broadcast failed');
+        finally {
+            // Backstop, not the settle point: release() is a no-op on a token already
+            // committed or released, so an exit that forgot to settle gives the budget
+            // back rather than leaking a reservation that over-counts the window.
+            this.spendGuard.release(token);
+        }
     }
 
     // Sleep indirection so the retry paths above are testable without real waits
@@ -5066,12 +5248,24 @@ class StateAnchorPublisher {
             unconfirmed: allowUnconfirmed
         });
         if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
-        // Refuse phase 1 of a two-transaction encoding before anything is signed: this
-        // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
-        // ANCHOR no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
-        assertSingleTxEncoding(psbtResult, 'StateAnchorPublisher');
-        let txHex = await signer.walletSignFn(psbtResult.psbt);
-        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        // A successful create_tx RESERVED the inputs it selected (receipt on
+        // psbtResult.reservation, 5-minute encoder TTL), so an abandoned build must hand
+        // them back or this address is unavailable to every other publisher until the TTL
+        // expires. Scoped strictly to the pre-broadcast section below: past the send,
+        // holding the inputs is what stops a second build double-spending a transaction
+        // that may already have landed. See lib/encoder_reservation.js.
+        let txHex;
+        try {
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
+            // ANCHOR no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+            assertSingleTxEncoding(psbtResult, 'StateAnchorPublisher');
+            txHex = await signer.walletSignFn(psbtResult.psbt);
+            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        } catch(e){
+            await abandonBuild(signer.encoder, psbtResult, 'StateAnchorPublisher');
+            throw e;
+        }
         // Everything above is pre-send (building/signing; no money has moved).
         // Only broadcast_tx has a side effect, so only ITS failures get the
         // ambiguity classification _broadcastWithRetry keys the no-double-

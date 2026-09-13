@@ -188,6 +188,56 @@ describe('bin/oracle-round-presence.js: range pinning across hubs', function () 
             expect(paramsOf(post.getCall(0))).to.deep.equal({ from_round: 25, to_round: 27 });
             expect(paramsOf(post.getCall(1))).to.deep.equal({ from_round: 25, to_round: 27 });
         });
+
+        // An unvalidated bound is worse than a rejected one: Number('oops') is NaN and
+        // JSON.stringify writes NaN as null, so every hub silently resolved its OWN
+        // upper bound and the run still printed an agreed/divergent verdict over
+        // ranges that never matched. The pinned range is the whole point of the tool.
+        it('rejects an invalid explicit bound with exit 2, before any request', async function () {
+            for (const argv of [['--from', '25', '--to', 'oops'],
+                                ['--from', 'oops', '--to', '27'],
+                                ['--from', '-1', '--to', '27'],
+                                ['--from', '2.5', '--to', '27'],
+                                ['--limit', '0'],
+                                ['--from', '27', '--to', '25']]) {
+                const { cli, post } = loadCli({
+                    [HUB_A]: () => presence(25, 27),
+                    [HUB_B]: () => presence(25, 27)
+                });
+                const code = await cli.main(cli.parseArgs(
+                    ['node', 'cli', '--hubs', HUB_A + ',' + HUB_B].concat(argv), {}));
+                expect(code, argv.join(' ')).to.equal(2);
+                expect(post.callCount, argv.join(' ')).to.equal(0);
+            }
+        });
+    });
+
+    describe('distinct hub identities', function () {
+        it('collapses a repeated URL so the two-hub gate bites before any request', async function () {
+            // Comparing a hub to itself proves nothing, which the file's own usage
+            // text says; counting URL ENTRIES let `--hubs A,A` clear the gate, compare
+            // that endpoint to itself and print agreement with exit 0.
+            const { cli, post } = loadCli({ [HUB_A]: () => presence(25, 27) });
+            const code = await cli.main(cli.parseArgs(
+                ['node', 'cli', '--hubs', HUB_A + ',' + HUB_A + '/'], {}));
+            expect(code).to.equal(2);
+            expect(post.callCount).to.equal(0);
+            expect(logs.join('\n')).to.contain('DISTINCT');
+        });
+
+        it('counts a malformed answer as not-compared rather than as agreement', async function () {
+            // Two hubs answer, one without a rounds array. A gate that counted raw
+            // replies while comparePresence re-filtered would leave ONE view to be
+            // reported as federation agreement with exit 0.
+            const { cli } = loadCli({
+                [HUB_A]: () => presence(25, 27),
+                [HUB_B]: () => ({ from_round: 25, to_round: 27, digest: 'x' })
+            });
+            const code = await cli.main(cli.parseArgs(
+                ['node', 'cli', '--hubs', HUB_A + ',' + HUB_B, '--from', '25', '--to', '27'], {}));
+            expect(code).to.equal(2);
+            expect(logs.join('\n')).to.contain('need at least two to compare');
+        });
     });
 
     describe('exit codes', function () {

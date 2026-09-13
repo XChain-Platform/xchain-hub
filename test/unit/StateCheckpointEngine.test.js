@@ -146,6 +146,9 @@ describe('StateCheckpointEngine', function () {
                 p2pConfig: {
                     CHECKPOINT_CHAINS:        (opts.chains || ['BTC']).join(','),
                     CHECKPOINT_CONFIRMATIONS: String(opts.confirmations != null ? opts.confirmations : 0),
+                    // Left undefined unless a case sets it, so every other mesh keeps
+                    // resolving the built-in default.
+                    CHECKPOINT_COSIGN_TOLERANCE_BLOCKS: opts.cosignTolerance,
                     BTC_INDEXER_URL: 'http://stub', LTC_INDEXER_URL: 'http://stub', DOGE_INDEXER_URL: 'http://stub'
                 },
                 hubDbBroadcaster: { rows: [], broadcastRow(ev) { this.rows.push(ev); } },
@@ -503,6 +506,42 @@ describe('StateCheckpointEngine', function () {
             let signs = watchCosign(follower);
             await follower.engine._handleSignReq(env);
             expect(signs.length, 'missing own tip fails closed').to.equal(0);
+        });
+
+        // Review board #7582: a MALFORMED tolerance must not disable this whole guard.
+        // parseInt('invalid') is NaN and `Math.abs(delta) > NaN` is always false, so an
+        // unclamped typo in CHECKPOINT_COSIGN_TOLERANCE_BLOCKS silently removes the
+        // freshness bound on a wire field that selects the validator set, the leader
+        // ladder and every flag-day gate. The constructor clamps to the default on any
+        // non-negative failure, which is the idiom `confirmations` two lines above uses.
+        it('a MALFORMED tolerance falls back to the default and still declines a stale request', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0, cosignTolerance: 'invalid' });
+            let { env, follower } = makeSignReq(bus, SNAP);
+            expect(follower.engine.cosignToleranceBlocks,
+                   'a nonnumeric value must not become NaN').to.equal(144);
+            follower.hub._resolveBtcLatestBlock = async () => SNAP + 9900;
+            let signs = watchCosign(follower);
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'a 9,900-block-stale snapshot_block must be declined').to.equal(0);
+        });
+
+        it('honours a VALID operator tolerance in both directions', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0, cosignTolerance: '10' });
+            let { env, follower } = makeSignReq(bus, SNAP);
+            expect(follower.engine.cosignToleranceBlocks).to.equal(10);
+            follower.hub._resolveBtcLatestBlock = async () => SNAP + 5;   // inside the window
+            let signs = watchCosign(follower);
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'a value the default would also accept is co-signed').to.equal(1);
+
+            let bus2 = buildMesh(2, { btcBlock: SNAP, confirmations: 0, cosignTolerance: '10' });
+            let second = makeSignReq(bus2, SNAP);
+            second.follower.hub._resolveBtcLatestBlock = async () => SNAP + 50;   // outside 10, inside 144
+            let signs2 = watchCosign(second.follower);
+            await second.follower.engine._handleSignReq(second.env);
+            expect(signs2.length, 'a tightened window is actually enforced').to.equal(0);
         });
     });
 

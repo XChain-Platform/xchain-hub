@@ -102,10 +102,16 @@ function _statusOf(value) {
     return Number.isFinite(n) ? n : null;
 }
 
-// Decide whether a non-zero CLI exit reports the VENDOR being unavailable. Reads the
+// Decide whether a CLI failure reports the VENDOR being unavailable. Reads the
 // structured stdout envelope first (--output-format json carries the vendor's own
 // status and error type on an error run), then the free-form error text, because which
 // stream carries the detail is a CLI implementation detail this module does not own.
+//
+// Field set read: api_error_status (envelope and error, the documented carrier of the
+// vendor's HTTP status on the success-shaped result), status / error.status /
+// error.code, error.type / type / subtype, and the message text plus the string
+// entries of the errors[] array. The 429-plus-any-5xx boundary itself is unchanged, so
+// the paired _isTransientStatus in providers/llm.js does not move with this.
 //
 // The text scan is deliberately fed stderr plus the envelope's MESSAGE fields, never
 // the whole stdout blob: a bare status token is matched by word boundary, and a usage
@@ -117,15 +123,28 @@ function _cliFailureIsTransient(stdout, stderr) {
     const envelope = (json && typeof json === 'object') ? json : {};
     const err = (envelope.error && typeof envelope.error === 'object') ? envelope.error : {};
 
+    // envelope.errors is the CLI's own diagnostic array on an execution-error result
+    // (item 7756). Only its STRING entries join the scan, and they join it here rather
+    // than as a blob: an object entry stringifies to '[object Object]' and a nested
+    // usage figure would come back as a bare number the status regex could read as a 5xx.
+    const errorsText = Array.isArray(envelope.errors)
+        ? envelope.errors.filter((v) => typeof v === 'string').join('\n')
+        : '';
+
     const text = [
         stderr,
         err.message,
         envelope.message,
-        envelope.subtype
+        envelope.subtype,
+        errorsText
     ].map((v) => (typeof v === 'string' ? v : '')).join('\n');
     if (REFUSAL_TEXT_RE.test(text)) return false;
 
-    for (const status of [_statusOf(envelope.status), _statusOf(err.status), _statusOf(err.code)]) {
+    // api_error_status is the field the CLI's result envelope actually carries the
+    // vendor's HTTP status on, and it rides on the SUCCESS-shaped result, so it is read
+    // alongside the error-shaped status fields rather than instead of them (item 7756).
+    for (const status of [_statusOf(envelope.api_error_status), _statusOf(err.api_error_status),
+                          _statusOf(envelope.status), _statusOf(err.status), _statusOf(err.code)]) {
         if (status === 429 || (status >= 500 && status <= 599)) return true;
     }
     const type = String(err.type || envelope.type || envelope.subtype || '').toLowerCase();
@@ -293,28 +312,70 @@ async function runClaudePrint(opts) {
                 // no-kind branch below is what says so.
                 let subtype = String((json && json.subtype) || '');
                 let isRefusal = /refus|declin|blocked/i.test(subtype);
+                // A vendor 429/5xx can exit 0 (item 7756): api_error_status rides on the
+                // success-shaped result, so the outage lands here with empty result text
+                // rather than on the non-zero branch above. Consult the same classifier,
+                // refusal first, so it fails over to the next judge instead of burning the
+                // round. Everything it does not recognize keeps today's hard rejection.
+                if (!isRefusal && _cliFailureIsTransient(stdout, '')) {
+                    rejectTransient('claude-spawn: CLI returned no result text' +
+                        (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
+                    return;
+                }
                 rejectHard('claude-spawn: CLI returned no result text' +
                     (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
                     isRefusal ? 'refusal' : undefined);
                 return;
             }
             // Fail closed when the CLI reports its own failure alongside result text.
-            // The empty-result branch above only fires when the text is empty, so a
-            // reached-CLI failure that emitted partial text resolved as a sound
-            // verdict -- the same fail-open the HTTP transports had in
-            // providers/llm.js.
+            // The empty-result branch above fires only when the text is empty, so without
+            // this branch a reached-CLI failure that emits partial text resolves as a
+            // sound verdict: the same fail-open providers/llm.js closes on its HTTP
+            // transports.
             //
-            // Gate on is_error/subtype, NOT stop_reason: that field looks like the
-            // obvious signal, but `claude --print --output-format json` emits no
-            // such field (it is on the direct Anthropic Messages API, a different
-            // transport); is_error + subtype is this CLI's whole failure contract, so
-            // a stop_reason check here would be dead code.
+            // is_error + subtype is the CLI's own documented failure contract and stays
+            // the primary gate; the stop_reason net below is a second, narrower one.
+            //
+            // The CLI does emit a stop_reason, so a check on it here is live code, not
+            // dead: the `type:"result"` envelope carries a top-level stop_reason (observed
+            // as `stop_reason:null` on the CLI's own error result, alongside end_turn /
+            // tool_use / stop_sequence / refusal). Unchecked, a refusal or a truncation
+            // arriving with is_error false and non-empty text resolves as a sound verdict.
+            // This transport signs its text into on-chain attestation answers and parses
+            // judge verdicts out of it, and the two direct HTTP transports reject exactly
+            // these outcomes even when text is emitted (providers/llm.js:1397 refusal,
+            // :1420 truncation), so the CLI must not be the one lane that accepts them.
             if (json && json.is_error === true) {
                 let subtype = String((json && json.subtype) || '');
                 let isRefusal = /refus|declin|blocked/i.test(subtype);
+                // Same availability route as the empty-result branch (item 7756). The
+                // classifier is NOT fed the result text here: a judge verdict that happens
+                // to mention a status token would otherwise re-ask a model that already
+                // answered, which is the verdict-shopping the refusal precedence exists to
+                // prevent. Only the envelope's own status and diagnostic fields decide.
+                if (!isRefusal && _cliFailureIsTransient(stdout, '')) {
+                    rejectTransient('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
+                        (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
+                    return;
+                }
                 rejectHard('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
                     (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
                     isRefusal ? 'refusal' : undefined);
+                return;
+            }
+            // Presence-conditional, TOP-LEVEL only, reject-known-bad. Reading nested
+            // per-turn messages would falsely reject a complete answer whose intermediate
+            // turn hit max_tokens; an absent field, an empty string, and every other value
+            // (end_turn, tool_use, stop_sequence, tool_deferred, anything new) fall through
+            // to resolve, which is the same allow-by-default posture the HTTP branches take.
+            const stop = (json && typeof json.stop_reason === 'string') ? json.stop_reason : '';
+            if (stop === 'refusal') {
+                rejectHard('claude-spawn: CLI reported a model refusal (stop_reason=refusal) with result text',
+                    'refusal');
+                return;
+            }
+            if (stop === 'max_tokens' || stop === 'model_context_window_exceeded') {
+                rejectHard('claude-spawn: CLI response truncated (stop_reason=' + stop + ')', 'truncation');
                 return;
             }
             safeResolve({ result, json, stderr });
