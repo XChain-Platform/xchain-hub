@@ -33,7 +33,7 @@
  *
  ********************************************************************/
 
-const Database = require('../src/db.js');
+const Database = require('../src/db');
 const prune    = require('../src/lib/capability_snapshot_prune.js');
 const { resolveSecretEnv } = require('../src/secret-env.js');
 

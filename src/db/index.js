@@ -18,6 +18,17 @@
  * Adapted from xchain-sync/src/db.js: connection pool,
  * circuit breaker, and hub-specific config storage methods.
  *
+ * The per-table queries live in one mixin per table family beside this file, and
+ * installMixins() puts them on Database.prototype at load time, so every caller
+ * keeps writing db.<method>() and no call site knows which file a query is in.
+ *
+ * The install uses Object.defineProperties with enumerable false, NOT the
+ * Object.assign the style guide names. Class methods are non-enumerable, so an
+ * assigned mixin would be the only prototype member that for...in and
+ * Object.keys(Database.prototype) can see: the split would change what the
+ * prototype enumerates, which is behaviour, not layout. writable and
+ * configurable stay true so a test can still stub and restore a moved method.
+ *
  ********************************************************************/
 
 // Runtime floor, asserted above the require it protects. The pinned mariadb 3.5.x
@@ -37,30 +48,32 @@ if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');
-const ark     = require('./anchor_reward_key.js');
+const ark     = require('../anchor_reward_key.js');
+
+// One mixin per table family, each an object of methods installed on
+// Database.prototype below. A family's file is named for the src/sql DDL it owns.
+const MIXINS = [
+    require('./anchor.js'),
+    require('./attestation.js'),
+    require('./bridge_transfers.js'),
+    require('./capability_snapshots.js'),
+    require('./configs.js'),
+    require('./consensus_state.js'),
+    require('./cross_chain.js'),
+    require('./governance.js'),
+    require('./oracle.js'),
+    require('./p2p_peers.js'),
+    require('./policy_snapshots.js'),
+    require('./prices.js'),
+    require('./reorg_attestations.js'),
+    require('./slash_proposals.js'),
+    require('./state_checkpoints.js'),
+    require('./swap_records.js'),
+    require('./telemetry_pings.js'),
+    require('./validators.js')
+];
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
-
-// The `coin` key the admission watermark floor is stored under. The watermark is
-// per (table, chain) and the hub federates every chain, so it has no coin of its
-// own: the same problem getConfigRowsByModule exists for, solved here with one
-// reserved key so the read stays a plain getConfig.
-const ADMISSION_WATERMARK_COIN = 'xchain';
-
-// Canonical coin names. The hub config tree keys coins by full name
-// (bitcoin/litecoin/dogecoin); indexers, however, push chain tips using the
-// coin abbreviation (config['COIN'] = 'BTC'/'LTC'/'DOGE'). Storing chain_tips
-// under the abbreviation creates a phantom top-level coin key (e.g. 'BTC')
-// alongside the real 'bitcoin' entry, which the explorer's config loader
-// cannot map to a coin and used to crash on (configs/undefined.js). Normalize
-// the coin to its full name so chain_tips co-locate under the canonical key.
-const coins = require('./coins');
-const COIN_FULL_NAME = { ...coins.COIN_FULL_NAME };
-
-function normalizeCoin(coin) {
-    if (typeof coin !== 'string') return coin;
-    return COIN_FULL_NAME[coin.toUpperCase()] || coin;
-}
 
 // Binary args the driver encodes correctly on its own, so doQuery's
 // JSON-stringify safety net must leave them alone: stringifying a Buffer yields
@@ -84,11 +97,11 @@ function indexSpecColumns(spec){
 
 // Render a Date as the UTC datetime literal MariaDB should store.
 //
-// Two separate defects met on this line. First, the safety net above
-// used to catch Dates too: JSON.stringify(new Date()) is a QUOTED ISO string and
+// Two separate defects meet on this line. First, the safety net above must
+// leave Dates alone: JSON.stringify(new Date()) is a QUOTED ISO string and
 // MariaDB rejects it with errno 1292 "Incorrect datetime value", so EVERY product
-// write binding a Date failed outright - Governance.propose() could not record a
-// proposal at all - and the unit tier could not see it because it stubs doQuery.
+// write binding a Date would fail outright - Governance.propose() could not record
+// a proposal at all - and the unit tier cannot see it because it stubs doQuery.
 // Second, simply handing the Date to the driver is not right either: the
 // connector encodes it with getFullYear()/getHours(), i.e. in the NODE PROCESS's
 // local timezone, while the session is pinned to UTC (see
@@ -232,7 +245,9 @@ class Database {
     }
 
     async verifyTables(){
-        let dir   = path.join(__dirname, 'sql');
+        // The DDL stays at src/sql/ while this file lives in src/db/, so every read
+        // of it climbs one directory out of the db home.
+        let dir   = path.join(__dirname, '..', 'sql');
         let files = fs.readdirSync(dir);
         let db    = await this.getConnection();
         // One summary line instead of a per-table pair; error paths below still
@@ -586,7 +601,7 @@ class Database {
         }
     }
 
-    // Drop an index if it exists (idempotent). Used to retire an index that a
+    // Drop an index if it exists (idempotent). It retires an index that a
     // later schema revision superseded, so a node created from an older release
     // does not keep carrying it after the migration runs.
     async _dropIndexIfExists(table, indexName){
@@ -808,7 +823,7 @@ class Database {
     // Widen an ENUM column in place to the target value set. Idempotent: skips
     // when the live COLUMN_TYPE already contains every target value, so it is a
     // no-op on fresh installs (which get the full set from the CREATE TABLE) and
-    // on already-migrated nodes. Used to roll out new capability tiers without a
+    // on already-migrated nodes. It rolls out new capability tiers without a
     // manual ALTER on every deployed hub.
     async _migrateEnumColumn(table, column, enumValues, nullClause){
         let db = await this.getConnection();
@@ -833,7 +848,8 @@ class Database {
     }
 
     async _createTableFromFile(file){
-        let dir     = path.join(__dirname, 'sql');
+        // src/sql/ sits one level above the db home (see verifyTables).
+        let dir     = path.join(__dirname, '..', 'sql');
         let data    = fs.readFileSync(dir + '/' + file, "utf8");
         // Strip `--` line comments BEFORE splitting on ';'. A comment may contain a
         // ';' (e.g. "regtest; signed into the canonical"), which would otherwise split
@@ -927,7 +943,8 @@ class Database {
     // Doesn't touch types, defaults of existing columns, or indexes. Each applied
     // ALTER is loudly logged. Reuses the caller's connection (`db`).
     async alterTableForDrift(file, db){
-        const dir      = path.join(__dirname, 'sql');
+        // src/sql/ sits one level above the db home (see verifyTables).
+        const dir      = path.join(__dirname, '..', 'sql');
         const data     = fs.readFileSync(dir + '/' + file, "utf8");
         const table    = file.substring(0, file.indexOf('.sql'));
         const expected = this.parseExpectedColumns(data);
@@ -1037,211 +1054,6 @@ class Database {
         return results;
     }
 
-    async setParam(coin, network, module, paramName, paramValue){
-        let query = `INSERT INTO configs (coin, network, module, param_name, param_value)
-                     VALUES (?, ?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE param_value = ?, updated_at = NOW()`;
-        await this.doQuery(query, [coin, network, module, paramName, paramValue, paramValue]);
-    }
-
-    // Batched upsert. rows: [{coin, network, module, paramName, paramValue}, ...]
-    // Single round-trip: keeps xchain-node's precheck push (3 coins x 3 networks
-    // x ~6 modules x ~7 params ~= 378 rows) under one second instead of one
-    // INSERT per row.
-    async setParams(rows){
-        if(!rows || rows.length === 0) return 0;
-        let placeholders = rows.map(() => '(?, ?, ?, ?, ?)').join(', ');
-        let query = `INSERT INTO configs (coin, network, module, param_name, param_value)
-                     VALUES ${placeholders}
-                     ON DUPLICATE KEY UPDATE param_value = VALUES(param_value), updated_at = NOW()`;
-        let args = [];
-        for(let r of rows){
-            args.push(r.coin, r.network, r.module, r.paramName, r.paramValue);
-        }
-        await this.doQuery(query, args);
-        return rows.length;
-    }
-
-    // The admission height watermark's durable FLOOR.
-    //
-    // The watermark is a CLAIM about rounds, and a claim that was sound when it was
-    // published stays sound: a round that had terminated before this hub restarted has not
-    // un-terminated. Without a floor every hub restart publishes no heights for one full
-    // round-abandon window while every indexer on every re-keyed barrier defers, which is a
-    // mirror outage per restart rather than a design property.
-    //
-    // Stored in `configs` beside chain_tips because it is exactly that kind of value: the
-    // hub's own observation of a chain, node-local, hashed by nothing. It is a floor and
-    // never a ceiling; the producer takes the max of it and what this hub can justify from
-    // its own tip observations, and a per-rail cap still pulls the result down.
-    //
-    // `coin` is the chain-agnostic 'xchain' key, as the hub has no coin of its own: the
-    // identity of a row is the (table, chain) pair in its param_name.
-    async getAdmissionWatermarkFloor(network){
-        let net  = network || 'mainnet';
-        let rows = await this.getConfig(ADMISSION_WATERMARK_COIN, net, 'admission_watermark');
-        let out  = {};
-        for(let name of Object.keys(rows || {})){
-            // '<table>.<chain>'. Table names and chain codes both exclude '.', so the first
-            // dot is the only split, and anything else is skipped rather than guessed at.
-            let dot = String(name).indexOf('.');
-            if(dot <= 0 || dot === String(name).length - 1) continue;
-            let table = String(name).slice(0, dot);
-            let chain = String(name).slice(dot + 1);
-            let raw   = String(rows[name]);
-            if(!/^(?:0|[1-9][0-9]*)$/.test(raw)) continue;
-            let h = Number(raw);
-            if(!Number.isSafeInteger(h)) continue;
-            if(!out[table]) out[table] = {};
-            out[table][chain] = h;
-        }
-        return out;
-    }
-
-    // Persist the floor, monotonically and only where it moved.
-    //
-    // Monotonic because a floor that retreated would re-open the restart window it exists
-    // to close, and only-where-it-moved because the producer samples on a timer: writing
-    // every entry every pass would be one configs UPDATE per table per chain per sample
-    // for a value that changes once per block.
-    //
-    // Returns how many rows were written, so a caller can see the floor moving.
-    async saveAdmissionWatermarkFloor(network, heights){
-        let net = network || 'mainnet';
-        if(!this._admissionFloorWritten) this._admissionFloorWritten = new Map();
-        let rows = [];
-        let mark = [];
-        for(let table of Object.keys(heights || {})){
-            let inner = heights[table];
-            if(!inner || typeof inner !== 'object') continue;
-            for(let chain of Object.keys(inner)){
-                let h = Number(inner[chain]);
-                if(!Number.isSafeInteger(h) || h < 0) continue;
-                let key  = net + '|' + table + '|' + chain;
-                let prev = this._admissionFloorWritten.has(key) ? this._admissionFloorWritten.get(key) : null;
-                if(prev !== null && h <= prev) continue;
-                rows.push({ coin: ADMISSION_WATERMARK_COIN, network: net, module: 'admission_watermark',
-                            paramName: table + '.' + chain, paramValue: String(h) });
-                mark.push([key, h]);
-            }
-        }
-        if(rows.length === 0) return 0;
-        let written = await this.setParams(rows);
-        // Marked only AFTER the write landed: caching a value the INSERT threw on would skip
-        // it on every later pass and leave the floor permanently behind.
-        for(let [key, h] of mark) this._admissionFloorWritten.set(key, h);
-        return written;
-    }
-
-    async getConfig(coin, network, module){
-        let query = "SELECT param_name, param_value FROM configs WHERE coin = ? AND network = ? AND module = ?";
-        let rows  = await this.doQuery(query, [coin, network, module]);
-        let config = {};
-        for(let row of rows){
-            config[row.param_name] = row.param_value;
-        }
-        return config;
-    }
-
-    // Every row of one module on one network, across coins, ordered so two hubs
-    // reading the same table see the same sequence. getConfig() above needs a coin,
-    // and a hub has none: it federates several chains and p2pConfig carries only
-    // HUB_NETWORK. Used for chain-agnostic modules whose param_name is the whole
-    // identity (ATTESTATION_PROVIDER rows are one definition per provider_id), where
-    // a coin-keyed read would have to invent a coin to ask for.
-    async getConfigRowsByModule(network, module){
-        let query = "SELECT coin, param_name, param_value FROM configs WHERE network = ? AND module = ? "
-                  + "ORDER BY coin, param_name";
-        return await this.doQuery(query, [network, module]);
-    }
-
-    // Network defaults to 'mainnet' for back-compat with older indexers.
-    //
-    // `chainId` (optional) identifies the chain INSTANCE the pushing indexer follows:
-    // the hash of its block 1, not of block 0, because the regtest genesis hash is a
-    // chainparams constant that survives every re-genesis while block 1 commits to the
-    // moment the new chain started. Omitted (older indexer, or a chain whose block 1 is
-    // not mined yet) leaves the stored value alone rather than clearing it, so a single
-    // push that has not learned the id cannot erase an identity the mirrors are filtering on.
-    async setChainTip(coin, network, blockHeight, blockTime, chainId){
-        let net = network || 'mainnet';
-        // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
-        // appears as an abbreviation-keyed phantom coin in the served config tree.
-        let key = normalizeCoin(coin);
-        await this.setParam(key, net, 'chain_tips', 'block_height', String(blockHeight));
-        await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
-        if(typeof chainId === 'string' && chainId)
-            await this.setParam(key, net, 'chain_tips', 'chain_id', chainId);
-    }
-
-    // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.
-    // Returns: { blockHeight, blockTime, chainId } or null if not set.
-    async getChainTip(coin, network){
-        let net = network || 'mainnet';
-        // Prefer the canonical full-name key (setChainTip writes there now). Fall
-        // back to the raw abbreviation for tips written before the normalization,
-        // so a deploy never opens a read gap on the oracle's BTC anchor.
-        let cfg = await this.getConfig(normalizeCoin(coin), net, 'chain_tips');
-        if(!cfg.block_height && normalizeCoin(coin) !== coin)
-            cfg = await this.getConfig(coin, net, 'chain_tips');
-        if(!cfg.block_height) return null;
-        return {
-            blockHeight: parseInt(cfg.block_height),
-            blockTime:   parseInt(cfg.block_time) || 0,
-            // Explicitly null, never undefined, when no indexer has reported one: every
-            // consumer (the row stamps, the snapshot envelopes) treats null as "identity
-            // unknown", which the mirrors accept, so a hub that has not learned its chain
-            // keeps behaving exactly as it did before the column existed.
-            chainId:     (typeof cfg.chain_id === 'string' && cfg.chain_id) ? cfg.chain_id : null
-        };
-    }
-
-    // Returns: { coin: { network: { module: { param: value } } } }
-    //
-    // Optional `sinceUpdatedAt` (epoch-seconds cursor from getConfigWatermark) returns rows
-    // changed at or after that instant. The cursor is anchored on UNIX_TIMESTAMP(updated_at): a
-    // plain integer that survives JSON round-trips with no timezone ambiguity. Comparison is
-    // INCLUSIVE `>=` (item #2265): both sides truncate to whole seconds, so a strict `>` dropped
-    // a write committed after the row read but stamped in the same second as the watermark - the
-    // client advanced its cursor to that second and the write was never delivered until a full
-    // re-fetch. The cost of `>=` is that rows in the cursor second are re-delivered each poll
-    // until a newer write lands; consumers merge idempotently, so redelivery is a no-op and the
-    // delta is genuinely loss-free without a separate sequence column.
-    async getAllConfigs(sinceUpdatedAt){
-        let query = "SELECT coin, network, module, param_name, param_value FROM configs";
-        let args  = [];
-        let since = Number(sinceUpdatedAt);
-        if(Number.isFinite(since) && since > 0){
-            query += " WHERE UNIX_TIMESTAMP(updated_at) >= ?";
-            args.push(since);
-        }
-        query += " ORDER BY coin, network, module, param_name";
-        let rows  = await this.doQuery(query, args);
-        let configs = {};
-        for(let row of rows){
-            let coin    = row.coin;
-            let network = row.network;
-            let module  = row.module;
-            if(!configs[coin]) configs[coin] = {};
-            if(!configs[coin][network]) configs[coin][network] = {};
-            if(!configs[coin][network][module]) configs[coin][network][module] = {};
-            configs[coin][network][module][row.param_name] = row.param_value;
-        }
-        return configs;
-    }
-
-    // High-water mark of the configs table as epoch seconds (newest updated_at, or 0 when empty).
-    // Read BEFORE reading the rows: a racing write is excluded from the watermark but included in
-    // the rows. The cursor second itself is INCLUSIVE on the next poll (getAllConfigs uses `>=`),
-    // so a write stamped in the same second as the watermark - even one committed after the row
-    // read - is re-delivered next poll (idempotent merge) rather than skipped. That inclusive
-    // redelivery is what makes the delta loss-free at one-second granularity (item #2265).
-    async getConfigWatermark(){
-        let rows = await this.doQuery("SELECT UNIX_TIMESTAMP(MAX(updated_at)) AS watermark FROM configs");
-        let w = rows && rows[0] ? rows[0].watermark : null;
-        return w == null ? 0 : Number(w);
-    }
-
     // The fence's network scope, normalized the same way on the read and the write so a
     // HUB_NETWORK of '  Regtest ' keys the same row as 'regtest'. '' is the legacy/unset
     // bucket: a hub that does not know its own network writes there, and every reader folds
@@ -1250,67 +1062,12 @@ class Database {
         return typeof network === 'string' ? network.trim().toLowerCase() : '';
     }
 
-    // HUB-RETRACT-4: per-(network, source-chain) price ingest fence. Returns the highest
-    // source-chain rollback generation whose price retraction the hub has processed, plus that
-    // retraction's orphaned-range lower bound; or null when no retraction has ever been recorded
-    // for the chain on this network (so pre-reorg generation-0 pushes are never rejected).
-    // PriceAggregator rejects an incoming price push whose push_generation <= retraction_generation
-    // AND action_index >= from_action_index: exactly a stale replay of a rolled-back action arriving
-    // after its retraction (the re-published canonical row carries a higher generation and passes).
-    //
-    // `network` is part of the key because one hub DB can be shared by, or outlive, more than one
-    // deployment network: on a chain-only key, clearing the regtest fence after an indexer wipe
-    // dropped the LIVE network's fence for that chain and admitted the orphan replay it existed to
-    // stop. The legacy '' bucket (rows written before the column, or by a hub with HUB_NETWORK
-    // unset) is ambiguous by construction, so it is folded in here and the STRICTER fence wins:
-    // highest generation, and at a tie the lowest orphan bound. Over-rejecting is loud and
-    // clearable; a fence silently lost is not.
-    async getPriceIngestWatermark(sourceChain, network){
-        let net = Database.normalizeFenceNetwork(network);
-        let rows = await this.doQuery(
-            `SELECT retraction_generation, from_action_index FROM price_ingest_watermarks
-             WHERE source_chain = ? AND network IN (?, '')
-             ORDER BY retraction_generation DESC, from_action_index ASC
-             LIMIT 1`,
-            [sourceChain, net]);
-        if(!rows || rows.length === 0) return null;
-        return {
-            retraction_generation: Number(rows[0].retraction_generation) || 0,
-            from_action_index:     Number(rows[0].from_action_index) || 0
-        };
-    }
-
-    // Raise one network's fence for a chain to a retraction's generation. Monotonic in generation:
-    // a higher generation replaces the stored (generation, from); the same generation only widens
-    // the orphaned range downward (LEAST from); a lower generation is ignored. The from_action_index
-    // assignment is ordered BEFORE retraction_generation so its CASE reads the OLD generation
-    // (MariaDB evaluates ON DUPLICATE assignments left to right).
-    //
-    // The write always names this hub's own network, so a retraction on one network can no longer
-    // raise a fence that drops another network's healthy pushes.
-    async bumpPriceIngestWatermark(sourceChain, generation, fromActionIndex, network){
-        let gen  = Number(generation);
-        let from = Number(fromActionIndex);
-        if(!Number.isFinite(gen) || gen < 0) return;
-        if(!Number.isFinite(from) || from < 0) from = 0;
-        let net = Database.normalizeFenceNetwork(network);
-        await this.doQuery(
-            `INSERT INTO price_ingest_watermarks (network, source_chain, retraction_generation, from_action_index)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                from_action_index = CASE
-                    WHEN VALUES(retraction_generation) > retraction_generation THEN VALUES(from_action_index)
-                    WHEN VALUES(retraction_generation) = retraction_generation THEN LEAST(from_action_index, VALUES(from_action_index))
-                    ELSE from_action_index END,
-                retraction_generation = GREATEST(retraction_generation, VALUES(retraction_generation))`,
-            [net, sourceChain, gen, from]);
-    }
-
     // ---------------------------------------------------------------------------
     // Bridge tables (the base bridge spec section 6, token spec section 5,
     // policy spec section 5). CrossChainBridgeEngine runs the rounds; the writes and
-    // the invariant read live here beside the other table writers so one place owns
-    // the column lists that the hub-DB mirror carries to every indexer.
+    // the invariant read live in db/bridge_transfers.js and db/policy_snapshots.js,
+    // and the column lists stay here as statics so one place owns what the hub-DB
+    // mirror carries to every indexer.
     // ---------------------------------------------------------------------------
 
     // Columns written for a finalized transfer record. `status` is left to its DDL
@@ -1341,161 +1098,32 @@ class Database {
                 'btc_chain_id'];
     }
 
-    // Persist one quorum-signed transfer record. Returns true ONLY when a row was
-    // actually written, so the caller mirrors, credits and logs exactly once per
-    // finalization and a duplicate finalize (restart race, a second hub) is a no-op.
-    //
-    // INSERT IGNORE plus a revive of a retracted row: the cross_chain_matches rule
-    // verbatim (CrossChainDexEngine._insertMatchRow). transfer_id is a pure function of
-    // the source leg, so a leg reorged out and re-mined ALWAYS re-derives the identical id;
-    // without the revive the IGNORE would no-op against the stale 'retracted' row and the
-    // re-formed transfer would strand, unmirrored, for good. A row already 'finalized' is
-    // left untouched by the status guard, which is what keeps the double-finalize dedupe.
-    //
-    // The revive rewrites EVERY column the new round chose, not just the signatures: the
-    // signatures cover the canonical at the new round's snapshot_block and effective_time,
-    // so a revived row that kept the retracted round's height is a row whose signature set
-    // no indexer can verify against the capability snapshot it names. push_generation is
-    // the re-mined leg's fence (the follower pinned it to its own indexer view) and the
-    // chain id is re-stamped for the same reason it is stamped at all.
-    async insertBridgeTransfer(row){
-        let cols = Database.BRIDGE_TRANSFER_COLUMNS;
-        let res = await this.doQuery(
-            'INSERT IGNORE INTO bridge_transfers (' + cols.join(', ') + ') VALUES (' +
-            cols.map(() => '?').join(', ') + ')',
-            cols.map(c => row[c]));
-        if(res && Number(res.affectedRows) > 0) return true;
-        let revive = await this.doQuery(
-            "UPDATE bridge_transfers SET status = 'finalized', validator_signatures = ?, " +
-            'finalizing_view = ?, effective_time = ?, snapshot_block = ?, push_generation = ?, ' +
-            "btc_chain_id = ? WHERE transfer_id = ? AND status = 'retracted'",
-            [row.validator_signatures, row.finalizing_view, row.effective_time, row.snapshot_block,
-             row.push_generation, row.btc_chain_id, row.transfer_id]);
-        return !!(revive && Number(revive.affectedRows) > 0);
-    }
-
-    // Persist one quorum-signed policy snapshot. Append-only, the state_checkpoints
-    // shape: a superseding policy is a NEW row at a higher policy_seq, never an in-place
-    // update (the mirror applies rows INSERT IGNORE, so an UPDATE would never propagate),
-    // and there is no retraction path for this table. Returns true only on a real insert
-    // so a same-seq race between two hubs collapses on uq_policy_seq silently.
-    async insertPolicySnapshot(row){
-        let cols = Database.POLICY_SNAPSHOT_COLUMNS;
-        let res = await this.doQuery(
-            'INSERT IGNORE INTO policy_snapshots (' + cols.join(', ') + ') VALUES (' +
-            cols.map(() => '?').join(', ') + ')',
-            cols.map(c => row[c]));
-        return !!(res && Number(res.affectedRows) > 0);
-    }
-
-    // Highest FINALIZED policy_seq this hub holds for one token, or 0 when it holds
-    // none. The next snapshot signs at this + 1 (policy spec section 3 step 2); a gap is
-    // ordering only and never a refusal, so the caller never back-fills.
-    async getLatestPolicySeq(network, originChain, tick){
-        let rows = await this.doQuery(
-            "SELECT MAX(policy_seq) AS seq FROM policy_snapshots " +
-            "WHERE network = ? AND origin_chain = ? AND tick = ? AND status = 'finalized'",
-            [String(network || ''), String(originChain || ''), String(tick || '')]);
-        if(!rows || rows.length === 0 || rows[0].seq == null) return 0;
-        let n = Number(rows[0].seq);
-        return Number.isFinite(n) ? n : 0;
-    }
-
-    // The finalized snapshot a follower would be equivocating against: our own row at
-    // the same (network, origin_chain, tick, policy_seq), or null when we hold none.
-    async getPolicySnapshotAtSeq(network, originChain, tick, policySeq){
-        let rows = await this.doQuery(
-            'SELECT snapshot_id, policy_hash, origin_block, snapshot_block, status FROM policy_snapshots ' +
-            'WHERE network = ? AND origin_chain = ? AND tick = ? AND policy_seq = ? LIMIT 1',
-            [String(network || ''), String(originChain || ''), String(tick || ''), Number(policySeq)]);
-        return (rows && rows.length) ? rows[0] : null;
-    }
-
-    // Every (tick, src_chain, dest_chain) triple this hub has ever finalized on one
-    // network. The policy poll derives its candidate (origin_chain, tick) pairs from it,
-    // and the invariant read derives which chains hold a copy of a tick.
-    //
-    // Direction is NOT a column (base spec D19: it is derived from the chains, and every
-    // canonical field is a byte-match obligation forever), so the caller resolves which
-    // side of a triple is the origin rather than reading it here.
-    async getBridgeTransferChainPairs(network){
-        return await this.doQuery(
-            'SELECT DISTINCT tick, src_chain, dest_chain FROM bridge_transfers ' +
-            "WHERE network = ? AND status = 'finalized' ORDER BY tick, src_chain, dest_chain",
-            [String(network || '')]);
-    }
-
-    // Finalized transfers whose effective_time has NOT passed yet: signed, mirrored, and
-    // not applyable on any destination until the block loop's protocol time reaches the
-    // stamp. They are the "signed but unapplied" half of the invariant's in-flight term.
-    //
-    // Amounts come back as the raw decimal strings the record carries. SQL SUM() would
-    // coerce them through a float and silently lose the low digits of an 18-decimal
-    // token, so the caller sums them with bcmath instead.
-    async getInFlightBridgeTransfers(network, nowSeconds, tick){
-        let args = [String(network || ''), Number(nowSeconds)];
-        let sql = 'SELECT tick, dest_chain, amount FROM bridge_transfers ' +
-                  "WHERE network = ? AND status = 'finalized' AND effective_time > ?";
-        if(tick){ sql += ' AND tick = ?'; args.push(String(tick)); }
-        return await this.doQuery(sql, args);
-    }
-
-    // True when this hub already holds a non-retracted record for a source leg, so the
-    // poll does not re-propose a round for a transfer it has finalized. Keyed on
-    // (src_chain, src_action_index), the leg's own identity, the same key transfer_id is
-    // derived from.
-    async bridgeTransferExistsForSource(network, srcChain, srcActionIndex){
-        let rows = await this.doQuery(
-            'SELECT 1 FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
-            "src_action_index = ? AND status <> 'retracted' LIMIT 1",
-            [String(network || ''), String(srcChain || ''), Number(srcActionIndex)]);
-        return !!(rows && rows.length);
-    }
-
-    // The subset of `srcActionIndexes` this hub holds a non-retracted record for on one
-    // source chain, as a Set of numbers. The poll reads this ONCE per chain per tick over
-    // the page the indexer returned, so a leg the hub has already finalized (which a lagging
-    // indexer mirror can still list as pending) is dropped from both the round attempt and
-    // the invariant's in-flight term without a query per leg. Non-integer inputs are
-    // dropped before the query rather than bound, so a malformed page cannot widen the IN.
-    async getBridgeTransferSourceIndexes(network, srcChain, srcActionIndexes){
-        let wanted = [...new Set((srcActionIndexes || []).filter(n => Number.isInteger(n)))];
-        if(!wanted.length) return new Set();
-        let rows = await this.doQuery(
-            'SELECT src_action_index FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
-            "status <> 'retracted' AND src_action_index IN (" + wanted.map(() => '?').join(', ') + ')',
-            [String(network || ''), String(srcChain || '')].concat(wanted));
-        return new Set((rows || []).map(r => Number(r.src_action_index)));
-    }
-
-    // The transfer_id of this hub's persisted, non-retracted record for one source leg, or
-    // null when it holds none. A follower's _validateTransfer reads this rather than
-    // bridgeTransferExistsForSource's boolean because it has to tell "this row IS the
-    // persisted record" (same id, a legitimate re-validation) from "a record for this leg
-    // already exists under a DIFFERENT id" (a preimage the honest derivation never yields,
-    // now that the id is a function of the leg alone).
-    async getBridgeTransferIdForSource(network, srcChain, srcActionIndex){
-        let rows = await this.doQuery(
-            'SELECT transfer_id FROM bridge_transfers WHERE network = ? AND src_chain = ? AND ' +
-            "src_action_index = ? AND status <> 'retracted' LIMIT 1",
-            [String(network || ''), String(srcChain || ''), Number(srcActionIndex)]);
-        return (rows && rows.length) ? String(rows[0].transfer_id) : null;
-    }
-
-    // Returns 0 on a fresh node or unparseable value.
-    async getLastSeq(){
-        let rows = await this.doQuery(
-            "SELECT value FROM consensus_state WHERE key_name = ?",
-            ['last_seq']
-        );
-        if(!rows || rows.length === 0) return 0;
-        let seq = parseInt(rows[0].value, 10);
-        return Number.isNaN(seq) ? 0 : seq;
-    }
-
     async close(){
         await this.pool.end();
     }
 }
+
+// Install one mixin's methods on the prototype, non-enumerably.
+//
+// enumerable false keeps a moved method indistinguishable from one still declared in
+// the class above, so for...in and Object.keys(Database.prototype) report exactly what
+// they reported before the split; writable and configurable true keep a test able to
+// stub a method and restore it. A name already on the prototype throws rather than
+// overwriting: two families claiming one method name is a collision the loader must
+// name at boot, not a silent last-mixin-wins.
+function installMixins(target, mixins){
+    for(const mixin of mixins){
+        const descriptors = {};
+        for(const name of Object.keys(mixin)){
+            if(Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate database method: ' + name + ' is already defined on ' +
+                    'Database.prototype. Two db mixins, or a mixin and the class, claim the same name.');
+            descriptors[name] = { value: mixin[name], enumerable: false, writable: true, configurable: true };
+        }
+        Object.defineProperties(target, descriptors);
+    }
+}
+
+installMixins(Database.prototype, MIXINS);
 
 module.exports = Database;

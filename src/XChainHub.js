@@ -19,7 +19,7 @@
  *
  ********************************************************************/
 
-const Database           = require('./db.js');
+const Database           = require('./db');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
 const coins              = require('./coins');
 const PeerManager        = require('./PeerManager.js');
