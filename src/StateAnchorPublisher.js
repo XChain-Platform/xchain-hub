@@ -1738,6 +1738,44 @@ class StateAnchorPublisher {
                     this._deferredRewardAttest.size + ' pending)');
     }
 
+    // The anchor-attest rail's QUEUE-DRAIN RULE for the height watermark.
+    //
+    // heights.anchor_reward_attestations.BTC certifies that every round for that table which
+    // opened at or below it has terminated, and on this rail a round is not terminated until
+    // its reward attestation is WRITTEN. The write is deferred until the DOGE anchor is
+    // buried, so a snapshot sitting in this queue is an open round whose row the mirror
+    // cannot hold yet, and the watermark may not pass it. Returns the LOWEST snapshot block
+    // still held, so the producer caps the entry at one below it, or null when the queue
+    // holds nothing and the generic bounded advance applies.
+    //
+    // An entry past announceRetryTtlMs is ABANDONED and no longer counted here, which is
+    // what bounds the trail at the TTL (6 h, 36 BTC blocks) instead of leaving it open
+    // ended; _drainDeferredRewardAttest deletes those entries on its own timer, and this
+    // read must not wait for that timer to agree with it.
+    //
+    // ONE queue covers both halves of the rail: a receiver's re-proof of a peer's reward
+    // attestation is handed to this same queue rather than to one of its own
+    // (_handleRewardAttestation step 4), so the two 36-block terms of the budget are the
+    // same constant seen twice and this one read counts both.
+    deferredRewardAttestFloor(nowMs){
+        let now   = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
+        let floor = null;
+        for(let e of this._deferredRewardAttest.values()){
+            if(!e) continue;
+            if(now - Number(e.at) > this.announceRetryTtlMs) continue;   // abandoned by TTL
+            // Checked on the RAW value before coercing. Number(null), Number(undefined and
+            // Number('') are 0, -0 and 0: a bare Number() here would read an entry with NO
+            // snapshot block as a queued snapshot at height ZERO, cap the watermark at -1 and
+            // delete the whole anchor entry on the strength of a missing field.
+            let raw = e.snapshotBlock;
+            if(raw === null || raw === undefined || raw === '') continue;
+            let s = Number(raw);
+            if(!Number.isSafeInteger(s) || s < 0) continue;
+            if(floor === null || s < floor) floor = s;
+        }
+        return floor;
+    }
+
     // Write the queued reward attestations whose anchor has since been buried. Runs on
     // the announceRetryMs timer and at the head of every flush, beside the BUNDLE_DONE and
     // FINALIZED drains.

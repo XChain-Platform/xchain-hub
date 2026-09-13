@@ -41,6 +41,12 @@ const ark     = require('./anchor_reward_key.js');
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
 
+// The `coin` key the admission watermark floor is stored under. The watermark is
+// per (table, chain) and the hub federates every chain, so it has no coin of its
+// own: the same problem getConfigRowsByModule exists for, solved here with one
+// reserved key so the read stays a plain getConfig.
+const ADMISSION_WATERMARK_COIN = 'xchain';
+
 // Canonical coin names. The hub config tree keys coins by full name
 // (bitcoin/litecoin/dogecoin); indexers, however, push chain tips using the
 // coin abbreviation (config['COIN'] = 'BTC'/'LTC'/'DOGE'). Storing chain_tips
@@ -1054,6 +1060,77 @@ class Database {
         }
         await this.doQuery(query, args);
         return rows.length;
+    }
+
+    // The admission height watermark's durable FLOOR.
+    //
+    // The watermark is a CLAIM about rounds, and a claim that was sound when it was
+    // published stays sound: a round that had terminated before this hub restarted has not
+    // un-terminated. Without a floor every hub restart publishes no heights for one full
+    // round-abandon window while every indexer on every re-keyed barrier defers, which is a
+    // mirror outage per restart rather than a design property.
+    //
+    // Stored in `configs` beside chain_tips because it is exactly that kind of value: the
+    // hub's own observation of a chain, node-local, hashed by nothing. It is a floor and
+    // never a ceiling; the producer takes the max of it and what this hub can justify from
+    // its own tip observations, and a per-rail cap still pulls the result down.
+    //
+    // `coin` is the chain-agnostic 'xchain' key, as the hub has no coin of its own: the
+    // identity of a row is the (table, chain) pair in its param_name.
+    async getAdmissionWatermarkFloor(network){
+        let net  = network || 'mainnet';
+        let rows = await this.getConfig(ADMISSION_WATERMARK_COIN, net, 'admission_watermark');
+        let out  = {};
+        for(let name of Object.keys(rows || {})){
+            // '<table>.<chain>'. Table names and chain codes both exclude '.', so the first
+            // dot is the only split, and anything else is skipped rather than guessed at.
+            let dot = String(name).indexOf('.');
+            if(dot <= 0 || dot === String(name).length - 1) continue;
+            let table = String(name).slice(0, dot);
+            let chain = String(name).slice(dot + 1);
+            let raw   = String(rows[name]);
+            if(!/^(?:0|[1-9][0-9]*)$/.test(raw)) continue;
+            let h = Number(raw);
+            if(!Number.isSafeInteger(h)) continue;
+            if(!out[table]) out[table] = {};
+            out[table][chain] = h;
+        }
+        return out;
+    }
+
+    // Persist the floor, monotonically and only where it moved.
+    //
+    // Monotonic because a floor that retreated would re-open the restart window it exists
+    // to close, and only-where-it-moved because the producer samples on a timer: writing
+    // every entry every pass would be one configs UPDATE per table per chain per sample
+    // for a value that changes once per block.
+    //
+    // Returns how many rows were written, so a caller can see the floor moving.
+    async saveAdmissionWatermarkFloor(network, heights){
+        let net = network || 'mainnet';
+        if(!this._admissionFloorWritten) this._admissionFloorWritten = new Map();
+        let rows = [];
+        let mark = [];
+        for(let table of Object.keys(heights || {})){
+            let inner = heights[table];
+            if(!inner || typeof inner !== 'object') continue;
+            for(let chain of Object.keys(inner)){
+                let h = Number(inner[chain]);
+                if(!Number.isSafeInteger(h) || h < 0) continue;
+                let key  = net + '|' + table + '|' + chain;
+                let prev = this._admissionFloorWritten.has(key) ? this._admissionFloorWritten.get(key) : null;
+                if(prev !== null && h <= prev) continue;
+                rows.push({ coin: ADMISSION_WATERMARK_COIN, network: net, module: 'admission_watermark',
+                            paramName: table + '.' + chain, paramValue: String(h) });
+                mark.push([key, h]);
+            }
+        }
+        if(rows.length === 0) return 0;
+        let written = await this.setParams(rows);
+        // Marked only AFTER the write landed: caching a value the INSERT threw on would skip
+        // it on every later pass and leave the floor permanently behind.
+        for(let [key, h] of mark) this._admissionFloorWritten.set(key, h);
+        return written;
     }
 
     async getConfig(coin, network, module){

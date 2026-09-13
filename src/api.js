@@ -499,6 +499,16 @@ async function startApi(){
     // supplies MIN_STAKE thresholds and the per-capability self-test config blocks.
     await hub.startCapabilities(process.env.HUB_CAPABILITY_CONFIG || null);
 
+    // Start sampling the per-table per-chain admission height watermark.
+    // The broadcaster is constructed with (p2pConfig, db) and holds no hub handle, so the
+    // hub is attached here, after the anchor publisher exists: the watermark reads this
+    // hub's own per-chain admission tips and the anchor rail's deferred reward-attest queue
+    // through it. Without the attach the hub publishes an empty heights object, which every
+    // consumer reads as not satisfied, so a failed attach defers barriers rather than
+    // over-claiming.
+    if (hub.hubDbBroadcaster && typeof hub.hubDbBroadcaster.attachAdmissionSource === 'function')
+        hub.hubDbBroadcaster.attachAdmissionSource(hub);
+
     const app = express();
 
     // A deployed hub usually sits behind a reverse proxy on the same host, and
@@ -1972,6 +1982,23 @@ async function startApi(){
         }
     };
 
+    // The per-table per-chain admission height watermark, for the REST carriers.
+    //
+    // It rides all TEN snapshot pages as well as the heartbeat and the ready frame:
+    // a poll-mode consumer never receives a heartbeat at all, so without it a poll-mode
+    // bootstrap never establishes a baseline and every height-keyed barrier defers forever
+    // rather than for one interval.
+    //
+    // Fail-closed by construction: a hub whose broadcaster is not up yet serves {}, which
+    // reads as no claim on every chain and every table.
+    function admissionHeightsForSnapshot() {
+        try {
+            if (hub.hubDbBroadcaster && typeof hub.hubDbBroadcaster.admissionHeights === 'function')
+                return hub.hubDbBroadcaster.admissionHeights();
+        } catch (err) { /* a watermark that cannot be read is a watermark that claims nothing */ }
+        return {};
+    }
+
     // Hub DB sync channel: REST snapshot endpoints
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
@@ -2004,7 +2031,7 @@ async function startApi(){
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2025,7 +2052,7 @@ async function startApi(){
                 limit: req.query.limit ? parseInt(req.query.limit) : undefined,
             });
             let rows = await hub.db.doQuery(sql, params);
-            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2064,7 +2091,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2081,7 +2108,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2114,7 +2141,7 @@ async function startApi(){
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2142,7 +2169,7 @@ async function startApi(){
                 'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2169,7 +2196,7 @@ async function startApi(){
                 "SELECT * FROM bridge_transfers WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2192,7 +2219,7 @@ async function startApi(){
                 'SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2215,7 +2242,7 @@ async function startApi(){
                 'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -2252,7 +2279,7 @@ async function startApi(){
                 'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
