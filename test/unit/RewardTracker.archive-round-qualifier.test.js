@@ -28,6 +28,7 @@
 const { expect }           = require('chai');
 const RewardTracker        = require('../../src/RewardTracker');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_LOW   = 'aa'.repeat(32);
 const PK_HIGH  = 'bb'.repeat(32);
@@ -45,7 +46,7 @@ function makeTracker(qualified) {
     const matches = (r, params) => Number(r.round_number) === Number(params[0]) &&
                                    r.reward_type === params[1] &&
                                    (!qualified || Number(r.round_qualifier) === Number(params[2]));
-    let db = {
+    let db = { ...DB_METHODS,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.indexOf('SELECT validator_pubkey, batch_seq FROM validator_rewards') === 0)
@@ -144,7 +145,7 @@ function archivedReward(pk, snapshotBlock) {
 // SQL actually carries one, so the pre-fix (unqualified) query reproduces its real
 // cross-archive match instead of being masked by a qualifier-agnostic mock.
 function makePublisher(localRewardRows, oraclePublishSet) {
-    const db = {
+    const db = { ...DB_METHODS,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT validator_pubkey, amount, block_index FROM validator_rewards')) {

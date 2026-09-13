@@ -18,6 +18,7 @@ const EventEmitter   = require('events');
 // a height change moves the cases with it instead of leaving them asserting a
 // literal the code no longer uses.
 const lssMod         = require('../../src/attest_leader_silence_skip_activation.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const LICENSE_HEADER = ''; // Only needed for file comment; tests use it below
 
@@ -39,7 +40,7 @@ function makePeerManager() {
 function makeHub(overrides) {
     let pm = makePeerManager();
     let hub = {
-        db:               { doQuery: sinon.stub().resolves([]) },
+        db:               { ...DB_METHODS, doQuery: sinon.stub().resolves([]) },
         p2pConfig:        overrides && overrides.p2pConfig ? overrides.p2pConfig : {},
         getPeerManager:   () => pm,
         getIdentity:      () => makeIdentity(),
@@ -1163,7 +1164,7 @@ describe('AttestationRound', function () {
             let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: MY_PUBKEY }] }) };
             let hub   = makeHub({ capabilitySnapshot: capSS });
             hub.getIdentity = () => makeIdentity(MY_PUBKEY);
-            hub.db = { doQuery: makeCacheDb(row) };
+            hub.db = { ...DB_METHODS, doQuery: makeCacheDb(row) };
             let reg = makeProviderRegistry({ getModule: sinon.stub().returns({ fetch: fetchStub }) });
             let ar  = new AttestationRound(hub, reg);
             sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);

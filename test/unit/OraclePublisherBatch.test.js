@@ -25,6 +25,7 @@ const { expect } = require('chai');
 const OraclePublisher = require('../../src/OraclePublisher.js');
 const { waitUntil }   = require('../helpers/waitUntil');
 const { PRICE_BATCH_COMPRESSION_MARKER, inflatePriceBatchBody } = require('../../src/price_batch_compression.js');
+const { DB_METHODS }  = require('../helpers/mockHub.js');
 
 const PRICE_WIRE_MAX_BYTES = 8189;
 
@@ -142,6 +143,10 @@ function makeDb(seed) {
         markers:   Object.assign({}, seed.markers || {}),
         queries:   []
     };
+    // The named query methods sit on the PROTOTYPE, so anything this fake
+    // defines itself still wins while the publisher's db.findX() calls resolve
+    // and land on the doQuery stub below with the statement they always carried.
+    Object.setPrototypeOf(db, DB_METHODS);
     db.doQuery = sinon.stub().callsFake(async (q, args) => {
         db.queries.push({ q, args });
         if (/FROM\s+price_snapshots/i.test(q)) {
@@ -2184,6 +2189,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             // Finalized v0 rows for the rounds, one per pair, the shape the restore reads.
             function restoreDb(rounds) {
                 let db = { queries: [], markers: {} };
+                Object.setPrototypeOf(db, DB_METHODS);   // the named query methods, own members still win
                 db.doQuery = sinon.stub().callsFake(async (q, args) => {
                     db.queries.push({ q, args });
                     if (/FROM\s+price_snapshots/i.test(q) && /round_number\s+IN/i.test(q)) {

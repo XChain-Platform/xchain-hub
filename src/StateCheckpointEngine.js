@@ -367,10 +367,7 @@ class StateCheckpointEngine extends EventEmitter {
     async getStats(){
         let rows = [];
         try {
-            rows = await this.db.doQuery(
-                'SELECT chain, MAX(block_index) AS last_finalized_block, MAX(checkpoint_seq) AS last_seq ' +
-                'FROM state_checkpoints WHERE network = ? GROUP BY chain',
-                [this.network]);
+            rows = await this.db.findStateCheckpointsByNetwork(this.network);
         } catch(e){
             console.warn('StateCheckpointEngine: getStats query failed: ' + (e && e.message));
         }
@@ -425,9 +422,7 @@ class StateCheckpointEngine extends EventEmitter {
     // must not block engine startup.
     async _loadLastCheckpointLatch(){
         try {
-            let rows = await this.db.doQuery(
-                'SELECT MAX(snapshot_block) AS last_block FROM state_checkpoints WHERE network = ?',
-                [this.network]);
+            let rows = await this.db.getStateCheckpointsMaxSnapshotBlock(this.network);
             let last = rows && rows[0] ? rows[0].last_block : null;
             if(last != null){
                 this._lastCheckpointBtcBlock = Number(last);
@@ -904,14 +899,7 @@ class StateCheckpointEngine extends EventEmitter {
         }
 
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
-        await this.db.doQuery(
-            'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash,
-             cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block,
-             cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null,
-             cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null,
-             JSON.stringify(sigs)]);
+        await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
 
         await this._broadcastRowOrResync(
             'state_checkpoints',
@@ -1120,9 +1108,7 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     async _getMaxCheckpointSeq(chain, network){
-        let r = await this.db.doQuery(
-            'SELECT MAX(checkpoint_seq) AS max_seq FROM state_checkpoints WHERE chain = ? AND network = ?',
-            [chain, network]);
+        let r = await this.db.getStateCheckpointsMaxCheckpointSeq(chain, network);
         return (r.length > 0 && r[0].max_seq != null) ? Number(r[0].max_seq) : null;
     }
 
@@ -1138,9 +1124,7 @@ class StateCheckpointEngine extends EventEmitter {
     async _seatedCheckpointAtSeq(cp){
         let r;
         try {
-            r = await this.db.doQuery(
-                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ? LIMIT 1',
-                [cp.chain, cp.network, Number(cp.checkpoint_seq)]);
+            r = await this.db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(cp.chain, cp.network, Number(cp.checkpoint_seq));
         } catch(e){
             console.warn('StateCheckpointEngine: same-seq conflict check could not read ' + cp.chain + '/' +
                          cp.network + ' seq ' + cp.checkpoint_seq + ' (' + (e && e.message) +

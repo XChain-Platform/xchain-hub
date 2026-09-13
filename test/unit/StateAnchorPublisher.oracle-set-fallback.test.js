@@ -22,6 +22,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const KEY_A = 'aa'.repeat(33);
 const KEY_B = 'bb'.repeat(33);
@@ -30,7 +31,7 @@ function buildPub(opts) {
     opts = opts || {};
     let queried = { count: 0, params: null };
     let hub = {
-        db: { async doQuery(sql, params) {
+        db: { ...DB_METHODS, async doQuery(sql, params) {
             queried.count++;
             queried.params = params;
             if (opts.dbThrows) throw new Error('db gone');

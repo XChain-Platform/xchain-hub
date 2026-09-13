@@ -15,6 +15,7 @@ const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
 const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 describe('XChainHub', function () {
 
@@ -34,7 +35,7 @@ describe('XChainHub', function () {
     beforeEach(function () {
         mockConn = { query: sinon.stub().resolves([]), release: sinon.stub().resolves() };
         mockPool = { getConnection: sinon.stub().resolves(mockConn), end: sinon.stub().resolves() };
-        mockDb   = {
+        mockDb   = { ...DB_METHODS,
             doQuery:     sinon.stub().resolves([]),
             setParam:    sinon.stub().resolves(),
             setParams:   sinon.stub().resolves(0),

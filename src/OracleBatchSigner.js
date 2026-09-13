@@ -557,12 +557,7 @@ class OracleBatchSigner {
     // batch-sourced row's reference_block is the LANDING chain's height, not the
     // round's BTC anchor, so reading it as an anchor invents a number.
     async _deriveWindow(firstRound, lastRound){
-        let rows = await this.db.doQuery(
-            'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
-            'LEFT(consensus_proof, 8) AS proof_head, admit_block_btc, admit_block_ltc, admit_block_doge ' +
-            'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
-            'ORDER BY round_number ASC, coin_pair ASC',
-            [firstRound, lastRound, 'finalized']);
+        let rows = await this.db.findPriceSnapshotsByRoundNumber(firstRound, lastRound, 'finalized');
 
         let byRound = new Map();
         for(let r of (rows || [])){

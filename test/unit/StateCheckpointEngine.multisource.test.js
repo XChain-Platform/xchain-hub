@@ -25,6 +25,7 @@ const ValidatorIdentity       = require('../../src/ValidatorIdentity');
 const swq                     = require('../../src/stake_weighted_quorum');
 const { resolveQuorumNetwork } = require('../../src/lib/quorum_network');
 const { waitUntil }           = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -39,7 +40,7 @@ const TIP = {
 function memDb() {
     let checkpoints = [];
     let snapshots   = [];
-    return {
+    return { ...DB_METHODS,
         checkpoints, snapshots,
         async doQuery(sql, params) {
             if (sql.startsWith('SELECT COALESCE(MAX(checkpoint_seq)')) {
@@ -206,7 +207,7 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
     it('an archive containing a multi-source key co-signs (2648)', async function () {
         let PK = new ValidatorIdentity('44'.repeat(32)).getPubkeyHex().toLowerCase();
         let hub = {
-            db: { async doQuery() { return []; } },
+            db: { ...DB_METHODS, async doQuery() { return []; } },
             network: 'regtest',
             capabilitySnapshot: { async getSnapshot() { return null; }, async getWeightSnapshot() { return null; } },
             getIdentity: () => null, getPeerManager: () => null, p2pConfig: {},

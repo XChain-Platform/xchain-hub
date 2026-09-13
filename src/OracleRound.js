@@ -319,10 +319,7 @@ class OracleRound {
             // (a) Most recent finalized round and its wall-clock time. created_at is
             // a TIMESTAMP; convert to epoch ms to match the live value, which is set
             // from Date.now() on each successful round.
-            let lastRows = await this.db.doQuery(
-                "SELECT round_number, UNIX_TIMESTAMP(created_at) * 1000 AS ms " +
-                "FROM price_snapshots WHERE status = 'finalized' " +
-                "ORDER BY round_number DESC LIMIT 1");
+            let lastRows = await this.db.getPriceSnapshotByStatus();
 
             let lastFinalizedRound = -1;
             if (lastRows && lastRows.length) {
@@ -334,10 +331,7 @@ class OracleRound {
             // NOT finalize: the consecutive trailing skip streak. With no finalized
             // round at all (lastFinalizedRound = -1) this counts every recorded
             // non-finalized round.
-            let skipRows = await this.db.doQuery(
-                "SELECT COUNT(DISTINCT round_number) AS skipped " +
-                "FROM price_snapshots WHERE round_number > ? AND status <> 'finalized'",
-                [lastFinalizedRound]);
+            let skipRows = await this.db.getPriceSnapshotsCountUnfinalizedAfterRound(lastFinalizedRound);
             this.consecutiveSkippedRounds = (skipRows && skipRows.length) ? Number(skipRows[0].skipped) : 0;
         } catch (err) {
             // Non-fatal: a hydration failure must not block oracle startup. Leave the
@@ -456,12 +450,7 @@ class OracleRound {
         let skippedRoundsReadError = false;
         let droppedPairsReadError = false;
         try {
-            let rows = await this.db.doQuery(
-                `SELECT DISTINCT s.round_number FROM price_snapshots s
-                 WHERE s.status = 'skipped' AND NOT EXISTS (
-                   SELECT 1 FROM price_snapshots f
-                   WHERE f.round_number = s.round_number AND f.status = 'finalized')
-                 ORDER BY s.round_number DESC LIMIT 50`);
+            let rows = await this.db.findPriceSnapshotRoundsSkippedWithNoFinalized();
             skippedRounds = rows.map(r => Number(r.round_number));
         } catch (err) {
             // Non-fatal: diagnostics still return the in-memory state if the read fails
@@ -473,12 +462,7 @@ class OracleRound {
             // otherwise finalized (aggregation clamp / deviation gate / trim, or
             // absent from the leader's proposal), so a single pair silently
             // ceasing to publish is observable while the round looks healthy.
-            let rows = await this.db.doQuery(
-                `SELECT s.round_number, s.coin_pair FROM price_snapshots s
-                 WHERE s.status = 'skipped' AND EXISTS (
-                   SELECT 1 FROM price_snapshots f
-                   WHERE f.round_number = s.round_number AND f.status = 'finalized')
-                 ORDER BY s.round_number DESC, s.coin_pair ASC LIMIT 50`);
+            let rows = await this.db.findPriceSnapshotsSkippedWithFinalizedRound();
             droppedPairs = rows.map(r => ({ round: Number(r.round_number), coinPair: r.coin_pair }));
         } catch (err) {
             droppedPairsReadError = true;
@@ -503,9 +487,7 @@ class OracleRound {
         let implausibleRoundsReadError = false;
         if (band) {
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT DISTINCT round_number FROM price_snapshots WHERE round_number > ? ' +
-                    'ORDER BY round_number DESC LIMIT 50', [band.max]);
+                let rows = await this.db.findPriceSnapshotRoundsAfter(band.max);
                 implausibleRounds = rows.map(r => Number(r.round_number));
             } catch (err) {
                 // Same additive-marker contract as the two reads above: without it a
@@ -1196,9 +1178,7 @@ class OracleRound {
         if (!this.submissionsRetentionRounds || this.submissionsRetentionRounds <= 0) return;
         let cutoff = this.currentRound - this.submissionsRetentionRounds;
         if (cutoff <= 0) return;
-        let result = await this.db.doQuery(
-            'DELETE FROM oracle_submissions WHERE round_number < ?',
-            [cutoff]);
+        let result = await this.db.deleteOracleSubmission(cutoff);
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
         if (deleted > 0) {
             console.log('Oracle submissions retention: pruned ' + deleted +

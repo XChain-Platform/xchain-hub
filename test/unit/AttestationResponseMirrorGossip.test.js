@@ -44,6 +44,7 @@ const AttestationConsensus = require('../../src/AttestationConsensus');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const eq                   = require('../../src/equivocation_header.js');
 const { buildResponseCanonicalRaw } = require('../../src/attest_response_canonical.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const RID            = '11'.repeat(32);
 const REQUEST_BLOCK  = 120;
@@ -117,7 +118,7 @@ function gossipPayload(overrides){
 // ---------------------------------------------------------------------------
 function makeDb(){
     let table = [], nextId = 1, queries = [];
-    return {
+    return { ...DB_METHODS,
         table:   table,
         queries: queries,
         inserts: () => queries.filter(q => /^INSERT/i.test(q.sql)),

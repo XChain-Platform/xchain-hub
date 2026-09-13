@@ -192,9 +192,7 @@ class RewardTracker {
 
         // Cross-pubkey dedup guard: inspect any rows already holding this logical
         // anchor (round_number, reward_type, qualifier) regardless of pubkey.
-        let existing = await this.db.doQuery(
-            'SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ?',
-            [roundNumber, rewardType, qualifier])
+        let existing = await this.db.findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier)
             .catch(e => { console.error('Error reading anchor reward for ' + lcPubkey + ':', e); return null; });
         existing = existing || [];
 
@@ -209,9 +207,7 @@ class RewardTracker {
             if (minIncumbent <= lcPubkey) return;
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
             // supersedes the local-only incumbent(s); every hub makes the same call.
-            await this.db.doQuery(
-                'DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL',
-                [roundNumber, rewardType, qualifier])
+            await this.db.deleteValidatorReward(roundNumber, rewardType, qualifier)
                 .catch(e => console.error('Error consolidating anchor reward for ' + lcPubkey + ':', e));
         }
 

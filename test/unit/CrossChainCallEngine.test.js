@@ -25,6 +25,7 @@ const path       = require('path');
 
 const CrossChainCallEngine = require('../../src/CrossChainCallEngine');
 const eq         = require('../../src/equivocation_header.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CALL_ID = 'c'.repeat(64);
 const sha256  = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
@@ -104,7 +105,7 @@ function requireIndexerSource() {
 
 function memDb() {
     let rows = [];
-    return {
+    return { ...DB_METHODS,
         rows,
         async doQuery(sql, params) {
             params = params || [];

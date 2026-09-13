@@ -31,6 +31,7 @@ const { expect }           = require('chai');
 const sinon                = require('sinon');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const arMod                = require('../../src/anchor_reward_activation.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP_ROW = {
     id: 1, chain: 'BTC', network: 'regtest', block_index: 494, block_hash: 'c0'.repeat(32),
@@ -48,7 +49,7 @@ function makePub(plan) {
     plan = plan || {};
     const inserts = [], broadcast = [], resyncs = [];
     let insertAttempt = 0, selectAttempt = 0;
-    const db = {
+    const db = { ...DB_METHODS,
         async doQuery(sql, params) {
             if (sql.indexOf('SELECT * FROM state_checkpoints') === 0) return [Object.assign({}, CP_ROW)];
             if (sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0) {

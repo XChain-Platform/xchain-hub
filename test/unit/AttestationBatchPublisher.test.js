@@ -38,6 +38,7 @@ const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.j
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -50,7 +51,7 @@ function makeDb(){
     let responses = [];
     let markers   = [];
     let tip       = { blockHeight: ANCHOR, blockTime: 1 };
-    return {
+    return { ...DB_METHODS,
         responses, markers,
         setTip(h){ tip = (h === null) ? null : { blockHeight: h, blockTime: 1 }; },
         marker(windowStart){ return markers.find(m => Number(m.window_start) === Number(windowStart)) || null; },

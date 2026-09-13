@@ -25,6 +25,7 @@ const sinon       = require('sinon');
 const { expect }  = require('chai');
 const proxyquire  = require('proxyquire');
 const { waitUntil } = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // Every /hub-db/snapshot/* route, and one BigInt-bearing column seeded into
 // its row: any column works to prove the point (the fault was in the
@@ -45,7 +46,7 @@ const ROUTES = [
 // elsewhere, e.g. hubDbAttestationResponsesMirror.test.js) and just returns
 // the one seeded row for whichever table the SQL names.
 function makeFakeDb() {
-    return {
+    return { ...DB_METHODS,
         async doQuery(sql) {
             let text = String(sql);
             let hit  = ROUTES.find((r) => text.includes('FROM ' + r.table));
@@ -177,7 +178,7 @@ describe('hub-db snapshot routes: BIGINT serialization matches the WS path', fun
             // (never loaded, just needs its OPEN constant) so bigIntReplacer
             // itself is the actual production module-private function.
             let HubDbBroadcaster = proxyquire('../../src/HubDbBroadcaster', { ws: { OPEN: 1 } });
-            let broadcaster = new HubDbBroadcaster({}, { doQuery: async () => [] });
+            let broadcaster = new HubDbBroadcaster({}, { ...DB_METHODS, doQuery: async () => [] });
             let ws = { readyState: 1, bufferedAmount: 0, _hubBuffered: 0, send: sinon.stub(), close: sinon.stub(), on: sinon.stub() };
             await broadcaster.addSubscriber(ws);
             ws.send.resetHistory();

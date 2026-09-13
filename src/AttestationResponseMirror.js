@@ -696,10 +696,7 @@ class AttestationResponseMirror {
 
         // Read the affected rows BEFORE the clear: the re-broadcast below needs their
         // natural key, and after the UPDATE the link that selected them is gone.
-        let linked = await db.doQuery(
-            'SELECT id, network, request_id, effective_time FROM attestation_responses ' +
-            'WHERE network = ? AND batch_action_index = ? AND effective_time >= ? AND effective_time < ?',
-            [network, actionIndex, windowStart, windowEnd]);
+        let linked = await db.findAttestationResponsesByNetwork(network, actionIndex, windowStart, windowEnd);
 
         // Nothing linked is an ACCEPTED no-op, not a rejection: a replayed retraction, a
         // batch that never reached this hub and an already-cleared link are all "nothing
@@ -708,10 +705,7 @@ class AttestationResponseMirror {
         if(!linked || linked.length === 0)
             return { accepted: true, cleared: 0, reason: null };
 
-        await db.doQuery(
-            'UPDATE attestation_responses SET batch_action_index = NULL ' +
-            'WHERE network = ? AND batch_action_index = ? AND effective_time >= ? AND effective_time < ?',
-            [network, actionIndex, windowStart, windowEnd]);
+        await db.updateAttestationResponseByNetwork(network, actionIndex, windowStart, windowEnd);
 
         // The cleared link has to travel the road the set link travelled, for the reason
         // the link's own re-broadcast states: insertAndBroadcast streams a row only on a
@@ -786,10 +780,7 @@ class AttestationResponseMirror {
     async _linkBatchAction(row, actionIndex){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return false;
-        let res = await db.doQuery(
-            'UPDATE attestation_responses SET batch_action_index = ? ' +
-            'WHERE network = ? AND request_id = ? AND effective_time = ? AND batch_action_index IS NULL',
-            [actionIndex, row.network, row.request_id, row.effective_time]);
+        let res = await db.updateAttestationResponseByNetworkAndRequestId(actionIndex, row.network, row.request_id, row.effective_time);
         return !!(res && Number(res.affectedRows) > 0);
     }
 
@@ -1020,9 +1011,7 @@ class AttestationResponseMirror {
     async _alreadyHeld(row){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return false;
-        let rows = await db.doQuery(
-            'SELECT id FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
-            [row.network, row.request_id, row.effective_time]);
+        let rows = await db.getAttestationResponse(row.network, row.request_id, row.effective_time);
         return !!(rows && rows.length);
     }
 

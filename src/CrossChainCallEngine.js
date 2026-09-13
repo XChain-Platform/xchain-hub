@@ -280,12 +280,7 @@ class CrossChainCallEngine extends EventEmitter {
             // Mirror _pollTargetResults' retracted-result filter so the backlog
             // count matches what the engine will actually re-relay: a
             // dispatch whose only result row is 'retracted' is pending again.
-            rows = await this.db.doQuery(
-                "SELECT d.target_chain, COUNT(*) AS pending_relay_count " +
-                "FROM cross_chain_calls d " +
-                "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
-                "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND r.id IS NULL " +
-                "GROUP BY d.target_chain");
+            rows = await this.db.findCrossChainCallsByPhase();
         } catch(e){
             console.warn('CrossChainCall: getStats query failed: ' + (e && e.message));
         }
@@ -767,9 +762,7 @@ class CrossChainCallEngine extends EventEmitter {
         // do (a reorg marks status='retracted' + broadcasts a deletion). Without this
         // filter a follower co-signs a result round bound to a dispatch its own reorg
         // already retracted.
-        let d = await this.db.doQuery(
-            "SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' AND status <> 'retracted' LIMIT 1",
-            [String(row.call_id).toLowerCase()]);
+        let d = await this.db.getCrossChainCallByCallId(String(row.call_id).toLowerCase());
         if(!d.length) return false;
         if(String(d[0].source_chain) !== String(row.source_chain) ||
            String(d[0].target_chain) !== String(row.target_chain) ||
@@ -995,9 +988,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
         let failure = null;
         try {
-            let read = await this.db.doQuery(
-                'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1',
-                [row.call_id, row.phase]);
+            let read = await this.db.getCrossChainCallByCallIdAndPhase(row.call_id, row.phase);
             if(read && read.length){
                 b.broadcastRow({ table: 'cross_chain_calls', row: read[0] });
                 return;
@@ -1066,9 +1057,7 @@ class CrossChainCallEngine extends EventEmitter {
                 // (LIMIT 1), so the mirror stream carried one source and the downstream
                 // verifier tallied an under-counted denominator. Inert below SWQ, where
                 // source='' and there is one row per key. Parity with StateCheckpointEngine.
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -1171,8 +1160,7 @@ class CrossChainCallEngine extends EventEmitter {
     }
 
     async _rowExists(callId, phase){
-        let rows = await this.db.doQuery(
-            "SELECT 1 FROM cross_chain_calls WHERE call_id = ? AND phase = ? AND status <> 'retracted' LIMIT 1", [callId, phase]);
+        let rows = await this.db.hasCrossChainCalls(callId, phase);
         return rows.length > 0;
     }
 

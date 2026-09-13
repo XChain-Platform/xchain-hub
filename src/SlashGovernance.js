@@ -91,12 +91,7 @@ class SlashGovernance {
 
     // Pending evidence rows for one validator (oldest first, deterministic order).
     async _pendingRows(validatorPubkey) {
-        return await this.db.doQuery(
-            "SELECT id, validator_pubkey, offense_type, round_number, evidence, created_at " +
-            "FROM slash_proposals WHERE validator_pubkey = ? AND status = 'pending' " +
-            "ORDER BY id ASC",
-            [validatorPubkey]
-        );
+        return await this.db.findSlashProposals(validatorPubkey);
     }
 
     // Create a governance proposal to execute `penalty` against the validator's
@@ -228,11 +223,7 @@ class SlashGovernance {
 
         let suspended = false;
         if (penalty === 'suspend') {
-            let vres = await this.db.doQuery(
-                "UPDATE validators SET status = 'suspended', updated_at = NOW() " +
-                "WHERE signing_pubkey = ? AND status = 'active'",
-                [pk]
-            );
+            let vres = await this.db.updateValidatorBySigningPubkey(pk);
             suspended = !!(vres && vres.affectedRows > 0);
 
             // Push the shrunken active set into the transport registry and every

@@ -10,15 +10,46 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+const fs           = require('fs');
+const path         = require('path');
 const sinon        = require('sinon');
 const EventEmitter = require('events');
+const Database     = require('../../src/db');
+
+/**
+ * Every named query method the db mixins install, as a plain object.
+ *
+ * A test double is an object carrying a doQuery stub. Now that a query lives in
+ * a mixin method rather than at its call site, the engine calls db.findX() and a
+ * bare double answers "findX is not a function", which says nothing about the
+ * code under test. Spreading this into a double gives it the real methods, and
+ * each of them calls this.doQuery, so the stub still sees the same statements
+ * with the same args in the same order. Spread it FIRST in the literal so every
+ * member the double declares itself still wins.
+ *
+ * Read off src/db/ rather than off Database.prototype, because the prototype
+ * also carries the class's own connection and migration methods and handing a
+ * double a real getConnection would let a unit test reach for a server.
+ */
+const DB_METHODS = {};
+const DB_DIR = path.join(__dirname, '..', '..', 'src', 'db');
+for (const f of fs.readdirSync(DB_DIR)) {
+    if (f === 'index.js' || !f.endsWith('.js')) continue;
+    Object.assign(DB_METHODS, require(path.join(DB_DIR, f)));
+}
+delete DB_METHODS.doQuery;
 
 /**
  * Create a mock hub object suitable for injecting into any xchain-hub class.
  * Every dependency is a sinon stub so callers can assert on interactions.
  */
 function createMockHub(overrides = {}) {
-    let db = {
+    // Built ON Database.prototype rather than as a bare object, so every named
+    // query method the mixins define is present and routes through the doQuery
+    // stub below. The stub's callCount and getCall(i).args therefore still
+    // assert the same statements, in the same order, that they asserted when
+    // the SQL sat at the call site.
+    let db = Object.assign(Object.create(Database.prototype), {
         doQuery: sinon.stub().resolves([]),
         setParam: sinon.stub().resolves(),
         setParams: sinon.stub().resolves(0),
@@ -36,7 +67,7 @@ function createMockHub(overrides = {}) {
         getPriceIngestWatermark: sinon.stub().resolves(null),
         bumpPriceIngestWatermark: sinon.stub().resolves(),
         close: sinon.stub().resolves()
-    };
+    });
 
     let peerManager        = new EventEmitter();
     peerManager.validatorAddr    = overrides.validatorAddr || 'ws://validator-1:10001';
@@ -82,4 +113,4 @@ function createMockHub(overrides = {}) {
     return hub;
 }
 
-module.exports = { createMockHub };
+module.exports = { createMockHub, DB_METHODS };

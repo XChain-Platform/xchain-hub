@@ -778,9 +778,7 @@ async function startApi(){
                     oracleThresholdS = parseInt(process.env.ORACLE_STALENESS_THRESHOLD_S)
                         || Math.round((roundIntervalMs * 2) / 1000);
                     let rows = await Promise.race([
-                        hub.db.doQuery(
-                            "SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(MAX(created_at)) AS age_s " +
-                            "FROM price_snapshots WHERE status = 'finalized'", []),
+                        hub.db.getPriceSnapshotsFinalizedAgeSeconds(),
                         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                     ]);
                     // age_s is null when no round has ever finalized (fresh node);
@@ -2036,10 +2034,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findPriceSnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2096,10 +2091,7 @@ async function startApi(){
             // diverges byte-for-byte from a long-running streamed mirror. status<>'retracted'
             // (not ='finalized') excludes exactly what the stream deletes and keeps every
             // other status the stream retains.
-            let rows = await hub.db.doQuery(
-                "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
-                [since, limit]
-            );
+            let rows = await hub.db.findCrossChainMatchesById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2113,10 +2105,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findCapabilitySnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2142,14 +2131,7 @@ async function startApi(){
             // Exclude retracted rows (see the cross_chain_matches snapshot above): the
             // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
             // mirror must skip them to stay byte-identical with streamed mirrors.
-            let rows = await hub.db.doQuery(
-                'SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, ' +
-                'source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, ' +
-                'cross_hops, effective_time, status, finalizing_view, push_generation, result_status, ' +
-                "return_payload_b64, validator_signatures, btc_chain_id, created_at " +
-                "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
-                [since, limit]
-            );
+            let rows = await hub.db.findCrossChainCallsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2171,13 +2153,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, ' +
-                'contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, ' +
-                'block_merkle_root, block_merkle_version, validator_signatures, created_at ' +
-                'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findStateCheckpointsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2201,10 +2177,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                "SELECT * FROM bridge_transfers WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
-                [since, limit]
-            );
+            let rows = await hub.db.findBridgeTransfers(since, limit);
             res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2224,10 +2197,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findPolicySnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2245,12 +2215,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT id, chain, network, reward_type, round_reference, snapshot_block, ' +
-                'publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at ' +
-                'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findAnchorRewardAttestations(since, limit);
             res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2281,13 +2246,7 @@ async function startApi(){
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT id, network, request_id, request_action_index, request_block_index, ' +
-                'provider_id, status, response_payload, response_hash, meta, effective_time, ' +
-                'signer_pubkeys, signatures, widen, batch_action_index, finalized_at ' +
-                'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
+            let rows = await hub.db.findAttestationResponsesById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2655,10 +2614,7 @@ async function startApi(){
     if (TELEMETRY_ENABLED) {
         const pruneTelemetry = async () => {
             try {
-                let result = await hub.db.doQuery(
-                    'DELETE FROM telemetry_pings WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)',
-                    [TELEMETRY_RETENTION_DAYS]
-                );
+                let result = await hub.db.deleteTelemetryPing(TELEMETRY_RETENTION_DAYS);
                 let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
                 if (deleted > 0) console.log('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
             } catch (e) { /* best-effort; never crash the hub over retention */ }

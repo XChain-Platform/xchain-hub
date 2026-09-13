@@ -427,11 +427,7 @@ class ProviderRegistry {
         if (!this.db) return;
         let rows;
         try {
-            rows = await this.db.doQuery(
-                `SELECT parameter, proposed_value, activation_block
-                   FROM governance_proposals
-                  WHERE status = 'passed' AND activation_block IS NOT NULL
-                  ORDER BY activation_block ASC, id ASC`, []);
+            rows = await this.db.findGovernanceProposalsByStatus();
         } catch (e) {
             // Distinguish transient read failure from the benign "table absent on a
             // fresh hub" case: log so a startup-time DB error is visible in the log

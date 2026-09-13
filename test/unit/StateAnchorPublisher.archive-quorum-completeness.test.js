@@ -41,6 +41,7 @@
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK = 100;
 const CP_ROW = {
@@ -65,7 +66,7 @@ function buildPub(rows) {
     rows = rows || {};
     let identity = new ValidatorIdentity('11'.repeat(32));
     let hub = {
-        db: {
+        db: { ...DB_METHODS,
             async doQuery(sql) {
                 for (let frag of Object.keys(rows))
                     if (sql.indexOf(frag) !== -1) return rows[frag];

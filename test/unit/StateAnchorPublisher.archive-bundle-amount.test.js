@@ -26,6 +26,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK        = 'cc'.repeat(32);
 const ROUND     = 970000;   // snapshot_block, at/above every testnet flag-day (threshold 0)
@@ -41,7 +42,7 @@ function makePublisher(rewardType, localAmount) {
         validator_pubkey: PK, reward_type: rewardType, round_number: ROUND,
         amount: localAmount, block_index: BLOCK
     }];
-    const db = {
+    const db = { ...DB_METHODS,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT validator_pubkey, amount, block_index FROM validator_rewards')) {

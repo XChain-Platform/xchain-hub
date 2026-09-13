@@ -26,6 +26,7 @@
 const { expect }            = require('chai');
 const sinon                 = require('sinon');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = {
     chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
@@ -38,7 +39,7 @@ const CP = {
 // A db double whose SELECT behaviour is the variable under test; every other
 // statement is a no-op that resolves, so only DELIVERY can fail.
 function mkDb(selectBehaviour) {
-    return {
+    return { ...DB_METHODS,
         selects: 0,
         async doQuery(sql) {
             if (/^SELECT \* FROM state_checkpoints/.test(sql) ||
@@ -89,7 +90,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
         });
 
         it('repairs the stream when the re-read throws', async function () {
-            const db     = { async doQuery() { throw new Error('connection lost'); } };
+            const db     = { ...DB_METHODS, async doQuery() { throw new Error('connection lost'); } };
             const engine = mkEngine(db, broadcaster);
             await engine._broadcastRowOrResync('state_checkpoints', 'SELECT * FROM state_checkpoints WHERE id = ?', [1], 'gap-a');
             expect(broadcaster.broadcastRow.called).to.equal(false);
@@ -108,7 +109,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
         });
 
         it('never throws out of the repair itself', async function () {
-            const db     = { async doQuery() { throw new Error('connection lost'); } };
+            const db     = { ...DB_METHODS, async doQuery() { throw new Error('connection lost'); } };
             const engine = mkEngine(db, { broadcastRow() {}, dropAllForResync() { throw new Error('repair blew up'); } });
             await engine._broadcastRowOrResync('state_checkpoints', 'SELECT 1', [], 'gap-c');   // resolves
         });
@@ -121,7 +122,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
                 broadcastRow: sinon.stub(),
                 dropAllForResync: sinon.stub().returns(0)
             };
-            const db     = { calls: 0, async doQuery() { this.calls++; throw new Error('connection lost'); } };
+            const db     = { ...DB_METHODS, calls: 0, async doQuery() { this.calls++; throw new Error('connection lost'); } };
             const engine = mkEngine(db, b);
             await engine._broadcastRowOrResync('capability_snapshots', 'SELECT 1', [], 'gap-d');
             expect(b.dropAllForResync.called).to.equal(false);
@@ -132,7 +133,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
     describe('_acceptFinalized', function () {
 
         it('still advances the latch and emits when the mirror re-read fails', async function () {
-            const db     = { async doQuery(sql) {
+            const db     = { ...DB_METHODS, async doQuery(sql) {
                 if (/^SELECT \* FROM state_checkpoints/.test(sql)) throw new Error('connection lost');
                 return [];
             } };

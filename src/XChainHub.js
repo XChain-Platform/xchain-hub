@@ -827,18 +827,9 @@ class XChainHub {
         // Addr-keyed: each addr has exactly ONE active pubkey, so retire any other
         // active row for this addr BEFORE the upsert. Without it _loadValidatorPubkeys'
         // Map<addr, pubkey> resolves the collision by signing_pubkey sort order.
-        await this.db.doQuery(
-            "UPDATE validators SET status = 'removed', updated_at = NOW() " +
-            "WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'",
-            [addr, signingPubkey]
-        );
+        await this.db.updateValidatorByAddr(addr, signingPubkey);
 
-        await this.db.doQuery(
-            `INSERT INTO validators (signing_pubkey, addr, status)
-             VALUES (?, ?, 'active')
-             ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
-            [signingPubkey, addr, addr]
-        );
+        await this.db.setValidator(signingPubkey, addr, addr);
 
         // The new set must reach EVERY consensus engine, not just config-PBFT: a
         // runtime registration has to enter oracle leader rotation too, or hubs hold
@@ -859,20 +850,12 @@ class XChainHub {
         if(!addr)
             throw new Error('Validator addr is required');
 
-        let current = await this.db.doQuery(
-            "SELECT signing_pubkey FROM validators WHERE addr = ? AND status = 'active'", [addr]);
+        let current = await this.db.findValidatorsByAddr(addr);
         if(!current || current.length === 0)
             throw new Error('No active validator at addr ' + addr + ' to rotate');
 
-        await this.db.doQuery(
-            "UPDATE validators SET status = 'removed', updated_at = NOW() " +
-            "WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'",
-            [addr, newSigningPubkey]);
-        await this.db.doQuery(
-            `INSERT INTO validators (signing_pubkey, addr, status)
-             VALUES (?, ?, 'active')
-             ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
-            [newSigningPubkey, addr, addr]);
+        await this.db.updateValidatorByAddr(addr, newSigningPubkey);
+        await this.db.setValidator(newSigningPubkey, addr, addr);
 
         await this._loadValidatorPubkeys();
         await this._propagateValidatorSet();
@@ -923,9 +906,7 @@ class XChainHub {
     async _loadValidatorPubkeys(){
         if(!this.peerManager) return;
         try {
-            let rows = await this.db.doQuery(
-                "SELECT signing_pubkey, addr FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
-            );
+            let rows = await this.db.findActiveValidators();
             let pubkeyMap = new Map();
             for(let row of rows){
                 pubkeyMap.set(row.addr, row.signing_pubkey);
@@ -942,9 +923,7 @@ class XChainHub {
 
     async _loadValidatorSet(){
         try {
-            let rows = await this.db.doQuery(
-                "SELECT signing_pubkey, addr FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
-            );
+            let rows = await this.db.findActiveValidators();
             return rows.map(r => ({ pubkey: r.signing_pubkey, addr: r.addr }));
         } catch(e){
             console.error('Error loading validator set:', e);
@@ -958,9 +937,7 @@ class XChainHub {
         let chainPairMap = new Map();
         try {
             // db.js verifyTables reconciles 'chains' onto the table at startup.
-            let rows = await this.db.doQuery(
-                "SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
-            );
+            let rows = await this.db.findActiveValidatorChains();
 
             let allChains = [...coins.ALLOWED_COINS];
             let chainPairs = ['BTC-LTC', 'BTC-DOGE', 'LTC-DOGE'];
@@ -1014,7 +991,7 @@ class XChainHub {
 
         let to = parseInt(toRound, 10);
         if (!Number.isFinite(to)) {
-            let top = await this.db.doQuery('SELECT MAX(round_number) AS max_round FROM price_snapshots', []);
+            let top = await this.db.getPriceSnapshotsMaxRoundNumber();
             to = (top && top[0] && top[0].max_round != null) ? Number(top[0].max_round) : null;
             // No price_snapshots rows at all: an empty range, not a fabricated one.
             if (to === null) return { from_round: null, to_round: null, rounds: [], missing: [], digest: null };
@@ -1027,9 +1004,7 @@ class XChainHub {
         // silently: from wins, so an explicit from_round is always honoured.
         if (to - from + 1 > presence.MAX_RANGE) to = from + presence.MAX_RANGE - 1;
 
-        let rows = await this.db.doQuery(
-            'SELECT round_number, coin_pair, status, reference_block, block_timestamp ' +
-            'FROM price_snapshots WHERE round_number BETWEEN ? AND ?', [from, to]);
+        let rows = await this.db.findPriceSnapshotsBetweenRounds(from, to);
         let summary = presence.summarizeRoundPresence(rows, from, to);
         return { from_round: from, to_round: to, ...summary };
     }
@@ -1119,12 +1094,7 @@ class XChainHub {
             if (!v.signing_pubkey || !/^[0-9a-fA-F]{64}$/.test(v.signing_pubkey)) continue;
             if (!v.addr) continue;
 
-            await this.db.doQuery(
-                `INSERT INTO validators (signing_pubkey, addr, status)
-                 VALUES (?, ?, 'active')
-                 ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
-                [v.signing_pubkey, v.addr, v.addr]
-            );
+            await this.db.setValidator(v.signing_pubkey, v.addr, v.addr);
         }
 
         // Reloads every subsystem, including reorg and governance, which otherwise
@@ -1144,9 +1114,7 @@ class XChainHub {
     }
 
     async getValidatorStatus(signingPubkey) {
-        let vRows = await this.db.doQuery(
-            "SELECT * FROM validators WHERE signing_pubkey = ?", [signingPubkey]
-        );
+        let vRows = await this.db.findValidatorsBySigningPubkey(signingPubkey);
         if (vRows.length === 0) return null;
 
         let unclaimed = this.rewardTracker ? await this.rewardTracker.getUnclaimedRewards(signingPubkey) : '0';

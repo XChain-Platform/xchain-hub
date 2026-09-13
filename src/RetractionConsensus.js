@@ -458,9 +458,7 @@ class RetractionConsensus {
                 // (LIMIT 1), so the mirror stream carried one source and the verifier of
                 // this signed deletion tallied an under-counted denominator. Inert below
                 // SWQ, where source='' and there is one row per key.
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, row.signing_pubkey, row.source]);
+                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

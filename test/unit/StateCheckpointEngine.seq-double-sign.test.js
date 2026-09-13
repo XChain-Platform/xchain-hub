@@ -29,6 +29,7 @@ const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const { waitUntil }         = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // Deterministic 64-hex block data, distinct per height, so two heights produce two
 // different canonicals and each is confirmable by a follower's own indexer.
@@ -58,7 +59,7 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
     function memDb() {
         let checkpoints = [];
         let snapshots   = [];
-        return {
+        return { ...DB_METHODS,
             checkpoints, snapshots,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT MAX(checkpoint_seq)')) {

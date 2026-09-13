@@ -1353,10 +1353,7 @@ class Consensus {
 
     async _loadSeq() {
         try {
-            let rows = await this.db.doQuery(
-                "SELECT value FROM consensus_state WHERE key_name = ?",
-                ['last_seq']
-            );
+            let rows = await this.db.findConsensusState('last_seq');
             if (rows.length > 0) {
                 this.seq = parseInt(rows[0].value) || 0;
                 this.lastAppliedSeq = this.seq;
@@ -1376,10 +1373,7 @@ class Consensus {
 
     async _saveSeq(seq) {
         try {
-            await this.db.doQuery(
-                "INSERT INTO consensus_state (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()",
-                ['last_seq', String(seq), String(seq)]
-            );
+            await this.db.setConsensusState('last_seq', String(seq), String(seq));
         } catch (e) {
             console.error('Error saving consensus sequence:', e);
             throw e;   // surface so _checkCommitQuorum rejects rather than diverging

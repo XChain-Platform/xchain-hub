@@ -22,6 +22,7 @@ const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const { waitUntil }         = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // The mock bus hands SIGN_REQ to an async handler that _handleMessage fires and
 // forgets, so "nobody co-signed" is only settled once every peer has finished
@@ -59,7 +60,7 @@ describe('StateCheckpointEngine', function () {
     function memDb() {
         let checkpoints = [];          // rows keyed by (chain, network, block_index)
         let snapshots   = [];
-        return {
+        return { ...DB_METHODS,
             checkpoints, snapshots,
             async doQuery(sql, params) {
                 if (sql.startsWith('SELECT COALESCE(MAX(checkpoint_seq)')) {
@@ -416,7 +417,7 @@ describe('StateCheckpointEngine', function () {
         const swq = require('../../src/stake_weighted_quorum');
 
         function makeEngine(snapshotResult) {
-            let eng = new StateCheckpointEngine({ db: { doQuery: async () => [] }, network: 'regtest' });
+            let eng = new StateCheckpointEngine({ db: { ...DB_METHODS, doQuery: async () => [] }, network: 'regtest' });
             eng.capSnapshot = { getWeightSnapshot: async () => snapshotResult };
             return eng;
         }

@@ -41,6 +41,7 @@ const path       = require('path');
 
 const SpendGuard       = require('../../src/lib/spend_guard.js');
 const AttestationRelay = require('../../src/AttestationRelay.js');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A promise plus the handle that settles it, so a test can park a broadcast
 // mid-flight and start a second pass while the first is still awaiting.
@@ -142,7 +143,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         const doQuery = sinon.stub();
         doQuery.withArgs(sinon.match(/SELECT round, txid, sent_at/)).resolves([]);
         doQuery.resolves([]);
-        pub.db = { doQuery: doQuery };
+        pub.db = { ...DB_METHODS, doQuery: doQuery };
 
         pub.spendGuard.pause('ceiling closed for this test');
         await pub._processQueueInner();
@@ -157,7 +158,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         const walPath = path.join(walDir, 'queue.jsonl');
 
         const relay = new AttestationRelay({
-            db:        { doQuery: sinon.stub().resolves([]) },
+            db:        { ...DB_METHODS, doQuery: sinon.stub().resolves([]) },
             network:   'regtest',
             p2pConfig: {
                 ATTEST_RELAY_QUEUE_PATH:              walPath,

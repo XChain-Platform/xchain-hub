@@ -398,10 +398,7 @@ class AttestationBatchPublisher {
     async _resolveFloorWindow(){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this._nowSeconds());
-        let rows = await db.doQuery(
-            'SELECT MIN(window_start) AS oldest, MAX(window_start) AS newest ' +
-            'FROM attest_published_batches WHERE network = ?',
-            [this.network]);
+        let rows = await db.getAttestPublishedBatch(this.network);
         let oldest = (rows && rows.length) ? Number(rows[0].oldest) : NaN;
         let newest = (rows && rows.length) ? Number(rows[0].newest) : NaN;
         // Read by _pendingWindows only to tell a routine catch-up from a coverage GAP: a
@@ -780,9 +777,7 @@ class AttestationBatchPublisher {
         }
         if(this.hub && this.hub.hubDbBroadcaster){
             for(let row of rows){
-                let r = await db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [a, 'attestation', row.signing_pubkey, row.source]);
+                let r = await db.getCapabilitySnapshot(a, 'attestation', row.signing_pubkey, row.source);
                 if(r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -1279,10 +1274,7 @@ class AttestationBatchPublisher {
     async _getMarker(windowStart){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return null;
-        let rows = await db.doQuery(
-            'SELECT network, window_start, window_end, batch_key, row_count, txid, status ' +
-            'FROM attest_published_batches WHERE network = ? AND window_start = ?',
-            [this.network, windowStart]);
+        let rows = await db.findAttestPublishedBatchesByNetwork(this.network, windowStart);
         return (rows && rows.length) ? rows[0] : null;
     }
 
@@ -1292,9 +1284,7 @@ class AttestationBatchPublisher {
     async _hydrateMarkers(){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
-        let rows = await db.doQuery(
-            'SELECT window_start FROM attest_published_batches WHERE network = ? AND status = ?',
-            [this.network, 'intent']);
+        let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
         for(let r of (rows || [])) this._quarantined.add(Number(r.window_start));
         if(this._quarantined.size > 0)
             console.error('AttestationBatchPublisher: ' + this._quarantined.size + ' window(s) carry a ' +
@@ -1307,10 +1297,7 @@ class AttestationBatchPublisher {
     async _recordIntent(window, batchKey){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
-        await db.doQuery(
-            'INSERT INTO attest_published_batches (network, window_start, window_end, batch_key, row_count, status) ' +
-            'VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE window_start = window_start',
-            [this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent']);
+        await db.setAttestPublishedBatchByNetwork(this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent');
     }
 
     // Withdraw an intent-only marker. The status guard is the whole safety of the
@@ -1319,9 +1306,7 @@ class AttestationBatchPublisher {
     async _clearIntent(windowStart){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
-        await db.doQuery(
-            'DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND status = ?',
-            [this.network, windowStart, 'intent']);
+        await db.deleteAttestPublishedBatch(this.network, windowStart, 'intent');
     }
 
     // The DOGE is already spent by the time this runs, so a failure here is logged
@@ -1331,10 +1316,7 @@ class AttestationBatchPublisher {
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         try {
-            await db.doQuery(
-                'UPDATE attest_published_batches SET status = ?, txid = ?, row_count = ?, sent_at = NOW() ' +
-                'WHERE network = ? AND window_start = ? AND status = ?',
-                ['sent', txid, rowCount, this.network, windowStart, 'intent']);
+            await db.updateAttestPublishedBatch('sent', txid, rowCount, this.network, windowStart, 'intent');
         } catch(e){
             console.error('AttestationBatchPublisher: window ' + windowStart + ' was broadcast but its ' +
                 'durable sent marker could not be persisted; a restart will QUARANTINE (not re-publish) it. ' +
@@ -1347,10 +1329,7 @@ class AttestationBatchPublisher {
         if(!db || typeof db.doQuery !== 'function') return;
         this.stats.windowsDeadLettered++;
         try {
-            await db.doQuery(
-                'INSERT INTO attest_published_batches (network, window_start, window_end, row_count, status) ' +
-                'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = VALUES(status), row_count = VALUES(row_count)',
-                [this.network, windowStart, windowEnd, rowCount, 'deadletter']);
+            await db.setAttestPublishedBatchByNetworkAndWindowStart(this.network, windowStart, windowEnd, rowCount, 'deadletter');
         } catch(e){
             console.error('AttestationBatchPublisher: could not record the dead-letter marker for window ' +
                           windowStart + ': ' + (e && e.message));
@@ -1365,13 +1344,7 @@ class AttestationBatchPublisher {
         if(!db || typeof db.doQuery !== 'function') return;
         this.stats.landedRecorded++;
         this._quarantined.delete(Number(windowStart));
-        await db.doQuery(
-            'INSERT INTO attest_published_batches ' +
-            '(network, window_start, window_end, row_count, txid, status, landed_at) ' +
-            'VALUES (?, ?, ?, ?, ?, ?, NOW()) ' +
-            'ON DUPLICATE KEY UPDATE status = VALUES(status), landed_at = NOW(), ' +
-            'row_count = VALUES(row_count), txid = COALESCE(attest_published_batches.txid, VALUES(txid))',
-            [this.network, windowStart, windowEnd, rowCount, txidOrNull, 'landed']);
+        await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd, rowCount, txidOrNull, 'landed');
     }
 
     // ------------------------------------------------------------ the files

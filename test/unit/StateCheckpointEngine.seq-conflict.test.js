@@ -27,6 +27,7 @@
 const { expect }            = require('chai');
 const sinon                 = require('sinon');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const SEATED = {
     id: 1, chain: 'BTC', network: 'regtest', block_index: 494, block_hash: 'c0'.repeat(32),
@@ -48,7 +49,7 @@ delete RIVAL.validator_signatures;
 
 // A db double that seats exactly one state_checkpoints row and records every write.
 function mkDb(seatedRow) {
-    return {
+    return { ...DB_METHODS,
         inserts: [],
         rows: seatedRow ? [seatedRow] : [],
         async doQuery(sql, params) {
@@ -151,7 +152,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
     // without it. Failing closed on a read error would turn a transient DB blip into a
     // refusal to persist quorum-signed checkpoints, which is strictly worse.
     it('fails OPEN when the conflict read itself errors', async function () {
-        const db = {
+        const db = { ...DB_METHODS,
             inserts: [],
             async doQuery(sql, params) {
                 if (/^SELECT \* FROM state_checkpoints WHERE chain = \? AND network = \? AND checkpoint_seq = \?/.test(sql))

@@ -29,6 +29,7 @@ const OracleBatchSigner = require('../../src/OracleBatchSigner');
 const OracleConsensus   = require('../../src/OracleConsensus');
 const ValidatorIdentity = require('../../src/ValidatorIdentity');
 const { waitUntil }     = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const canonicalBuilder = { _buildPriceBatchPayload: OracleConsensus.prototype._buildPriceBatchPayload };
 
@@ -57,7 +58,7 @@ function snapshotRows(rounds) {
 }
 
 function memDb(rows) {
-    return {
+    return { ...DB_METHODS,
         async doQuery(sql, params) {
             let [first, last, status] = params;
             return rows.filter(r => r.round_number >= first && r.round_number <= last && r.status === status)

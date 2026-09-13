@@ -629,26 +629,26 @@ class HubDbBroadcaster {
         let maxIds = {};
         if (this.db) {
             try {
-                let ps = await this.db.doQuery('SELECT MAX(id) AS max_id FROM price_snapshots');
+                let ps = await this.db.getPriceSnapshotsMaxId();
                 maxIds.price_snapshots = (ps.length > 0 && ps[0].max_id != null) ? Number(ps[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let op = await this.db.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
+                let op = await this.db.getOraclePricesMaxId();
                 maxIds.oracle_prices = (op.length > 0 && op[0].max_id != null) ? Number(op[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
                 // Exclude retracted rows so the advertised max_id matches what the snapshot feed
                 // serves (it filters status<>'retracted'); otherwise a retracted max-id row keeps
                 // the consumer's gap-detection catch-up firing forever (localMax never reaches it).
-                let cm = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_matches WHERE status <> 'retracted'");
+                let cm = await this.db.getCrossChainMatchesMaxLiveId();
                 maxIds.cross_chain_matches = (cm.length > 0 && cm[0].max_id != null) ? Number(cm[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let cs = await this.db.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
+                let cs = await this.db.getCapabilitySnapshotsMaxId();
                 maxIds.capability_snapshots = (cs.length > 0 && cs[0].max_id != null) ? Number(cs[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let sc = await this.db.doQuery('SELECT MAX(id) AS max_id FROM state_checkpoints');
+                let sc = await this.db.getStateCheckpointsMaxId();
                 maxIds.state_checkpoints = (sc.length > 0 && sc[0].max_id != null) ? Number(sc[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
@@ -660,11 +660,11 @@ class HubDbBroadcaster {
                 // consumer's catch-up branch is gated off entirely. No status filter: the
                 // table is append-only, never retracted, and the snapshot endpoint serves it
                 // unfiltered, so an unfiltered MAX(id) is exactly the ceiling that feed reaches.
-                let ra = await this.db.doQuery('SELECT MAX(id) AS max_id FROM anchor_reward_attestations');
+                let ra = await this.db.getAnchorRewardAttestationsMaxId();
                 maxIds.anchor_reward_attestations = (ra.length > 0 && ra[0].max_id != null) ? Number(ra[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let cc = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'");
+                let cc = await this.db.getCrossChainCallsMaxLiveId();
                 maxIds.cross_chain_calls = (cc.length > 0 && cc[0].max_id != null) ? Number(cc[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
@@ -677,7 +677,7 @@ class HubDbBroadcaster {
                 // cross_chain_* entries: attestation_responses is insert-only and never
                 // retracted, so a status filter would advertise a ceiling BELOW what the
                 // snapshot feed serves and strand the catch-up.
-                let ar = await this.db.doQuery('SELECT MAX(id) AS max_id FROM attestation_responses');
+                let ar = await this.db.getAttestationResponsesMaxId();
                 maxIds.attestation_responses = (ar.length > 0 && ar[0].max_id != null) ? Number(ar[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
         }
