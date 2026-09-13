@@ -302,13 +302,9 @@ class ReorgHandler extends EventEmitter {
     }
 
     async getReorgHistory(limit) {
-        // Server-side page cap, matching the other three HubOperationalCache-backed
-        // RPC methods (CapabilityRegistry#listState, Governance#getProposals,
-        // Governance#getVotes): the API layer's generic validateLimit ceiling
-        // (10000) is too loose for a hub-side read RPC to rely on alone.
-        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
-        let query = "SELECT * FROM reorg_attestations ORDER BY created_at DESC LIMIT " + lim;
-        return await this.db.doQuery(query);
+        // The 500-row server-side page cap travels with the statement, in
+        // db/reorg_attestations.js, so the caller's limit is passed through raw.
+        return await this.db.findReorgAttestations(limit);
     }
 
     // Defense-in-depth: only tally votes from senders that are registered

@@ -33,5 +33,20 @@ module.exports = {
                  validator_count, consensus_proof, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')
              ON DUPLICATE KEY UPDATE status = 'confirmed', updated_at = NOW()`, [reorgId, chain, reorgHeight, timestamp, affected_chains, validatorCount, proof]);
+    },
+
+    // Reads the newest reorg_attestations rows.
+    // Moved here from src/ReorgHandler.js:304, clamp included.
+    //
+    // Server-side page cap, matching the other three HubOperationalCache-backed
+    // RPC methods (CapabilityRegistry#listState, Governance#getProposals,
+    // Governance#getVotes): the API layer's generic validateLimit ceiling
+    // (10000) is too loose for a hub-side read RPC to rely on alone. The clamp
+    // sits here rather than at the caller so the ceiling travels with the
+    // statement it bounds, and so the only value reaching the interpolated
+    // LIMIT is one this method produced.
+    async findReorgAttestations(limit) {
+        let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+        return this.doQuery("SELECT * FROM reorg_attestations ORDER BY created_at DESC LIMIT " + lim);
     }
 };
