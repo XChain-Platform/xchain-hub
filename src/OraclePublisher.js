@@ -1911,15 +1911,9 @@ class OraclePublisher {
         if (!this.db) return 0;
         let want = rounds.filter(r => !this._buffer.has(r));
         if (want.length === 0) return 0;
-        let placeholders = want.map(() => '?').join(',');
         let rows;
         try {
-            rows = await this.db.doQuery(
-                'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
-                'admit_block_btc, admit_block_ltc, admit_block_doge ' +
-                'FROM price_snapshots WHERE round_number IN (' + placeholders + ') AND status = ? ' +
-                'AND consensus_proof NOT LIKE \'{"batch":%\' ORDER BY round_number ASC, coin_pair ASC',
-                want.concat(['finalized']));
+            rows = await this.db.findV0PriceSnapshotsForRounds(want, 'finalized');
         } catch (e) {
             console.warn('OraclePublisher: cannot restore retracted round(s) ' + want.join(',') +
                 ' to the buffer from price_snapshots; they cannot be re-published: ', e && e.message);
@@ -2709,9 +2703,7 @@ class OraclePublisher {
         catch (e) { console.warn('OraclePublisher: restoring retracted rounds to the buffer failed:', e && e.message); }
 
         if (!this.db) return list.length;
-        let placeholders = list.map(() => '?').join(',');
-        let result = await this.db.doQuery(
-            'DELETE FROM oracle_published_rounds WHERE round IN (' + placeholders + ')', list);
+        let result = await this.db.deleteOraclePublishedRoundsByRounds(list);
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
         console.log('OraclePublisher: cleared publish markers for ' + list.length +
             ' retracted batch round(s) (' + deleted + ' durable row(s) removed); the recovery ' +

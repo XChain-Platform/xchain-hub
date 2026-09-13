@@ -552,13 +552,11 @@ class AttestationBatchPublisher {
 
     // The window's terminal rows, in the applier's own order. Every codec row field is
     // selected by name from the codec's own list, so a field added to the wire cannot
-    // be silently absent here.
+    // be silently absent here; the statement and that ordering argument now live in
+    // db.findAttestationResponsesInBatchWindow.
     //
-    // MEMBERSHIP IS THE SIGNED effective_time. It is the only column of this table two
-    // hubs are guaranteed to read identically: it rides inside the canonical the
-    // responsible set signed, so a boundary row falls on the same side of the same
-    // instant on every hub that holds it. The idx_effective_time index is what makes
-    // this range read a seek rather than a scan.
+    // One row over ATTEST_BATCH_MAX_ROWS is read on purpose, so the caller can tell a
+    // full window from one that overflows the cap.
     //
     // NORMALIZED ON READ. The driver may hand a BIGINT back as a number, a string or a
     // BigInt depending on how the pool is configured, and the row goes straight into
@@ -568,16 +566,8 @@ class AttestationBatchPublisher {
     async _selectWindowRows(windowStart, windowEnd){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') throw new Error('no hub DB');
-        let rows = await db.doQuery(
-            'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ' ' +
-            'FROM attestation_responses ' +
-            'WHERE network = ? AND effective_time >= ? AND effective_time < ? ' +
-            // effective_time last: one request can hold two honest rows (a round that
-            // finalized under two leader slots), and the window has to order them the
-            // same way on every hub or the signed bytes differ.
-            'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC, effective_time ASC ' +
-            'LIMIT ?',
-            [this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1]);
+        let rows = await db.findAttestationResponsesInBatchWindow(
+            this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1);
         return (rows || []).map(r => this._normalizeRow(r));
     }
 

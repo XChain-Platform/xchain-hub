@@ -40,11 +40,15 @@ function loadModule() {
 
 function makeDexHub(overrides) {
     let hub = createMockHub(overrides);
-    hub.db = {
-        // The shared capability snapshot writer's one named statement, so its
-        // insert still reaches the doQuery stub below with the same SQL and args.
-        createCapabilitySnapshots: DB_METHODS.createCapabilitySnapshots,
+    // DB_METHODS first: the engine calls named query methods, and each of them
+    // routes its statement through the doQuery stub, so a test that swaps doQuery
+    // still sees every statement and its args. getChainTip stays a null-resolving
+    // stub, as in createMockHub: the real one issues its own doQuery, which would
+    // shift every scripted onCall(n) below by one and answer the engine's
+    // btc_chain_id lookup with a row meant for the statement under test.
+    hub.db = { ...DB_METHODS,
         doQuery: sinon.stub().resolves([]),
+        getChainTip: sinon.stub().resolves(null),
         ...(overrides && overrides.db ? overrides.db : {})
     };
     hub.hubDbBroadcaster = overrides && overrides.hubDbBroadcaster !== undefined

@@ -930,28 +930,15 @@ class CrossChainDexEngine extends EventEmitter {
     // Returns true iff the row was actually inserted (false on INSERT IGNORE dedupe), so the
     // caller only updates the committed ledger once per fill.
     async _insertMatchRow(row){
-        let cols = ['match_id','snapshot_block','network',
-                    'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr','a_payout_legs',
-                    'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr','b_payout_legs',
-                    'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation',
-                    'btc_chain_id',
-                    // The admission map, one column per chain. Inside the signed canonical,
-                    // unlike btc_chain_id above, so it is read off `row` with everything else.
-                    // APPENDED at the end: this list's positional order is mirrored by hand
-                    // in the engine's unit-test fake, and a mid-list insert re-maps every
-                    // column after it there while the production INSERT stays correct.
-                    'admit_block_btc','admit_block_ltc','admit_block_doge'];
         // Resolved into the value list rather than onto `row`: the row object is what the
         // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
         // never consensus. _canonicalMatch enumerates its fields explicitly, so this value has
-        // no path into a signed preimage.
+        // no path into a signed preimage. The column list and the statement live in
+        // db.createCrossChainMatch.
         let btcChainId = await this._resolveBtcChainId(row.network);
-        let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
-        let res = await this.db.doQuery(
-            'INSERT IGNORE INTO cross_chain_matches (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')',
-            vals);
+        let res = await this.db.createCrossChainMatch(row, btcChainId);
         let inserted = !!(res && Number(res.affectedRows) > 0);
         // A retracted row keeps its (unique) match_id. When a reorg retracts a crossing and the
         // SAME crossing re-forms at the same BTC snapshot_block, _deriveMatchId yields the
@@ -1110,21 +1097,9 @@ class CrossChainDexEngine extends EventEmitter {
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
-        // Per-leg clause for whichever side is on the reorged chain, fenced by THAT leg's generation.
-        let legClause = (col, gcol) => "(" + col + "_chain = ? AND " + col + "_action_index >= ?" +
-            (bounded ? " AND " + col + "_action_index <= ?" : "") +
-            (fenced ? " AND " + gcol + " <= ?" : "") + ")";
-        let legParams = () => {
-            let p = [chain, from];
-            if(bounded) p.push(to);
-            if(fenced) p.push(gen);
-            return p;
-        };
-        let where = "status = 'finalized' AND (" + legClause('a', 'a_push_generation') + " OR " + legClause('b', 'b_push_generation') + ")";
-        let params = legParams().concat(legParams());
-        let rows = await this.db.doQuery(
-            "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches WHERE " + where,
-            params);
+        // Per-leg clause for whichever side is on the reorged chain, fenced by THAT leg's
+        // generation; the statement is db.findFinalizedCrossChainMatchesForReorg.
+        let rows = await this.db.findFinalizedCrossChainMatchesForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){
             await this.db.updateCrossChainMatchRetracted(r.match_id);
             this._applyCommit(r, -1);                   // restore both legs' remaining capacity

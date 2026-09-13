@@ -24,6 +24,32 @@
  *
  ********************************************************************/
 
+// The codec's own field list, read from the wire module rather than re-spelled here:
+// the batch window is selected by the same names the encoder writes, so a field added
+// to the wire cannot be silently absent from the read that feeds it.
+const abw = require('../lib/attest_batch_wire.js');
+
+// The durable spot-check outcome table the AttestationSpotChecker statements write,
+// prune and aggregate; named once so its four statements cannot address two tables.
+const STATS_TABLE = 'attestation_validator_stats';
+
+// The attestation_responses columns the response mirror writes and selects back, in
+// the order the snapshot route selects them. It is used for BOTH the INSERT and the
+// select-back on purpose: the REST bootstrap and the WS stream must hand a consumer
+// the SAME columns, and the way they drift apart is one path gaining a column the
+// other does not know about. `id` is excluded: it is assigned by AUTO_INCREMENT and
+// stripped again on apply, so it is a paging cursor and never an input.
+//
+// AttestationResponseMirror.MIRROR_COLUMNS spells the same list for the wire (its
+// GOSSIP_COLUMNS derive from it); a column added to the table goes in both, and the
+// mirror suite's every-column-written test fails when only one of them gains it.
+const ATTESTATION_RESPONSE_MIRROR_COLUMNS = [
+    'network', 'request_id', 'request_action_index', 'request_block_index',
+    'provider_id', 'status', 'response_payload', 'response_hash', 'meta',
+    'effective_time', 'admit_block_btc', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
+    'finalized_at'
+];
+
 module.exports = {
     // Deletes from attest_published_batches.
     // Moved here from src/AttestationBatchPublisher.js:1322.
@@ -35,6 +61,29 @@ module.exports = {
     // Moved here from src/AttestationPublisher.js:728.
     async deleteAttestPublishedRequest(rid) {
         return this.doQuery('DELETE FROM attest_published_requests WHERE request_id = ? AND sent_at IS NULL', [rid]);
+    },
+
+    // Retention sweep over the settled markers in attest_published_requests.
+    // Moved here from src/AttestationPublisher.js:797.
+    //
+    // Seconds, and DB-clock arithmetic on both sides: sent_at is written by NOW(), so
+    // comparing it against a Node-side timestamp would fold any host/DB clock skew
+    // straight into the cutoff. A marker holding a quarantined intent is never swept
+    // (intent_status IS NULL), and `excludeRequestIds` carries the request ids still on
+    // the caller's durable queue, excluded by identity because a rid is a string rather
+    // than an orderable round. The ids are bound as parameters, so the only thing this
+    // builds from the list is the count of placeholders.
+    async deleteSettledAttestPublishedRequests(windowSec, excludeRequestIds) {
+        let excluded = Array.isArray(excludeRequestIds) ? excludeRequestIds : [];
+        let sql = 'DELETE FROM attest_published_requests ' +
+                  'WHERE sent_at IS NOT NULL AND intent_status IS NULL ' +
+                  'AND sent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)';
+        let params = [windowSec];
+        if (excluded.length > 0){
+            sql += ' AND request_id NOT IN (' + excluded.map(() => '?').join(',') + ')';
+            params = params.concat(excluded);
+        }
+        return this.doQuery(sql, params);
     },
 
     // Deletes from attestations.
@@ -207,5 +256,101 @@ module.exports = {
             validator_count, consensus_proof,
             statusOnDuplicate, validatorCountOnDuplicate, consensusProofOnDuplicate
         ]);
+    },
+
+    // One batch window's terminal rows, in the applier's own order.
+    // Moved here from src/AttestationBatchPublisher.js:571.
+    //
+    // MEMBERSHIP IS THE SIGNED effective_time. It is the only column of this table two
+    // hubs are guaranteed to read identically: it rides inside the canonical the
+    // responsible set signed, so a boundary row falls on the same side of the same
+    // instant on every hub that holds it. The idx_effective_time index is what makes
+    // this range read a seek rather than a scan.
+    //
+    // `limit` is the caller's row cap plus one, so the caller can tell a full window
+    // from an overflowing one; the caller normalizes the rows it gets back.
+    async findAttestationResponsesInBatchWindow(network, windowStart, windowEnd, limit) {
+        return this.doQuery(
+            'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ' ' +
+            'FROM attestation_responses ' +
+            'WHERE network = ? AND effective_time >= ? AND effective_time < ? ' +
+            // effective_time last: one request can hold two honest rows (a round that
+            // finalized under two leader slots), and the window has to order them the
+            // same way on every hub or the signed bytes differ.
+            'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC, effective_time ASC ' +
+            'LIMIT ?',
+            [network, windowStart, windowEnd, limit]);
+    },
+
+    // Writes one finalized response row for the mirror, idempotently.
+    // Moved here from src/AttestationResponseMirror.js:427.
+    //
+    // INSERT IGNORE against the UNIQUE (network, request_id, effective_time): a duplicate
+    // is ordinary traffic, and insert-only means the existing row is already correct. A
+    // column the writer never sets (batch_action_index at finalization) binds NULL
+    // explicitly rather than riding the driver's treatment of undefined.
+    async createAttestationResponseMirrorRow(row) {
+        return this.doQuery(
+            'INSERT IGNORE INTO attestation_responses (' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ') ' +
+            'VALUES (' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.map(() => '?').join(', ') + ')',
+            ATTESTATION_RESPONSE_MIRROR_COLUMNS.map(c => (row[c] === undefined ? null : row[c])));
+    },
+
+    // Reads one mirrored response row back by its natural key, id included.
+    // Moved here from src/AttestationResponseMirror.js:446 and :793, which issued the
+    // same statement.
+    //
+    // The id is the consumer's paging cursor and only the table carries it, which is
+    // why the mirror selects the row back rather than broadcasting the object it holds.
+    async getAttestationResponseMirrorRow(network, requestId, effectiveTime) {
+        return this.doQuery(
+            'SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' ' +
+            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+            [network, requestId, effectiveTime]);
+    },
+
+    // Records one judged spot-check outcome, idempotent per (validator, request).
+    // Moved here from src/AttestationSpotChecker.js:562.
+    //
+    // The row is keyed by the request's creation block so a reorg can roll it back; a
+    // re-judge of the same request overwrites the verdict rather than adding a row.
+    async setAttestationValidatorStat(validatorPubkey, providerId, requestId, blockIndex, passed) {
+        return this.doQuery(
+            'INSERT INTO ' + STATS_TABLE +
+            ' (validator_pubkey, provider_id, request_id, block_index, passed)' +
+            ' VALUES (?, ?, ?, ?, ?)' +
+            ' ON DUPLICATE KEY UPDATE passed = VALUES(passed),' +
+            ' provider_id = VALUES(provider_id), block_index = VALUES(block_index)',
+            [validatorPubkey, providerId, requestId, blockIndex, passed]
+        );
+    },
+
+    // Retention sweep over the spot-check outcomes.
+    // Moved here from src/AttestationSpotChecker.js:595.
+    //
+    // DB-clock arithmetic on BOTH sides: checked_at is written by CURRENT_TIMESTAMP, so
+    // comparing it against a Node-side timestamp would fold host/DB clock skew straight
+    // into the cutoff. The caller floors the window at its rolling failure window.
+    async deleteAttestationValidatorStatsOlderThan(windowSec) {
+        return this.doQuery(
+            'DELETE FROM ' + STATS_TABLE + ' WHERE checked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [windowSec]);
+    },
+
+    // Reorg rollback: every spot-check outcome anchored above `height` is orphaned.
+    // Moved here from src/AttestationSpotChecker.js:644.
+    async deleteAttestationValidatorStatsAboveBlock(height) {
+        return this.doQuery(
+            'DELETE FROM ' + STATS_TABLE + ' WHERE block_index > ?', [height]);
+    },
+
+    // Aggregate outcome counts for one validator: total rows and failed rows.
+    // Moved here from src/AttestationSpotChecker.js:667.
+    async getAttestationValidatorStatTotals(validatorPubkey) {
+        return this.doQuery(
+            'SELECT COUNT(*) AS total,' +
+            ' SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS failed' +
+            ' FROM ' + STATS_TABLE + ' WHERE validator_pubkey = ?',
+            [validatorPubkey]);
     }
 };

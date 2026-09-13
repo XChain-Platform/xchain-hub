@@ -2262,21 +2262,7 @@ class OracleConsensus extends EventEmitter {
         // read to a replica. The hub Database exposes no transaction API, so a single
         // statement is the atomicity primitive here.
         let admitCols = ah.admitBlocksToColumns(admitBlocks === undefined ? null : admitBlocks);
-        let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
-        let params = [];
-        for (let p of prices) params.push(round, p.coinPair, p.price, referenceBlock, blockTimestamp, validatorCount, proof,
-                                          admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
-        let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status,
-                 admit_block_btc, admit_block_ltc, admit_block_doge)
-                VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
-                 block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
-                 consensus_proof = VALUES(consensus_proof), status = 'finalized',
-                 admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                 admit_block_doge = VALUES(admit_block_doge)`;
-        await this.db.doQuery(query, params);
+        await this.db.setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols);
 
         // Durable per-pair skip markers (item #180). A pair can drop out of a
         // round that otherwise finalizes (aggregation clamp/deviation-gate/trim
@@ -2296,17 +2282,7 @@ class OracleConsensus extends EventEmitter {
                 console.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
                     + ' configured pair(s): ' + missingPairs.join(', ')
                     + '; recording per-pair skipped snapshot(s)');
-                let skipPlaceholders = missingPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
-                let skipParams = [];
-                for (let pair of missingPairs) skipParams.push(round, pair, referenceBlock, blockTimestamp);
-                await this.db.doQuery(`INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                     validator_count, consensus_round, consensus_proof, status)
-                    VALUES ${skipPlaceholders}
-                    ON DUPLICATE KEY UPDATE
-                     reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
-                     block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
-                     status = IF(status = 'skipped', 'skipped', status)`, skipParams);
+                await this.db.setSkippedPriceSnapshotRound(round, missingPairs, referenceBlock, blockTimestamp);
             }
         } catch (e) {
             console.error('Oracle: error recording per-pair skipped snapshot(s) for round %s:', round, e.message);
@@ -2463,18 +2439,7 @@ class OracleConsensus extends EventEmitter {
         // One multi-row INSERT so the skipped round lands atomically (same torn-read
         // rationale as _storeSnapshot).
         if (coinPairs.length) {
-            let placeholders = coinPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
-            let params = [];
-            for (let pair of coinPairs) params.push(round, pair, referenceBlock, blockTimestamp);
-            let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status)
-                VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE
-                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
-                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
-                 status = IF(status = 'skipped', 'skipped', status)`;
-            await this.db.doQuery(query, params);
+            await this.db.setSkippedPriceSnapshotRound(round, coinPairs, referenceBlock, blockTimestamp);
         }
         // Broadcast the skipped-round rows to hub-DB mirror subscribers, mirroring
         // _storeSnapshot. Both insert paths into the mirrored price_snapshots table must

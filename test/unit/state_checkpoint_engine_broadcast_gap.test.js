@@ -83,7 +83,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
         it('broadcasts the re-read rows and does not resync', async function () {
             const db     = mkDb(() => [{ id: 1, chain: 'BTC' }]);
             const engine = mkEngine(db, broadcaster);
-            await engine._broadcastRowOrResync('state_checkpoints', 'SELECT * FROM state_checkpoints WHERE id = ?', [1], 'why');
+            await engine._broadcastRowOrResync('state_checkpoints', () => db.doQuery('SELECT * FROM state_checkpoints WHERE id = ?', [1]), 'why');
             expect(broadcaster.broadcastRow.calledOnce).to.equal(true);
             expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('state_checkpoints');
             expect(broadcaster.dropAllForResync.called).to.equal(false);
@@ -92,7 +92,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
         it('repairs the stream when the re-read throws', async function () {
             const db     = { ...DB_METHODS, async doQuery() { throw new Error('connection lost'); } };
             const engine = mkEngine(db, broadcaster);
-            await engine._broadcastRowOrResync('state_checkpoints', 'SELECT * FROM state_checkpoints WHERE id = ?', [1], 'gap-a');
+            await engine._broadcastRowOrResync('state_checkpoints', () => db.doQuery('SELECT * FROM state_checkpoints WHERE id = ?', [1]), 'gap-a');
             expect(broadcaster.broadcastRow.called).to.equal(false);
             expect(broadcaster.dropAllForResync.calledOnce).to.equal(true);
             expect(broadcaster.dropAllForResync.firstCall.args[0]).to.equal('gap-a');
@@ -103,7 +103,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
             // for a row that is committed locally, which the watermark then certifies past.
             const db     = mkDb(() => []);
             const engine = mkEngine(db, broadcaster);
-            await engine._broadcastRowOrResync('state_checkpoints', 'SELECT * FROM state_checkpoints WHERE id = ?', [1], 'gap-b');
+            await engine._broadcastRowOrResync('state_checkpoints', () => db.doQuery('SELECT * FROM state_checkpoints WHERE id = ?', [1]), 'gap-b');
             expect(broadcaster.broadcastRow.called).to.equal(false);
             expect(broadcaster.dropAllForResync.calledOnce).to.equal(true);
         });
@@ -111,7 +111,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
         it('never throws out of the repair itself', async function () {
             const db     = { ...DB_METHODS, async doQuery() { throw new Error('connection lost'); } };
             const engine = mkEngine(db, { broadcastRow() {}, dropAllForResync() { throw new Error('repair blew up'); } });
-            await engine._broadcastRowOrResync('state_checkpoints', 'SELECT 1', [], 'gap-c');   // resolves
+            await engine._broadcastRowOrResync('state_checkpoints', () => db.doQuery('SELECT 1', []), 'gap-c');   // resolves
         });
 
         it('fires the repair once, not once per row, when the subscriber set is already empty', async function () {
@@ -124,7 +124,7 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
             };
             const db     = { ...DB_METHODS, calls: 0, async doQuery() { this.calls++; throw new Error('connection lost'); } };
             const engine = mkEngine(db, b);
-            await engine._broadcastRowOrResync('capability_snapshots', 'SELECT 1', [], 'gap-d');
+            await engine._broadcastRowOrResync('capability_snapshots', () => db.doQuery('SELECT 1', []), 'gap-d');
             expect(b.dropAllForResync.called).to.equal(false);
             expect(db.calls, 'no re-read is worth running with nothing to deliver to').to.equal(0);
         });

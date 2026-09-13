@@ -14,6 +14,7 @@ const sinon                  = require('sinon');
 const { expect }             = require('chai');
 const EventEmitter           = require('events');
 const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+const { DB_METHODS }         = require('../helpers/mockHub.js');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -477,7 +478,9 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
 function makeFakeDb() {
     const rows = [];
     const counts = { retentionDeletes: 0, retentionWindowSec: null };
-    return {
+    // DB_METHODS first: the checker calls named query methods, and each of them
+    // routes its statement through the doQuery below.
+    return { ...DB_METHODS,
         rows,
         counts,
         async doQuery(sql, args) {

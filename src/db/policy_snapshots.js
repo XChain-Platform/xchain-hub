@@ -68,5 +68,12 @@ module.exports = {
     // Moved here from src/api.js:2227.
     async findPolicySnapshots(since, limit) {
         return this.doQuery('SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+    },
+
+    // Reads one committed policy snapshot row back whole, for the hub-DB mirror stream.
+    // Moved here from src/CrossChainBridgeEngine.js:1113, which read either this table
+    // or bridge_transfers through one statement built from the table name.
+    async getPolicySnapshotBySnapshotId(snapshotId) {
+        return this.doQuery('SELECT * FROM policy_snapshots WHERE snapshot_id = ? LIMIT 1', [snapshotId]);
     }
 };

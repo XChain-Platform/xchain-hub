@@ -903,8 +903,7 @@ class StateCheckpointEngine extends EventEmitter {
 
         await this._broadcastRowOrResync(
             'state_checkpoints',
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-            [cp.chain, cp.network, cp.block_index, cp.checkpoint_seq],
+            () => this.db.getStateCheckpointByChain(cp.chain, cp.network, cp.block_index, cp.checkpoint_seq),
             'state-checkpoint broadcast gap');
 
         // Advance the cadence latch for PEER-led rounds too, symmetric with the
@@ -1227,8 +1226,7 @@ class StateCheckpointEngine extends EventEmitter {
             // second. Inert below SWQ, where source='' and there is one row per key.
             await this._broadcastRowOrResync(
                 'capability_snapshots',
-                'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                [block, capability, row.signing_pubkey, row.source],
+                () => this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source),
                 'capability-snapshot broadcast gap');
         }
     }
@@ -1250,13 +1248,17 @@ class StateCheckpointEngine extends EventEmitter {
     // non-fatal here; the INSERTs above and the rootless-checkpoint refusal stay fail-closed.
     // The empty-subscriber short-circuit also keeps the per-validator loop in
     // _persistCapabilitySnapshot from re-firing the repair once the first drop emptied the set.
-    async _broadcastRowOrResync(table, sql, params, reason){
+    //
+    // `readRows` is the caller's committed-row re-read (a named db method bound to the row's
+    // key), called only when there is a subscriber to deliver to, so no statement runs for
+    // an empty set.
+    async _broadcastRowOrResync(table, readRows, reason){
         let b = this.broadcaster;
         if(!b) return;
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
         let failure = null;
         try {
-            let rows = await this.db.doQuery(sql, params);
+            let rows = await readRows();
             if(rows && rows.length){
                 for(let row of rows) b.broadcastRow({ table: table, row: row });
                 return;

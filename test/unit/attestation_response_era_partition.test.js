@@ -41,6 +41,7 @@ const EventEmitter = require('events');
 
 const AttestationPublisher      = require('../../src/AttestationPublisher');
 const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const { DB_METHODS }            = require('../helpers/mockHub.js');
 const activationMod = require('../../src/attest_response_mirror_activation.js');
 
 const PUB = 'aa'.repeat(32);
@@ -51,7 +52,9 @@ const PUB = 'aa'.repeat(32);
 function makeDb() {
     let table  = [];
     let nextId = 1;
-    return {
+    // DB_METHODS first: the mirror calls named query methods, and each of them
+    // routes its statement through the doQuery below.
+    return { ...DB_METHODS,
         async doQuery(sql, args) {
             if (/^INSERT IGNORE INTO attestation_responses/i.test(sql)) {
                 let cols = sql.substring(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(s => s.trim());

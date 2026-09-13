@@ -790,20 +790,13 @@ class AttestationPublisher {
             return 0;
         }
 
-        // Seconds, and DB-clock arithmetic on both sides: sent_at is written by NOW(),
-        // so comparing it against a Node-side timestamp would fold any host/DB clock
-        // skew straight into the cutoff.
+        // Seconds, because the cutoff is DB-clock arithmetic on both sides: sent_at is
+        // written by NOW(), so comparing it against a Node-side timestamp would fold any
+        // host/DB clock skew straight into the cutoff (the statement lives in
+        // db.deleteSettledAttestPublishedRequests).
         let windowSec = Math.ceil(windowMs / 1000);
-        let sql = 'DELETE FROM attest_published_requests ' +
-                  'WHERE sent_at IS NOT NULL AND intent_status IS NULL ' +
-                  'AND sent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)';
-        let params = [windowSec];
-        if (queued.length > 0){
-            sql += ' AND request_id NOT IN (' + queued.map(() => '?').join(',') + ')';
-            params = params.concat(queued);
-        }
 
-        let result  = await db.doQuery(sql, params);
+        let result  = await db.deleteSettledAttestPublishedRequests(windowSec, queued);
         let deleted = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
         if (deleted > 0){
             this.publishedRequestsPruned += deleted;

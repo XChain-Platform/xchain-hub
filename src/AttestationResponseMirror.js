@@ -92,10 +92,12 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./lib/attest
 const ah     = require('./lib/admission_height.js');
 
 // The mirrored column set, in the order the snapshot route (api.js
-// GET /hub-db/snapshot/attestation_responses) selects them. It is written out
-// once here and used for BOTH the INSERT and the select-back on purpose: the REST
+// GET /hub-db/snapshot/attestation_responses) selects them. The INSERT and the
+// select-back now live in src/db/attestation.js, which spells the same list for
+// the SQL; this copy is the wire's, and GOSSIP_COLUMNS derive from it. The REST
 // bootstrap and this WS stream must hand a consumer the SAME columns, and the way
-// they drift apart is one path gaining a column the other does not know about.
+// they drift apart is one path gaining a column the other does not know about, so
+// a column added to the table goes in both lists.
 // `id` is excluded: it is assigned by AUTO_INCREMENT and stripped again on apply
 // (two hubs carry different ids for the same logical row), so it is a paging
 // cursor and never an input.
@@ -424,12 +426,7 @@ class AttestationResponseMirror {
         // under two leader slots (the slot follows the chain tip each hub polled), and
         // it is kept so every hub ends up holding every variant. The indexer binds the
         // smaller stamp on every node; see the table's SQL for the full argument.
-        let res = await db.doQuery(
-            'INSERT IGNORE INTO attestation_responses (' + MIRROR_COLUMNS.join(', ') + ') ' +
-            'VALUES (' + MIRROR_COLUMNS.map(() => '?').join(', ') + ')',
-            // A column the writer never sets (batch_action_index at finalization) binds
-            // NULL explicitly rather than riding the driver's treatment of undefined.
-            MIRROR_COLUMNS.map(c => (row[c] === undefined ? null : row[c])));
+        let res = await db.createAttestationResponseMirrorRow(row);
         let inserted = !!(res && Number(res.affectedRows) > 0);
         if(inserted) this.stats.written++;
         else         this.stats.duplicates++;
@@ -443,10 +440,7 @@ class AttestationResponseMirror {
         // hub that already holds the row must be able to answer with the id it holds
         // (the gossip receiver needs exactly that), and res.insertId is 0 on an
         // ignored insert, so the id can only come from the table.
-        let rows = await db.doQuery(
-            'SELECT id, ' + MIRROR_COLUMNS.join(', ') + ' ' +
-            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
-            [row.network, row.request_id, row.effective_time]);
+        let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored){
             this.stats.errors++;
@@ -790,10 +784,7 @@ class AttestationResponseMirror {
     async _rebroadcastRow(row){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
-        let rows = await db.doQuery(
-            'SELECT id, ' + MIRROR_COLUMNS.join(', ') + ' ' +
-            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
-            [row.network, row.request_id, row.effective_time]);
+        let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored) return;
         let b = this._broadcaster();

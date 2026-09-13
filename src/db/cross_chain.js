@@ -73,6 +73,20 @@ function crossChainCallRetractionTail(chain, bounds) {
     return { tail, params };
 }
 
+// The cross_chain_matches columns createCrossChainMatch writes, in bind order.
+// `btc_chain_id` is the one value not read off the match row (see that method).
+// The admission map, one column per chain, is inside the signed canonical, unlike
+// btc_chain_id, so it is read off the row with everything else. It is APPENDED at
+// the end: this list's positional order is mirrored by hand in the engine's
+// unit-test fake, and a mid-list insert re-maps every column after it there while
+// the production INSERT stays correct.
+const CROSS_CHAIN_MATCH_COLUMNS = ['match_id','snapshot_block','network',
+    'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr','a_payout_legs',
+    'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr','b_payout_legs',
+    'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation',
+    'btc_chain_id',
+    'admit_block_btc','admit_block_ltc','admit_block_doge'];
+
 module.exports = {
     // Reads rows from cross_chain_calls.
     // Moved here from src/StateAnchorPublisher.js:2491.
@@ -252,5 +266,44 @@ module.exports = {
         return this.doQuery(
             "SELECT * FROM cross_chain_matches WHERE match_id IN (" + matchIds.map(() => '?').join(', ') + ") AND status <> 'retracted'",
             matchIds);
+    },
+
+    // Writes one finalized match row, idempotently.
+    // Moved here from src/CrossChainDexEngine.js:952.
+    //
+    // INSERT IGNORE: match_id is unique, so a re-finalize (another hub, or a restart
+    // racing the poll) is a harmless no-op, and the caller reads affectedRows to credit
+    // the committed ledger only once per fill. `btcChainId` is resolved by the caller
+    // into the value list rather than onto `row`: the row object is what the canonical,
+    // the ledger and the retraction paths read, and btc_chain_id is transport, never
+    // consensus, so it has no path into a signed preimage.
+    async createCrossChainMatch(row, btcChainId) {
+        return this.doQuery(
+            'INSERT IGNORE INTO cross_chain_matches (' + CROSS_CHAIN_MATCH_COLUMNS.join(', ') + ') VALUES (' + CROSS_CHAIN_MATCH_COLUMNS.map(() => '?').join(', ') + ')',
+            CROSS_CHAIN_MATCH_COLUMNS.map(c => (c === 'btc_chain_id' ? btcChainId : row[c])));
+    },
+
+    // Finalized matches with a leg on a reorged chain, for retraction.
+    // Moved here from src/CrossChainDexEngine.js:1125.
+    //
+    // Two-sided: the per-leg clause applies to whichever leg (a/b) is on `chain`, and each
+    // leg is fenced by ITS OWN push generation. `bounded` closes the range at `to` so a leg
+    // re-published inside the original open-ended range survives a deferred retraction;
+    // `fenced` keeps a leg re-finalized at a recycled action_index (higher generation). The
+    // caller normalizes and validates the bounds; this only binds them.
+    async findFinalizedCrossChainMatchesForReorg(chain, from, to, gen, bounded, fenced) {
+        let legClause = (col, gcol) => "(" + col + "_chain = ? AND " + col + "_action_index >= ?" +
+            (bounded ? " AND " + col + "_action_index <= ?" : "") +
+            (fenced ? " AND " + gcol + " <= ?" : "") + ")";
+        let legParams = () => {
+            let p = [chain, from];
+            if(bounded) p.push(to);
+            if(fenced) p.push(gen);
+            return p;
+        };
+        let where = "status = 'finalized' AND (" + legClause('a', 'a_push_generation') + " OR " + legClause('b', 'b_push_generation') + ")";
+        return this.doQuery(
+            "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches WHERE " + where,
+            legParams().concat(legParams()));
     }
 };
