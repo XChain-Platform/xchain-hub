@@ -33,6 +33,7 @@ const { expect } = require('chai');
 const EventEmitter = require('events');
 
 const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const { DB_METHODS }            = require('../helpers/mockHub.js');
 
 const PUB_A = 'aa'.repeat(32);
 const PUB_B = 'bb'.repeat(32);
@@ -49,7 +50,9 @@ function makeDb(){
     let table   = [];
     let nextId  = 1;
     let queries = [];
-    return {
+    // DB_METHODS first: the mirror calls named query methods, and each of them
+    // routes its statement through the doQuery below.
+    return { ...DB_METHODS,
         table:   table,
         queries: queries,
         inserts: () => queries.filter(q => /^INSERT/i.test(q.sql)),

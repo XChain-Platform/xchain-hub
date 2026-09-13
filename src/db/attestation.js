@@ -29,6 +29,23 @@
 // to the wire cannot be silently absent from the read that feeds it.
 const abw = require('../lib/attest_batch_wire.js');
 
+// The attestation_responses columns the response mirror writes and selects back, in
+// the order the snapshot route selects them. It is used for BOTH the INSERT and the
+// select-back on purpose: the REST bootstrap and the WS stream must hand a consumer
+// the SAME columns, and the way they drift apart is one path gaining a column the
+// other does not know about. `id` is excluded: it is assigned by AUTO_INCREMENT and
+// stripped again on apply, so it is a paging cursor and never an input.
+//
+// AttestationResponseMirror.MIRROR_COLUMNS spells the same list for the wire (its
+// GOSSIP_COLUMNS derive from it); a column added to the table goes in both, and the
+// mirror suite's every-column-written test fails when only one of them gains it.
+const ATTESTATION_RESPONSE_MIRROR_COLUMNS = [
+    'network', 'request_id', 'request_action_index', 'request_block_index',
+    'provider_id', 'status', 'response_payload', 'response_hash', 'meta',
+    'effective_time', 'admit_block_btc', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
+    'finalized_at'
+];
+
 module.exports = {
     // Deletes from attest_published_batches.
     // Moved here from src/AttestationBatchPublisher.js:1322.
@@ -225,5 +242,32 @@ module.exports = {
             'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC, effective_time ASC ' +
             'LIMIT ?',
             [network, windowStart, windowEnd, limit]);
+    },
+
+    // Writes one finalized response row for the mirror, idempotently.
+    // Moved here from src/AttestationResponseMirror.js:427.
+    //
+    // INSERT IGNORE against the UNIQUE (network, request_id, effective_time): a duplicate
+    // is ordinary traffic, and insert-only means the existing row is already correct. A
+    // column the writer never sets (batch_action_index at finalization) binds NULL
+    // explicitly rather than riding the driver's treatment of undefined.
+    async createAttestationResponseMirrorRow(row) {
+        return this.doQuery(
+            'INSERT IGNORE INTO attestation_responses (' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ') ' +
+            'VALUES (' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.map(() => '?').join(', ') + ')',
+            ATTESTATION_RESPONSE_MIRROR_COLUMNS.map(c => (row[c] === undefined ? null : row[c])));
+    },
+
+    // Reads one mirrored response row back by its natural key, id included.
+    // Moved here from src/AttestationResponseMirror.js:446 and :793, which issued the
+    // same statement.
+    //
+    // The id is the consumer's paging cursor and only the table carries it, which is
+    // why the mirror selects the row back rather than broadcasting the object it holds.
+    async getAttestationResponseMirrorRow(network, requestId, effectiveTime) {
+        return this.doQuery(
+            'SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' ' +
+            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+            [network, requestId, effectiveTime]);
     }
 };
