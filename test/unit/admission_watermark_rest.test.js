@@ -110,17 +110,18 @@ async function bootApi(heightsMode) {
         getProviderRegistry: sinon.stub().returns(null),
         hubDbBroadcaster: broadcaster,
         db: {
-            // One row per page, whichever table the SELECT names: the page's own filtering is
-            // covered elsewhere and is not what is under test here.
+            // Every named db method the mixins install, spread first so the doQuery and
+            // getChainTip overrides below still win: the nine snapshot routes and the
+            // oracle_prices route now call named methods (findPriceSnapshotsById and the
+            // rest) instead of hub.db.doQuery directly, and each of those methods routes
+            // straight back through `this.doQuery`, so this stub still sees the same SQL
+            // text it always did, one row per page, whichever table the SELECT names.
+            ...DB_METHODS,
             async doQuery(sql) {
                 let text = String(sql);
                 let hit  = PAGES.find((t) => text.includes('FROM ' + t));
                 return hit ? [{ id: 1 }] : [];
             },
-            // The oracle_prices page now calls one of these two named statements
-            // instead of doQuery; the real methods route back through doQuery above.
-            findOraclePricesAfterId: DB_METHODS.findOraclePricesAfterId,
-            findLatestOraclePricesPerFeed: DB_METHODS.findLatestOraclePricesPerFeed,
             getChainTip: async () => null,
         },
     };
