@@ -200,31 +200,14 @@ const DYNAMIC_EDGES = [
     },
     {
         from: 'src/db/index.js',
-        // The mixin install loop calls require(file) over its MIXIN_FILES rows, so
-        // not one literal in the file names a mixin and all of src/db/ reads
-        // unreachable without this edge. The list is read out of the declaration
-        // rather than restated here, because a restated copy is a second registry
-        // that drifts away from the one the loop actually walks.
-        //
-        // The hub has no src/db/ yet: db.js is still one file, and the split lands
-        // in this same wave. The edge is declared now and returns nothing until the
-        // directory exists, so the lane that creates it inherits a walk that
-        // already sees its mixins instead of a tool that reads them all dead.
-        toList: () => {
-            const indexPath = path.join(REPO_ROOT, 'src/db/index.js');
-            if (!fs.existsSync(indexPath)) return [];
-            const declared = fs.readFileSync(indexPath, 'utf8');
-            const block = /const MIXIN_FILES = \[([\s\S]*?)\];/.exec(declared);
-            if (!block) {
-                throw new Error('src/db/index.js no longer declares MIXIN_FILES: the mixin edge cannot be read');
-            }
-            const rows = Array.from(block[1].matchAll(/(['"])([^'"]+)\1/g))
-                .map((m) => resolveRequire('src/db/index.js', m[2]))
-                .filter(Boolean);
-            if (!rows.length) throw new Error('MIXIN_FILES declares no resolvable mixin: the edge is stale');
-            return rows;
-        },
-        why: 'the Database mixin install loop requires every MIXIN_FILES row by computed path',
+        // The db home installs one mixin per table family onto Database.prototype, and
+        // the edge is derived from what that index really does rather than from a name
+        // list this file carries (see dbHomeMixins). Declared even though today's index
+        // names every mixin in a literal require, which the ordinary walk already
+        // follows: the install list is the kind of thing that becomes computed, and the
+        // day it does, eighteen live files would otherwise start reading dead.
+        toList: () => dbHomeMixins(),
+        why: 'the db home installs the mixin files beside its index onto Database.prototype',
     },
 ];
 
@@ -251,6 +234,61 @@ function resolveRequire(fromRel, spec) {
 }
 
 const REQUIRE_LITERAL = /require\(\s*(['"])([^'"]+)\1\s*\)/g;
+
+// The db home: an index that installs one mixin per table family onto
+// Database.prototype, with the mixin files beside it.
+const DB_HOME = 'src/db';
+
+// A require whose argument is not a string literal, which is what an install loop
+// looks like from the outside: require(file), require(path.join(__dirname, file)).
+const REQUIRE_COMPUTED = /require\(\s*[^'")\s]/;
+
+// A read of the home's own directory, the other half of that same shape.
+const HOME_READDIR = /readdir(?:Sync)?\(\s*__dirname/;
+
+/**
+ * The mixin files the db home installs, derived from what the home does rather than
+ * from a list of names kept here.
+ *
+ * TWO SHAPES, BOTH REAL. The index may name each mixin in a literal require, which
+ * the ordinary require walk follows on its own, or build the list at runtime from
+ * its own directory, which no static walk can see. The literals are read first; a
+ * computed require or a read of __dirname then adds every other .js in the home,
+ * because under that shape no literal names a single mixin.
+ *
+ * IT NEVER THROWS. The first cut of this edge insisted on a MIXIN_FILES literal and
+ * died when the split landed with a different one, stopping the whole sweep instead
+ * of measuring the tree. An unfamiliar home, or one with no mixins at all, is zero
+ * edges: a file the home does not load is a candidate, which is the verdict this
+ * tool exists to produce.
+ *
+ * @returns {string[]} repo-relative mixin paths, sorted, possibly empty
+ */
+function dbHomeMixins() {
+    const indexRel = `${DB_HOME}/index.js`;
+    let text;
+    try { text = fs.readFileSync(path.join(REPO_ROOT, indexRel), 'utf8'); } catch (e) { return []; }
+
+    const out = new Set();
+    // A fresh matcher rather than REQUIRE_LITERAL itself: the shared one carries a
+    // lastIndex, and two walks sharing it would each start where the other stopped.
+    const literals = new RegExp(REQUIRE_LITERAL.source, 'g');
+    let m;
+    while ((m = literals.exec(text)) !== null) {
+        const target = resolveRequire(indexRel, m[2]);
+        if (target && target !== indexRel && target.startsWith(`${DB_HOME}/`)) out.add(target);
+    }
+
+    if (REQUIRE_COMPUTED.test(text) || HOME_READDIR.test(text)) {
+        let entries = [];
+        try { entries = fs.readdirSync(path.join(REPO_ROOT, DB_HOME)); } catch (e) { entries = []; }
+        for (const name of entries) {
+            const rel = `${DB_HOME}/${name}`;
+            if (name.endsWith('.js') && rel !== indexRel) out.add(rel);
+        }
+    }
+    return Array.from(out).sort();
+}
 
 /** Every repo-local file `rel` requires by a literal path, plus its declared dynamic edges. */
 function edgesFrom(rel, fileSet) {
