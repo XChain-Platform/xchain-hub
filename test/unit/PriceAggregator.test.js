@@ -16,7 +16,7 @@ const { expect }       = require('chai');
 const PriceAggregator  = require('../../src/PriceAggregator');
 const { createMockHub } = require('../helpers/mockHub');
 
-// Mirror of the canonical PRICE v0 payload (xchain-indexer/src/ed25519.js)
+// Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)
 // buildPriceV0Payload. Tests sign these exact bytes. The mockHub has no `network`,
 // so the EQUIV header is OFF (unknown network) and this is the bare-JSON branch;
 // btc_block_height still rides in the signed content (#4232).
@@ -231,7 +231,7 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(events).to.deep.equal([]);
     });
 
-    // xchain-indexer/src/hub_client.js TERMINAL_HUB_REJECTIONS: a match there DROPS the queued
+    // xchain-indexer/src/hub/hub_client.js TERMINAL_HUB_REJECTIONS: a match there DROPS the queued
     // retraction instead of retrying it, which would undo this whole guard.
     it('HUB-RETRACT-4: the fence-failure error is retryable, not a terminal hub rejection', async function () {
         const TERMINAL = [

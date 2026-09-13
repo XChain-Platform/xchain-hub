@@ -877,7 +877,7 @@ class AttestationRelay {
     }
 
     // Fields reach the chain through a positional `split('|')` with no escaping
-    // (xchain-indexer/src/actions.js), so a literal pipe anywhere in a variable field
+    // (xchain-indexer/src/actions/index.js), so a literal pipe anywhere in a variable field
     // silently shifts every field after it. Such a request cannot be relayed at all;
     // it expires on its origin deadline, which is the honest outcome versus spending
     // a BTC fee on an action every indexer will misparse.

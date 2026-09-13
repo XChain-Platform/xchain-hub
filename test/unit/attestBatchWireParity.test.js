@@ -15,7 +15,7 @@
  *
  * The ATTEST v5/v6 batch wire is written ONCE and vendored twice: the hub BUILDS
  * the wire (src/lib/attest_batch_wire.js) and the indexer PARSES it
- * (xchain-indexer/src/attest_batch_wire.js). Two hand-written layouts of one wire
+ * (xchain-indexer/src/actions/attest/attest_batch_wire.js). Two hand-written layouts of one wire
  * is the failure parallel building invites, so the two copies are byte twins and
  * this file is the hub-side half of the guard, on the pattern the ATTEST relay
  * flag-day twin already uses.
@@ -38,7 +38,7 @@ const local = require('../../src/lib/attest_batch_wire.js');
 // to the dev sibling layout. Absent means skip, unless CI demands the comparison.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-indexer');
-const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'attest_batch_wire.js');
+const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'actions', 'attest', 'attest_batch_wire.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'lib', 'attest_batch_wire.js');
 
 // A window built to exercise everything the canonical normalizes: a null field, a
@@ -75,7 +75,7 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
             }
         });
 
-        it('is byte-identical to xchain-indexer/src/attest_batch_wire.js', function () {
+        it('is byte-identical to xchain-indexer/src/actions/attest/attest_batch_wire.js', function () {
             expect(fs.readFileSync(LOCAL_PATH, 'utf8'))
                 .to.equal(fs.readFileSync(TWIN_PATH, 'utf8'),
                     'the hub copy has drifted from the indexer twin; the hub builds this wire and ' +

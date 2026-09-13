@@ -218,8 +218,8 @@ describe('AttestationRelay', function () {
         // is what catches a one-sided edit to either copy.
         it('byte-matches the indexer implementation (skipped when the sibling repo is absent)', function () {
             const attestPath = process.env.XCHAIN_INDEXER_DIR
-                ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest.js')
-                : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest.js');
+                ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest', 'index.js')
+                : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest', 'index.js');
             if (!fs.existsSync(attestPath)) return this.skip();
 
             const Attest = require(attestPath);
@@ -264,8 +264,8 @@ describe('AttestationRelay', function () {
         // the indexer hashes the DECODED bytes, not the base64 text.
         it('byte-matches the indexer on the derived response leg (skipped when the sibling repo is absent)', function () {
             const attestPath = process.env.XCHAIN_INDEXER_DIR
-                ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest.js')
-                : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest.js');
+                ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest', 'index.js')
+                : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest', 'index.js');
             if (!fs.existsSync(attestPath)) return this.skip();
 
             const Attest = require(attestPath);
@@ -288,7 +288,7 @@ describe('AttestationRelay', function () {
                                     }));
                                     expect(fields, 'derivation refused a relayable body').to.not.equal(null);
 
-                                    // Exactly what xchain-indexer/src/actions/attest.js
+                                    // Exactly what xchain-indexer/src/actions/attest/index.js
                                     // _parseRelayResponse does with the wire field.
                                     const wireBytes = Buffer.from(fields.payloadB64, 'base64');
                                     const wireHash  = crypto.createHash('sha256').update(wireBytes).digest('hex');
@@ -938,7 +938,7 @@ describe('AttestationRelay', function () {
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
 
             const parts = wire.split('|');
-            // Mirrors xchain-indexer/src/actions/attest.js formats[3] and the
+            // Mirrors xchain-indexer/src/actions/attest/index.js formats[3] and the
             // params[N] offsets _parseRelayRequest reads.
             expect(parts[0]).to.equal('ATTEST');
             expect(parts[1]).to.equal('3');
@@ -989,7 +989,7 @@ describe('AttestationRelay', function () {
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
 
             const parts = wire.split('|');
-            // Mirrors xchain-indexer/src/actions/attest.js formats[4]:
+            // Mirrors xchain-indexer/src/actions/attest/index.js formats[4]:
             // VERSION|REQUEST_ID|HOME_RESPONSE_ACTION_INDEX|RESPONSE_PAYLOAD|STATUS|META|
             // SNAPSHOT_BLOCK|SIG_COUNT|PUBKEY|SIG|...
             expect(parts[0]).to.equal('ATTEST');

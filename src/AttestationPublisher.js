@@ -52,7 +52,7 @@
  *     one) rather than in the primary key, so a hub upgrades by adding two nullable
  *     columns and a row that names no status keeps holding its whole request.
  *
- * Wire format (parsed by xchain-indexer/src/actions/attest.js):
+ * Wire format (parsed by xchain-indexer/src/actions/attest/index.js):
  *   ATTEST|1|REQUEST_ID|PROVIDER_ID|RESPONSE_PAYLOAD|STATUS|META|
  *     SIG_COUNT|PUBKEY1|SIG1|PUBKEY2|SIG2|...
  *

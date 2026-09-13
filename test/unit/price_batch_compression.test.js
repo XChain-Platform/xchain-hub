@@ -513,7 +513,7 @@ describe('price_batch_compression: vendored-twin byte identity @regression', fun
         path.join(__dirname, '..', '..', '..', 'xchain-indexer');
 
     it('this copy is byte-identical to the xchain-indexer canonical', function(){
-        const twin = path.join(INDEXER_DIR, 'src', 'price_batch_compression.js');
+        const twin = path.join(INDEXER_DIR, 'src', 'actions', 'price', 'price_batch_compression.js');
         if(!fs.existsSync(twin)){
             if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
                 throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical is missing: ' + twin);

@@ -83,7 +83,7 @@ function hubTwins() {
 }
 
 function loadIndexerTwin(ctx) {
-    try { return require('../../../xchain-indexer/src/ed25519.js'); }
+    try { return require('../../../xchain-indexer/src/consensus/ed25519.js'); }
     catch (e) {
         if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
             throw new Error('PRICE v0 canonical parity cannot run: xchain-indexer sibling missing (' + e.message + ')');
@@ -234,7 +234,7 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
     ];
     const INDEXER_MODULES = [
         '../../../xchain-indexer/src/mirror_admission_activation.js',
-        '../../../xchain-indexer/src/ed25519.js'
+        '../../../xchain-indexer/src/consensus/ed25519.js'
     ];
 
     function armTwins() {
@@ -255,7 +255,7 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
         const ArmedOracleConsensus = require('../../src/OracleConsensus.js');
         const ArmedPriceAggregator = require('../../src/PriceAggregator.js');
         const act                  = require('../../src/mirror_admission_activation.js');
-        const indexer              = indexerPaths ? require('../../../xchain-indexer/src/ed25519.js') : null;
+        const indexer              = indexerPaths ? require('../../../xchain-indexer/src/consensus/ed25519.js') : null;
 
         // Put the process back exactly as it was found. The instances built below keep the
         // armed modules they closed over, so the batch describe above and every other file in

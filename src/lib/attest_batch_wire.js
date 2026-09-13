@@ -95,7 +95,7 @@ const ATTEST_BATCH_MAX_ROWS = 256;
  *
  * TOTAL_CHUNKS is attacker-supplied and lands in an INT UNSIGNED column
  * (`attests.batch_total_chunks`), so unbounded it wedges the node rather than
- * failing the wire: a head declaring 4294967296 parses, actions/attest.js stamps
+ * failing the wire: a head declaring 4294967296 parses, actions/attest/index.js stamps
  * it through unchanged, and the INSERT throws inside the block transaction under
  * the MariaDB default sql_mode. That is a halt any sender can arm for the price
  * of one transaction.

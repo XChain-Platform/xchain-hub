@@ -23,7 +23,7 @@
  * tables: oracle_prices, price_snapshots, cross_chain_matches, cross_chain_calls,
  * capability_snapshots, state_checkpoints, anchor_reward_attestations,
  * attestation_responses, bridge_transfers, policy_snapshots (see
- * xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS +
+ * xchain-indexer/src/hub/hub_db_sync.js RETRACTION_COLUMNS +
  * CROSS_CHAIN_TABLES + HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
  * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
  * is a ledger-fork risk. The indexer rejects a version mismatch so a hub-side

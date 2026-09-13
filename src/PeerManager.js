@@ -45,7 +45,7 @@ const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
 // The two request shapes the read-only mirror feed occupies on the P2P port. They
 // MUST stay byte-identical to what the API server mounts (api.js
 // '/hub-db/snapshot' routes, '/hub-db/subscribe' upgrade) and to what the indexer
-// asks for (xchain-indexer src/hub_db_sync.js _httpGet / _connectWebSocket): the
+// asks for (xchain-indexer src/hub/hub_db_sync.js _httpGet / _connectWebSocket): the
 // same client code reaches a validator over this port and a private hub over the
 // API port, so a path that differs on one side silently disables the mirror.
 const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';

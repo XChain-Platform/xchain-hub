@@ -948,7 +948,7 @@ class AttestationRound {
     // CONSENSUS-CRITICAL: this rule exists in THREE copies that must apply it
     // identically or validation forks:
     //   1. here (AttestationRound._computeResponsibleSet)
-    //   2. the indexer, xchain-indexer/src/actions/attest.js
+    //   2. the indexer, xchain-indexer/src/actions/attest/index.js
     //   3. AttestationPublisher._computeResponsible (failover-rank derivation)
     // All three are behaviorally identical (hash-order sort, source===null keep
     // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)

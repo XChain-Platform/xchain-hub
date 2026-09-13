@@ -316,7 +316,7 @@ class PriceAggregator extends EventEmitter {
     }
 
     // Build the canonical signable payload for a PRICE v0 round.
-    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload (and
+    // MUST match xchain-indexer/src/consensus/ed25519.js buildPriceV0Payload (and
     // OracleConsensus._buildPriceV0Payload) exactly; validators signed these
     // bytes, so any divergence here rejects every legitimate round.
     //
@@ -356,7 +356,7 @@ class PriceAggregator extends EventEmitter {
     }
 
     // Build the canonical signable payload for a PRICE batch: ONE signature set over
-    // several rounds. MUST match xchain-indexer/src/ed25519.js buildPriceBatchPayload and
+    // several rounds. MUST match xchain-indexer/src/consensus/ed25519.js buildPriceBatchPayload and
     // OracleConsensus._buildPriceBatchPayload byte for byte; validators signed these bytes,
     // so any divergence here rejects every legitimate batch.
     //
@@ -1612,7 +1612,7 @@ class PriceAggregator extends EventEmitter {
         // bumpPriceIngestWatermark), so it can only reject pushes this retraction is about to
         // delete; there is no hub-side transaction spanning both, so this is fail-closed, not
         // atomic. Keep the error wording clear of the indexer's TERMINAL_HUB_REJECTIONS patterns
-        // (xchain-indexer/src/hub_client.js) or the retained retry becomes a silent drop.
+        // (xchain-indexer/src/hub/hub_client.js) or the retained retry becomes a silent drop.
         if (fenced) {
             try {
                 await this.db.bumpPriceIngestWatermark(sourceChain, gen, from, this._fenceNetwork());
