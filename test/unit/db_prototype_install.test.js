@@ -63,6 +63,19 @@ describe('db mixin install', function(){
                 expect(Database.prototype[name], m.file + ' -> ' + name).to.be.a('function');
     });
 
+    it('installs every mixin file in the directory, so none is missing from the MIXINS list', function(){
+        // index.js lists its mixins literally. A family file added beside it but never
+        // listed would install nothing, so each file is checked by identity: every one
+        // of its exports must be the very function the prototype carries, and a file
+        // that fails is named here instead of surfacing later as one missing method.
+        // A family that exports no methods yet installs nothing either way, so there is
+        // nothing to compare; the day it gains a method this identity check covers it.
+        const notInstalled = mixins
+            .filter(m => m.methods.some(name => Database.prototype[name] !== require(path.join(DB_DIR, m.file))[name]))
+            .map(m => m.file);
+        expect(notInstalled, 'src/db mixin files not installed on Database.prototype').to.deep.equal([]);
+    });
+
     it('installs them NON-enumerably, so the prototype enumerates what it always did', function(){
         const enumerableOwn = Object.keys(Database.prototype);
         expect(enumerableOwn).to.deep.equal([]);
