@@ -234,5 +234,23 @@ module.exports = {
     `SELECT price FROM price_snapshots
      WHERE coin_pair = ? AND round_number < ? AND status = 'finalized' AND price IS NOT NULL
      ORDER BY round_number DESC LIMIT 1`, [pair, round]);
+    },
+
+    // A set of rounds' finalized v0-proofed rows, for restoring a retracted batch window
+    // to the publisher's buffer.
+    // Moved here from src/OraclePublisher.js:1917.
+    //
+    // Only v0-proofed rows qualify: a batch-sourced row's consensus_proof is the
+    // {"batch":...} object and its reference_block is the landing height, not the round's
+    // BTC anchor. `rounds` are bound as parameters, so the only thing built from the list
+    // is the count of placeholders.
+    async findV0PriceSnapshotsForRounds(rounds, status) {
+        let placeholders = rounds.map(() => '?').join(',');
+        return this.doQuery(
+            'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
+            'admit_block_btc, admit_block_ltc, admit_block_doge ' +
+            'FROM price_snapshots WHERE round_number IN (' + placeholders + ') AND status = ? ' +
+            'AND consensus_proof NOT LIKE \'{"batch":%\' ORDER BY round_number ASC, coin_pair ASC',
+            rounds.concat([status]));
     }
 };

@@ -71,5 +71,16 @@ module.exports = {
     // Moved here from src/OraclePublisher.js:2772.
     async updateOraclePublishedRound(txid, round) {
         return this.doQuery('UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?', [txid, round]);
+    },
+
+    // Forgets the durable publish markers for a set of retracted rounds.
+    // Moved here from src/OraclePublisher.js:2713.
+    //
+    // `rounds` is the caller's list of parsed integer round numbers; each one is bound as
+    // a parameter, so the only thing built from the list is the count of placeholders.
+    async deleteOraclePublishedRoundsByRounds(rounds) {
+        let placeholders = rounds.map(() => '?').join(',');
+        return this.doQuery(
+            'DELETE FROM oracle_published_rounds WHERE round IN (' + placeholders + ')', rounds);
     }
 };
