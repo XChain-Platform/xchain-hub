@@ -982,7 +982,7 @@ describe('Security Hardening', function () {
 
         before(function () {
             XChainHub = proxyquire('../../src/XChainHub', {
-                './db.js': function () {
+                './db': function () {
                     return {
                         createDatabase: sinon.stub().resolves(),
                         verifyTables: sinon.stub().resolves(),

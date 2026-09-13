@@ -18,7 +18,7 @@ let mockDb;
 const DatabaseStub = function() { return mockDb; };
 
 const XChainHub = proxyquire('../../../src/XChainHub', {
-    './db.js':               DatabaseStub,
+    './db':                  DatabaseStub,
     './PeerManager.js':      function() { return null; },
     './Consensus.js':        function() {},
     './ValidatorIdentity.js':function() {},
