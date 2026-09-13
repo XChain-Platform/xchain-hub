@@ -19,6 +19,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const { MAX_RANGE } = require('../../src/lib/oracle_round_presence.js');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 describe('XChainHub.getOracleRoundPresence', function () {
 
@@ -46,7 +47,11 @@ describe('XChainHub.getOracleRoundPresence', function () {
     }
 
     beforeEach(function () {
-        mockDb = { doQuery: sinon.stub().resolves([]), close: sinon.stub().resolves() };
+        // Spread first: getOracleRoundPresence now calls db.getPriceSnapshotsMaxRoundNumber()
+        // and db.findPriceSnapshotsBetweenRounds() instead of issuing SQL inline, and each
+        // routes back through this.doQuery, so seed()'s later reassignment of mockDb.doQuery
+        // (looked up at call time, not captured) still dispatches on the same statement text.
+        mockDb = { ...DB_METHODS, doQuery: sinon.stub().resolves([]), close: sinon.stub().resolves() };
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
         hub.db = mockDb;
     });
