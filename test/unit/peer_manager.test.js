@@ -17,6 +17,7 @@ const ValidatorIdentity  = require('../../src/ValidatorIdentity');
 const PeerManager        = require('../../src/PeerManager');
 const observability      = require('../../src/observability');
 const { waitUntil }      = require('../helpers/waitUntil');
+const { DB_METHODS }     = require('../helpers/mockHub');
 
 describe('PeerManager', function () {
 
@@ -36,7 +37,9 @@ describe('PeerManager', function () {
             P2P_RECONNECT_BASE: 2000,
             P2P_RECONNECT_MAX: 60000
         };
-        dbStub = { doQuery: sinon.stub().resolves([]) };
+        // DB_METHODS gives the double the real named query methods (setP2pPeer
+        // among them), each routing through the doQuery stub the tests assert on.
+        dbStub = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
         pm = new PeerManager(config, dbStub);
     });
 
@@ -1011,7 +1014,7 @@ describe('PeerManager', function () {
                 P2P_WS_PING_INTERVAL: 100000, P2P_RECONNECT_BASE: 200,
                 P2P_RECONNECT_MAX: 2000, P2P_MAX_PAYLOAD: 1048576
             };
-            let n = new PeerManager(cfg, { doQuery: sinon.stub().resolves([]) });
+            let n = new PeerManager(cfg, { ...DB_METHODS, doQuery: sinon.stub().resolves([]) });
             nodes.push(n);
             return n;
         }
