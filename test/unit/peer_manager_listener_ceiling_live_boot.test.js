@@ -29,6 +29,7 @@ const proxyquire  = require('proxyquire');
 const { expect }  = require('chai');
 
 const PeerManager = require('../../src/PeerManager.js');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 describe('PeerManager: message listener ceiling, observed on a real hub boot', function () {
     this.timeout(30000);
@@ -48,6 +49,10 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
         // with "nothing configured yet" so each phase reaches its real
         // peerManager.on('message', ...) registration instead of throwing first.
         mockDb = {
+            // Spread first: _loadValidatorPubkeys now calls db.findActiveValidators()
+            // instead of issuing SQL inline, and that (and every other named method
+            // here) calls this.doQuery, which stays the own override declared below.
+            ...DB_METHODS,
             doQuery:               async () => [],
             setParam:               async () => {},
             setParams:               async () => 0,

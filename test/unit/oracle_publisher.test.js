@@ -15,6 +15,7 @@ const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const path           = require('path');
 const os             = require('os');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -68,6 +69,10 @@ function makeHub(overrides) {
 function makeDb(seed) {
     let markers = Object.assign({}, seed || {});   // round -> { round, txid, sent_at }
     let db = {
+        // Spread first: OraclePublisher now calls db.deleteOraclePublishedRound() and its
+        // sibling named methods instead of issuing SQL inline, and each routes back
+        // through this.doQuery, so the SQL-text dispatch below still drives every case.
+        ...DB_METHODS,
         markers,
         doQuery: sinon.stub().callsFake(async function (q, args) {
             if (/^\s*SELECT/i.test(q)) {

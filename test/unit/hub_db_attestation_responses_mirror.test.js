@@ -24,6 +24,7 @@ const http               = require('http');
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
+const { DB_METHODS }     = require('../helpers/mockHub');
 
 const TABLE = 'attestation_responses';
 
@@ -65,6 +66,11 @@ function makeRow(id) {
 // the one mistake this whole test file has to be able to see.
 function makeFakeDb(rowsByTable) {
     return {
+        // Spread first: the REST route now calls db.findAttestationResponsesById() and
+        // the broadcaster calls db.getAttestationResponsesMaxId() instead of issuing SQL
+        // inline, and every named method here calls this.doQuery, which stays this own
+        // object's doQuery below (spread never overwrites a key declared after it).
+        ...DB_METHODS,
         calls: [],
         async doQuery(sql, params) {
             this.calls.push({ sql: String(sql), params: params });

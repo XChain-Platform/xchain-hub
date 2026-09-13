@@ -14,7 +14,7 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const EventEmitter = require('events');
 const PeerManager  = require('../../../src/PeerManager');
-const { createMockHub } = require('../../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../../helpers/mockHub');
 
 describe('Boundary: P2P Layer', function () {
 
@@ -22,6 +22,10 @@ describe('Boundary: P2P Layer', function () {
 
     beforeEach(function () {
         db = {
+            // Spread first so _recordPeer's db.setP2pPeer(), which now carries the peer
+            // upsert instead of PeerManager issuing SQL inline, still routes through the
+            // doQuery stub below.
+            ...DB_METHODS,
             doQuery: sinon.stub().resolves([]),
             close:   sinon.stub().resolves()
         };

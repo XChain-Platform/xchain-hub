@@ -13,6 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
+const { DB_METHODS }     = require('../helpers/mockHub');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Load HubDbBroadcaster with WebSocket stubbed
@@ -50,6 +51,11 @@ function makeMockWs(overrides) {
 
 function makeDb(overrides) {
     return {
+        // Spread first: the ready frame's max_id lookups now call named getters
+        // (getPriceSnapshotsMaxId and its seven siblings) instead of issuing SQL
+        // inline, and every one of them calls this.doQuery, which stays whichever
+        // doQuery this call site declares afterwards.
+        ...DB_METHODS,
         doQuery: sinon.stub().resolves([]),
         ...(overrides || {})
     };
@@ -185,9 +191,23 @@ describe('HubDbBroadcaster', function () {
                     return [{ max_id: 7 }];
                 })
             });
+            // Spy every named getter the ready frame's max_id scan can reach. The caller
+            // wraps each one in a try/catch with an empty catch body (a missing table is
+            // not an error), so a getter that is not a function on db throws AND is
+            // swallowed silently: neither the missing-key case above nor a thrown call
+            // would otherwise be distinguishable from a healthy empty table. Asserting no
+            // spied call threw closes that gap; a future regression that drops one of
+            // these named methods from the double fails here loudly instead of quietly
+            // reporting 0.
+            let methodSpies = Object.keys(DB_METHODS).map(name => sinon.spy(db, name));
             let b  = new HubDbBroadcaster({}, db);
             let ws = makeMockWs();
             await b.addSubscriber(ws);
+            for (const spy of methodSpies) {
+                for (let i = 0; i < spy.callCount; i++) {
+                    expect(spy.getCall(i).threw(), spy.name + ' threw and was swallowed by the ready-frame scan').to.equal(false);
+                }
+            }
             let msg = JSON.parse(ws.send.firstCall.args[0]);
             for (const table of ['state_checkpoints', 'anchor_reward_attestations']) {
                 expect(msg.max_ids, 'ready frame omits ' + table + ', so the consumer never runs its gap catch-up for it')
