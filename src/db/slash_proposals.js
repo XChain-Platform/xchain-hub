@@ -29,5 +29,19 @@ module.exports = {
     // Moved here from src/SlashGovernance.js:94.
     async findSlashProposals(validatorPubkey) {
         return this.doQuery(`SELECT id, validator_pubkey, offense_type, round_number, evidence, created_at FROM slash_proposals WHERE validator_pubkey = ? AND status = 'pending' ORDER BY id ASC`, [validatorPubkey]);
+    },
+
+    // Sweeps the status of an explicit set of pending slash_proposals rows.
+    // Moved here from src/SlashGovernance.js:202.
+    //
+    // The id list is bound one placeholder per row rather than interpolated, so
+    // the caller's row ids are data and the only thing its length changes is how
+    // many ? the IN list carries.
+    async updateSlashProposalsStatusByIds(newStatus, validatorPubkey, ids) {
+        return this.doQuery(
+            "UPDATE slash_proposals SET status = ? WHERE validator_pubkey = ? AND status = 'pending' " +
+            "AND id IN (" + ids.map(() => '?').join(',') + ")",
+            [newStatus, validatorPubkey].concat(ids)
+        );
     }
 };

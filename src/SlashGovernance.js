@@ -199,11 +199,7 @@ class SlashGovernance {
                     pk.substring(0, 16) + '... were detected after proposal ' + ev.proposalId +
                     ' was created; leaving them pending (not covered by the voted evidence set)');
             }
-            let res = await this.db.doQuery(
-                "UPDATE slash_proposals SET status = ? WHERE validator_pubkey = ? AND status = 'pending' " +
-                "AND id IN (" + voted.map(() => '?').join(',') + ")",
-                [newStatus, pk].concat(voted.map(r => r.id))
-            );
+            let res = await this.db.updateSlashProposalsStatusByIds(newStatus, pk, voted.map(r => r.id));
             marked = (res && res.affectedRows != null) ? res.affectedRows : 0;
         } else {
             // No local subset hashes to the voted evidence set: this hub's
