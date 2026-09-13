@@ -42,6 +42,29 @@ module.exports = {
         return this.doQuery('DELETE FROM attest_published_requests WHERE request_id = ? AND sent_at IS NULL', [rid]);
     },
 
+    // Retention sweep over the settled markers in attest_published_requests.
+    // Moved here from src/AttestationPublisher.js:797.
+    //
+    // Seconds, and DB-clock arithmetic on both sides: sent_at is written by NOW(), so
+    // comparing it against a Node-side timestamp would fold any host/DB clock skew
+    // straight into the cutoff. A marker holding a quarantined intent is never swept
+    // (intent_status IS NULL), and `excludeRequestIds` carries the request ids still on
+    // the caller's durable queue, excluded by identity because a rid is a string rather
+    // than an orderable round. The ids are bound as parameters, so the only thing this
+    // builds from the list is the count of placeholders.
+    async deleteSettledAttestPublishedRequests(windowSec, excludeRequestIds) {
+        let excluded = Array.isArray(excludeRequestIds) ? excludeRequestIds : [];
+        let sql = 'DELETE FROM attest_published_requests ' +
+                  'WHERE sent_at IS NOT NULL AND intent_status IS NULL ' +
+                  'AND sent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)';
+        let params = [windowSec];
+        if (excluded.length > 0){
+            sql += ' AND request_id NOT IN (' + excluded.map(() => '?').join(',') + ')';
+            params = params.concat(excluded);
+        }
+        return this.doQuery(sql, params);
+    },
+
     // Deletes from attestations.
     // Moved here from src/ReorgHandler.js:626.
     async deleteAttestation(chain, bound) {
