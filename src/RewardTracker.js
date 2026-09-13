@@ -75,11 +75,9 @@ class RewardTracker {
             ), 8);
 
         for (let pubkey of validParticipants) {
-            // INSERT IGNORE relies on the UNIQUE KEY (validator_pubkey, round_number, reward_type)
-            // so concurrent writes from multiple hubs collapse to one row per (validator, round).
-            let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
-                         VALUES (?, ?, 'oracle_round', ?)`;
-            await this.db.doQuery(query, [pubkey, round, perValidator])
+            // createValidatorRoundReward is an INSERT IGNORE, so concurrent writes from
+            // multiple hubs collapse to one row per (validator, round).
+            await this.db.createValidatorRoundReward(pubkey, round, perValidator)
                 .catch(e => console.error('Error recording reward for ' + pubkey + ':', e));
         }
 
@@ -211,9 +209,7 @@ class RewardTracker {
                 .catch(e => console.error('Error consolidating anchor reward for ' + lcPubkey + ':', e));
         }
 
-        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
-                     VALUES (?, ?, ?, ?, ?, ?)`;
-        await this.db.doQuery(query, [lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier])
+        await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
             .catch(e => console.error('Error recording anchor reward for ' + lcPubkey + ':', e));
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
@@ -272,25 +268,16 @@ class RewardTracker {
     }
 
     async getUnclaimedRewards(validatorPubkey) {
-        let query = `SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total
-                     FROM validator_rewards
-                     WHERE validator_pubkey = ? AND claimed = 0`;
-        let rows = await this.db.doQuery(query, [validatorPubkey]);
+        let rows = await this.db.getUnclaimedValidatorRewardTotal(validatorPubkey);
         return rows.length > 0 ? rows[0].total.toString() : '0';
     }
 
     async getRewardHistory(validatorPubkey, limit) {
-        let query = `SELECT round_number, reward_type, amount, claimed, created_at
-                     FROM validator_rewards
-                     WHERE validator_pubkey = ?
-                     ORDER BY round_number DESC
-                     LIMIT ?`;
-        return await this.db.doQuery(query, [validatorPubkey, limit || 50]);
+        return await this.db.findValidatorRewardHistory(validatorPubkey, limit || 50);
     }
 
     async getTotalDistributed() {
-        let query = `SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total FROM validator_rewards`;
-        let rows = await this.db.doQuery(query);
+        let rows = await this.db.getValidatorRewardsDistributedTotal();
         return rows.length > 0 ? rows[0].total.toString() : '0';
     }
 }

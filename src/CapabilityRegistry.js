@@ -224,14 +224,8 @@ class CapabilityRegistry {
             throw new Error('unknown capability: ' + capability);
         let conn = await this.db.getConnection();
         try {
-            await conn.query(
-                `INSERT INTO validator_capabilities
-                    (signing_pubkey, capability, qualified, qualified_at_block)
-                 VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                    qualified=VALUES(qualified),
-                    qualified_at_block=VALUES(qualified_at_block)`,
-                [String(pubkey).toLowerCase(), capability, qualified ? 1 : 0, blockIndex || null]
+            await this.db.setValidatorCapabilityQualification(
+                conn, String(pubkey).toLowerCase(), capability, qualified ? 1 : 0, blockIndex || null
             );
         } finally {
             await conn.release();
@@ -243,15 +237,8 @@ class CapabilityRegistry {
             throw new Error('unknown capability: ' + capability);
         let conn = await this.db.getConnection();
         try {
-            await conn.query(
-                `INSERT INTO validator_capabilities
-                    (signing_pubkey, capability, self_test_ok, self_test_at, self_test_msg)
-                 VALUES (?, ?, ?, NOW(), ?)
-                 ON DUPLICATE KEY UPDATE
-                    self_test_ok=VALUES(self_test_ok),
-                    self_test_at=VALUES(self_test_at),
-                    self_test_msg=VALUES(self_test_msg)`,
-                [String(pubkey).toLowerCase(), capability, ok ? 1 : 0, reason || null]
+            await this.db.setValidatorCapabilitySelfTestResult(
+                conn, String(pubkey).toLowerCase(), capability, ok ? 1 : 0, reason || null
             );
         } finally {
             await conn.release();
@@ -263,13 +250,8 @@ class CapabilityRegistry {
             throw new Error('unknown capability: ' + capability);
         let conn = await this.db.getConnection();
         try {
-            await conn.query(
-                `INSERT INTO validator_capabilities
-                    (signing_pubkey, capability, enabled)
-                 VALUES (?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                    enabled=VALUES(enabled)`,
-                [String(pubkey).toLowerCase(), capability, enabled ? 1 : 0]
+            await this.db.setValidatorCapabilityEnabled(
+                conn, String(pubkey).toLowerCase(), capability, enabled ? 1 : 0
             );
         } finally {
             await conn.release();
@@ -284,12 +266,8 @@ class CapabilityRegistry {
     async isActive(pubkey, capability) {
         let conn = await this.db.getConnection();
         try {
-            let rows = await conn.query(
-                `SELECT qualified, self_test_ok, enabled
-                 FROM validator_capabilities
-                 WHERE signing_pubkey=? AND capability=?
-                 LIMIT 1`,
-                [String(pubkey).toLowerCase(), capability]
+            let rows = await this.db.getValidatorCapabilityActivationFlags(
+                conn, String(pubkey).toLowerCase(), capability
             );
             if (rows.length === 0) return false;
             let r = rows[0];
@@ -302,12 +280,7 @@ class CapabilityRegistry {
     async getActiveValidators(capability) {
         let conn = await this.db.getConnection();
         try {
-            let rows = await conn.query(
-                `SELECT signing_pubkey
-                 FROM validator_capabilities
-                 WHERE capability=? AND qualified=1 AND self_test_ok=1 AND enabled=1`,
-                [capability]
-            );
+            let rows = await this.db.findActiveValidatorPubkeysByCapability(conn, capability);
             return rows.map(r => r.signing_pubkey);
         } finally {
             await conn.release();
@@ -324,12 +297,7 @@ class CapabilityRegistry {
     async getActiveCount(capability) {
         let conn = await this.db.getConnection();
         try {
-            let rows = await conn.query(
-                `SELECT COUNT(*) AS cnt
-                 FROM validator_capabilities
-                 WHERE capability=? AND qualified=1 AND self_test_ok=1 AND enabled=1`,
-                [capability]
-            );
+            let rows = await this.db.getActiveValidatorCountByCapability(conn, capability);
             return rows.length > 0 ? Number(rows[0].cnt) : 0;
         } finally {
             await conn.release();
@@ -339,13 +307,8 @@ class CapabilityRegistry {
     async getState(pubkey, capability) {
         let conn = await this.db.getConnection();
         try {
-            let rows = await conn.query(
-                `SELECT signing_pubkey, capability, qualified, self_test_ok, enabled,
-                        self_test_at, self_test_msg, qualified_at_block
-                 FROM validator_capabilities
-                 WHERE signing_pubkey=? AND capability=?
-                 LIMIT 1`,
-                [String(pubkey).toLowerCase(), capability]
+            let rows = await this.db.getValidatorCapabilityState(
+                conn, String(pubkey).toLowerCase(), capability
             );
             return rows.length > 0 ? rows[0] : null;
         } finally {
@@ -358,25 +321,13 @@ class CapabilityRegistry {
     // validator-capabilities page); returns the full flag set per row so callers
     // can distinguish "not qualified" from "operator-disabled" from "self-test failing".
     async listState({ signingPubkey, capability, limit } = {}) {
-        let query = `SELECT id, signing_pubkey, capability, qualified, self_test_ok,
-                            enabled, qualified_at_block, updated_at
-                     FROM validator_capabilities`;
-        let where = [];
-        let args = [];
-        if (signingPubkey) {
-            where.push("signing_pubkey = ?");
-            args.push(String(signingPubkey).toLowerCase());
-        }
-        if (capability) {
-            where.push("capability = ?");
-            args.push(capability);
-        }
-        if (where.length) query += " WHERE " + where.join(" AND ");
-        let lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
-        query += " ORDER BY id DESC LIMIT " + lim;
         let conn = await this.db.getConnection();
         try {
-            return await conn.query(query, args);
+            return await this.db.findValidatorCapabilityStates(conn, {
+                signingPubkey: signingPubkey ? String(signingPubkey).toLowerCase() : signingPubkey,
+                capability,
+                limit
+            });
         } finally {
             await conn.release();
         }
@@ -386,12 +337,7 @@ class CapabilityRegistry {
     async getOwnState(pubkey) {
         let conn = await this.db.getConnection();
         try {
-            let rows = await conn.query(
-                `SELECT capability, qualified, self_test_ok, enabled, self_test_at, self_test_msg
-                 FROM validator_capabilities
-                 WHERE signing_pubkey=?`,
-                [String(pubkey).toLowerCase()]
-            );
+            let rows = await this.db.findValidatorCapabilitiesByPubkey(conn, String(pubkey).toLowerCase());
             return rows;
         } finally {
             await conn.release();

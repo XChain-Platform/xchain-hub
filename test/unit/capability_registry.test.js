@@ -13,6 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
+const { DB_METHODS }     = require('../helpers/mockHub');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Stub out capabilities/index.js so we don't hit real self-tests
@@ -47,7 +48,12 @@ function makeDb() {
         query:   sinon.stub().resolves([]),
         release: sinon.stub().resolves()
     };
+    // DB_METHODS carries the named query methods the src/db mixins install. The
+    // registry's statements now live in db/validators.js and take the connection as
+    // their first argument, so the double needs the real methods: each one calls
+    // conn.query, and the stub below still sees the same SQL with the same args.
     return {
+        ...DB_METHODS,
         _conn: conn,
         getConnection: sinon.stub().resolves(conn)
     };
