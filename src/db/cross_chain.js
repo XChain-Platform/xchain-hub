@@ -243,5 +243,14 @@ module.exports = {
     async updateCrossChainCallsRetractedInRange(chain, bounds) {
         let { tail, params } = crossChainCallRetractionTail(chain, bounds);
         return this.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
+    },
+
+    // Reads the non-retracted cross_chain_matches rows among an explicit set of match ids,
+    // for the anchor-stamp re-broadcast. Moved here from src/StateAnchorPublisher.js:4732.
+    // The ids are bound one placeholder each; their count is all they change.
+    async findLiveCrossChainMatchesByMatchIds(matchIds) {
+        return this.doQuery(
+            "SELECT * FROM cross_chain_matches WHERE match_id IN (" + matchIds.map(() => '?').join(', ') + ") AND status <> 'retracted'",
+            matchIds);
     }
 };

@@ -101,5 +101,27 @@ module.exports = {
     // Moved here from src/StateAnchorPublisher.js:5578.
     async updateAnchorPublishedCheckpoint(txid, chain, network, checkpoint_seq) {
         return this.doQuery('UPDATE anchor_published_checkpoints SET txid = ?, sent_at = NOW() WHERE chain = ? AND network = ? AND checkpoint_seq = ?', [txid, chain, network, checkpoint_seq]);
+    },
+
+    // Retention sweep: deletes confirmed anchor_published_checkpoints markers whose intent
+    // is older than the window. Moved here from src/StateAnchorPublisher.js:5670.
+    //
+    // `sent_at IS NOT NULL` keeps every intent-only row, which is the only durable trace
+    // that DOGE may already have paid, and the cutoff is DB-clock arithmetic on intent_at,
+    // the column _anchorIntentHolds measures, so host/DB skew never folds into the window.
+    async deleteAnchorPublishedCheckpointsSentBefore(windowSec) {
+        return this.doQuery(
+            'DELETE FROM anchor_published_checkpoints WHERE sent_at IS NOT NULL ' +
+            'AND intent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [windowSec]);
+    },
+
+    // The same retention sweep for anchor_published_archives markers.
+    // Moved here from src/StateAnchorPublisher.js:5670.
+    async deleteAnchorPublishedArchivesSentBefore(windowSec) {
+        return this.doQuery(
+            'DELETE FROM anchor_published_archives WHERE sent_at IS NOT NULL ' +
+            'AND intent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [windowSec]);
     }
 };

@@ -107,5 +107,45 @@ module.exports = {
     // the documented response has always carried it.
     async findActiveValidatorRoster() {
         return this.doQuery("SELECT signing_pubkey, addr, chains, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey");
+    },
+
+    // Stamps the archive batch_seq on one not-yet-archived validator_rewards row.
+    // Moved here from src/StateAnchorPublisher.js:4753, the branch for a FINALIZED from a
+    // peer predating the round qualifier.
+    async updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, validatorPubkey) {
+        return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey]);
+    },
+
+    // Stamps the archive batch_seq on one not-yet-archived validator_rewards row, matched
+    // on its round qualifier too, so a rebase-reissued archive seq cannot mark its twin.
+    // Moved here from src/StateAnchorPublisher.js:4753, the qualified branch.
+    async updateValidatorRewardArchiveBatchSeqByQualifier(batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier) {
+        return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND round_qualifier = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier]);
+    },
+
+    // Reads a page of pending anchor reward rows for the archive, for a hub with no
+    // flag-days to bind (unscoped or unknown network). Moved here from
+    // src/StateAnchorPublisher.js:2505, the branch with no exclusion clause.
+    async findArchivableAnchorRewards(maxBatch) {
+        return this.doQuery(
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" + " " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
+            [maxBatch]);
+    },
+
+    // Reads a page of pending anchor reward rows for the archive, excluding every row the
+    // indexer credits from on-chain bytes at or above this hub's two flag-days, so
+    // eligibility applies BEFORE the LIMIT. The exclusion clause is built here beside the
+    // query it filters, so StateAnchorPublisher passes only the bound values. The reward
+    // types and both flag-days are bound; the anchor type count is all the list changes.
+    async findArchivableAnchorRewardsBelowFlagDays(anchorRewardTypes, anchorFlagDay, archiveRewardType, archiveFlagDay, maxBatch) {
+        return this.doQuery(
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" +
+            " AND NOT (reward_type IN (" +
+                anchorRewardTypes.map(() => '?').join(', ') +
+            ") AND block_index >= ?)" +
+            " AND NOT (reward_type = ? AND block_index >= ?)" + " " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
+            anchorRewardTypes.concat([anchorFlagDay, archiveRewardType, archiveFlagDay, maxBatch]));
     }
 };

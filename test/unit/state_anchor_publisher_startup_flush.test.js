@@ -27,6 +27,7 @@ const { expect }           = require('chai');
 const { waitUntil }        = require('../helpers/waitUntil');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const { DB_METHODS }       = require('../helpers/mockHub.js');
 
 const BLOCK  = 100;
 const CP_ROW = {
@@ -42,6 +43,10 @@ function buildPub() {
     let identity = new ValidatorIdentity('11'.repeat(32));
     let hub = {
         db: {
+            // The publisher's pending-checkpoint reads are named methods now; these two
+            // route the same statement into the doQuery below.
+            findAnchorEligibleUnanchoredCheckpoints: DB_METHODS.findAnchorEligibleUnanchoredCheckpoints,
+            findAnchorEligibleUnanchoredCheckpointsByNetwork: DB_METHODS.findAnchorEligibleUnanchoredCheckpointsByNetwork,
             async doQuery(sql) {
                 if (sql.indexOf('FROM state_checkpoints') !== -1) return [CP_ROW];
                 return [];

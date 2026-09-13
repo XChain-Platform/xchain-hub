@@ -1057,19 +1057,13 @@ class StateAnchorPublisher {
         // checkpoints. A hub with no configured network keeps the legacy
         // unscoped behavior rather than filtering everything out.
         //
-        // The SQL is unchanged from the per-chain era ON PURPOSE (D24). The
-        // `anchor_txid IS NULL` predicate sits OUTSIDE the MAX subquery: pushing it in
-        // would resurrect older un-anchored seqs that the chained hashes have already
-        // superseded. Do not move it.
-        let pendingSql =
-            'SELECT sc.* FROM state_checkpoints sc JOIN (' +
-            '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
-            '  WHERE MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
-            ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
-            'WHERE sc.anchor_txid IS NULL';
-        let pendingParams = [this.checkpointIntervalBlocks, this.anchorEveryNCheckpoints];
-        if(this.network){ pendingSql += ' AND sc.network = ?'; pendingParams.push(this.network); }
-        let rows = await this.db.doQuery(pendingSql, pendingParams);
+        // The statement lives in db/state_checkpoints.js beside its D24 note: the
+        // `anchor_txid IS NULL` predicate stays OUTSIDE the MAX subquery.
+        let rows = this.network
+            ? await this.db.findAnchorEligibleUnanchoredCheckpointsByNetwork(this.checkpointIntervalBlocks,
+                                                                             this.anchorEveryNCheckpoints, this.network)
+            : await this.db.findAnchorEligibleUnanchoredCheckpoints(this.checkpointIntervalBlocks,
+                                                                    this.anchorEveryNCheckpoints);
         let anchored = [];
         let skipped  = { rows: 0 };
 
@@ -2371,29 +2365,24 @@ class StateAnchorPublisher {
         this._checkArchiveAttestQuorum();
     }
 
-    // The SQL twin of _isChainDerivedReward, for the pending-reward selector, which has
-    // to apply eligibility BEFORE its LIMIT. Emitted from the same two constants the
-    // predicate reads, on the sqlRoundQualifier precedent, so the two forms cannot
-    // disagree about which reward type is judged against which flag-day.
+    // The flag-day twin of _isChainDerivedReward, for the pending-reward selector, which has
+    // to apply eligibility BEFORE its LIMIT; db/validators.js
+    // findArchivableAnchorRewardsBelowFlagDays turns these thresholds into the selector's
+    // exclusion clause. Emitted from the same two constants the predicate reads, on the
+    // sqlRoundQualifier precedent, so the two forms cannot disagree about which reward type
+    // is judged against which flag-day.
     //
     // Thresholds are read HERE rather than cached on the instance: both maps are mutable
     // module state that configuration and tests re-pin. When either is not a finite
     // number the hub is unscoped or on an unknown network, which is exactly when
-    // _isChainDerivedReward answers false for everything, so the clause is empty and the
+    // _isChainDerivedReward answers false for everything, so this returns null and the
     // selector keeps its original unnarrowed form.
-    _derivedRewardExclusionSql(){
+    _derivedRewardFlagDays(){
         let anchorFlagDay  = Number(ar.ANCHOR_REWARD_ACTIVATION[this.network]);
         let archiveFlagDay = Number(ar.ARCHIVE_REWARD_ACTIVATION[this.network]);
         if(!Number.isFinite(anchorFlagDay) || !Number.isFinite(archiveFlagDay))
-            return { clause: '', params: [] };
-        return {
-            clause: " AND NOT (reward_type IN (" +
-                        ANCHOR_FLAG_DAY_REWARD_TYPES.map(() => '?').join(', ') +
-                    ") AND block_index >= ?)" +
-                    " AND NOT (reward_type = ? AND block_index >= ?)",
-            params: ANCHOR_FLAG_DAY_REWARD_TYPES.concat([anchorFlagDay,
-                                                         ARCHIVE_FLAG_DAY_REWARD_TYPE, archiveFlagDay])
-        };
+            return null;
+        return { anchorFlagDay, archiveFlagDay };
     }
 
     // A validator_rewards row the indexer credits from on-chain bytes is not archive
@@ -2501,12 +2490,12 @@ class StateAnchorPublisher {
         // below-flag-day reward sorted behind them was never examined again: those rows
         // have no chain parse, so the archive is their ONLY recovery transport, and
         // nothing else clears the blockers.
-        let exclusion = this._derivedRewardExclusionSql();
-        let rewards = await this.db.doQuery(
-            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" +
-            exclusion.clause + " " +
-            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?",
-            exclusion.params.concat([this.maxBatch]));
+        let flagDays = this._derivedRewardFlagDays();
+        let rewards = flagDays
+            ? await this.db.findArchivableAnchorRewardsBelowFlagDays(ANCHOR_FLAG_DAY_REWARD_TYPES, flagDays.anchorFlagDay,
+                                                                     ARCHIVE_FLAG_DAY_REWARD_TYPE, flagDays.archiveFlagDay,
+                                                                     this.maxBatch)
+            : await this.db.findArchivableAnchorRewards(this.maxBatch);
         // RETAINED, and now redundant on purpose: the SQL narrows the page, this
         // guarantees the invariant for an unscoped hub (empty clause) and for any row the
         // SQL form judged differently. Archiving a derived row was self-feeding: each
@@ -4729,9 +4718,7 @@ class StateAnchorPublisher {
         if(txid && matchIds.length && this.hub && this.hub.hubDbBroadcaster){
             try {
                 let ids = matchIds.map(m => m.match_id);
-                let rows = await this.db.doQuery(
-                    "SELECT * FROM cross_chain_matches WHERE match_id IN (" + ids.map(() => '?').join(', ') + ") AND status <> 'retracted'",
-                    ids);
+                let rows = await this.db.findLiveCrossChainMatchesByMatchIds(ids);
                 for(let row of rows)
                     this.hub.hubDbBroadcaster.broadcastRow({ table: 'cross_chain_matches', row: row });
             } catch(e){
@@ -4748,12 +4735,13 @@ class StateAnchorPublisher {
             // FINALIZED from a peer predating the qualifier carries none, so fall back to
             // the unqualified stamp rather than matching nothing during a rolling deploy.
             let qualified = (r.round_qualifier !== undefined && r.round_qualifier !== null);
-            let args = [batchSeq, String(r.reward_type), Number(r.round_number), String(r.validator_pubkey).toLowerCase()];
-            if(qualified) args.push(Number(r.round_qualifier));
-            await this.db.doQuery(
-                'UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? ' +
-                (qualified ? 'AND round_qualifier = ? ' : '') + 'AND batch_seq IS NULL',
-                args);
+            let rewardType  = String(r.reward_type);
+            let roundNumber = Number(r.round_number);
+            let pubkey      = String(r.validator_pubkey).toLowerCase();
+            if(qualified)
+                await this.db.updateValidatorRewardArchiveBatchSeqByQualifier(batchSeq, rewardType, roundNumber, pubkey, Number(r.round_qualifier));
+            else
+                await this.db.updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, pubkey);
         }
     }
 
@@ -5665,14 +5653,13 @@ class StateAnchorPublisher {
 
         // DB-clock arithmetic on both sides: intent_at is written by CURRENT_TIMESTAMP,
         // so a Node-side cutoff would fold host/DB clock skew into the window.
+        // Checkpoints first, then archives, the order the sweep has always run in; each
+        // table has its own fixed statement, so no table name is assembled into SQL here.
         let deleted = 0;
-        for(let table of ['anchor_published_checkpoints', 'anchor_published_archives']){
-            let res = await this.db.doQuery(
-                'DELETE FROM ' + table + ' WHERE sent_at IS NOT NULL ' +
-                'AND intent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
-                [windowSec]);
-            deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
-        }
+        let res = await this.db.deleteAnchorPublishedCheckpointsSentBefore(windowSec);
+        deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
+        res = await this.db.deleteAnchorPublishedArchivesSentBefore(windowSec);
+        deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
         if(deleted > 0){
             this.anchorMarkersPruned += deleted;
             console.log('StateAnchorPublisher: anchor-marker retention pruned ' + deleted +
