@@ -14,7 +14,7 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const fc           = require('fast-check');
 const EventEmitter = require('events');
-const gen          = require('./generators');
+const gen          = require('./helpers/generators');
 
 // PeerManager is constructed directly, so we need to mock its dependencies
 // but call _handleInbound, _buildEnvelope, _makeId directly.

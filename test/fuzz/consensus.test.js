@@ -16,7 +16,7 @@ const fc         = require('fast-check');
 const Consensus  = require('../../src/Consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { makeValidator } = require('../helpers/fixtures');
-const gen               = require('./generators');
+const gen               = require('./helpers/generators');
 
 describe('Fuzz: Consensus', function () {
 

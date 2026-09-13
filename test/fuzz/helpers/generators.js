@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const fc = require('fast-check');
-const { PRICE_MAX } = require('../../src/constants');
+const { PRICE_MAX } = require('../../../src/constants');
 
 // ---------------------------------------------------------------------------
 // Prices

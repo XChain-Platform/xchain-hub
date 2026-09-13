@@ -14,7 +14,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
-const gen        = require('./generators');
+const gen        = require('./helpers/generators');
 
 describe('Fuzz: PriceFetcher', function () {
 
