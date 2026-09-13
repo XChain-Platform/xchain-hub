@@ -24,6 +24,11 @@
  *
  ********************************************************************/
 
+// The codec's own field list, read from the wire module rather than re-spelled here:
+// the batch window is selected by the same names the encoder writes, so a field added
+// to the wire cannot be silently absent from the read that feeds it.
+const abw = require('../lib/attest_batch_wire.js');
+
 module.exports = {
     // Deletes from attest_published_batches.
     // Moved here from src/AttestationBatchPublisher.js:1322.
@@ -173,5 +178,29 @@ module.exports = {
     // Moved here from src/AttestationResponseMirror.js:789.
     async updateAttestationResponseByNetworkAndRequestId(actionIndex, network, request_id, effective_time) {
         return this.doQuery('UPDATE attestation_responses SET batch_action_index = ? WHERE network = ? AND request_id = ? AND effective_time = ? AND batch_action_index IS NULL', [actionIndex, network, request_id, effective_time]);
+    },
+
+    // One batch window's terminal rows, in the applier's own order.
+    // Moved here from src/AttestationBatchPublisher.js:571.
+    //
+    // MEMBERSHIP IS THE SIGNED effective_time. It is the only column of this table two
+    // hubs are guaranteed to read identically: it rides inside the canonical the
+    // responsible set signed, so a boundary row falls on the same side of the same
+    // instant on every hub that holds it. The idx_effective_time index is what makes
+    // this range read a seek rather than a scan.
+    //
+    // `limit` is the caller's row cap plus one, so the caller can tell a full window
+    // from an overflowing one; the caller normalizes the rows it gets back.
+    async findAttestationResponsesInBatchWindow(network, windowStart, windowEnd, limit) {
+        return this.doQuery(
+            'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ' ' +
+            'FROM attestation_responses ' +
+            'WHERE network = ? AND effective_time >= ? AND effective_time < ? ' +
+            // effective_time last: one request can hold two honest rows (a round that
+            // finalized under two leader slots), and the window has to order them the
+            // same way on every hub or the signed bytes differ.
+            'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC, effective_time ASC ' +
+            'LIMIT ?',
+            [network, windowStart, windowEnd, limit]);
     }
 };
