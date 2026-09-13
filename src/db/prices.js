@@ -252,5 +252,55 @@ module.exports = {
             'FROM price_snapshots WHERE round_number IN (' + placeholders + ') AND status = ? ' +
             'AND consensus_proof NOT LIKE \'{"batch":%\' ORDER BY round_number ASC, coin_pair ASC',
             rounds.concat([status]));
+    },
+
+    // Writes one consensus-finalized round, every pair, in ONE multi-row INSERT.
+    // Moved here from src/OracleConsensus.js:2269.
+    //
+    // One statement so the round lands atomically: a per-pair loop let a getfeequote /
+    // getpricesnapshots reader observe a torn round (some pairs from round N, others from
+    // N-1), and the id-ordered mirror bootstrap could persist that torn read to a replica.
+    // The hub Database exposes no transaction API, so a single statement is the atomicity
+    // primitive. `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
+    // already resolved to its per-chain columns. The upsert upgrades a 'skipped' placeholder
+    // row to 'finalized'.
+    async setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols) {
+        let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
+        let params = [];
+        for (let p of prices) params.push(round, p.coinPair, p.price, referenceBlock, blockTimestamp, validatorCount, proof,
+                                          admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
+        let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status,
+                 admit_block_btc, admit_block_ltc, admit_block_doge)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
+                 block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
+                 consensus_proof = VALUES(consensus_proof), status = 'finalized',
+                 admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
+                 admit_block_doge = VALUES(admit_block_doge)`;
+        return this.doQuery(query, params);
+    },
+
+    // Writes a 'skipped' marker row for each of a round's pairs, in ONE multi-row INSERT.
+    // Moved here from src/OracleConsensus.js:2469 (_storeSkippedRound), and also serving the
+    // per-pair skip markers at src/OracleConsensus.js:2302, which issued the same statement
+    // with only its indentation differing.
+    //
+    // The upsert only refreshes a row that is still 'skipped': a pair that already finalized
+    // keeps its price, its anchor and its status, so a late skip never demotes a finalized row.
+    async setSkippedPriceSnapshotRound(round, coinPairs, referenceBlock, blockTimestamp) {
+        let placeholders = coinPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
+        let params = [];
+        for (let pair of coinPairs) params.push(round, pair, referenceBlock, blockTimestamp);
+        let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE
+                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
+                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
+                 status = IF(status = 'skipped', 'skipped', status)`;
+        return this.doQuery(query, params);
     }
 };

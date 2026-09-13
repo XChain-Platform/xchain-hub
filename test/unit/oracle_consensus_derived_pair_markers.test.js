@@ -22,7 +22,7 @@ const { expect }        = require('chai');
 const OracleConsensus   = require('../../src/OracleConsensus');
 const PriceFetcher      = require('../../src/PriceFetcher');
 const { DERIVED_PAIRS } = require('../../src/constants.js');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 
 describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
     const XCHAIN = DERIVED_PAIRS[0];
@@ -83,7 +83,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         const hub = createMockHub();
         oc = new OracleConsensus(hub, withGate(() => true));
         const queries = [];
-        oc.db = { doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
+        oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
         await oc._storeSnapshot(42, [{ coinPair: 'BTC/USD', price: '100000' }], 3, '[]', 900, 1700000000);
         const skipInsert = queries.find(q => q.sql.includes("'skipped'") && q.sql.includes('INSERT INTO price_snapshots'));
         expect(skipInsert, 'a skipped-marker INSERT was issued').to.exist;
@@ -94,7 +94,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         const hub = createMockHub();
         oc = new OracleConsensus(hub, withGate(() => true));
         const queries = [];
-        oc.db = { doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
+        oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
         await oc._storeSnapshot(42, [{ coinPair: 'BTC/USD', price: '100000' },
                                      { coinPair: XCHAIN, price: '0.01' }], 3, '[]', 900, 1700000000);
         const skipInsert = queries.find(q => q.sql.includes("'skipped'") && q.sql.includes('INSERT INTO price_snapshots'));
@@ -105,7 +105,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         const hub = createMockHub();
         oc = new OracleConsensus(hub, withGate(() => true));
         const queries = [];
-        oc.db = { doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
+        oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
         await oc._storeSkippedRound(42, 900, 1700000000, 'no submissions');
         const insert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots'));
         expect(insert, 'a skipped-round INSERT was issued').to.exist;
@@ -116,7 +116,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         const hub = createMockHub();
         oc = new OracleConsensus(hub, withGate(() => false));
         const queries = [];
-        oc.db = { doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
+        oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
         await oc._storeSkippedRound(42, 900, 1700000000, 'no submissions');
         const insert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots'));
         expect(insert).to.exist;
