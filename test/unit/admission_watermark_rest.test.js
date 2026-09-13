@@ -23,6 +23,7 @@ const sinon       = require('sinon');
 const { expect }  = require('chai');
 const proxyquire  = require('proxyquire');
 const { waitUntil } = require('../helpers/waitUntil');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 // Every /hub-db/snapshot/* page the mirror reads, in the order api.js declares them.
 const PAGES = [
@@ -116,6 +117,10 @@ async function bootApi(heightsMode) {
                 let hit  = PAGES.find((t) => text.includes('FROM ' + t));
                 return hit ? [{ id: 1 }] : [];
             },
+            // The oracle_prices page now calls one of these two named statements
+            // instead of doQuery; the real methods route back through doQuery above.
+            findOraclePricesAfterId: DB_METHODS.findOraclePricesAfterId,
+            findLatestOraclePricesPerFeed: DB_METHODS.findLatestOraclePricesPerFeed,
             getChainTip: async () => null,
         },
     };

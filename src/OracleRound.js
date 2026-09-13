@@ -1131,12 +1131,9 @@ class OracleRound {
 
         let inserts = [];
         for (let p of prices) {
-            // INSERT IGNORE relies on the UNIQUE KEY (round, coin_pair, validator_pubkey)
-            // so concurrent writes across hubs collapse silently instead of raising
-            // ER_DUP_ENTRY (which db.doQuery would log before our catch could filter it).
-            let query = `INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
-                         VALUES (?, ?, ?, ?, ?)`;
-            inserts.push(this.db.doQuery(query, [round, p.coinPair, validatorPubkey, p.price, p.sources]));
+            // createOracleSubmission is an INSERT IGNORE: a concurrent write from
+            // another hub collapses silently rather than rejecting this one.
+            inserts.push(this.db.createOracleSubmission(round, p.coinPair, validatorPubkey, p.price, p.sources));
         }
 
         // Settle every insert before the round proceeds so a persistence failure is

@@ -43,12 +43,16 @@
 // (tiny); the cap only guards a pathologically large feed set.
 const MAX_SNAPSHOT_ROWS = 10000;
 
-// Build the SQL + params for the oracle_prices snapshot route.
+// Pick the statement and bind values for the oracle_prices snapshot route.
 //   opts.latest : truthy -> latest-row-per-feed mode (MAX(effective_at))
 //   opts.since  : since_id for the default ascending page-walk (ignored when latest)
 //   opts.limit  : row cap (clamped to [1, MAX_SNAPSHOT_ROWS])
-// Returns { sql, params, mode }. `mode` is echoed to the client so it can tell
-// whether an older hub silently ignored the `latest` flag and served a page.
+// Returns { method, params, mode }. The SQL itself lives in src/db/oracle.js:
+// `method` names one of its two statements (findLatestOraclePricesPerFeed or
+// findOraclePricesAfterId) and is only ever one of those two literals, never a
+// value taken from the request, so the route calls db[method](...params).
+// `mode` is echoed to the client so it can tell whether an older hub silently
+// ignored the `latest` flag and served a page.
 function buildOraclePricesSnapshotQuery(opts = {}) {
     const limit = clampLimit(opts.limit);
 
@@ -59,31 +63,14 @@ function buildOraclePricesSnapshotQuery(opts = {}) {
         // is actually in effect. Without this gate the currently-served
         // price is hidden from the dashboard for the entire lock window.
         const now = clampNow(opts.now);
-        // Feed identity is (source_address, coin, tick, fiat): the table key
-        // and what dispenser settlement filters on (indexer getOraclePrice).
-        // PRICE v1 is permissionless, so two operators publishing the same
-        // (coin,tick,fiat) is normal; grouping without source_address would
-        // return only the freshest operator's row and hide an abandoned
-        // operator's stale feed from the dashboard (no feed-stale alert while
-        // dispensers pinned to that ORACLE_ADDRESS settle against dead data).
-        // Join each feed's MAX(effective_at) back to the full row. Ties at the
-        // same effective_at (two txs from one operator) return >1 row for that
-        // feed; the client re-dedups per feed key, so this is harmless and
-        // still bounded to ~= feed count. ORDER BY id keeps output stable.
-        const sql =
-            'SELECT op.* FROM oracle_prices op ' +
-            'JOIN (SELECT source_address, coin, tick, fiat, MAX(effective_at) AS max_eff ' +
-            '      FROM oracle_prices WHERE effective_at <= ? GROUP BY source_address, coin, tick, fiat) latest ' +
-            '  ON op.source_address = latest.source_address ' +
-            ' AND op.coin = latest.coin AND op.tick = latest.tick ' +
-            ' AND op.fiat = latest.fiat AND op.effective_at = latest.max_eff ' +
-            'ORDER BY op.id ASC LIMIT ?';
-        return { sql, params: [now, limit], mode: 'latest' };
+        // Feed identity, the MAX(effective_at) join and the tie behaviour are
+        // explained beside the statement in db/oracle.js.
+        return { method: 'findLatestOraclePricesPerFeed', params: [now, limit], mode: 'latest' };
     }
 
     const since = clampSince(opts.since);
     return {
-        sql: 'SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?',
+        method: 'findOraclePricesAfterId',
         params: [since, limit],
         mode: 'page',
     };

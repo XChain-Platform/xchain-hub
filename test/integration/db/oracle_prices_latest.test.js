@@ -70,8 +70,8 @@ describe('Integration: oracle_prices latest mode (per-operator feed identity)', 
             { source: 'opB', coin: 'BTC', tick: 'PEPECASH', fiat: 'USD', value: '2.1', effectiveAt: NOW - 3600 },
         ]);
 
-        const { sql, params } = buildOraclePricesSnapshotQuery({ latest: true, now: NOW });
-        const rows = await db.doQuery(sql, params);
+        const { method, params } = buildOraclePricesSnapshotQuery({ latest: true, now: NOW });
+        const rows = await db[method](...params);
 
         expect(rows).to.have.length(2);
         const bySource = Object.fromEntries(rows.map((r) => [r.source_address, r]));
@@ -88,8 +88,8 @@ describe('Integration: oracle_prices latest mode (per-operator feed identity)', 
             { source: 'opA', coin: 'LTC', tick: 'DOGEPARTY', fiat: 'USD', value: '9.9', effectiveAt: NOW + 86400 },
         ]);
 
-        const { sql, params } = buildOraclePricesSnapshotQuery({ latest: true, now: NOW });
-        const rows = await db.doQuery(sql, params);
+        const { method, params } = buildOraclePricesSnapshotQuery({ latest: true, now: NOW });
+        const rows = await db[method](...params);
 
         expect(rows).to.have.length(1);
         expect(rows[0].value).to.equal('5.0');

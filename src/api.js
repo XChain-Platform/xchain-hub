@@ -732,7 +732,7 @@ async function startApi(){
         async ping(params, {res}) {
             try {
                 await Promise.race([
-                    hub.db.doQuery('SELECT 1', []),
+                    hub.db.getDatabaseLivenessProbe(),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                 ]);
                 return {status: "success", db: true};
@@ -750,7 +750,7 @@ async function startApi(){
             let dbOk = false;
             try {
                 await Promise.race([
-                    hub.db.doQuery('SELECT 1', []),
+                    hub.db.getDatabaseLivenessProbe(),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                 ]);
                 dbOk = true;
@@ -2050,12 +2050,14 @@ async function startApi(){
             // per coin/tick/fiat); absent it, the default ascending since_id page-walk
             // (indexer bootstrap) is unchanged. See oraclePricesSnapshotQuery.js.
             let latest = req.query.latest === '1' || req.query.latest === 'true';
-            let { sql, params, mode } = buildOraclePricesSnapshotQuery({
+            // method is one of the two oracle_prices statements in db/oracle.js, picked
+            // by the builder from a fixed pair, never a name taken from the request.
+            let { method, params, mode } = buildOraclePricesSnapshotQuery({
                 latest,
                 since: req.query.since_id ? parseInt(req.query.since_id) : 0,
                 limit: req.query.limit ? parseInt(req.query.limit) : undefined,
             });
-            let rows = await hub.db.doQuery(sql, params);
+            let rows = await hub.db[method](...params);
             res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
@@ -2300,10 +2302,7 @@ async function startApi(){
                 running: !!(m && m.running)
             })) : [];
 
-            let query = `INSERT INTO telemetry_pings
-                         (install_id, country, region, ip_hash, node_version, os_platform, os_release, arch, docker_version, modules, event)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-            await hub.db.doQuery(query, [
+            await hub.db.createTelemetryPing(
                 installId,
                 country,
                 region,
@@ -2315,7 +2314,7 @@ async function startApi(){
                 clampStr(b.docker_version, 32),
                 JSON.stringify(modules),
                 event
-            ]);
+            );
             res.json({ status: 'success' });
         } catch (err) {
             // Never surface telemetry failures to the client.
@@ -2339,18 +2338,7 @@ async function startApi(){
 
             // Latest ping per install within the window. install_id is used only to
             // dedupe + group here; it is dropped before the response.
-            let rows = await hub.db.doQuery(
-                `SELECT t.install_id, t.country, t.node_version, t.os_platform, t.arch, t.docker_version, t.modules
-                   FROM telemetry_pings t
-                   JOIN (
-                     SELECT install_id, MAX(created_at) AS mx
-                       FROM telemetry_pings
-                      WHERE created_at > (NOW() - INTERVAL ${days} DAY)
-                      GROUP BY install_id
-                   ) l ON t.install_id = l.install_id AND t.created_at = l.mx
-                  LIMIT 50000`,
-                []
-            );
+            let rows = await hub.db.findLatestTelemetryPingPerInstall(days);
 
             const tally = (arr, key) => {
                 const m = new Map();
@@ -2401,10 +2389,7 @@ async function startApi(){
             }
 
             // Total pings over the window (activity volume, not unique installs).
-            let pingRow = await hub.db.doQuery(
-                `SELECT COUNT(*) AS c FROM telemetry_pings WHERE created_at > (NOW() - INTERVAL ${days} DAY)`,
-                []
-            );
+            let pingRow = await hub.db.getTelemetryPingCountInWindow(days);
 
             res.json({
                 enabled: true,
@@ -2445,29 +2430,10 @@ async function startApi(){
             if (days > 365) days = 365;
 
             // Latest ping per install in the window: the current state of each server.
-            let rows = await hub.db.doQuery(
-                `SELECT t.install_id, t.country, t.region, t.ip_hash, t.node_version,
-                        t.os_platform, t.os_release, t.arch, t.docker_version, t.modules,
-                        t.created_at AS last_seen
-                   FROM telemetry_pings t
-                   JOIN (
-                     SELECT install_id, MAX(created_at) AS mx
-                       FROM telemetry_pings
-                      WHERE created_at > (NOW() - INTERVAL ${days} DAY)
-                      GROUP BY install_id
-                   ) l ON t.install_id = l.install_id AND t.created_at = l.mx
-                  LIMIT 50000`,
-                []
-            );
+            let rows = await hub.db.findLatestTelemetryOperatorPingPerInstall(days);
 
             // first_seen + ping count per install over the window.
-            let statRows = await hub.db.doQuery(
-                `SELECT install_id, COUNT(*) AS pings, MIN(created_at) AS first_seen
-                   FROM telemetry_pings
-                  WHERE created_at > (NOW() - INTERVAL ${days} DAY)
-                  GROUP BY install_id`,
-                []
-            );
+            let statRows = await hub.db.findTelemetryPingStatsPerInstall(days);
             const stats = new Map();
             for (const s of statRows) stats.set(s.install_id, s);
 

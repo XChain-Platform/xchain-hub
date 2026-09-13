@@ -13,13 +13,25 @@
 const { expect } = require('chai');
 const { buildOraclePricesSnapshotQuery, MAX_SNAPSHOT_ROWS } =
     require('../../src/oraclePricesSnapshotQuery');
+const { DB_METHODS } = require('../helpers/mockHub');
+
+// The two statements now live in src/db/oracle.js and the builder names which one
+// the route runs. sqlOf calls that named method against a doQuery stand-in and
+// returns the SQL it issued, so the assertions below still read the real text.
+function sqlOf(built) {
+    let issued = null;
+    DB_METHODS[built.method].apply({ doQuery: (sql) => { issued = sql; return Promise.resolve([]); } }, built.params);
+    return issued;
+}
 
 describe('buildOraclePricesSnapshotQuery', function () {
 
     describe('default (page) mode - indexer bootstrap, must not change', function () {
 
         it('pages ascending by id from since_id', function () {
-            const { sql, params, mode } = buildOraclePricesSnapshotQuery({ since: 500, limit: 1000 });
+            const built = buildOraclePricesSnapshotQuery({ since: 500, limit: 1000 });
+            const { params, mode } = built;
+            const sql = sqlOf(built);
             expect(mode).to.equal('page');
             expect(sql).to.match(/WHERE id > \? ORDER BY id ASC LIMIT \?/);
             expect(sql).to.not.match(/GROUP BY/);
@@ -47,7 +59,9 @@ describe('buildOraclePricesSnapshotQuery', function () {
     describe('latest mode - dashboard current-per-feed', function () {
 
         it('selects the MAX(effective_at) row per (source_address,coin,tick,fiat), not per id', function () {
-            const { sql, params, mode } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
+            const built = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
+            const { params, mode } = built;
+            const sql = sqlOf(built);
             expect(mode).to.equal('latest');
             expect(sql).to.match(/MAX\(effective_at\)/);
             // Feed identity includes the operator: grouping without
@@ -65,12 +79,14 @@ describe('buildOraclePricesSnapshotQuery', function () {
         });
 
         it('gates the MAX(effective_at) subquery to now, hiding future-dated rows', function () {
-            const { sql } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
+            const sql = sqlOf(buildOraclePricesSnapshotQuery({ latest: true, now: 1000 }));
             expect(sql).to.match(/WHERE effective_at <= \? GROUP BY source_address, coin, tick, fiat/);
         });
 
         it('ignores since_id in latest mode (no page cursor bound)', function () {
-            const { sql, params } = buildOraclePricesSnapshotQuery({ latest: true, since: 12345, now: 1000 });
+            const built = buildOraclePricesSnapshotQuery({ latest: true, since: 12345, now: 1000 });
+            const { params } = built;
+            const sql = sqlOf(built);
             expect(params).to.deep.equal([1000, MAX_SNAPSHOT_ROWS]);
             expect(sql).to.not.contain('12345');
         });
