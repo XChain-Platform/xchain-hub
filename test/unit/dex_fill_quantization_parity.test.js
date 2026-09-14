@@ -42,6 +42,52 @@ function makeDexHub() {
     return hub;
 }
 
+const SRC_ROOT = path.join(__dirname, '../../src');
+const ENGINE_DIR = path.join(SRC_ROOT, 'cross_chain');
+
+// dex_engine.js plus every file it reaches through relative requires that stay inside
+// src/cross_chain, followed transitively. Source text is read rather than require.cache
+// walked because proxyquire above loads the engine outside the ordinary cache.
+function dexEngineSourceFiles() {
+    const seen = new Set();
+    const queue = [path.join(ENGINE_DIR, 'dex_engine.js')];
+    while (queue.length) {
+        const file = queue.shift();
+        if (seen.has(file)) continue;
+        seen.add(file);
+        const text = fs.readFileSync(file, 'utf8');
+        for (const m of text.matchAll(/require\(\s*'(\.{1,2}\/[^']+)'\s*\)/g)) {
+            let target = path.resolve(path.dirname(file), m[1]);
+            if (!target.endsWith('.js')) target += '.js';
+            if (target.startsWith(ENGINE_DIR + path.sep) && fs.existsSync(target)) queue.push(target);
+        }
+    }
+    return [...seen];
+}
+
+// The engine must not quantize with a guessed COIN_DECIMALS, checked over every file the
+// engine is assembled from, because the quantization may sit in a part file rather than
+// dex_engine.js itself. A scan that reaches no bcround call at all would pass that
+// negative check vacuously, so the two grid snaps are counted first and a count of zero
+// fails with the list of files it looked in.
+function assertNoGuessedGrid() {
+    const files = dexEngineSourceFiles();
+    const scanned = files.map((f) => path.relative(SRC_ROOT, f)).join(', ');
+    let calls = 0;
+    for (const file of files) {
+        calls += (fs.readFileSync(file, 'utf8').match(/\bbc\.bcround\s*\(/g) || []).length;
+    }
+    assert.ok(calls > 0, 'no bc.bcround call found in ' + scanned +
+        '; the quantization moved somewhere this scan does not reach, so the guard is vacuous');
+    assert.strictEqual(calls, 2,
+        'expected exactly the two grid snaps (takerGive and takerGet) across ' + scanned);
+    for (const file of files) {
+        assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /bcround\s*\([^)]*COIN_DECIMALS/,
+            path.relative(SRC_ROOT, file) + ': guessing 8 decimals would mis-quantize every ' +
+            '0-decimal (NFT) and non-8-decimal tick, which is worse than not rounding at all');
+    }
+}
+
 const FIXTURE = path.join(__dirname, '../fixtures/dex-fill-quantization-vectors.json');
 const vectors = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
 
@@ -127,10 +173,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
         // KEPT from the pre-parity suite, deliberately: a fallback default is still the
         // wrong way to close this, and it is the edit someone would reach for first.
         it('the engine does NOT quantize with a guessed COIN_DECIMALS', function () {
-            const src = fs.readFileSync(path.join(__dirname, '../../src/cross_chain/dex_engine.js'), 'utf8');
-            assert.doesNotMatch(src, /bcround\s*\([^)]*COIN_DECIMALS/,
-                'guessing 8 decimals would mis-quantize every 0-decimal (NFT) and ' +
-                'non-8-decimal tick, which is worse than not rounding at all');
+            assertNoGuessedGrid();
         });
 
         it('the fixture marks the tick-quantization vectors as hub-reachable', function () {
