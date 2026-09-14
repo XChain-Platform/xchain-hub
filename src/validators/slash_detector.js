@@ -24,21 +24,20 @@
  * rows into a SLASH_PENALTY governance proposal and a passed vote executes
  * the penalty. On-chain stake slashing stays in the indexer.
  *
+ * The detection passes live beside this file as prototype mixins:
+ * slash_detector/deviations.js (price deviation and its 24-hour repeat window),
+ * slash_detector/participation.js (the sliding missed-rounds window) and
+ * slash_detector/options.js (the deviation band and its override guards).
+ *
  ********************************************************************/
 
 const crypto = require('crypto');
-const { ORACLE_DEVIATION_THRESHOLD } = require('../constants');
-const bcmath = require('../bcmath.js');
-const devband = require('../lib/deviation_band.js');
-// The per-round move bound the aggregation clamp applies, read from its one definition
-// in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
-// does not require this file, so there is no cycle.
-const { maxChangeForPair } = require('../oracle/consensus.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
-
-const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
+const { resolveDeviationThreshold } = require('./slash_detector/options.js');
+const deviationsMixin    = require('./slash_detector/deviations.js');
+const participationMixin = require('./slash_detector/participation.js');
 
 // Page bound for the public read surface, matching Governance.getProposals /
 // Governance.getVotes exactly (default 50, hard cap 500). The API layer's
@@ -81,57 +80,10 @@ class SlashDetector {
         this.hub = hub;
         this.db  = hub.db;
 
-        // Price-deviation slash band. Defaults to the federation-uniform
-        // ORACLE_DEVIATION_THRESHOLD (constants.js), the same band the oracle
-        // co-sign gate (OracleConsensus._handlePropose) and the exactly-2-source
-        // publish gate (_aggregate) enforce, so by default we never slash a
-        // submission the federation just co-signed. This is the band's FLOOR, not
-        // the band in force every round: in a round where the aggregation clamp
-        // moved a pair's published price, checkDeviations widens that pair by
-        // maxChangeForPair, because the clamp is licensed to publish that far from
-        // the median every submitter stood behind (item 5833).
-        // A SLASH_DEVIATION_THRESHOLD override (env / governance) is still
-        // honored, but guarded:
-        //  - TIGHTER than the co-sign band would slash submitters INSIDE the
-        //    co-signed band (the exact inversion of the "never sign a price we
-        //    would slash" invariant), so it fails fast at construction;
-        //  - LOOSER only lets some co-sign-rejected deviations go unslashed
-        //    (a leniency/liveness asymmetry, not wrongful slashing), so it warns.
-        // Read on PRESENCE, never on truthiness. `parseFloat(x) || DEFAULT` ate the two
-        // values the guards below exist to catch: an explicit 0 is the TIGHTEST band an
-        // operator can express and therefore the exact inversion the throw is for, but it
-        // is falsy, so it silently became the default and neither the throw nor the warn
-        // ever fired. Dropping the `||` makes the finiteness check load-bearing rather
-        // than cosmetic: a typo'd value now parses to NaN, which passes both guards below
-        // (`NaN < x` is false, `NaN !== x` is true) and would reach checkDeviations.
-        // The band is not compared with a JS `>` there but handed to
-        // deviation_band.exceedsBand, and that was executed rather than reasoned about:
-        // with a NaN band it returns TRUE for any deviation at all (0.1% off the
-        // published price included), so a NaN band does not disable slashing, it slashes
-        // the whole honest federation. That is a direct breach of the never-slash-inside-
-        // the-co-signed-band invariant stated above, which is why a non-finite override
-        // must throw at construction and not fall back. Same dead-knob class the
-        // ORACLE_SUBMISSIONS_RETENTION_ROUNDS passthrough already guards at api.js:395.
-        let rawBand = hub.p2pConfig.SLASH_DEVIATION_THRESHOLD;
-        let hasBand = rawBand !== undefined && rawBand !== null && String(rawBand).trim() !== '';
-        this.deviationThreshold = hasBand ? parseFloat(rawBand) : ORACLE_DEVIATION_THRESHOLD;
-        if (hasBand && !Number.isFinite(this.deviationThreshold)) {
-            throw new Error('SLASH_DEVIATION_THRESHOLD (' + rawBand + ') is not a valid number: ' +
-                'remove the override or set it to a finite value >= the federation-uniform ' +
-                'ORACLE_DEVIATION_THRESHOLD (' + ORACLE_DEVIATION_THRESHOLD + ').');
-        }
-        if (this.deviationThreshold < ORACLE_DEVIATION_THRESHOLD) {
-            throw new Error('SLASH_DEVIATION_THRESHOLD (' + this.deviationThreshold +
-                ') is below the federation-uniform ORACLE_DEVIATION_THRESHOLD (' +
-                ORACLE_DEVIATION_THRESHOLD + '): this would slash submissions inside the ' +
-                'co-signed band. Remove the override or set it >= the oracle band.');
-        }
-        if (this.deviationThreshold !== ORACLE_DEVIATION_THRESHOLD) {
-            logger.warn('SlashDetector: SLASH_DEVIATION_THRESHOLD=' + this.deviationThreshold +
-                ' diverges from the federation-uniform ORACLE_DEVIATION_THRESHOLD=' +
-                ORACLE_DEVIATION_THRESHOLD + '; deviations between the two bands will be ' +
-                'co-sign-rejected but never slashed.');
-        }
+        // Resolve the price-deviation band: ORACLE_DEVIATION_THRESHOLD unless a guarded
+        // SLASH_DEVIATION_THRESHOLD override applies. It is a FLOOR checkDeviations widens in
+        // a clamped round; options.js documents why a tighter or non-finite override throws.
+        this.deviationThreshold = resolveDeviationThreshold(hub.p2pConfig);
         this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
 
         // Sliding window (in rounds) over which missed rounds are counted.
@@ -178,267 +130,6 @@ class SlashDetector {
     async checkRound(round, submissions, finalizedPrices, participants, allValidators) {
         await this.checkDeviations(round, submissions, finalizedPrices);
         await this.checkParticipation(round, participants, allValidators);
-    }
-
-    async checkDeviations(round, submissions, finalizedPrices) {
-        if (!submissions || !finalizedPrices) return;
-
-        let finalizedMap = {};
-        for (let fp of finalizedPrices) {
-            finalizedMap[fp.coinPair] = fp.price;
-        }
-
-        // Pairs whose published price was CLAMPED this round get a wider band (item 5833).
-        let clampedPairs = this.clampLimitedPairs(round, finalizedMap);
-
-        // Check each validator's submission against the finalized prices.
-        // The unique offense signal is (validator, round): one proposal per
-        // deviating validator per round, with the deviating pairs aggregated
-        // into the evidence (one row per pair flooded the table: 34 pairs ×
-        // rounds × hubs, unbounded).
-        for (let [sender, sub] of submissions) {
-            if (!sub.prices || !Array.isArray(sub.prices)) continue;
-
-            let pubkey = this.resolveValidatorPubkey(sender);
-            if (!pubkey) continue;
-
-            let deviatingPairs = [];
-            for (let p of sub.prices) {
-                let finalPriceStr = finalizedMap[p.coinPair];
-                let finalPrice = parseFloat(finalPriceStr);
-                if (!finalPrice || finalPrice === 0) continue;
-
-                let submittedPrice = parseFloat(p.price);
-                if (isNaN(submittedPrice) || submittedPrice === 0) continue;
-
-                // Canonical mean-relative deviation via the shared deviation_band helper:
-                // |submitted - finalized| / finalized at scale 18, the same
-                // formula and reference orientation as the co-sign admission gate and the
-                // publish-side 2-source gate in OracleConsensus. This site was already
-                // reference-relative pre-helper (behavior-preserving). Exact-decimal
-                // bcmath (no float ULP at the +-band boundary): both sides of the band
-                // must be decided by the same exact comparison, so an exactly-threshold
-                // submission is never co-signed yet slashed. Branch on the shared
-                // exceedsBand() comparator rather than a locally written bcgt, so that
-                // "same exact comparison" is one definition this gate and the co-sign
-                // admission gate both call, not two copies that agree today. deviation
-                // is recomputed inside the branch for the pct only, which costs a second
-                // bcdiv solely on the rare slash path.
-                //
-                // Widen the band by the pair's clamp allowance in a round where the clamp
-                // actually bound (item 5833). The band is measured against the CLAMPED
-                // published price while submissions are raw, and the clamp is licensed to
-                // move the published price up to maxChangeForPair away from the median every
-                // submitter stood behind, so a genuine fat-tail move put every honest
-                // submitter outside a 5% band and recorded price_deviation against the whole
-                // federation. Widening only in clamped rounds keeps the band exactly as tight
-                // as the co-sign gate in every normal round; the reference stays the uniform
-                // published price, so evidence bodies and their hashes are unchanged.
-                let band = this.deviationThreshold;
-                if (clampedPairs.has(p.coinPair)) band += maxChangeForPair(p.coinPair);
-                if (devband.exceedsBand(String(p.price), String(finalPriceStr), band, 18)) {
-                    let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
-                    let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
-                    logger.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
-                        pct + '% on ' + p.coinPair + ' in round ' + round);
-
-                    deviatingPairs.push({
-                        coinPair: p.coinPair,
-                        submitted: submittedPrice,
-                        finalized: finalPrice,
-                        deviation: pct + '%'
-                    });
-                }
-            }
-
-            if (deviatingPairs.length > 0) {
-                await this.recordSlashProposal(pubkey, 'price_deviation', round,
-                    JSON.stringify({
-                        pairCount: deviatingPairs.length,
-                        pairs: deviatingPairs
-                    })
-                );
-
-                // Track once per (validator, round) for the repeated-deviation check
-                await this.trackDeviation(pubkey, round);
-            }
-        }
-    }
-
-    // The pairs whose published price for `round` sits ON a clamp bound, i.e. the pairs
-    // OracleConsensus.clampToLastFinalized actually moved. Derived, not carried: no
-    // field is added to round:finalized, no wire format changes and no query is issued,
-    // so accusation sets and SlashGovernance evidence hashes stay byte-identical.
-    //
-    // The reference comes from the consensus engine's own retained clamp basis for this
-    // exact round (getClampReference), which is the value the aggregate was clamped
-    // against, not a re-read that could have moved since. Bounds are recomputed with the
-    // clamp's own scale-8 bcmath and compared NUMERICALLY rather than by string equality,
-    // so a re-formatted trailing digit cannot silently un-detect a clamp.
-    //
-    // Fail-soft to TODAY's behaviour: no engine, or no reference for this round, yields
-    // an empty set and the band stays at this.deviationThreshold. That never slashes
-    // anyone the tight band would have spared, it only fails to widen.
-    clampLimitedPairs(round, finalizedMap) {
-        let clamped = new Set();
-        let engine  = this.hub && this.hub.oracleConsensus;
-        let basis   = (engine && typeof engine.getClampReference === 'function')
-            ? engine.getClampReference(round) : null;
-        if (!basis) return clamped;
-
-        for (let coinPair of Object.keys(finalizedMap || {})) {
-            let published = finalizedMap[coinPair];
-            if (published === null || published === undefined) continue;
-            let last = basis.get(coinPair);
-            if (last === null || last === undefined || !bcmath.bcgt(String(last), '0')) continue;
-            let maxDelta = bcmath.bcmul(String(last), String(maxChangeForPair(coinPair)), 8);
-            let hi = bcmath.bcadd(String(last), maxDelta, 8);
-            let lo = bcmath.bcsub(String(last), maxDelta, 8);
-            // The clamp never publishes outside [lo, hi], so "at or past a bound" is
-            // "on the bound". A median landing exactly on a bound counts as clamped too:
-            // that widens the band on a round the clamp would have published the same
-            // price for, which is leniency, never a wrongful slash.
-            if (!bcmath.bclt(String(published), hi) || !bcmath.bcgt(String(published), lo)) {
-                clamped.add(coinPair);
-            }
-        }
-        return clamped;
-    }
-
-    async checkParticipation(round, participants, allValidators) {
-        if (!allValidators || allValidators.length === 0) return;
-
-        // Drop tracking state for pubkeys no longer in the known validator set
-        // before recording this round (SLASH-MAP-NO-GC-1). Without this the four
-        // per-validator maps kept one entry per pubkey ever seen, so a key
-        // rotation leaked an entry forever over the process lifetime.
-        this.gcValidatorState(allValidators);
-
-        let participantSet = new Set(participants);
-
-        for (let v of allValidators) {
-            let entry = this.participation.get(v.pubkey);
-            if (!entry) {
-                entry = { history: [], missed: 0 };
-                this.participation.set(v.pubkey, entry);
-            }
-
-            // Record this round's outcome in the sliding window (true = missed).
-            let missedThisRound = !participantSet.has(v.pubkey);
-            entry.history.push(missedThisRound);
-            if (missedThisRound) entry.missed++;
-            if (entry.history.length > this.participationWindowSize) {
-                if (entry.history.shift()) entry.missed--;
-            }
-
-            if (entry.missed < this.missedRoundsThreshold) {
-                // Windowed miss count is back under the threshold: the validator
-                // is genuinely participating again, so re-arm the latch. A single
-                // token participation while the window stays saturated does NOT
-                // reach here (that reset was the earlier evasion this window closes).
-                this.nonParticipationFired.set(v.pubkey, false);
-                continue;
-            }
-
-            // Fire once per crossing at or past the threshold. `>=` plus the
-            // latch keeps a single proposal per crossing while staying
-            // retry-safe: an exact `===` fired only at the precise count, so
-            // a DB write that failed at the threshold (errors are swallowed
-            // in recordSlashProposal) could never be retried and the offense
-            // was lost. The latch is set only after the row persists.
-            if (!this.nonParticipationFired.get(v.pubkey)) {
-                let rate = ((entry.history.length - entry.missed) / entry.history.length).toFixed(4);
-                logger.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
-                    '... missed ' + entry.missed + ' of the last ' + entry.history.length +
-                    ' rounds (participation rate ' + rate + ')');
-
-                // Latch optimistically BEFORE the await, then re-arm if the write
-                // failed. checkRound is driven by the un-serialized round:finalized
-                // listener, so two overlapping finalizations could both read the
-                // latch as false during the first call's DB round-trip and record a
-                // duplicate proposal. Setting the latch first closes that TOCTOU
-                // window while a failed write still re-arms for a retry next round.
-                this.nonParticipationFired.set(v.pubkey, true);
-                let recorded = await this.recordSlashProposal(v.pubkey, 'non_participation', round,
-                    JSON.stringify({
-                        missedRounds: entry.missed,
-                        windowRounds: entry.history.length,
-                        participationRate: rate
-                    })
-                );
-                if (!recorded) this.nonParticipationFired.set(v.pubkey, false);
-            }
-        }
-    }
-
-    // Bound the per-validator tracking maps to the currently-known validator set
-    // so a signing-key rotation does not leak a map entry per retired pubkey for
-    // the process lifetime (SLASH-MAP-NO-GC-1). A pubkey is kept if it is in this
-    // round's validator set OR still in the live peer registry: a deviating
-    // validator is recorded via resolveValidatorPubkey off the registry and may
-    // be known there before/without appearing in the round's `allValidators`, so
-    // reconciling against the registry too never drops an active validator's
-    // window. A dropped-then-returning validator simply restarts its window,
-    // which only makes non-participation detection more lenient, never wrongful.
-    gcValidatorState(allValidators) {
-        let live = new Set();
-        for (let v of allValidators) if (v && v.pubkey) live.add(v.pubkey);
-        let pm = this.hub.getPeerManager && this.hub.getPeerManager();
-        if (pm && pm.validatorPubkeys) {
-            for (let pk of pm.validatorPubkeys.values()) if (pk) live.add(pk);
-        }
-        for (let map of [this.participation, this.recentDeviations,
-                         this.repeatedDeviationFired, this.nonParticipationFired]) {
-            for (let key of map.keys()) if (!live.has(key)) map.delete(key);
-        }
-    }
-
-    async trackDeviation(pubkey, round) {
-        if (!this.recentDeviations.has(pubkey)) {
-            this.recentDeviations.set(pubkey, []);
-        }
-
-        let deviations = this.recentDeviations.get(pubkey);
-        deviations.push({ round: round, timestamp: Date.now() });
-
-        // Prune entries older than 24 hours
-        let cutoff = Date.now() - (24 * 60 * 60 * 1000);
-        deviations = deviations.filter(d => d.timestamp > cutoff);
-
-        // Enforce memory bound
-        if (deviations.length > MAX_DEVIATIONS_PER_VALIDATOR) {
-            deviations = deviations.slice(deviations.length - MAX_DEVIATIONS_PER_VALIDATOR);
-        }
-
-        this.recentDeviations.set(pubkey, deviations);
-
-        // 3+ deviations in 24h → repeated deviation. Fire once per crossing
-        // of the threshold (latched), not on every deviation while the window
-        // stays ≥3. The latch re-arms when pruning drops the window below 3.
-        if (deviations.length >= 3) {
-            if (!this.repeatedDeviationFired.get(pubkey)) {
-                logger.warn('Slash: Validator ' + pubkey.substring(0, 16) +
-                    '... has 3+ price deviations in 24 hours');
-
-                // Latch optimistically BEFORE the await, then re-arm on a failed write.
-                // Setting it first closes the TOCTOU window: this method is now awaited
-                // but overlapping deviations for the same validator would otherwise all
-                // read the latch as false during the DB round-trip and each record a
-                // duplicate. Re-arming on failure preserves retry-safety, the original
-                // bug was a latch set before an un-awaited write that, on failure, was
-                // never retried because the saturated window never re-armed it.
-                this.repeatedDeviationFired.set(pubkey, true);
-                let recorded = await this.recordSlashProposal(pubkey, 'repeated_deviation', round,
-                    JSON.stringify({
-                        deviationsIn24h: deviations.length,
-                        rounds: deviations.slice(-50).map(d => d.round)
-                    })
-                );
-                if (!recorded) this.repeatedDeviationFired.set(pubkey, false);
-            }
-        } else {
-            this.repeatedDeviationFired.set(pubkey, false);
-        }
     }
 
     // Returns true only when the row persisted, so callers can latch a
@@ -553,6 +244,24 @@ class SlashDetector {
         await this.recordSlashProposal(pk, 'attestation_divergence', pseudoRound, evidence);
     }
 }
+
+// Install each mixin non-enumerably and stubbable, as src/db/index.js does, so a moved
+// method is indistinguishable from a class method to for...in, Object.keys and sinon.
+// A name already on the prototype throws at load rather than overwriting silently.
+function installMixins(target, mixins) {
+    for (const mixin of mixins) {
+        const descriptors = {};
+        for (const name of Object.keys(mixin)) {
+            if (Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate SlashDetector method: ' + name + ' is already defined on ' +
+                    'SlashDetector.prototype. Two slash detector mixins, or a mixin and the class, claim the same name.');
+            descriptors[name] = { value: mixin[name], enumerable: false, writable: true, configurable: true };
+        }
+        Object.defineProperties(target, descriptors);
+    }
+}
+
+installMixins(SlashDetector.prototype, [deviationsMixin, participationMixin]);
 
 module.exports = Object.assign(SlashDetector, {
     // Exported so the published digest can be pinned against SlashGovernance's
