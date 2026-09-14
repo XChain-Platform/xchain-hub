@@ -59,14 +59,14 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const axios        = require('axios');
 
-const swq                    = require('./stake_weighted_quorum.js');
-const eq                     = require('./equivocation_header.js');
-const ah                     = require('./lib/admission_height.js');
-const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
-const { XCALL_MAX_HOPS }     = require('./constants.js');
-const coins                  = require('./coins');
-const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
-const snapWrite              = require('./lib/capability_snapshot_write.js');
+const swq                    = require('../stake_weighted_quorum.js');
+const eq                     = require('../equivocation_header.js');
+const ah                     = require('../lib/admission_height.js');
+const CrossChainDexConsensus = require('./dex_consensus.js');
+const { XCALL_MAX_HOPS }     = require('../constants.js');
+const coins                  = require('../coins');
+const { normalizeRetractionBounds } = require('../lib/retraction_bounds.js');
+const snapWrite              = require('../lib/capability_snapshot_write.js');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -96,10 +96,10 @@ const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_cal
 // fork). Tunable UPWARD via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig); the
 // default doubles as a HARD FLOOR, so a 0 no longer zeroes the margin.
 // Sizing, the ceiling and the follower-side floor live in lib/relay_margin.js.
-const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = require('./lib/relay_margin.js');
+const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = require('../lib/relay_margin.js');
 
 // Canonical integer-spelling guard for the signed fields (see lib/canonical_int.js).
-const { allCanonicalInts } = require('./lib/canonical_int.js');
+const { allCanonicalInts } = require('../lib/canonical_int.js');
 
 // The INT/BIGINT-backed fields each phase signs VERBATIM into _canonicalMatch and
 // every verifier re-derives from a normalized integer. Decimal, address, method,

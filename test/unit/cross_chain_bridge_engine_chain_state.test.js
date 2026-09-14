@@ -34,7 +34,7 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../src/CrossChainBridgeEngine.js');
+const CrossChainBridgeEngine = require('../../src/cross_chain/bridge_engine.js');
 const Database               = require('../../src/db');
 
 // A Database over a recording driver: every statement the engine issues is kept, so a test

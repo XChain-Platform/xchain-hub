@@ -139,20 +139,20 @@ module.exports = {
     },
 
     // Updates bridge_transfers.
-    // Moved here from src/CrossChainBridgeEngine.js:1157.
+    // Moved here from src/cross_chain/bridge_engine.js:1157.
     async updateBridgeTransfer(transfer_id) {
         return this.doQuery(`UPDATE bridge_transfers SET status = 'retracted' WHERE transfer_id = ?`, [transfer_id]);
     },
 
     // Reads one committed transfer row back whole, for the hub-DB mirror stream.
-    // Moved here from src/CrossChainBridgeEngine.js:1113, which read either this table
+    // Moved here from src/cross_chain/bridge_engine.js:1113, which read either this table
     // or policy_snapshots through one statement built from the table name.
     async getBridgeTransferByTransferId(transferId) {
         return this.doQuery('SELECT * FROM bridge_transfers WHERE transfer_id = ? LIMIT 1', [transferId]);
     },
 
     // Finalized transfers whose SOURCE leg sits in a rolled-back range, for retraction.
-    // Moved here from src/CrossChainBridgeEngine.js:1154.
+    // Moved here from src/cross_chain/bridge_engine.js:1154.
     //
     // `bounded` closes the range at `to`, so a leg re-published inside the original
     // open-ended range survives a deferred retraction; `fenced` limits the match to rows

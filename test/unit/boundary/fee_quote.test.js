@@ -26,9 +26,9 @@ const XChainHub = proxyquire('../../../src/XChainHub', {
     './oracle/round.js':     function () {},
     './anchor/reward_tracker.js':   function () {},
     './SlashDetector.js':   function () {},
-    './CrossChainEngine.js': function () {},
+    './cross_chain/engine.js': function () {},
     './anchor/reorg_handler.js':    function () {},
-    './SwapTracker.js':     function () {},
+    './cross_chain/swap_tracker.js':     function () {},
     './Governance.js':      function () {}
 });
 

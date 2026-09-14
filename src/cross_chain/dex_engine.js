@@ -45,17 +45,17 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const axios        = require('axios');
 
-const bc                     = require('./bcmath.js');
-const swq                    = require('./stake_weighted_quorum.js');
-const eq                     = require('./equivocation_header.js');
-const ccr                    = require('./cross_chain_royalty_activation.js');
-const ah                     = require('./lib/admission_height.js');
-const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
-const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
-const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
-const { allCanonicalInts }   = require('./lib/canonical_int.js');
-const snapWrite              = require('./lib/capability_snapshot_write.js');
-const coins                  = require('./coins');
+const bc                     = require('../bcmath.js');
+const swq                    = require('../stake_weighted_quorum.js');
+const eq                     = require('../equivocation_header.js');
+const ccr                    = require('../cross_chain_royalty_activation.js');
+const ah                     = require('../lib/admission_height.js');
+const CrossChainDexConsensus = require('./dex_consensus.js');
+const { normalizeRetractionBounds } = require('../lib/retraction_bounds.js');
+const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('../lib/relay_margin.js');
+const { allCanonicalInts }   = require('../lib/canonical_int.js');
+const snapWrite              = require('../lib/capability_snapshot_write.js');
+const coins                  = require('../coins');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
 // settlement pass rebuilds them from the mirrored BIGINT row. The fill and

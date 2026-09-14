@@ -38,7 +38,7 @@ const KEY_STRANGER = 'cc'.repeat(32);   // in neither
 const CHAIN_KEYED = [
     { name: 'Consensus',        cls: require('../../src/Consensus'),        method: '_isKnownSender' },
     { name: 'OracleConsensus',  cls: require('../../src/oracle/consensus'),  method: '_isKnownSender' },
-    { name: 'CrossChainEngine', cls: require('../../src/CrossChainEngine'), method: '_isKnownSender' },
+    { name: 'CrossChainEngine', cls: require('../../src/cross_chain/engine'), method: '_isKnownSender' },
     { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: '_isRegisteredSender' },
 ];
 
@@ -189,7 +189,7 @@ describe('vote admission follows the chain-effective signer set', function () {
 
 describe('one key is one vote (count-mode forgery bound)', function () {
     const OracleConsensus  = require('../../src/oracle/consensus');
-    const CrossChainEngine = require('../../src/CrossChainEngine');
+    const CrossChainEngine = require('../../src/cross_chain/engine');
 
     // A tally that keyed on envelope.sender could be inflated to a full quorum by
     // one authorized key naming N different senders. Keyed on the proven key, those

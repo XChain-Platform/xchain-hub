@@ -12,7 +12,7 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const CrossChainEngine   = require('../../src/CrossChainEngine');
+const CrossChainEngine   = require('../../src/cross_chain/engine');
 const { createMockHub }  = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
 const { waitUntil }      = require('../helpers/waitUntil');

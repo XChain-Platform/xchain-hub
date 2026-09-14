@@ -147,7 +147,7 @@ module.exports = {
     },
 
     // Reads one row from attestations.
-    // Moved here from src/CrossChainEngine.js:724.
+    // Moved here from src/cross_chain/engine.js:724.
     async getAttestation(attestationId) {
         return this.doQuery('SELECT * FROM attestations WHERE attestation_id = ? LIMIT 1', [attestationId]);
     },
@@ -225,25 +225,25 @@ module.exports = {
     },
 
     // Reads the newest attestations rows, any status.
-    // Moved here from src/CrossChainEngine.js:295, the branch that adds no status filter.
+    // Moved here from src/cross_chain/engine.js:295, the branch that adds no status filter.
     async findAttestations(limit) {
         return this.doQuery("SELECT * FROM attestations ORDER BY created_at DESC LIMIT ?", [limit]);
     },
 
     // Reads the newest attestations rows in one status.
-    // Moved here from src/CrossChainEngine.js:295, the branch that filters on status.
+    // Moved here from src/cross_chain/engine.js:295, the branch that filters on status.
     async findAttestationsByStatus(status, limit) {
         return this.doQuery("SELECT * FROM attestations WHERE status = ? ORDER BY created_at DESC LIMIT ?", [status, limit]);
     },
 
     // Reads the newest attestations row for one source action.
-    // Moved here from src/CrossChainEngine.js:308.
+    // Moved here from src/cross_chain/engine.js:308.
     async getAttestationBySourceAction(sourceChain, sourceActionIndex) {
         return this.doQuery("SELECT * FROM attestations WHERE source_chain = ? AND source_action_index = ? ORDER BY created_at DESC LIMIT 1", [sourceChain, sourceActionIndex]);
     },
 
     // Inserts or updates a row in attestations.
-    // Moved here from src/CrossChainEngine.js:710. The last three arguments repeat
+    // Moved here from src/cross_chain/engine.js:710. The last three arguments repeat
     // the mutable columns for the ON DUPLICATE KEY UPDATE clause.
     async setAttestation(attestation_id, source_chain, source_action_index, dest_chain, confirmations, status, validator_count, consensus_proof, statusOnDuplicate, validatorCountOnDuplicate, consensusProofOnDuplicate) {
         return this.doQuery(`INSERT INTO attestations

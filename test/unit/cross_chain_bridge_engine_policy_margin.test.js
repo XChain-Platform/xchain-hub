@@ -32,7 +32,7 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../src/CrossChainBridgeEngine.js');
+const CrossChainBridgeEngine = require('../../src/cross_chain/bridge_engine.js');
 const { relayMarginFloorS, RELAY_MIN_FUTURE_S } = require('../../src/lib/relay_margin.js');
 
 // The engine with nothing wired: _policyMarginS is pure, and the constructor is the only

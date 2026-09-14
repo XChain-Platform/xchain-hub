@@ -31,7 +31,7 @@ let CrossChainDexEngine;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: axiosStub });
+    CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: axiosStub });
 }
 
 // ────────────────────────────────────────────────────────────────────────────

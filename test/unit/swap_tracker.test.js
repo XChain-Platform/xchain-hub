@@ -13,7 +13,7 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const EventEmitter   = require('events');
-const SwapTracker    = require('../../src/SwapTracker');
+const SwapTracker    = require('../../src/cross_chain/swap_tracker');
 const { createMockHub }     = require('../helpers/mockHub');
 const { waitUntil }         = require('../helpers/waitUntil');
 

@@ -57,7 +57,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
     function makeEngine() {
         axiosStub = { post: sinon.stub() };
-        CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: axiosStub });
+        CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: axiosStub });
         const hub = createMockHub();
         hub.db = { doQuery: sinon.stub().resolves([]) };
         hub.capabilitySnapshot = null;

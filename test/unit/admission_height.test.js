@@ -39,8 +39,8 @@ const act = require('../../src/mirror_admission_activation.js');
 const ERA_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/CrossChainDexEngine.js',
-    '../../src/CrossChainBridgeEngine.js'
+    '../../src/cross_chain/dex_engine.js',
+    '../../src/cross_chain/bridge_engine.js'
 ];
 
 // The regtest producer activation the armed describes below use. A row at this height is an
@@ -64,8 +64,8 @@ function withAdmissionActivation(height){
         act:    require('../../src/mirror_admission_activation.js'),
         // _canonicalMatch reads nothing off `this`, so it is driven off the prototype rather
         // than through a constructed engine with a hub, a db and a consensus behind it.
-        DEX:    require('../../src/CrossChainDexEngine.js').prototype._canonicalMatch,
-        BRIDGE: require('../../src/CrossChainBridgeEngine.js').prototype._canonicalMatch,
+        DEX:    require('../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
+        BRIDGE: require('../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
         restore(){
             for(const [p, mod] of saved){
                 if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;

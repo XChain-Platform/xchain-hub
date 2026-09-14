@@ -56,8 +56,8 @@ const CALL_ID = 'c'.repeat(64);
 const ARMED_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/CrossChainDexConsensus.js',
-    '../../src/CrossChainCallEngine.js'
+    '../../src/cross_chain/dex_consensus.js',
+    '../../src/cross_chain/call_engine.js'
 ];
 
 // Purge, arm, re-require, and hand back a restore() that puts the process back byte-exact.
@@ -71,7 +71,7 @@ function armAdmission() {
     process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
 
     const ah                   = require('../../src/lib/admission_height.js');
-    const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
+    const CrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
 
     function restore() {
         for (const [p, mod] of saved) {
@@ -283,7 +283,7 @@ describe('follower admission bound: the shared CrossChainDexConsensus PROPOSE ga
     // for a scope, which is the only thing that can know the row's table and read set, and
     // then bounds whatever map the row carries. Driving it with a stub engine is what proves
     // the gate is generic rather than XCALL-shaped.
-    const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus.js');
+    const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus.js');
     const ah                     = require('../../src/lib/admission_height.js');
 
     const leaderIdent   = new ValidatorIdentity('11'.repeat(32));

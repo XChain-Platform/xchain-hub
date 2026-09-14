@@ -39,11 +39,11 @@ describe('bin/sibling-reference-map.js', function () {
             const source = [
                 "const path = require('path');",
                 "const HUB = path.resolve(__dirname, '../../xchain-hub');",
-                "const engine = require(path.join(HUB, 'src', 'CrossChainBridgeEngine.js'));",
+                "const engine = require(path.join(HUB, 'src', 'cross_chain', 'bridge_engine.js'));",
                 'const other = `${HUB}/src/PeerManager.js`;',
             ].join('\n');
             const hits = refs.scanIndirectIdioms(source, {}).found.map((h) => h.path).sort();
-            assert.deepStrictEqual(hits, ['src/CrossChainBridgeEngine.js', 'src/PeerManager.js'],
+            assert.deepStrictEqual(hits, ['src/PeerManager.js', 'src/cross_chain/bridge_engine.js'],
                 'neither site spells the repo name beside the file name, which is why a grep misses both');
         });
 

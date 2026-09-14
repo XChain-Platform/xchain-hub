@@ -17,8 +17,8 @@ const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
-const CrossChainEngine = require('../../../src/CrossChainEngine');
-const SwapTracker      = require('../../../src/SwapTracker');
+const CrossChainEngine = require('../../../src/cross_chain/engine');
+const SwapTracker      = require('../../../src/cross_chain/swap_tracker');
 const coins            = require('../../../src/coins');
 const { createIntegrationHub: createTestHub, createCapabilitySnapshotStub } = require('../../helpers/integrationHub');
 

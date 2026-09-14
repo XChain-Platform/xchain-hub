@@ -136,8 +136,8 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
     it('every capability_snapshots writer goes through the shared helper', function () {
         // Paths relative to this suite, so each one names the writer's file wherever
         // its feature directory keeps it.
-        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/CrossChainDexEngine.js',
-                         '../../src/CrossChainCallEngine.js', '../../src/oracle/consensus.js',
+        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/cross_chain/dex_engine.js',
+                         '../../src/cross_chain/call_engine.js', '../../src/oracle/consensus.js',
                          '../../src/RetractionConsensus.js', '../../src/attestation/relay.js'];
         let offenders = [];
         for (const name of WRITERS) {

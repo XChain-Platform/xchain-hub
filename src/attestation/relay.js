@@ -105,7 +105,7 @@ const coins       = require('../coins');
 
 const EncoderClient          = require('../EncoderClient.js');
 const SpendGuard             = require('../lib/spend_guard.js');
-const CrossChainDexConsensus = require('../CrossChainDexConsensus.js');
+const CrossChainDexConsensus = require('../cross_chain/dex_consensus.js');
 const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
 const { allCanonicalInts } = require('../lib/canonical_int.js');
 const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');

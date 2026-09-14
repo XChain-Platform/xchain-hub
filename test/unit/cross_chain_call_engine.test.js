@@ -23,7 +23,7 @@ const crypto     = require('crypto');
 const fs         = require('fs');
 const path       = require('path');
 
-const CrossChainCallEngine = require('../../src/CrossChainCallEngine');
+const CrossChainCallEngine = require('../../src/cross_chain/call_engine');
 const eq         = require('../../src/equivocation_header.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

@@ -113,7 +113,7 @@ describe('bin/reachability.js', function () {
         });
 
         it('resolves all three bridge gates out of the engine itself', () => {
-            const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/CrossChainBridgeEngine.js');
+            const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/cross_chain/bridge_engine.js');
             assert.ok(edge, 'the bridge edge must be declared');
             const targets = edge.toList();
             assert.deepStrictEqual(targets.slice().sort(), [

@@ -18,7 +18,7 @@
 // for AttestationConsensus/Consensus can only be checked in a mesh.
 
 const { expect }             = require('chai');
-const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus');
+const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus');
 const ValidatorIdentity      = require('../../src/ValidatorIdentity');
 const { waitUntil }          = require('../helpers/waitUntil');
 

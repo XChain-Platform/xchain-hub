@@ -37,8 +37,8 @@ const proxyquireNoCache = require('proxyquire').noPreserveCache();
 const { waitUntil } = require('../helpers/waitUntil');
 
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
-const CrossChainDexEngine  = require('../../src/CrossChainDexEngine.js');
-const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
+const CrossChainDexEngine  = require('../../src/cross_chain/dex_engine.js');
+const CrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A plausible regtest block-1 hash (lowercase 64 hex) and a foreign one.

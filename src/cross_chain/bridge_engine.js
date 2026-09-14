@@ -49,18 +49,19 @@
 
 const crypto       = require('crypto');
 const EventEmitter = require('events');
+const path         = require('path');
 const axios        = require('axios');
 
-const bc                     = require('./bcmath.js');
-const swq                    = require('./stake_weighted_quorum.js');
-const eq                     = require('./equivocation_header.js');
-const ah                     = require('./lib/admission_height.js');
-const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
-const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
-const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
-const { allCanonicalInts }   = require('./lib/canonical_int.js');
-const snapWrite              = require('./lib/capability_snapshot_write.js');
-const coins                  = require('./coins');
+const bc                     = require('../bcmath.js');
+const swq                    = require('../stake_weighted_quorum.js');
+const eq                     = require('../equivocation_header.js');
+const ah                     = require('../lib/admission_height.js');
+const CrossChainDexConsensus = require('./dex_consensus.js');
+const { normalizeRetractionBounds } = require('../lib/retraction_bounds.js');
+const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('../lib/relay_margin.js');
+const { allCanonicalInts }   = require('../lib/canonical_int.js');
+const snapWrite              = require('../lib/capability_snapshot_write.js');
+const coins                  = require('../coins');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -102,9 +103,9 @@ const SNAPSHOT_BLOCK_TOLERANCE = 144;
 // Activation gates. The canonical maps are xchain-indexer/src/xchain_bridge_activation.js,
 // token_bridge_activation.js and token_policy_activation.js, mirrored into
 // xchain-documentation/protocol/constants.js and held equal by the indexer's
-// activationConstantsParity test. The hub reads a VENDORED twin beside its other
-// *_activation.js copies, exactly as it does for checkpoint_commitment and the attest
-// gates, because a second hand-written copy of a flag day is a fork waiting to happen.
+// activationConstantsParity test. The hub reads a VENDORED twin one directory up, at the top
+// of src/ beside its other *_activation.js copies, exactly as it does for checkpoint_commitment
+// and the attest gates, because a second hand-written copy of a flag day is a fork waiting to happen.
 //
 // A twin that is missing or unreadable is not an error here: every load below returns null
 // and the engine FAILS CLOSED, idling instead of polling a chain whose flag day it cannot
@@ -113,7 +114,7 @@ const SNAPSHOT_BLOCK_TOLERANCE = 144;
 function loadActivation(moduleName, predicate){
     try {
         // eslint-disable-next-line global-require
-        let mod = require('./' + moduleName + '.js');
+        let mod = require(path.join(__dirname, '..', moduleName + '.js'));
         let fn  = mod && mod[predicate];
         return (typeof fn === 'function') ? fn : null;
     } catch(e){

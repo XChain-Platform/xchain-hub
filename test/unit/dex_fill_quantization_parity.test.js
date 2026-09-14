@@ -32,7 +32,7 @@ require('mathjs');
 
 // axios is stubbed: the engine-level assertions below drive _tryOrderMatch directly and
 // must never reach an indexer.
-const CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: { post: sinon.stub() } });
+const CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: { post: sinon.stub() } });
 
 function makeDexHub() {
     const hub = createMockHub();
@@ -90,7 +90,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             // reintroduces 18 on either branch silently restores the divergence, and no
             // value-level test above would catch it because both branches are reachable
             // only through a full offer pair.
-            const src = fs.readFileSync(path.join(__dirname, '../../src/CrossChainDexEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(__dirname, '../../src/cross_chain/dex_engine.js'), 'utf8');
             const clampMuls = src.match(/bc\.bcmul\((?:max_get|max_give),\s*taker\w+Price,\s*(\d+)\)/g) || [];
             assert.strictEqual(clampMuls.length, 2, 'expected exactly the two clamp multiplications');
             for (const m of clampMuls) {
@@ -127,7 +127,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
         // KEPT from the pre-parity suite, deliberately: a fallback default is still the
         // wrong way to close this, and it is the edit someone would reach for first.
         it('the engine does NOT quantize with a guessed COIN_DECIMALS', function () {
-            const src = fs.readFileSync(path.join(__dirname, '../../src/CrossChainDexEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(__dirname, '../../src/cross_chain/dex_engine.js'), 'utf8');
             assert.doesNotMatch(src, /bcround\s*\([^)]*COIN_DECIMALS/,
                 'guessing 8 decimals would mis-quantize every 0-decimal (NFT) and ' +
                 'non-8-decimal tick, which is worse than not rounding at all');

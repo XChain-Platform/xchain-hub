@@ -167,18 +167,19 @@ const DYNAMIC_EDGES = [
         why: 'the consensus-rules digest requires every SHARED_GATES module by computed path',
     },
     {
-        from: 'src/CrossChainBridgeEngine.js',
-        // loadActivation(name, predicate) requires './<name>.js' inside a try/catch
-        // that returns null, and the constructor calls it for three gates. Read out
+        from: 'src/cross_chain/bridge_engine.js',
+        // loadActivation(name, predicate) requires src/<name>.js from the engine's
+        // feature directory inside a try/catch that returns null, and the
+        // constructor calls it for three gates. Read out
         // of the call sites rather than restated, so a fourth gate added tomorrow
         // is an edge this tool already knows about. A missed move here is the
         // quietest failure in the repo: the engine idles and nothing throws.
         toList: () => {
-            const src = fs.readFileSync(path.join(REPO_ROOT, 'src/CrossChainBridgeEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(REPO_ROOT, 'src/cross_chain/bridge_engine.js'), 'utf8');
             const rows = Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g))
                 .map((m) => `src/${m[1]}.js`);
             if (!rows.length) {
-                throw new Error('src/CrossChainBridgeEngine.js declares no loadActivation call: the bridge edge is stale');
+                throw new Error('src/cross_chain/bridge_engine.js declares no loadActivation call: the bridge edge is stale');
             }
             return rows;
         },

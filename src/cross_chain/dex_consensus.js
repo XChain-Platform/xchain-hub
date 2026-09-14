@@ -44,11 +44,11 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const swq               = require('./stake_weighted_quorum.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const ah                = require('./lib/admission_height.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const swq               = require('../stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const ah                = require('../lib/admission_height.js');
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';

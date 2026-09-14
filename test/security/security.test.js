@@ -532,7 +532,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('CrossChainEngine: Chain validation', function () {
-        const CrossChainEngine = require('../../src/CrossChainEngine');
+        const CrossChainEngine = require('../../src/cross_chain/engine');
 
         let hub, pm, engine;
 
@@ -626,7 +626,7 @@ describe('Security Hardening', function () {
     describe('Consensus engines: sender-membership guard', function () {
         const Consensus       = require('../../src/Consensus');
         const OracleConsensus = require('../../src/oracle/consensus');
-        const CrossChainEngine = require('../../src/CrossChainEngine');
+        const CrossChainEngine = require('../../src/cross_chain/engine');
 
         // Populate the peer registry so the guard is active, then inject a
         // PREPARE from a sender that is NOT a registered validator and assert the
