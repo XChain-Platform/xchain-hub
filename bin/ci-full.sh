@@ -49,6 +49,14 @@
 # actions/setup-node, the npm ci install step, and the coverage job's sibling
 # clone loop, which need_sib below covers).
 #
+# LANE-LEVEL BY DESIGN: bin/sync-coins.sh --check and the platform's
+# reconcile-twins.sh --check are not tiers here. Both compare against the
+# sibling checkouts beside this repo, so either reds on sibling drift that a hub
+# commit did not cause, while the venue ships each sibling from its own origin.
+# They run in the working tree where a twin is edited, beside the checkouts they
+# read. The observability compare below is a tier because ci.yml's drift-guards
+# job runs it.
+#
 # All tiers run even after one fails (GitHub reports every red job, so this
 # reports every red tier); the exit code is red if any tier was.
 #

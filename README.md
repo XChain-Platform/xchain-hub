@@ -237,7 +237,7 @@ suites expect, runs them and drops the container again.
 ```bash
 bin/run-db-tiers.sh                    # integration tier
 bin/run-db-tiers.sh unit integration
-bin/run-db-tiers.sh -- test/integration/api/jsonrpc.integration.test.js
+bin/run-db-tiers.sh -- test/integration/api/jsonrpc.test.js
 ```
 
 **One trap it guards, because there is no way to configure around it.** The oracle
@@ -257,7 +257,7 @@ a failure that looks like broken code. A symlinked sibling satisfies it.
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit | ~3,023 | 114 files covering `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleConsensus.test.js`, `CrossChainDexEngine.test.js`, `Governance.test.js`, `AttestationConsensus.test.js`, `AttestationPublisher.test.js`, `StateAnchorPublisher.test.js`, `ReorgHandler.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.coverage.test.js`, and many more. Excludes the boundary files, which are counted on their own row below |
+| Unit | ~3,023 | 114 files covering `xchain_hub.test.js`, `consensus.test.js`, `peer_manager.test.js`, `oracle_consensus.test.js`, `cross_chain_dex_engine.test.js`, `governance.test.js`, `attestation_consensus.test.js`, `attestation_publisher.test.js`, `state_anchor_publisher.test.js`, `reorg_handler.test.js`, `reward_tracker.test.js`, `slash_detector.test.js`, `db_coverage.test.js`, and many more. Excludes the boundary files, which are counted on their own row below |
 | Security | ~87 | SQL safety, parameter injection, authentication, rate limiting |
 | Boundary | ~287 | 15 files in two directories: `test/unit/boundary/` holds the per-module edge cases (config, consensus, cross-chain, db, fee quote, governance, P2P, price fetcher, quorum, reorg, rewards, slashing, trimmed median, validator), `test/boundary/` holds the flag-day consensus activation gates |
 | Integration | ~89 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
@@ -275,8 +275,8 @@ predates the split and is unit-scoped, so those 273 cases run under `npm test` a
 `npm run ci` as well as under `npm run test:boundary`; `test/boundary/` was added later
 for the consensus flag-day activation gates and runs only under `npm run test:boundary`,
 which globs both paths. A guard test
-(`test/unit/boundary/boundary-suite-coverage.boundary.test.js`) fails if any
-`*.boundary.test.js` file exists that the `test:boundary` globs would not pick up, so a
+(`test/unit/boundary/boundary_suite_coverage.test.js`) fails if any spec in a
+directory named `boundary` exists that the `test:boundary` globs would not pick up, so a
 third boundary directory cannot go silently unrun.
 
 ## JSON-RPC API
