@@ -24,7 +24,7 @@
 // The two halves are now separated. DURABILITY fails closed: the INSERT propagates and
 // the drain keeps the entry for its existing TTL-bounded retry (idempotent, INSERT IGNORE
 // on uq_reward_tuple). DELIVERY is non-fatal and repaired: a throwing or empty read-back
-// forces subscriber resync, exactly as StateCheckpointEngine._broadcastRowOrResync and
+// forces subscriber resync, exactly as StateCheckpointEngine.broadcastRowOrResync and
 // CrossChainCallEngine.mirrorCallRow already do for their own committed rows.
 
 const { expect }           = require('chai');

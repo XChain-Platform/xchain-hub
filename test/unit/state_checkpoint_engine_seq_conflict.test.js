@@ -96,7 +96,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         let emitted = null;
         engine.on('checkpoint:finalized', (e) => { emitted = e; });
 
-        await engine._acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
+        await engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
 
         expect(db.inserts, 'nothing is written').to.deep.equal([]);
         expect(broadcaster.broadcastRow.called, 'nothing is streamed to mirrors').to.equal(false);
@@ -115,7 +115,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         const db     = mkDb(SEATED);
         const engine = mkEngine(db, broadcaster);
         expect((await engine.getStats()).seq_conflicts).to.equal(0);
-        await engine._acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
+        await engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
         expect((await engine.getStats()).seq_conflicts).to.equal(1);
     });
 
@@ -131,7 +131,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         const same = Object.assign({}, SEATED);
         delete same.id;
         delete same.validator_signatures;
-        await engine._acceptFinalized(same, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
+        await engine.acceptFinalized(same, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
 
         expect(db.inserts.length, 'the INSERT IGNORE still runs').to.equal(1);
         expect(broadcaster.broadcastRow.calledOnce, 'the row still streams').to.equal(true);
@@ -143,7 +143,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         const db     = mkDb(SEATED);
         const engine = mkEngine(db, broadcaster);
         const next = Object.assign({}, RIVAL, { checkpoint_seq: 8, snapshot_block: 486 });
-        await engine._acceptFinalized(next, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
+        await engine.acceptFinalized(next, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
         expect(db.inserts.length, 'a new seq commits normally').to.equal(1);
         expect(engine._seqConflicts).to.equal(0);
     });
@@ -164,7 +164,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         const engine = mkEngine(db, broadcaster);
         let emitted = null;
         engine.on('checkpoint:finalized', (e) => { emitted = e; });
-        await engine._acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
+        await engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
         expect(db.inserts.length, 'the commit still happens').to.equal(1);
         expect(emitted, 'and still emits').to.not.equal(null);
         expect(engine._seqConflicts, 'nothing is counted: we could not tell').to.equal(0);

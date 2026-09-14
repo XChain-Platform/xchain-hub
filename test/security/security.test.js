@@ -712,7 +712,7 @@ describe('Security Hardening', function () {
             handler = new ReorgHandler(hub);
             handler.setValidatorSet([]);
             hub._peerManager.getPeerStatus.returns([]);
-            sinon.stub(handler, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(handler, 'verifyReorgAgainstOwnNode').resolves(true);
         });
 
         afterEach(function () {
@@ -774,7 +774,7 @@ describe('Security Hardening', function () {
         });
 
         it('reportReorg refuses a report the own indexer does not confirm', async function () {
-            handler._verifyReorgAgainstOwnNode.resolves(false);
+            handler.verifyReorgAgainstOwnNode.resolves(false);
             try {
                 await handler.reportReorg('DOGE', 100, Date.now(), 'a'.repeat(64), 'b'.repeat(64));
                 expect.fail('should have thrown');

@@ -65,7 +65,7 @@ function mkPub(indexerReply) {
                         noteBlocked: () => '' };
     // Durable-intent marker: exercised by its own suite; inert here.
     pub.getLiveArchiveIntent  = async () => null;
-    pub._recordArchiveIntent   = async () => {};
+    pub.recordArchiveIntent   = async () => {};
     pub.markArchiveSent       = async () => {};
     pub.withdrawArchiveIntent = async () => {};
     pub.backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
@@ -222,24 +222,24 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
         expect(sent.length).to.equal(CHUNKS.length);
     });
 
-    describe('_archiveAnchorLookup', () => {
+    describe('archiveAnchorLookup', () => {
         it('throws (undetermined) rather than reporting absent when no indexer is wired', async () => {
             const { pub } = mkPub(() => ABSENT);
             pub.indexers = {};
             let threw = false;
-            try { await pub._archiveAnchorLookup(CP, mkRound([])); } catch (e) { threw = true; }
+            try { await pub.archiveAnchorLookup(CP, mkRound([])); } catch (e) { threw = true; }
             expect(threw, 'an unanswerable check must not read as "definitively absent"').to.equal(true);
         });
 
         it('reports absent (null) only on a definitive negative from the indexer', async () => {
             const { pub } = mkPub(() => ABSENT);
-            expect(await pub._archiveAnchorLookup(CP, mkRound([]))).to.equal(null);
+            expect(await pub.archiveAnchorLookup(CP, mkRound([]))).to.equal(null);
         });
 
         it('scopes the question to our own publishing address', async () => {
             const { pub } = mkPub(() => ABSENT);
             pub.dogeAddress = 'DsomeOtherAddress';
-            await pub._archiveAnchorLookup(CP, mkRound([]));
+            await pub.archiveAnchorLookup(CP, mkRound([]));
             expect(pub.indexerCalls[0].params.author).to.equal('DsomeOtherAddress');
         });
     });

@@ -16,7 +16,7 @@
 // instant quorum is met and only THEN awaits `_publishArchive`. That await is not
 // covered by flush()'s `_flushing` mutex either, because quorum can arrive on a peer
 // message (`_handleSign`), which runs outside flush entirely. And `_publishArchive`
-// does not arm its durable dedupe marker (`_recordArchiveIntent`) until after the
+// does not arm its durable dedupe marker (`recordArchiveIntent`) until after the
 // publisher-attestation round, so the live-intent gate at the top of the publish reads
 // nothing for a publish already in flight: a timer or size flush landing in that window
 // rebuilds the same still-pending rows and spends DOGE a second time.
@@ -25,7 +25,7 @@
 // second case pins the belt-and-braces half: a publisher-attestation round that
 // displaces another must settle the one it displaces. The displaced round's timer is
 // guarded on `this._archiveAttestRound === round`, so it no-ops, and
-// `_checkArchiveAttestQuorum` only ever reads the live field - the `_publishArchive`
+// `checkArchiveAttestQuorum` only ever reads the live field - the `_publishArchive`
 // awaiting the displaced round would otherwise wait forever, and nothing in the process
 // would ever notice.
 

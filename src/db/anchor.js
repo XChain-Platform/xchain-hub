@@ -108,7 +108,7 @@ module.exports = {
     //
     // `sent_at IS NOT NULL` keeps every intent-only row, which is the only durable trace
     // that DOGE may already have paid, and the cutoff is DB-clock arithmetic on intent_at,
-    // the column _anchorIntentHolds measures, so host/DB skew never folds into the window.
+    // the column anchorIntentHolds measures, so host/DB skew never folds into the window.
     async deleteAnchorPublishedCheckpointsSentBefore(windowSec) {
         return this.doQuery(
             'DELETE FROM anchor_published_checkpoints WHERE sent_at IS NOT NULL ' +

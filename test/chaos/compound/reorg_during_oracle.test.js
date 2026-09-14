@@ -34,7 +34,7 @@ describe('Chaos: Reorg During Oracle Round', function () {
         reorgHandler = new ReorgHandler(hub);
         // R2-C2: chaos experiments exercise the round/rollback interplay, not
         // the indexer probe (which has its own unit coverage).
-        sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
+        sinon.stub(reorgHandler, 'verifyReorgAgainstOwnNode').resolves(true);
 
         // Single-node mode for simpler testing
         oracleCon.validatorSet = [];

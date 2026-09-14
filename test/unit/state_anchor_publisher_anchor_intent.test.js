@@ -68,24 +68,24 @@ function sqlHits(db, needle){ return db.seen.filter(q => q.sql.indexOf(needle) !
 
 describe('StateAnchorPublisher: durable at-most-once anchor intent', function () {
 
-    describe('_anchorIntentHolds', function () {
+    describe('anchorIntentHolds', function () {
         it('does not hold with no marker', function () {
-            expect(mkPub(mkDb())._anchorIntentHolds(null)).to.equal(false);
+            expect(mkPub(mkDb()).anchorIntentHolds(null)).to.equal(false);
         });
 
         it('holds a fresh intent', function () {
             const pub = mkPub(mkDb());
-            expect(pub._anchorIntentHolds({ intent_at: new Date() })).to.equal(true);
+            expect(pub.anchorIntentHolds({ intent_at: new Date() })).to.equal(true);
         });
 
         it('releases an intent older than the TTL, so a never-relayed send cannot suppress the anchor forever', function () {
             const pub = mkPub(mkDb());
             pub.anchorIntentTtlMs = 1000;
-            expect(pub._anchorIntentHolds({ intent_at: new Date(Date.now() - 5000) })).to.equal(false);
+            expect(pub.anchorIntentHolds({ intent_at: new Date(Date.now() - 5000) })).to.equal(false);
         });
 
         it('holds an unreadable stamp (fail closed: the TTL is a liveness bound, not a licence to spend)', function () {
-            expect(mkPub(mkDb())._anchorIntentHolds({ intent_at: 'not-a-date' })).to.equal(true);
+            expect(mkPub(mkDb()).anchorIntentHolds({ intent_at: 'not-a-date' })).to.equal(true);
         });
     });
 
@@ -310,7 +310,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             for(const q of d){
                 expect(q.sql, 'the ambiguous-send record must never be deleted')
                     .to.match(/sent_at IS NOT NULL/);
-                expect(q.sql, 'intent_at is the column _anchorIntentHolds measures')
+                expect(q.sql, 'intent_at is the column anchorIntentHolds measures')
                     .to.match(/intent_at < DATE_SUB\(NOW\(\), INTERVAL \? SECOND\)/);
                 expect(q.params[0]).to.equal(7776000);
             }
@@ -318,7 +318,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         });
 
         it('clamps the cutoff below the anchorIntentTtlMs hold window, which is the re-presentability floor', async function () {
-            // A one-minute window would delete a marker that _anchorIntentHolds still
+            // A one-minute window would delete a marker that anchorIntentHolds still
             // answers true for, and the next flush would rebuild a second PSBT for a
             // checkpoint DOGE may already have paid for. The TTL floors it instead.
             const db  = mkRetentionDb(0);

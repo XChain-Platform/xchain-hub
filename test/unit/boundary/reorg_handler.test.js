@@ -29,7 +29,7 @@ describe('Boundary: ReorgHandler', function () {
         hub = createMockHub();
         pm  = hub._peerManager;
         rh  = new ReorgHandler(hub);
-        sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
+        sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(true);
     });
 
     afterEach(function () {
@@ -83,7 +83,7 @@ describe('Boundary: ReorgHandler', function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            // timestamp=0 would make _executeRollback DELETE every attestation and dispute
+            // timestamp=0 would make executeRollback DELETE every attestation and dispute
             // every finalized price snapshot for the chain. It is far outside the recent
             // window, so it must be refused before any rollback runs.
             let threw = false;
@@ -145,17 +145,17 @@ describe('Boundary: ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getAffectedChains
+    // getAffectedChains
     // -----------------------------------------------------------------
 
-    describe('_getAffectedChains', function () {
+    describe('getAffectedChains', function () {
 
         it("source='BTC' returns ['LTC', 'DOGE']", function () {
-            expect(rh._getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
+            expect(rh.getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
         });
 
         it("source='DOGE' returns ['BTC', 'LTC']", function () {
-            expect(rh._getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
+            expect(rh.getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
         });
     });
 

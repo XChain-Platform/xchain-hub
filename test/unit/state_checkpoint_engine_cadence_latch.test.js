@@ -182,13 +182,13 @@ describe('StateCheckpointEngine cadence latch', function () {
             chain: 'BTC', network: 'regtest', checkpoint_seq: StateCheckpointEngine.deriveCheckpointSeq(200),
             snapshot_block: 200
         });
-        await nd.engine._acceptFinalized(cp, [], 1, false);          // peer-led (isLeader false)
+        await nd.engine.acceptFinalized(cp, [], 1, false);          // peer-led (isLeader false)
         expect(nd.engine._lastCheckpointBtcBlock, 'peer round advances the latch').to.equal(200);
 
         // An out-of-order / replayed FINALIZED for an EARLIER snapshot_block must not
         // rewind the latch into an early extra round.
         let older = Object.assign({}, cp, { block_index: 400, checkpoint_seq: StateCheckpointEngine.deriveCheckpointSeq(150), snapshot_block: 150 });
-        await nd.engine._acceptFinalized(older, [], 1, false);
+        await nd.engine.acceptFinalized(older, [], 1, false);
         expect(nd.engine._lastCheckpointBtcBlock, 'latch is monotonic').to.equal(200);
     });
 });

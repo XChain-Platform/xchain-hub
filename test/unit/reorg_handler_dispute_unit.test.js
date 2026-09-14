@@ -32,7 +32,7 @@ describe('ReorgHandler price-snapshot dispute unit (stress-sweep 2026-07-08)', f
         // Recent timestamp: the rollback bound clamps to the 24h lookback floor,
         // so a within-window value passes through unchanged (bound === tsMs).
         let tsMs = Date.now() - 60_000; // milliseconds
-        await rh._executeRollback('BTC', 800000, tsMs, 'reorg-x', 3, '[]');
+        await rh.executeRollback('BTC', 800000, tsMs, 'reorg-x', 3, '[]');
 
         // getCall(1) is the price_snapshots UPDATE.
         let disputeCall = hub.db.doQuery.getCall(1);

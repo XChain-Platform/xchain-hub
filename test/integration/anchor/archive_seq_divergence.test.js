@@ -343,7 +343,7 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         expect(laggy.pub._archiveRound, 'an unsigned refusal is ignored').to.equal(round);
         await laggy.pub._handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: outsider.getPubkeyHex().toLowerCase(),
                                               sig: '', consumed_seq: 99,
-                                              refusal_sig: outsider.sign(laggy.pub._seqRefusalCanonical(round.batchSeq, 99)) } });
+                                              refusal_sig: outsider.sign(laggy.pub.seqRefusalCanonical(round.batchSeq, 99)) } });
         expect(laggy.pub._archiveRound, 'a non-member refusal is ignored').to.equal(round);
         expect(laggy.pub._observedConsumedBatchSeq, 'and neither moved the seq floor').to.equal(-1);
 
@@ -353,7 +353,7 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         await laggy.pub._handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: leader.pubkey,
                                               sig: '', consumed_seq: round.batchSeq,
                                               refusal_sig: leader.identity.sign(
-                                                  laggy.pub._seqRefusalCanonical(round.batchSeq, round.batchSeq)) } });
+                                                  laggy.pub.seqRefusalCanonical(round.batchSeq, round.batchSeq)) } });
         expect(laggy.pub._archiveRound, 'the honest refusal abandons the round').to.equal(null);
         expect(laggy.pub._observedConsumedBatchSeq).to.equal(round.batchSeq);
     });

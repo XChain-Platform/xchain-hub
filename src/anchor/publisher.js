@@ -163,7 +163,7 @@ const ANCHOR_SIG_PAIR_BYTES = 1 + 64 + 1 + 128;   // 194
 // oracle_published_rounds window.
 const DEFAULT_ANCHOR_MARKER_RETENTION_MS = 7776000000;   // 90 days
 // Multiple of anchorIntentTtlMs the effective window is FLOORED at. The TTL is the
-// exact horizon past which _anchorIntentHolds already answers false, so the multiple
+// exact horizon past which anchorIntentHolds already answers false, so the multiple
 // is pure margin over a re-armed intent, not the safety property itself.
 const ANCHOR_MARKER_RETENTION_TTL_SAFETY = 8;
 
@@ -448,7 +448,7 @@ class StateAnchorPublisher {
         // signature-collection phase and is cleared the moment quorum is met, which leaves
         // the whole publish unguarded: quorum can arrive on a peer message (_handleSign),
         // outside flush()'s _flushing mutex, and _publishArchive does not arm its durable
-        // dedupe marker (_recordArchiveIntent) until AFTER the publisher-attestation round,
+        // dedupe marker (recordArchiveIntent) until AFTER the publisher-attestation round,
         // so a timer flush in that window rebuilds the same still-pending rows and spends
         // DOGE a second time. This field covers quorum-to-return.
         this._archivePublishing = null;
@@ -1207,7 +1207,7 @@ class StateAnchorPublisher {
             let held = null;
             for(let s of group){
                 let intent = await this.getAnchorIntent(s);
-                if(this._anchorIntentHolds(intent)){ held = { section: s, intent: intent }; break; }
+                if(this.anchorIntentHolds(intent)){ held = { section: s, intent: intent }; break; }
             }
             if(held){
                 let mined = null;
@@ -1508,7 +1508,7 @@ class StateAnchorPublisher {
     // mirror subscribers. Never throws: the row is durable, so a delivery failure must not
     // fail the write or block federation. A throw from the read-back and a zero-row result
     // are the same undeliverable-row event, and dropAllForResync is the sanctioned repair
-    // (StateCheckpointEngine._broadcastRowOrResync and CrossChainCallEngine.mirrorCallRow
+    // (StateCheckpointEngine.broadcastRowOrResync and CrossChainCallEngine.mirrorCallRow
     // are the in-repo precedents, each a local copy by house convention). Without it the
     // heartbeat watermark certifies completeness past a committed attestation row an
     // attached indexer never received, and that table mints COLLECT-spendable rewards, so
@@ -2268,7 +2268,7 @@ class StateAnchorPublisher {
             };
             // Settle whatever this round displaces. The timer below is guarded on
             // `this._archiveAttestRound === round`, so a displaced round's timer no-ops
-            // and _checkArchiveAttestQuorum only ever looks at the live field: without
+            // and checkArchiveAttestQuorum only ever looks at the live field: without
             // this, the _publishArchive awaiting the displaced round waits forever. Same
             // shape as the stop() teardown. The archive leg is the reachable one: the v0
             // twin's caller runs only inside flush(), which _flushing serializes.
@@ -2300,11 +2300,11 @@ class StateAnchorPublisher {
             this.peerManager.broadcast(XANCARCHPUB_SIGN_REQ, {
                 batch_seq: batchSeq, publisher: publisher, sig_pubkey: me, sig: mySig
             });
-            this._checkArchiveAttestQuorum();
+            this.checkArchiveAttestQuorum();
         });
     }
 
-    _checkArchiveAttestQuorum(){
+    checkArchiveAttestQuorum(){
         let round = this._archiveAttestRound;
         if(!round || round.done) return;
         let met = round.weighted
@@ -2366,7 +2366,7 @@ class StateAnchorPublisher {
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
-        this._checkArchiveAttestQuorum();
+        this.checkArchiveAttestQuorum();
     }
 
     // The flag-day twin of _isChainDerivedReward, for the pending-reward selector, which has
@@ -2520,7 +2520,7 @@ class StateAnchorPublisher {
         // legacy unscoped selection.
         // Ordered on the CONSENSUS key (checkpoint_seq, then snapshot_block, then
         // block_index), never on `id`. `id` is this hub's AUTO_INCREMENT insertion
-        // cursor: every hub writes its own state_checkpoints rows (_acceptFinalized on
+        // cursor: every hub writes its own state_checkpoints rows (acceptFinalized on
         // both the leader and follower paths), so id ordering is local insertion order,
         // which MATCH_KEYS already calls "the hub-assigned mirror cursor" and
         // verifyArchiveAgainstLocal deletes before byte-comparing. The selected row
@@ -2554,7 +2554,7 @@ class StateAnchorPublisher {
         // Bounded by anchorIntentTtlMs: an unbounded marker for a send that never
         // relayed would stall archiving forever.
         let liveIntent = await this.getLiveArchiveIntent(network);
-        if(this._anchorIntentHolds(liveIntent)){
+        if(this.anchorIntentHolds(liveIntent)){
             logger.warn('StateAnchorPublisher: archive round for ' + network + ' held: batch ' +
                          liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
                          (liveIntent.txid ? ' (v1 txid ' + liveIntent.txid + ')' : '') +
@@ -2793,7 +2793,7 @@ class StateAnchorPublisher {
     // Canonical a follower signs when it REFUSES to co-sign a proposal whose batch_seq it
     // already holds as consumed. Distinct prefix from XANCFIN/the archive canonical, so a
     // refusal can never be replayed as a co-signature or an announcement.
-    _seqRefusalCanonical(batchSeq, consumedSeq){
+    seqRefusalCanonical(batchSeq, consumedSeq){
         return 'XANCSEQ|' + String(batchSeq) + '|' + String(consumedSeq);
     }
 
@@ -3786,7 +3786,7 @@ class StateAnchorPublisher {
             sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
             sig: '',
             consumed_seq: Number(consumedSeq),
-            refusal_sig: this.identity.sign(this._seqRefusalCanonical(Number(batchSeq), Number(consumedSeq)))
+            refusal_sig: this.identity.sign(this.seqRefusalCanonical(Number(batchSeq), Number(consumedSeq)))
         });
     }
 
@@ -3810,7 +3810,7 @@ class StateAnchorPublisher {
             if(Number(d.consumed_seq) < round.batchSeq) return;
             let electionPubkeys = await this._getActiveOraclePublishPubkeys(round.electionBlock);
             if(!electionPubkeys.includes(pubkey)) return;
-            if(!ValidatorIdentity.verify(this._seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
+            if(!ValidatorIdentity.verify(this.seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;
             logger.warn('StateAnchorPublisher: archive round (batch ' + round.batchSeq + ') refused by ' +
                          pubkey.substring(0, 12) + '..., which holds batch seq ' + Number(d.consumed_seq) +
@@ -3875,7 +3875,7 @@ class StateAnchorPublisher {
         // either. Fails closed (a DB read error throws and the rows stay pending) rather
         // than spending against publish history it could not read.
         let liveIntent = await this.getLiveArchiveIntent(network);
-        if(this._anchorIntentHolds(liveIntent)){
+        if(this.anchorIntentHolds(liveIntent)){
             logger.warn('StateAnchorPublisher: archive batch ' + round.batchSeq + ' NOT published: batch ' +
                          liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
                          ' that never finished; rows stay pending and re-archive under a fresh seq once it ' +
@@ -3935,7 +3935,7 @@ class StateAnchorPublisher {
         // Armed BEFORE the send, so the window this marker covers starts at the earliest
         // moment DOGE could have moved, and stays armed across the whole v2 chunk loop:
         // a crash anywhere in the round is one unfinished archive, not one per chunk.
-        await this._recordArchiveIntent(network, round.batchSeq);
+        await this.recordArchiveIntent(network, round.batchSeq);
         let result;
         try {
             // The durable intent above holds a crashed round for anchorIntentTtlMs; this
@@ -5387,7 +5387,7 @@ class StateAnchorPublisher {
     // reply, or an indexer too old to serve the method), so _broadcastWithRetry keeps
     // its "absent" / "can't tell" distinction: an un-upgraded indexer therefore degrades
     // to exactly today's behavior (publish) rather than blocking the archive.
-    async _archiveAnchorLookup(cp, round){
+    async archiveAnchorLookup(cp, round){
         let ix = this.indexers && this.indexers.DOGE;
         if(!ix || !ix.url)    throw new Error('no DOGE indexer wired');
         if(!this.dogeAddress) throw new Error('no DOGE_ADDRESS configured');
@@ -5432,7 +5432,7 @@ class StateAnchorPublisher {
     // _publishArchive can address the remaining chunk slots under the seq the batch
     // actually landed under, which this process no longer knows.
     async findExistingArchiveAnchor(cp, round){
-        let res = await this._archiveAnchorLookup(cp, round);
+        let res = await this.archiveAnchorLookup(cp, round);
         if(!res) return null;
         return { exists: true, txid: res.txid || null, archiveAnchor: res };
     }
@@ -5444,7 +5444,7 @@ class StateAnchorPublisher {
     // right in both directions: on a fresh publish the head is still in the mempool and
     // every chunk must go out, and with no head there is nothing for a chunk to attach to.
     async findExistingArchiveChunk(cp, round, chunkIndex){
-        let res = await this._archiveAnchorLookup(cp, round);
+        let res = await this.archiveAnchorLookup(cp, round);
         if(!res) return null;
         let present = Array.isArray(res.chunks_present) ? res.chunks_present.map(Number) : [];
         if(!present.includes(Number(chunkIndex))) return null;
@@ -5489,7 +5489,7 @@ class StateAnchorPublisher {
     // which is written BEFORE the broadcast, so the window starts at the earliest moment
     // money could have moved. An unreadable stamp holds (fail closed): the TTL is a
     // liveness bound, not a licence to spend.
-    _anchorIntentHolds(marker){
+    anchorIntentHolds(marker){
         if(!marker) return false;
         let at = marker.intent_at ? new Date(marker.intent_at).getTime() : NaN;
         if(!Number.isFinite(at)) return true;
@@ -5568,7 +5568,7 @@ class StateAnchorPublisher {
     // checkpoint twin: the caller reaches this only when no unexpired intent holds the
     // network, so an existing row for this seq is a stale one and the write is this round
     // opening its own window. Throws on a DB error so the caller fails closed.
-    async _recordArchiveIntent(network, batchSeq){
+    async recordArchiveIntent(network, batchSeq){
         await this.db.setAnchorPublishedArchive(String(network), Number(batchSeq));
     }
 
@@ -5632,14 +5632,14 @@ class StateAnchorPublisher {
     //   2. The cutoff never rises above `now - anchorIntentTtlMs`. This is the
     //      re-presentability floor and it is exact rather than estimated, because the
     //      TTL is the SAME quantity the read paths already measure. Every read of
-    //      either table goes through _anchorIntentHolds, which is false for any marker
+    //      either table goes through anchorIntentHolds, which is false for any marker
     //      whose intent_at is older than the TTL, so a row this DELETE can reach is one
     //      that already changes no decision. anchor_published_archives is stricter
     //      still: getLiveArchiveIntent only ever selects `settled_at IS NULL`, so a
     //      settled row is not read at all.
     //
     // The cutoff is measured on intent_at, not sent_at, because intent_at is the column
-    // _anchorIntentHolds measures and the one the floor is expressed in.
+    // anchorIntentHolds measures and the one the floor is expressed in.
     //
     // Returns the total number of rows deleted across both tables. Throws on a DB
     // error; the caller treats a retention failure as non-fatal.

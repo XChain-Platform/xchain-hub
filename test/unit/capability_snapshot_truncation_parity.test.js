@@ -93,7 +93,7 @@ const WRITERS = [
     ['OracleConsensus',       OracleConsensus,       'cross_chain', [BLOCK],
         cap => ({ hub: { capabilitySnapshot: cap, network: NETWORK, hubDbBroadcaster: null } })],
     ['StateCheckpointEngine', StateCheckpointEngine, 'cross_chain', [BLOCK],
-        cap => ({ capSnapshot: cap, network: NETWORK, _broadcastRowOrResync: async () => {} })],
+        cap => ({ capSnapshot: cap, network: NETWORK, broadcastRowOrResync: async () => {} })],
     ['CrossChainDexEngine',   CrossChainDexEngine,   'cross_chain', [BLOCK, NETWORK],
         cap => ({ capSnapshot: cap, broadcaster: null, resolveBtcChainId: async () => null })],
     ['CrossChainCallEngine',  CrossChainCallEngine,  'cross_chain', [BLOCK, NETWORK],

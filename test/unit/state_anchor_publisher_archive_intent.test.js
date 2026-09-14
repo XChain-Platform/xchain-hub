@@ -150,7 +150,7 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
     describe('marker statements', function () {
         it('arms intent with a window-refreshing upsert that clears the prior outcome', async function () {
             const db = mkDb();
-            await mkPub(db).pub._recordArchiveIntent('regtest', 7);
+            await mkPub(db).pub.recordArchiveIntent('regtest', 7);
             const q = sqlHits(db, 'INSERT INTO anchor_published_archives')[0];
             expect(q.sql).to.contain('ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP');
             expect(q.sql).to.contain('sent_at = NULL');

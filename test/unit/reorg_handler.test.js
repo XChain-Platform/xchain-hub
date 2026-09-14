@@ -41,24 +41,24 @@ describe('ReorgHandler', function () {
     // Most flow tests are about the PBFT round, not the node probe, so verification
     // is stubbed to "confirmed". The probe itself is covered in its own section.
     function stubVerified(result = true) {
-        return sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(result);
+        return sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(result);
     }
 
     // -----------------------------------------------------------------
-    // _getAffectedChains()
+    // getAffectedChains()
     // -----------------------------------------------------------------
 
-    describe('_getAffectedChains()', function () {
+    describe('getAffectedChains()', function () {
         it('returns all chains except source: BTC', function () {
-            expect(rh._getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
+            expect(rh.getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
         });
 
         it('returns all chains except source: LTC', function () {
-            expect(rh._getAffectedChains('LTC')).to.deep.equal(['BTC', 'DOGE']);
+            expect(rh.getAffectedChains('LTC')).to.deep.equal(['BTC', 'DOGE']);
         });
 
         it('returns all chains except source: DOGE', function () {
-            expect(rh._getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
+            expect(rh.getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
         });
     });
 
@@ -266,14 +266,14 @@ describe('ReorgHandler', function () {
             expect(hub.db.doQuery.called, 'no rollback without confirmation').to.be.false;
         });
 
-        it('_handleAlert abstains (no round, no PREPARE) when verification fails', async function () {
+        it('handleAlert abstains (no round, no PREPARE) when verification fails', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             stubVerified(false);
 
             let ts = Date.now();
             let reorgId = 'BTC:500:' + ts;
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_4[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
                         oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -313,7 +313,7 @@ describe('ReorgHandler', function () {
             expect(hub.db.doQuery.getCall(1).args[1][0], 'dispute bound = block_time').to.equal(blockTime);
         });
 
-        it('_handleAlert abstains when the timestamp predates the observed block_time', async function () {
+        it('handleAlert abstains when the timestamp predates the observed block_time', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let blockTime = Date.now() - 60000;
@@ -321,7 +321,7 @@ describe('ReorgHandler', function () {
 
             let ts = blockTime - rh.timestampSkewToleranceMs - 60000;
             let reorgId = 'BTC:500:' + ts;
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_4[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
                         oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -370,11 +370,11 @@ describe('ReorgHandler', function () {
                 .to.equal(blockTime);
         });
 
-        it('_handleAlert ignores an alert missing the hash pair (legacy / malformed wire)', async function () {
+        it('handleAlert ignores an alert missing the hash pair (legacy / malformed wire)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             let verify = stubVerified(true);
             let ts = Date.now();
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_4[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'BTC:500:' + ts }
             });
@@ -382,14 +382,14 @@ describe('ReorgHandler', function () {
             expect(verify.called, 'no probe for a hashless alert').to.be.false;
         });
 
-        it('_handleAlert drops an ALERT whose reorgId is not the canonical chain:height:timestamp (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+        it('handleAlert drops an ALERT whose reorgId is not the canonical chain:height:timestamp (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let verify = stubVerified(true);
             let ts = Date.now();
             // Real (chain, height, timestamp) but an attacker-minted reorgId string: without
             // the binding this would create a fresh round (and PREPARE fan-out) per distinct id.
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_4[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'FORGED:' + ts,
                         oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -398,14 +398,14 @@ describe('ReorgHandler', function () {
             expect(verify.called, 'dropped before the indexer probe').to.be.false;
         });
 
-        it('_handleAlert abstains at the concurrent-round cap (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+        it('handleAlert abstains at the concurrent-round cap (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let verify = stubVerified(true);
             rh.maxPendingReorgs = 1;
             rh.pendingReorgs.set('BTC:1:1', { reorgId: 'BTC:1:1', timer: null });   // at cap
             let ts = Date.now();
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_4[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'BTC:500:' + ts,
                         oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -433,7 +433,7 @@ describe('ReorgHandler', function () {
         it('reportReorg does NOT consume the rate budget when self-verification fails (REORG-RATELIMIT-BEFORE-VERIFY-1)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
-            let verify = sinon.stub(rh, '_verifyReorgAgainstOwnNode');
+            let verify = sinon.stub(rh, 'verifyReorgAgainstOwnNode');
             verify.onFirstCall().resolves(false);   // local node momentarily lagging
             verify.onSecondCall().resolves(true);    // re-synced on the retry
             let ts = Date.now();
@@ -512,10 +512,10 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // _probeOwnNode(): the actual indexer probe
+    // probeOwnNode(): the actual indexer probe
     // -----------------------------------------------------------------
 
-    describe('_probeOwnNode()', function () {
+    describe('probeOwnNode()', function () {
 
         beforeEach(function () {
             rh.indexers.BTC = { url: 'http://btc-indexer.test', key: '' };
@@ -536,13 +536,13 @@ describe('ReorgHandler', function () {
 
         it('abstains (false) without an indexer endpoint', async function () {
             rh.indexers.BTC = { url: '', key: '' };
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('confirms when the node serves newHash at reorgHeight on the right network', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' });
-            let r = await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            let r = await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
             expect(r).to.be.ok;
             expect(r.blockTimeMs, 'no block_time served → null anchor (legacy bound)').to.equal(null);
         });
@@ -550,7 +550,7 @@ describe('ReorgHandler', function () {
         it('captures the served block_time (seconds) as the ms rollback anchor', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest', block_time: 1700000000 });
-            let r = await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            let r = await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
             expect(r).to.be.ok;
             expect(r.blockTimeMs).to.equal(1700000000000);
         });
@@ -558,36 +558,36 @@ describe('ReorgHandler', function () {
         it('abstains while the node still serves the pre-reorg hash (lagging sync)', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: OLD_HASH, network: 'regtest' });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('rejects a reorgHeight above the own tip', async function () {
             let ic = stubIndexer({ block_index: 400, block_hash: 'f'.repeat(64), network: 'regtest' }, null);
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
             expect(ic.callCount, 'no second call past the tip bound').to.equal(1);
         });
 
         it('rejects a reorgHeight deeper than REORG_MAX_DEPTH below the tip', async function () {
             rh.maxReorgDepth = 100;
             let ic = stubIndexer({ block_index: 1000, block_hash: 'f'.repeat(64), network: 'regtest' }, null);
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
             expect(ic.callCount).to.equal(1);
         });
 
         it('rejects a cross-network (or network-agnostic) answer', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'mainnet' });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
 
             sinon.restore();
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('reuses the tip response when reorgHeight IS the tip (single getblockhashes RPC)', async function () {
             let ic = stubIndexer({ block_index: 500, block_hash: NEW_HASH, network: 'regtest' }, null);
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
             expect(ic.getCalls().filter(c => c.args[1] === 'getblockhashes').length).to.equal(1);
         });
 
@@ -596,21 +596,21 @@ describe('ReorgHandler', function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [], count: 0, matched: false });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('abstains when a reorg at that height orphaned a DIFFERENT hash', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: 'c'.repeat(64) }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('abstains when the orphaned-hash match is at a DIFFERENT height in the same event', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 501, block_hash: OLD_HASH }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         // this case USED to accept (fail open). It now abstains. An unrecorded
@@ -622,7 +622,7 @@ describe('ReorgHandler', function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('still confirms when ANOTHER event records the real hash for the same height', async function () {
@@ -632,7 +632,7 @@ describe('ReorgHandler', function () {
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 2, blocks: [{ block_index: 500, block_hash: null }] },
                                    { id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH }] }], count: 2 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
         });
 
         it('a null hash does not launder a WRONG oldHash into a confirmation', async function () {
@@ -641,7 +641,7 @@ describe('ReorgHandler', function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, 'a'.repeat(64), NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, 'a'.repeat(64), NEW_HASH)).to.be.false;
         });
 
         it('REORG_ALLOW_UNRECORDED_OLDHASH=1 restores the old fail-open, and warns', async function () {
@@ -651,7 +651,7 @@ describe('ReorgHandler', function () {
                 stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                             { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                             { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
-                expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+                expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
                 expect(warn.getCalls().some(c => /UNVERIFIED oldHash/.test(String(c.args[0]))),
                     'the escape hatch is loud about what it is doing').to.equal(true);
             } finally {
@@ -665,14 +665,14 @@ describe('ReorgHandler', function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('matches an uppercase recorded orphaned hash case-insensitively', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH.toUpperCase() }] }], count: 1 });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
         });
 
         it('abstains (never throws) when getreorghistory errors or is unsupported', async function () {
@@ -680,7 +680,7 @@ describe('ReorgHandler', function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { error: 'decoder database not ready' });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
 
             // RPC rejection (e.g. an indexer predating getreorghistory).
             sinon.restore();
@@ -688,42 +688,42 @@ describe('ReorgHandler', function () {
                 if (method === 'getreorghistory') throw new Error('indexer RPC error: method not found');
                 return { block_index: 500, block_hash: NEW_HASH, network: 'regtest' };
             });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('skips the reorg-history probe entirely when the served hash already mismatches', async function () {
             let ic = stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                                  { block_index: 500, block_hash: OLD_HASH, network: 'regtest' });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
             expect(ic.getCalls().some(c => c.args[1] === 'getreorghistory')).to.be.false;
         });
 
-        it('_verifyReorgAgainstOwnNode maps an RPC error to abstain (false), never a throw', async function () {
+        it('verifyReorgAgainstOwnNode maps an RPC error to abstain (false), never a throw', async function () {
             sinon.stub(rh, '_indexerCall').rejects(new Error('ECONNREFUSED'));
-            expect(await rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(await rh.verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
-        it('_verifyReorgAgainstOwnNode dedupes concurrent probes for the same observation', async function () {
+        it('verifyReorgAgainstOwnNode dedupes concurrent probes for the same observation', async function () {
             let resolveProbe;
-            sinon.stub(rh, '_probeOwnNode').callsFake(() => new Promise(res => { resolveProbe = res; }));
-            let p1 = rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
-            let p2 = rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            sinon.stub(rh, 'probeOwnNode').callsFake(() => new Promise(res => { resolveProbe = res; }));
+            let p1 = rh.verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            let p2 = rh.verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
             resolveProbe(true);
             expect(await p1).to.be.true;
             expect(await p2).to.be.true;
-            expect(rh._probeOwnNode.callCount).to.equal(1);
+            expect(rh.probeOwnNode.callCount).to.equal(1);
         });
     });
 
     // -----------------------------------------------------------------
-    // _executeRollback()
+    // executeRollback()
     // -----------------------------------------------------------------
 
-    describe('_executeRollback()', function () {
+    describe('executeRollback()', function () {
 
         it('deletes attestations for affected chain after a recent timestamp (legacy fallback bound)', async function () {
             let ts = Date.now() - 60000;
-            await rh._executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
+            await rh.executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
 
             let deleteCall = hub.db.doQuery.getCall(0);
             expect(deleteCall.args[0]).to.include('DELETE FROM attestations');
@@ -736,7 +736,7 @@ describe('ReorgHandler', function () {
             // so the bound must come from OUR OWN node's block_time for reorgHeight.
             let reported  = Date.now() - 12 * 3600000;   // adversarial far-past report
             let blockTime = Date.now() - 600000;         // the reorged block is 10 min old
-            await rh._executeRollback('BTC', 500000, reported, 'reorg-bt', 3, '[]', blockTime);
+            await rh.executeRollback('BTC', 500000, reported, 'reorg-bt', 3, '[]', blockTime);
 
             expect(hub.db.doQuery.getCall(0).args[1][1], 'attestation DELETE bound').to.equal(blockTime);
             expect(hub.db.doQuery.getCall(1).args[1][0], 'snapshot dispute bound').to.equal(blockTime);
@@ -744,7 +744,7 @@ describe('ReorgHandler', function () {
 
         it('clamps the rollback bound to the lookback floor (blast-radius bound)', async function () {
             let before = Date.now() - rh.maxLookbackMs;
-            await rh._executeRollback('BTC', 500000, Date.now(), 'reorg-deep', 3, '[]',
+            await rh.executeRollback('BTC', 500000, Date.now(), 'reorg-deep', 3, '[]',
                 Date.now() - 3 * rh.maxLookbackMs);      // fabricated deep "reorg" block_time
             let after = Date.now() - rh.maxLookbackMs;
 
@@ -754,14 +754,14 @@ describe('ReorgHandler', function () {
         });
 
         it('marks price snapshots as disputed', async function () {
-            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '[]');
+            await rh.executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '[]');
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[0]).to.include("status = 'disputed'");
         });
 
         it('stores reorg attestation', async function () {
-            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '["v1","v2","v3"]');
+            await rh.executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '["v1","v2","v3"]');
 
             let insertCall = hub.db.doQuery.getCall(2);
             expect(insertCall.args[0]).to.include('reorg_attestations');
@@ -770,7 +770,7 @@ describe('ReorgHandler', function () {
         });
 
         it('adds reorgId to processed set', async function () {
-            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-x', 1, '[]');
+            await rh.executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-x', 1, '[]');
             expect(rh.processed.has('reorg-x')).to.be.true;
         });
     });
@@ -809,10 +809,10 @@ describe('ReorgHandler', function () {
             expect(rh.pendingReorgs.get(reorgId).prepares.has(VALIDATORS_3[1].addr)).to.be.true;
         });
 
-        it('_handleAlert refuses an out-of-window (old) timestamp and starts no consensus', async function () {
+        it('handleAlert refuses an out-of-window (old) timestamp and starts no consensus', async function () {
             let ts = 1700000000000; // ~2023, far outside the 24h blast-radius window
             let reorgId = 'BTC:500:' + ts;
-            await rh._handleAlert({
+            await rh.handleAlert({
                 sender: VALIDATORS_3[1].addr,
                 data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
                         oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -1013,7 +1013,7 @@ describe('ReorgHandler', function () {
 
     describe('_handleMessage dispatch', function () {
         it('routes alert / prepare / commit and ignores unknown types', async function () {
-            let a = sinon.spy(rh, '_handleAlert');
+            let a = sinon.spy(rh, 'handleAlert');
             let p = sinon.spy(rh, '_handlePrepare');
             let c = sinon.spy(rh, '_handleCommit');
             await rh._handleMessage({ type: 'REORG_ALERT', data: {} });
@@ -1043,23 +1043,23 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // _handleAlert()
+    // handleAlert()
     // -----------------------------------------------------------------
 
-    describe('_handleAlert()', function () {
+    describe('handleAlert()', function () {
         beforeEach(function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
         it('ignores an alert with missing fields', async function () {
-            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC' } });
+            await rh.handleAlert({ sender: 'peer', data: { chain: 'BTC' } });
             expect(rh.pendingReorgs.size).to.equal(0);
         });
 
         it('ignores an alert for an already-processed reorg', async function () {
             rh.processed.add('BTC:5:1700000000000');
-            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000', oldHash: OLD_HASH, newHash: NEW_HASH } });
+            await rh.handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000', oldHash: OLD_HASH, newHash: NEW_HASH } });
             expect(rh.pendingReorgs.size).to.equal(0);
         });
 
@@ -1067,8 +1067,8 @@ describe('ReorgHandler', function () {
             stubVerified(true);
             let ts = Date.now();
             let reorgId = 'BTC:5:' + ts;
-            let init = sinon.spy(rh, '_initiateReorgConsensus');
-            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: ts, reorgId, oldHash: OLD_HASH, newHash: NEW_HASH } });
+            let init = sinon.spy(rh, 'initiateReorgConsensus');
+            await rh.handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: ts, reorgId, oldHash: OLD_HASH, newHash: NEW_HASH } });
             expect(init.calledOnce).to.be.true;
             let p = rh.pendingReorgs.get(reorgId);
             if (p && p.timer) clearTimeout(p.timer);
@@ -1117,16 +1117,16 @@ describe('ReorgHandler', function () {
             expect(hub.db.doQuery.called, 'no work for an already-processed reorg').to.be.false;
         });
 
-        it('_initiateReorgConsensus is a no-op for an already-pending reorg', function () {
+        it('initiateReorgConsensus is a no-op for an already-pending reorg', function () {
             rh.pendingReorgs.set('r1', { timer: null });
-            rh._initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE'], OLD_HASH, NEW_HASH);
+            rh.initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE'], OLD_HASH, NEW_HASH);
             expect(rh.pendingReorgs.get('r1')).to.deep.equal({ timer: null });
         });
     });
 
     describe('checkCommitQuorum() rollback failure', function () {
         it('logs and clears the pending reorg when rollback execution throws', async function () {
-            sinon.stub(rh, '_executeRollback').rejects(new Error('db down'));
+            sinon.stub(rh, 'executeRollback').rejects(new Error('db down'));
             rh.pendingReorgs.set('BTC:5:1', {
                 chain: 'BTC', reorgHeight: 5, timestamp: 1,
                 prepares: new Set(['a', 'b']), commits: new Set(['a', 'b']),

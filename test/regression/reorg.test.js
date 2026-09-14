@@ -55,7 +55,7 @@ describe('Regression: ReorgHandler', function () {
         it('single-node processes valid reorg @regression-p1', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(true);
 
             await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
             expect(hub.db.doQuery.callCount).to.equal(3);
@@ -68,9 +68,9 @@ describe('Regression: ReorgHandler', function () {
 
     describe('REG-REORG-002: Rate limit 1 reorg per chain per 60s', function () {
         it('affected chains computed correctly @regression-p1', function () {
-            expect(rh._getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
-            expect(rh._getAffectedChains('LTC')).to.deep.equal(['BTC', 'DOGE']);
-            expect(rh._getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
+            expect(rh.getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
+            expect(rh.getAffectedChains('LTC')).to.deep.equal(['BTC', 'DOGE']);
+            expect(rh.getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
         });
     });
 
@@ -166,7 +166,7 @@ describe('Regression: ReorgHandler', function () {
     describe('REG-REORG-004: Attestations rolled back below reorg height', function () {
         it('DELETE FROM attestations executed with an in-window bound @regression-p0', async function () {
             let ts = Date.now() - 60000; // within the lookback window: used as-is
-            await rh._executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
+            await rh.executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
 
             let deleteCall = hub.db.doQuery.getCall(0);
             expect(deleteCall.args[0]).to.include('DELETE FROM attestations');
@@ -179,7 +179,7 @@ describe('Regression: ReorgHandler', function () {
             // fabricated deep "reorg" cannot grief-delete attestations further
             // back than the documented blast-radius bound.
             let before = Date.now();
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+            await rh.executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
             let after = Date.now();
 
             let bound = hub.db.doQuery.getCall(0).args[1][1];
@@ -194,7 +194,7 @@ describe('Regression: ReorgHandler', function () {
 
     describe('REG-REORG-005: Price snapshots marked disputed', function () {
         it('UPDATE price_snapshots status to disputed @regression-p0', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+            await rh.executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[0]).to.include("status = 'disputed'");
@@ -207,7 +207,7 @@ describe('Regression: ReorgHandler', function () {
 
     describe('REG-REORG-006: Reorg stored in reorg_attestations', function () {
         it('INSERT into reorg_attestations @regression-p2', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '["v1","v2","v3"]');
+            await rh.executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '["v1","v2","v3"]');
 
             let insertCall = hub.db.doQuery.getCall(2);
             expect(insertCall.args[0]).to.include('reorg_attestations');
@@ -216,7 +216,7 @@ describe('Regression: ReorgHandler', function () {
         });
 
         it('reorgId added to processed set @regression-p2', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-x', 1, '[]');
+            await rh.executeRollback('BTC', 500000, 1700000000000, 'reorg-x', 1, '[]');
             expect(rh.processed.has('reorg-x')).to.be.true;
         });
     });
@@ -236,7 +236,7 @@ describe('Regression: ReorgHandler', function () {
         it('single-node emits reorg:confirmed event @regression-p1', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(true);
 
             let emitted = null;
             rh.on('reorg:confirmed', (d) => { emitted = d; });

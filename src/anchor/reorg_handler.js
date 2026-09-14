@@ -77,7 +77,7 @@ class ReorgHandler extends EventEmitter {
 
         this.timeout = parseInt(hubConfig.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
 
-        // Blast-radius bound. _executeRollback DELETEs attestations and disputes price
+        // Blast-radius bound. executeRollback DELETEs attestations and disputes price
         // snapshots relative to the reorg `timestamp`, which is caller-supplied and only
         // sanity-checked for >= 0. A timestamp near 0 makes the rollback wipe essentially
         // ALL attestations for the chain and dispute every finalized price snapshot. A
@@ -155,7 +155,7 @@ class ReorgHandler extends EventEmitter {
     // skew tolerance) is adversarial or incoherent: acting on it would let a
     // registered-but-Byzantine reporter reach the rollback further back than the
     // blocks the reorg actually invalidated. The rollback bound itself is
-    // re-anchored to block_time in _executeRollback; this check additionally denies
+    // re-anchored to block_time in executeRollback; this check additionally denies
     // quorum to rounds minted with far-past timestamps. A null blockTimeMs (older
     // indexer without block_time) passes: legacy timestamp-bound behavior applies.
     // The opposite direction (timestamp AFTER block_time) is always legitimate:
@@ -273,7 +273,7 @@ class ReorgHandler extends EventEmitter {
             throw new Error('Rate limit: only one reorg report per chain per 60 seconds');
 
         // Never report (or locally execute) a rollback our own node does not confirm.
-        let verified = await this._verifyReorgAgainstOwnNode(chain, h, oldHash, newHash);
+        let verified = await this.verifyReorgAgainstOwnNode(chain, h, oldHash, newHash);
         if (!verified)
             throw new Error('own indexer does not confirm this reorg ' +
                 '(node must serve newHash at reorgHeight, within depth bounds, on the federation network)');
@@ -289,7 +289,7 @@ class ReorgHandler extends EventEmitter {
         // Single-node fallback
         let quorum = this._getQuorum();
         if (quorum === 0) {
-            await this._executeRollback(chain, reorgHeight, timestamp, reorgId, 1, '[]', observedBlockTimeMs);
+            await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, '[]', observedBlockTimeMs);
             return;
         }
 
@@ -299,10 +299,10 @@ class ReorgHandler extends EventEmitter {
         });
 
         // Determine affected chains (any chain that had cross-chain interactions with the source)
-        let affectedChains = this._getAffectedChains(chain);
+        let affectedChains = this.getAffectedChains(chain);
 
         // Start consensus
-        this._initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
+        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
     }
 
     async getReorgHistory(limit) {
@@ -339,13 +339,13 @@ class ReorgHandler extends EventEmitter {
 
     async _handleMessage(envelope) {
         switch (envelope.type) {
-            case REORG_ALERT:          await this._handleAlert(envelope);   break;
+            case REORG_ALERT:          await this.handleAlert(envelope);   break;
             case XCHAIN_REORG_PREPARE: await this._handlePrepare(envelope); break;
             case XCHAIN_REORG_COMMIT:  this._handleCommit(envelope);        break;
         }
     }
 
-    async _handleAlert(envelope) {
+    async handleAlert(envelope) {
         if (!this._isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_alert', sender: envelope.sender, envelope });
             return;
@@ -374,7 +374,7 @@ class ReorgHandler extends EventEmitter {
         if (!this.hashesWellFormed(oldHash, newHash)) return;
 
         // Independent observation: co-sign only what our own indexer confirms.
-        let verified = await this._verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
+        let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
         if (!verified) return;
         let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
         // Abstain from a round whose timestamp predates the reorged block itself
@@ -385,11 +385,11 @@ class ReorgHandler extends EventEmitter {
         // reorg may have created the round meanwhile.
         if (this.processed.has(reorgId) || this.pendingReorgs.has(reorgId)) return;
 
-        let affectedChains = this._getAffectedChains(chain);
-        this._initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
+        let affectedChains = this.getAffectedChains(chain);
+        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
     }
 
-    _initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs) {
+    initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs) {
         if (this.pendingReorgs.has(reorgId)) return;
 
         let digest = this._digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
@@ -398,7 +398,7 @@ class ReorgHandler extends EventEmitter {
             reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
             oldHash, newHash,
             // OUR OWN node's block_time (ms) for reorgHeight, captured during
-            // self-verification: the rollback bound (_executeRollback) anchors to
+            // self-verification: the rollback bound (executeRollback) anchors to
             // it instead of the reporter-supplied timestamp. Null when the indexer
             // reported no block_time (legacy timestamp bound applies).
             observedBlockTimeMs: Number.isFinite(observedBlockTimeMs) ? observedBlockTimeMs : null,
@@ -455,7 +455,7 @@ class ReorgHandler extends EventEmitter {
         }
         let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash } = envelope.data;
         if (!reorgId || !digest) return;
-        // Same canonical-reorgId binding as _handleAlert: reject a PREPARE whose reorgId is
+        // Same canonical-reorgId binding as handleAlert: reject a PREPARE whose reorgId is
         // not the canonical form of its own (chain,reorgHeight,timestamp), so the round-
         // creation path here cannot be driven with attacker-minted reorgId strings
         // (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
@@ -463,7 +463,7 @@ class ReorgHandler extends EventEmitter {
         if (reorgId !== this.canonicalReorgId(chain, reorgHeight, timestamp)) return;
 
         // A follower must not co-sign a reorg it would not itself accept: apply the same
-        // blast-radius bound as _handleAlert so a Byzantine leader can't gather quorum
+        // blast-radius bound as handleAlert so a Byzantine leader can't gather quorum
         // from followers that skipped the ALERT. PREPARE carries the timestamp.
         if (!this.timestampInBounds(timestamp)) return;
 
@@ -487,10 +487,10 @@ class ReorgHandler extends EventEmitter {
             // node BEFORE creating the round. On failure we abstain entirely; a
             // later PREPARE retries, so a hub whose node re-syncs mid-round can
             // still join.
-            let verified = await this._verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
+            let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
             if (!verified) return;
             let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
-            // Same over-rollback abstain as _handleAlert: never co-sign a round
+            // Same over-rollback abstain as handleAlert: never co-sign a round
             // whose timestamp predates the reorged block's own block_time.
             if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
             if (this.pendingReorgs.has(reorgId)) {
@@ -504,7 +504,7 @@ class ReorgHandler extends EventEmitter {
                     oldHash, newHash,
                     observedBlockTimeMs,
                     selfVerified: true,
-                    // Lock quorum at round start (see _initiateReorgConsensus).
+                    // Lock quorum at round start (see initiateReorgConsensus).
                     quorum:   this._getQuorum(),
                     prepares: new Set(),
                     commits:  new Set(),
@@ -513,7 +513,7 @@ class ReorgHandler extends EventEmitter {
                 };
                 pending.timer = setTimeout(() => {
                     if (!pending.finalized) {
-                        // Same silent-discard fix as _initiateReorgConsensus: emit the
+                        // Same silent-discard fix as initiateReorgConsensus: emit the
                         // dropped rollback so it isn't lost without a signal.
                         logger.warn('Reorg: Consensus timeout for ' + reorgId);
                         this.emit('reorg:timeout', {
@@ -590,7 +590,7 @@ class ReorgHandler extends EventEmitter {
 
             let proof = JSON.stringify([...pending.commits]);
 
-            this._executeRollback(
+            this.executeRollback(
                 pending.chain, pending.reorgHeight, pending.timestamp,
                 reorgId, pending.prepares.size, proof, pending.observedBlockTimeMs
             ).then(() => {
@@ -602,7 +602,7 @@ class ReorgHandler extends EventEmitter {
         }
     }
 
-    async _executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
+    async executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
         logger.info('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
 
         // Rollback bound: anchor to OUR OWN node's block_time for reorgHeight
@@ -633,7 +633,7 @@ class ReorgHandler extends EventEmitter {
         // zero rows.
         await this.db.updatePriceSnapshotByBlockTimestamp(bound);
 
-        let affectedChains = this._getAffectedChains(chain);
+        let affectedChains = this.getAffectedChains(chain);
         await this.db.setReorgAttestation(reorgId, chain, reorgHeight, timestamp, JSON.stringify(affectedChains), validatorCount, proof);
 
         this.processed.add(reorgId);
@@ -658,12 +658,12 @@ class ReorgHandler extends EventEmitter {
     // oldHash, network mismatch) returns false, which callers treat as ABSTAIN,
     // never as proof of absence. Concurrent calls for the same observation share
     // one in-flight probe.
-    _verifyReorgAgainstOwnNode(chain, reorgHeight, oldHash, newHash) {
+    verifyReorgAgainstOwnNode(chain, reorgHeight, oldHash, newHash) {
         let key = chain + ':' + reorgHeight + ':' + oldHash + ':' + newHash;
         let inFlight = this._verifying.get(key);
         if (inFlight) return inFlight;
 
-        let probe = this._probeOwnNode(chain, reorgHeight, oldHash, newHash)
+        let probe = this.probeOwnNode(chain, reorgHeight, oldHash, newHash)
             .catch(err => {
                 logger.warn(nodeUtil.format('Reorg: self-verification failed for %s:', key, err && err.message));
                 return false;
@@ -673,7 +673,7 @@ class ReorgHandler extends EventEmitter {
         return probe;
     }
 
-    async _probeOwnNode(chain, reorgHeight, oldHash, newHash) {
+    async probeOwnNode(chain, reorgHeight, oldHash, newHash) {
         let ix = this.indexers[chain];
         if (!ix || !ix.url) return false;                    // cannot verify → abstain
 
@@ -778,7 +778,7 @@ class ReorgHandler extends EventEmitter {
 
     // Determine which chains are affected by a reorg on the source chain
     // For now, returns all other supported chains (Phase 4C will be smarter about this)
-    _getAffectedChains(sourceChain) {
+    getAffectedChains(sourceChain) {
         let allChains = coins.ALLOWED_COINS;
         return allChains.filter(c => c !== sourceChain);
     }

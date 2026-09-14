@@ -630,8 +630,8 @@ describe('StateCheckpointEngine', function () {
             };
             // Two divergent payloads (block_index 10 vs 11) at the SAME seq 200 - exactly
             // the split-brain the old 4-column unique index admitted BOTH of.
-            await nd.engine._acceptFinalized(Object.assign({}, base, { block_index: 10 }), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
-            await nd.engine._acceptFinalized(Object.assign({}, base, { block_index: 11 }), [{ pubkey: nd.pubkey, sig: 'b' }], 1, true);
+            await nd.engine.acceptFinalized(Object.assign({}, base, { block_index: 10 }), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+            await nd.engine.acceptFinalized(Object.assign({}, base, { block_index: 11 }), [{ pubkey: nd.pubkey, sig: 'b' }], 1, true);
             let atSeq = nd.db.checkpoints.filter(r => r.chain === 'BTC' && r.network === 'regtest' && r.checkpoint_seq === 200);
             expect(atSeq.length, 'exactly one row survives per seq').to.equal(1);
             expect(atSeq[0].block_index, 'first writer wins').to.equal(10);
@@ -696,7 +696,7 @@ describe('StateCheckpointEngine', function () {
             let before = nd.db.checkpoints.length;
             let threw = null;
             try {
-                await nd.engine._acceptFinalized(cp(ROOTLESS), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+                await nd.engine.acceptFinalized(cp(ROOTLESS), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
             } catch(e){ threw = e; }
             expect(threw, 'must fail closed rather than persist').to.not.equal(null);
             expect(String(threw.message)).to.match(/rootless checkpoint/);
@@ -717,7 +717,7 @@ describe('StateCheckpointEngine', function () {
             nd.engine.network = 'mainnet';                 // deployment plane
             let threw = null;
             try {
-                await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'regtest' })),
+                await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'regtest' })),
                     [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
             } catch(e){ threw = e; }
             expect(threw, 'a cross-network checkpoint must be refused').to.not.equal(null);
@@ -764,7 +764,7 @@ describe('StateCheckpointEngine', function () {
             // SWQ on from genesis and need a weight snapshot the mock does not implement,
             // which tests the harness rather than the assert.)
             nd.engine.network = 'mainnet';
-            await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'mainnet' })),
+            await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'mainnet' })),
                 [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
             expect(nd.db.checkpoints.length).to.equal(1);
         });
@@ -780,8 +780,8 @@ describe('StateCheckpointEngine', function () {
             let orig = console.warn;
             console.warn = (...a) => warnings.push(a.join(' '));
             try {
-                await nd.engine._acceptFinalized(cp(ROOTED), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
-                await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { checkpoint_seq: 201, snapshot_block: 201 })),
+                await nd.engine.acceptFinalized(cp(ROOTED), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+                await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, { checkpoint_seq: 201, snapshot_block: 201 })),
                     [{ pubkey: nd.pubkey, sig: 'b' }], 1, true);
             } finally { console.warn = orig; }
             expect(nd.db.checkpoints.length, 'still persists').to.equal(2);
@@ -792,7 +792,7 @@ describe('StateCheckpointEngine', function () {
         it('persist ACCEPTS the same checkpoint once the roots are present', async function () {
             let bus = buildMesh(1, { btcBlock: 200 });
             let nd  = bus.nodes[0];
-            await nd.engine._acceptFinalized(cp(ROOTED), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+            await nd.engine.acceptFinalized(cp(ROOTED), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
             expect(nd.db.checkpoints.length, 'a rooted checkpoint still persists normally').to.equal(1);
         });
     });

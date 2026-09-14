@@ -970,7 +970,7 @@ class CrossChainDexEngine extends EventEmitter {
     // Never throws: the fill is durable and the ledger has been credited, so a delivery
     // failure must not skip the caller's tail. A throw from the re-read and a zero-row
     // result are the same undeliverable-row event, and dropAllForResync is the sanctioned
-    // repair (StateCheckpointEngine._broadcastRowOrResync and the OracleConsensus
+    // repair (StateCheckpointEngine.broadcastRowOrResync and the OracleConsensus
     // price-round path are the in-repo precedents): the watermark heartbeat advances on
     // its own wall clock and would otherwise certify completeness past a committed,
     // quorum-signed match until the socket happened to reconnect.

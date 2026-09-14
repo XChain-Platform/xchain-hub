@@ -145,7 +145,7 @@ describe('StateAnchorPublisher #7578 the on-chain-validity gate has no singleton
         pub.spendGuard  = { isPaused: () => false, reserve: () => ({ id: 1 }), commit(){}, release(){},
                             noteBlocked: () => '' };
         pub.getLiveArchiveIntent  = async () => null;
-        pub._recordArchiveIntent   = async () => {};
+        pub.recordArchiveIntent   = async () => {};
         pub.markArchiveSent       = async () => {};
         pub.withdrawArchiveIntent = async () => {};
         pub.settleArchiveIntent   = async () => {};

@@ -935,7 +935,7 @@ class CrossChainCallEngine extends EventEmitter {
     // delivery failure must not wedge the round or skip the caller's tail. A throw from
     // the re-read and a zero-row result are the same undeliverable-row event, and
     // dropAllForResync is the sanctioned repair (StateCheckpointEngine
-    // ._broadcastRowOrResync and the OracleConsensus price-round path are the in-repo
+    // .broadcastRowOrResync and the OracleConsensus price-round path are the in-repo
     // precedents), because the watermark heartbeat would otherwise certify completeness
     // past a committed, quorum-signed call row until the socket happened to reconnect.
     async mirrorCallRow(row){

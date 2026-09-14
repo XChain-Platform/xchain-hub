@@ -343,7 +343,7 @@ class StateCheckpointEngine extends EventEmitter {
         // off-schedule checkpoint anchors 3 chains on-chain (real DOGE). A
         // restart must not reset the cadence; only btcBlock advancing past
         // intervalBlocks should.
-        await this._loadLastCheckpointLatch();
+        await this.loadLastCheckpointLatch();
         if(this.peerManager){
             this._messageHandler = (env) => this._handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
@@ -424,7 +424,7 @@ class StateCheckpointEngine extends EventEmitter {
     // would silently suppress checkpointing on the active network indefinitely.
     // Best-effort: a read failure leaves the latch null (pre-fix behaviour) and
     // must not block engine startup.
-    async _loadLastCheckpointLatch(){
+    async loadLastCheckpointLatch(){
         try {
             let rows = await this.db.getStateCheckpointsMaxSnapshotBlock(this.network);
             let last = rows && rows[0] ? rows[0].last_block : null;
@@ -605,7 +605,7 @@ class StateCheckpointEngine extends EventEmitter {
         let oneDistinctPubkey = (new Set(validators.map(v => String(v.pubkey).toLowerCase()))).size === 1;
         let soleSelf = oneDistinctPubkey && String(validators[0].pubkey).toLowerCase() === myPubkey;
         if(snapCount <= 1 || (weighted && soleSelf)){
-            await this._acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
+            await this.acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
             return;
         }
 
@@ -773,7 +773,7 @@ class StateCheckpointEngine extends EventEmitter {
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XCHK_FINALIZED, { checkpoint: pending.cp, signatures: sigs });
-        this._acceptFinalized(pending.cp, sigs, pending.quorum, true)
+        this.acceptFinalized(pending.cp, sigs, pending.quorum, true)
             .catch(e => logger.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
     }
 
@@ -828,14 +828,14 @@ class StateCheckpointEngine extends EventEmitter {
                 '); persisted nothing on this hub');
             return;
         }
-        await this._acceptFinalized(cp, sigs, quorum, false);
+        await this.acceptFinalized(cp, sigs, quorum, false);
     }
 
     // Write the checkpoint row (append-only INSERT IGNORE: a reorged height is
     // superseded by a NEW row with a higher checkpoint_seq, never an UPDATE, so
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
     // indexer subscribers, and emit for the StateAnchorPublisher.
-    async _acceptFinalized(cp, sigs, quorum, isLeader){
+    async acceptFinalized(cp, sigs, quorum, isLeader){
         // Refuse BEFORE any work. This cp arrived from a PEER, so its network is
         // the sender's claim; if it disagrees with ours we would tally the signature set
         // under a different rule than the anchor publisher (and the sender) will. Checked
@@ -905,13 +905,13 @@ class StateCheckpointEngine extends EventEmitter {
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
 
-        await this._broadcastRowOrResync(
+        await this.broadcastRowOrResync(
             'state_checkpoints',
             () => this.db.getStateCheckpointByChain(cp.chain, cp.network, cp.block_index, cp.checkpoint_seq),
             'state-checkpoint broadcast gap');
 
         // Advance the cadence latch for PEER-led rounds too, symmetric with the
-        // startup seed (_loadLastCheckpointLatch reads MAX(snapshot_block) over rows
+        // startup seed (loadLastCheckpointLatch reads MAX(snapshot_block) over rows
         // written by ANY leader). Writing it only in the leader branch of _tick left
         // each hub gated on its own leadership history: with N validators and leader
         // = btcBlock % N, every hub's latch is stale on the N-1 blocks it does not
@@ -1228,7 +1228,7 @@ class StateCheckpointEngine extends EventEmitter {
             // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
             // carried a single source and the downstream indexer never saw the
             // second. Inert below SWQ, where source='' and there is one row per key.
-            await this._broadcastRowOrResync(
+            await this.broadcastRowOrResync(
                 'capability_snapshots',
                 () => this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source),
                 'capability-snapshot broadcast gap');
@@ -1256,7 +1256,7 @@ class StateCheckpointEngine extends EventEmitter {
     // `readRows` is the caller's committed-row re-read (a named db method bound to the row's
     // key), called only when there is a subscriber to deliver to, so no statement runs for
     // an empty set.
-    async _broadcastRowOrResync(table, readRows, reason){
+    async broadcastRowOrResync(table, readRows, reason){
         let b = this.broadcaster;
         if(!b) return;
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap

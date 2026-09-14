@@ -77,7 +77,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             // Track reorg event
             let reorgEvent = null;
             let reorgHandler = new ReorgHandler(hub);
-            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(reorgHandler, 'verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_1);
             await reorgHandler.start();
             reorgHandler.on('reorg:confirmed', (e) => { reorgEvent = e; });
@@ -139,7 +139,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             );
 
             let reorgHandler = new ReorgHandler(hub);
-            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(reorgHandler, 'verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_4);
             await reorgHandler.start();
 
@@ -207,7 +207,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
 
             let reorgHandler = new ReorgHandler(hub);
-            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
+            sinon.stub(reorgHandler, 'verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_1);
             await reorgHandler.start();
 

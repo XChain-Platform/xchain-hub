@@ -127,11 +127,11 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
         });
     });
 
-    describe('_seqRefusalCanonical', function () {
+    describe('seqRefusalCanonical', function () {
 
         it('is tagged so a refusal can never be replayed as a co-signature or an announcement', function () {
             const pub = mkPub(0);
-            const refusal = pub._seqRefusalCanonical(38, 40);
+            const refusal = pub.seqRefusalCanonical(38, 40);
             expect(refusal).to.equal('XANCSEQ|38|40');
             expect(refusal).to.not.equal(pub.finalizedCanonical(38, '40', 0));
             expect(refusal.indexOf('XANCFIN')).to.equal(-1);
@@ -140,8 +140,8 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
 
         it('binds BOTH seqs, so a refusal for one round cannot stand in for another', function () {
             const pub = mkPub(0);
-            expect(pub._seqRefusalCanonical(38, 40)).to.not.equal(pub._seqRefusalCanonical(39, 40));
-            expect(pub._seqRefusalCanonical(38, 40)).to.not.equal(pub._seqRefusalCanonical(38, 41));
+            expect(pub.seqRefusalCanonical(38, 40)).to.not.equal(pub.seqRefusalCanonical(39, 40));
+            expect(pub.seqRefusalCanonical(38, 40)).to.not.equal(pub.seqRefusalCanonical(38, 41));
         });
     });
 });
