@@ -190,6 +190,101 @@ module.exports = {
                 String(d.anchor_version), String(d.block_index), String(d.checkpoint_seq)].join('|');
     },
 
+    // The federated reward tuple this envelope carries, or null when any field is
+    // missing, malformed or outside what a reward wire may name.
+    federatedRewardTuple(d){
+        let network       = String(d.network || '');
+        let snapshotBlock = Number(d.snapshot_block);
+        if(!Number.isFinite(snapshotBlock)) return null;
+        if(!ar.isAnchorRewardDeriveActive(snapshotBlock, network)) return null;   // gate INERT: no rows exist at all
+
+        let rewardType = String(d.reward_type || '');
+        let chain      = String(d.chain || '');
+        let publisher  = String(d.publisher || '').toLowerCase();
+        let txid       = String(d.doge_anchor_txid || '').toLowerCase();
+        let sender     = String(d.sig_pubkey || '').toLowerCase();
+        let roundRef   = Number(d.round_reference);
+        let version    = Number(d.anchor_version);
+        let blockIndex = Number(d.block_index);
+        let cpSeq      = Number(d.checkpoint_seq);
+        if(!chain || !publisher || !sender) return null;
+        if(!/^[0-9a-f]{64}$/.test(txid)) return null;
+        if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return null;
+        if(![0, 1].includes(version)) return null;                                // only the attestation-bearing ANCHOR versions carry a reward
+        if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return null;
+        // BIND the two: v1 is the archive leg, v0 the checkpoint-bundle leg, which is the
+        // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
+        // "a v0 can never prove an archive reward and vice versa"). Checked
+        // independently, a mis-paired tuple still passes everything downstream: the
+        // XANCPUB canonical is rebuilt from the reward_type, so a publisher that really
+        // collected a bundle quorum can federate it against the v1 archive head that
+        // wraps the same checkpoint, and the drain's byte-match (four core hashes,
+        // identical on both legs) confirms it. The row it writes is append-only and
+        // never retracted, and the derive path rejects it forever: consensus-table
+        // pollution and a permanently stranded credit. Reject at ingress instead.
+        if((rewardType === 'anchor_archive') !== (version === 1)) return null;
+        if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return null;
+        if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return null;   // our own broadcast echoing back
+            return { network, snapshotBlock, rewardType, chain, publisher, txid, sender, roundRef, version, blockIndex, cpSeq };
+    },
+
+    async federatedRewardSigningSet(d, network, snapshotBlock, sender, publisher){
+        // The signing/quorum set at the reward's snapshot_block, resolved LOCALLY. This is the
+        // same set + weighting the indexer re-verifies against, so a quorum this hub accepts is
+        // one the derive path will accept too.
+        let signingSet = await this._resolveCapabilitySet('oracle_publish', snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
+        let pubkeys    = new Set((signingSet || []).map(v => String(v.pubkey).toLowerCase()));
+        if(pubkeys.size === 0) return null;                                       // unresolved set: fail closed, exactly like every other path here
+        if(!pubkeys.has(sender))    return null;                                  // relayer is not one of ours
+        if(!pubkeys.has(publisher)) return null;                                  // the earner must itself hold oracle_publish, or the indexer drops it anyway
+        if(!ValidatorIdentity.verify(this.rewardFederationCanonical(d), String(d.sig || ''), sender)) return null;
+            return { signingSet, pubkeys };
+    },
+
+    federatedAttestSigners(d, network, snapshotBlock, rewardType, roundRef, publisher, pubkeys){
+        // Rebuild the XANCPUB canonical from the tuple and the FROZEN amount. Nothing from the
+        // wire enters it, so an inflated reward_amount cannot be co-signed into existence.
+        // A bundle canonical binds only network + snapshot_block (the six positional
+        // fields of §2.5); `chain` on this wire is the checkpoint IDENTITY the mined-anchor
+        // proof re-runs against, never part of what was signed.
+        let canonical = (rewardType === 'anchor_archive')
+            ? this._archiveAttestationCanonical({ network: network, snapshot_block: snapshotBlock }, roundRef, publisher)
+            : this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
+
+        let seen = new Set(), signers = [], sigs = [];
+    for(let s of d.attest_sigs){
+            let pk = String(s && s.pubkey || '').toLowerCase();
+            if(!pk || seen.has(pk) || !pubkeys.has(pk)) continue;
+            if(!ValidatorIdentity.verify(canonical, String(s && s.sig || ''), pk)) continue;
+            seen.add(pk);
+            signers.push(pk);
+            sigs.push({ pubkey: pk, sig: String(s.sig).toLowerCase() });
+        }
+            return { signers, sigs };
+    },
+
+    // Does the re-verified signer list meet the quorum the indexer will hold it to?
+    federationQuorumMet(signingSet, pubkeys, signers, network, snapshotBlock){
+        let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
+        let met;
+    if(weighted){
+            let weightedSet = (signingSet || []).map(v => ({
+                pubkey: String(v.pubkey).toLowerCase(),
+                source: String(v.source != null ? v.source : ''),
+                weight: String(v.amount != null ? v.amount : '0')
+            }));
+            // Carry the truncation flag through, exactly as the publisher-attestation round
+            // does: meetsStakeThreshold fails CLOSED on an over-cap snapshot, and dropping the
+            // flag here would let a receiver accept a quorum on a truncated set that the
+            // indexer's own weighted check would then reject, stranding the credit.
+            if(signingSet && signingSet.truncated === true) weightedSet.truncated = true;
+            met = swq.meetsStakeThreshold(weightedSet, signers);
+        } else {
+            met = signers.length >= bftQuorumOrSingle(pubkeys.size, 1);
+        }
+            return met;
+    },
+
     // Receiver half of the federation (AML #4170). Everything here is a re-derivation from
     // this hub's OWN state; the message supplies identity, never authority:
     //   1. the derive flag-day gate, per the row's own snapshot_block, so an inert network
@@ -209,85 +304,15 @@ module.exports = {
     async handleRewardAttestation(envelope){
         let d = envelope && envelope.data;
         if(!d) return;
-        let network       = String(d.network || '');
-        let snapshotBlock = Number(d.snapshot_block);
-        if(!Number.isFinite(snapshotBlock)) return;
-        if(!ar.isAnchorRewardDeriveActive(snapshotBlock, network)) return;   // gate INERT: no rows exist at all
+        let tuple = this.federatedRewardTuple(d);
+        if(!tuple) return;
+        let { network, snapshotBlock, rewardType, chain, publisher, txid, sender, roundRef, version, blockIndex, cpSeq } = tuple;
 
-        let rewardType = String(d.reward_type || '');
-        let chain      = String(d.chain || '');
-        let publisher  = String(d.publisher || '').toLowerCase();
-        let txid       = String(d.doge_anchor_txid || '').toLowerCase();
-        let sender     = String(d.sig_pubkey || '').toLowerCase();
-        let roundRef   = Number(d.round_reference);
-        let version    = Number(d.anchor_version);
-        let blockIndex = Number(d.block_index);
-        let cpSeq      = Number(d.checkpoint_seq);
-        if(!chain || !publisher || !sender) return;
-        if(!/^[0-9a-f]{64}$/.test(txid)) return;
-        if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return;
-        if(![0, 1].includes(version)) return;                                // only the attestation-bearing ANCHOR versions carry a reward
-        if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return;
-        // BIND the two: v1 is the archive leg, v0 the checkpoint-bundle leg, which is the
-        // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
-        // "a v0 can never prove an archive reward and vice versa"). Checked
-        // independently, a mis-paired tuple still passes everything downstream: the
-        // XANCPUB canonical is rebuilt from the reward_type, so a publisher that really
-        // collected a bundle quorum can federate it against the v1 archive head that
-        // wraps the same checkpoint, and the drain's byte-match (four core hashes,
-        // identical on both legs) confirms it. The row it writes is append-only and
-        // never retracted, and the derive path rejects it forever: consensus-table
-        // pollution and a permanently stranded credit. Reject at ingress instead.
-        if((rewardType === 'anchor_archive') !== (version === 1)) return;
-        if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return;
-        if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return;   // our own broadcast echoing back
-
-        // The signing/quorum set at the reward's snapshot_block, resolved LOCALLY. This is the
-        // same set + weighting the indexer re-verifies against, so a quorum this hub accepts is
-        // one the derive path will accept too.
-        let signingSet = await this._resolveCapabilitySet('oracle_publish', snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
-        let pubkeys    = new Set((signingSet || []).map(v => String(v.pubkey).toLowerCase()));
-        if(pubkeys.size === 0) return;                                       // unresolved set: fail closed, exactly like every other path here
-        if(!pubkeys.has(sender))    return;                                  // relayer is not one of ours
-        if(!pubkeys.has(publisher)) return;                                  // the earner must itself hold oracle_publish, or the indexer drops it anyway
-        if(!ValidatorIdentity.verify(this.rewardFederationCanonical(d), String(d.sig || ''), sender)) return;
-
-        // Rebuild the XANCPUB canonical from the tuple and the FROZEN amount. Nothing from the
-        // wire enters it, so an inflated reward_amount cannot be co-signed into existence.
-        // A bundle canonical binds only network + snapshot_block (the six positional
-        // fields of §2.5); `chain` on this wire is the checkpoint IDENTITY the mined-anchor
-        // proof re-runs against, never part of what was signed.
-        let canonical = (rewardType === 'anchor_archive')
-            ? this._archiveAttestationCanonical({ network: network, snapshot_block: snapshotBlock }, roundRef, publisher)
-            : this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
-
-        let seen = new Set(), signers = [], sigs = [];
-        for(let s of d.attest_sigs){
-            let pk = String(s && s.pubkey || '').toLowerCase();
-            if(!pk || seen.has(pk) || !pubkeys.has(pk)) continue;
-            if(!ValidatorIdentity.verify(canonical, String(s && s.sig || ''), pk)) continue;
-            seen.add(pk);
-            signers.push(pk);
-            sigs.push({ pubkey: pk, sig: String(s.sig).toLowerCase() });
-        }
-        let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
-        let met;
-        if(weighted){
-            let weightedSet = (signingSet || []).map(v => ({
-                pubkey: String(v.pubkey).toLowerCase(),
-                source: String(v.source != null ? v.source : ''),
-                weight: String(v.amount != null ? v.amount : '0')
-            }));
-            // Carry the truncation flag through, exactly as the publisher-attestation round
-            // does: meetsStakeThreshold fails CLOSED on an over-cap snapshot, and dropping the
-            // flag here would let a receiver accept a quorum on a truncated set that the
-            // indexer's own weighted check would then reject, stranding the credit.
-            if(signingSet && signingSet.truncated === true) weightedSet.truncated = true;
-            met = swq.meetsStakeThreshold(weightedSet, signers);
-        } else {
-            met = signers.length >= bftQuorumOrSingle(pubkeys.size, 1);
-        }
-        if(!met){
+        let set = await this.federatedRewardSigningSet(d, network, snapshotBlock, sender, publisher);
+        if(!set) return;
+        let { signingSet, pubkeys } = set;
+        let { signers, sigs } = this.federatedAttestSigners(d, network, snapshotBlock, rewardType, roundRef, publisher, pubkeys);
+        if(!this.federationQuorumMet(signingSet, pubkeys, signers, network, snapshotBlock)){
             logger.warn('StateAnchorPublisher: federated reward attestation ' + rewardType + '/' + roundRef +
                          ' from ' + sender + ' failed local XANCPUB re-verification (' + signers.length +
                          ' of ' + pubkeys.size + ' local oracle_publish signers); dropped');

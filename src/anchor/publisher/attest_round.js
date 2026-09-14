@@ -65,16 +65,7 @@ module.exports = {
         return base;
     },
 
-    // Run the publisher-attestation round for a BUNDLE this hub is publishing (spec §2.5).
-    // Resolves { met, sigs:[{pubkey,sig}], publisher } once a 2f+1 oracle_publish quorum
-    // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
-    // { met:false } on timeout / short quorum. ONE round per bundle, where the retired
-    // per-chain path ran one per row. The SIGNING/QUORUM set is resolved at the bundle's
-    // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
-    // against, so the hub never collects a quorum the chain then rejects.
-    async runPublisherAttestationRound(b, publisher){
-        if(!this.identity) return { met: false, sigs: [] };
-
+    async attestationSigningSet(b){
         // _resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
         // deterministic snapshot is unavailable), which is right for the callers that
         // must not build on a divergent set. Here it would abort the whole anchor: this
@@ -91,47 +82,16 @@ module.exports = {
             logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(b.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
                          'publisher-attestation round (unattested bundle, no reward) rather than blocking the anchor');
-            return { met: false, sigs: [] };
+            return null;
         }
-        let signingPubkeys = signingSet.map(v => v.pubkey);
-        let snapCount      = signingPubkeys.length;
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));   // gate on the RECORD network to match the indexer
-        let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
+        return signingSet;
+    },
 
-        let me        = this.identity.getPubkeyHex().toLowerCase();
-        let canonical = this._attestationCanonical(b, publisher);
-        let mySig     = this.identity.sign(canonical);
-
-        // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
-        // this file fails closed on an unresolved set, and the two resolvers used across
-        // one round can legitimately disagree (_getActiveOraclePublishPubkeys reads the
-        // capability snapshot, _resolveCapabilitySet may take the weighted one), so a
-        // hub can pass the eligible.length fail-closed gate in _publishPendingCheckpoints
-        // and still resolve snapCount 0 here. Self-attesting on that would emit a v0
-        // carrying one signature that every indexer rejects (it resolves a non-empty set),
-        // while THIS hub banks and archives an anchor reward no live indexer credits: the
-        // live-vs-recovered ledger fork the reward gates exist to prevent. An unattested
-        // bundle is degraded, not divergent.
-        if(snapCount === 0){
-            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
-                         Number(b.snapshot_block) + '; abstaining from the publisher-attestation round ' +
-                         '(unattested bundle, no reward) rather than self-attesting');
-            return { met: false, sigs: [] };
-        }
-        // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
-        // drops the reward (PUBLISHER must be in the verified set). Fall back to an
-        // unattested bundle rather than emit one whose reward can never be credited.
-        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
-
-        let signatures = new Map();
-        signatures.set(me, mySig);
-
-        // Genuine single-node set (snapCount === 1, membership proven above): the
-        // publisher's own attestation IS the quorum.
-        if(snapCount <= 1 || !this.peerManager)
-            return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
-
-        return await new Promise((resolve) => {
+    // Open the round on the wire and settle it: the leader's own signature is already in,
+    // the followers verify the body against their own rows, and the timer resolves the
+    // round unattested if the quorum does not arrive.
+    openAttestRound(b, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig){
+        return new Promise((resolve) => {
             // Full {pubkey, source, weight} set so the stake-weighted tally can sum
             // distinct-source stake, identical to the archive round.
             let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
@@ -172,6 +132,59 @@ module.exports = {
             });
             this.checkAttestQuorum();
         });
+    },
+
+    // Run the publisher-attestation round for a BUNDLE this hub is publishing (spec §2.5).
+    // Resolves { met, sigs:[{pubkey,sig}], publisher } once a 2f+1 oracle_publish quorum
+    // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
+    // { met:false } on timeout / short quorum. ONE round per bundle, where the retired
+    // per-chain path ran one per row. The SIGNING/QUORUM set is resolved at the bundle's
+    // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
+    // against, so the hub never collects a quorum the chain then rejects.
+    // The oracle_publish set this round tallies against, or null when the snapshot is
+    // unavailable and the round must abstain rather than block the anchor.
+    async runPublisherAttestationRound(b, publisher){
+        if(!this.identity) return { met: false, sigs: [] };
+        let signingSet = await this.attestationSigningSet(b);
+        if(!signingSet) return { met: false, sigs: [] };
+        let signingPubkeys = signingSet.map(v => v.pubkey);
+        let snapCount      = signingPubkeys.length;
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));   // gate on the RECORD network to match the indexer
+        let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
+
+        let me        = this.identity.getPubkeyHex().toLowerCase();
+        let canonical = this._attestationCanonical(b, publisher);
+        let mySig     = this.identity.sign(canonical);
+
+        // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
+        // this file fails closed on an unresolved set, and the two resolvers used across
+        // one round can legitimately disagree (_getActiveOraclePublishPubkeys reads the
+        // capability snapshot, _resolveCapabilitySet may take the weighted one), so a
+        // hub can pass the eligible.length fail-closed gate in _publishPendingCheckpoints
+        // and still resolve snapCount 0 here. Self-attesting on that would emit a v0
+        // carrying one signature that every indexer rejects (it resolves a non-empty set),
+        // while THIS hub banks and archives an anchor reward no live indexer credits: the
+        // live-vs-recovered ledger fork the reward gates exist to prevent. An unattested
+        // bundle is degraded, not divergent.
+        if(snapCount === 0){
+            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+                         Number(b.snapshot_block) + '; abstaining from the publisher-attestation round ' +
+                         '(unattested bundle, no reward) rather than self-attesting');
+            return { met: false, sigs: [] };
+        }
+        // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
+        // drops the reward (PUBLISHER must be in the verified set). Fall back to an
+        // unattested bundle rather than emit one whose reward can never be credited.
+        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
+
+        let signatures = new Map();
+        signatures.set(me, mySig);
+
+        // Genuine single-node set (snapCount === 1, membership proven above): the
+        // publisher's own attestation IS the quorum.
+        if(snapCount <= 1 || !this.peerManager)
+            return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
+        return await this.openAttestRound(b, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig);
     },
 
     checkAttestQuorum(){

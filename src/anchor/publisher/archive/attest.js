@@ -52,13 +52,7 @@ module.exports = {
         return base;
     },
 
-    // Run the archive publisher-attestation round for a batch THIS hub is publishing
-    // (mirrors runPublisherAttestationRound for the archive leg). The signing/quorum set
-    // is resolved at the wrapper checkpoint's snapshot_block, the SAME set the indexer
-    // (anchor.js formats[1]) verifies the attestation against.
-    async runArchiveAttestationRound(cp, batchSeq, publisher){
-        if(!this.identity) return { met: false, sigs: [] };
-
+    async archiveAttestationSigningSet(cp){
         // Same fail-closed resolver, same reason to degrade rather than propagate (see
         // runPublisherAttestationRound): this round is awaited in _publishArchive AFTER
         // the wrapper co-sign quorum has already been collected, so a throw here discards
@@ -72,39 +66,15 @@ module.exports = {
                          Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
                          'archive publisher-attestation round (ATTEST_SIG_COUNT 0, no reward) rather than ' +
                          'discarding the archive');
-            return { met: false, sigs: [] };
+            return null;
         }
-        let signingPubkeys = signingSet.map(v => v.pubkey);
-        let snapCount      = signingPubkeys.length;
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
-        let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
+        return signingSet;
+    },
 
-        let me        = this.identity.getPubkeyHex().toLowerCase();
-        let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
-        let mySig     = this.identity.sign(canonical);
-
-        // Unresolved (empty) set: abstain, exactly as the v0 bundle round does. Self-attesting
-        // here would emit a v1 whose lone signature every indexer rejects while this hub
-        // banks and archives the archive-anchor reward locally.
-        if(snapCount === 0){
-            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
-                         Number(cp.snapshot_block) + '; abstaining from the archive publisher-attestation ' +
-                         'round (ATTEST_SIG_COUNT 0, no reward) rather than self-attesting');
-            return { met: false, sigs: [] };
-        }
-        // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
-        // drops the reward (PUBLISHER must be in the verified set). Fall back to a count-0
-        // tail rather than emit an attestation whose reward can never be credited.
-        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
-
-        let signatures = new Map();
-        signatures.set(me, mySig);
-
-        // Genuine single-node set (snapCount === 1, membership proven above).
-        if(snapCount <= 1 || !this.peerManager)
-            return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
-
-        return await new Promise((resolve) => {
+    // Open the archive round on the wire and settle it, including the displaced-round
+    // settlement that keeps a superseded publish from waiting forever.
+    openArchiveAttestRound(cp, batchSeq, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig){
+        return new Promise((resolve) => {
             let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
             // Preserve the truncation flag so the weighted quorum fails closed on an
             // over-cap oracle_publish snapshot (same reasoning as the v0 bundle round: a
@@ -151,6 +121,48 @@ module.exports = {
             });
             this.checkArchiveAttestQuorum();
         });
+    },
+
+    // Run the archive publisher-attestation round for a batch THIS hub is publishing
+    // (mirrors runPublisherAttestationRound for the archive leg). The signing/quorum set
+    // is resolved at the wrapper checkpoint's snapshot_block, the SAME set the indexer
+    // (anchor.js formats[1]) verifies the attestation against.
+    // The oracle_publish set the archive round tallies against, or null when the
+    // snapshot is unavailable and the round must abstain rather than discard the archive.
+    async runArchiveAttestationRound(cp, batchSeq, publisher){
+        if(!this.identity) return { met: false, sigs: [] };
+        let signingSet = await this.archiveAttestationSigningSet(cp);
+        if(!signingSet) return { met: false, sigs: [] };
+        let signingPubkeys = signingSet.map(v => v.pubkey);
+        let snapCount      = signingPubkeys.length;
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
+        let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
+
+        let me        = this.identity.getPubkeyHex().toLowerCase();
+        let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
+        let mySig     = this.identity.sign(canonical);
+
+        // Unresolved (empty) set: abstain, exactly as the v0 bundle round does. Self-attesting
+        // here would emit a v1 whose lone signature every indexer rejects while this hub
+        // banks and archives the archive-anchor reward locally.
+        if(snapCount === 0){
+            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+                         Number(cp.snapshot_block) + '; abstaining from the archive publisher-attestation ' +
+                         'round (ATTEST_SIG_COUNT 0, no reward) rather than self-attesting');
+            return { met: false, sigs: [] };
+        }
+        // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
+        // drops the reward (PUBLISHER must be in the verified set). Fall back to a count-0
+        // tail rather than emit an attestation whose reward can never be credited.
+        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
+
+        let signatures = new Map();
+        signatures.set(me, mySig);
+
+        // Genuine single-node set (snapCount === 1, membership proven above).
+        if(snapCount <= 1 || !this.peerManager)
+            return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
+        return await this.openArchiveAttestRound(cp, batchSeq, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig);
     },
 
     checkArchiveAttestQuorum(){
