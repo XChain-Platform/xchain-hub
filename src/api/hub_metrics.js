@@ -49,6 +49,16 @@ function installHubOracleMetrics(observability, hub){
     const registry = observability && observability.registry;
     if(!registry || !hub || typeof hub.getOracle !== 'function') return false;
 
+    const series = registerOracleSeries(registry);
+    registry.addCollector(() => {
+        collectOracleSeries(hub, series);
+    });
+
+    return true;
+}
+
+// The oracle-round series, registered once per install.
+function registerOracleSeries(registry){
     const lastFinalizedTs = registry.gauge({
         name: 'xchain_oracle_last_finalized_round_timestamp_seconds',
         help: 'Unix time of the last oracle round this hub saw finalized; stops advancing when rounds stop reaching quorum'
@@ -77,37 +87,38 @@ function installHubOracleMetrics(observability, hub){
         name: 'xchain_oracle_single_source_rounds_total',
         help: 'Oracle rounds finalized with one uncorrelated price source on a normally-multi-source pair'
     });
-
-    registry.addCollector(() => {
-        const oracle = hub.getOracle();
-        if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
-        // lastSuccessfulRoundTime is stamped by markRoundFinalized on a genuine
-        // finalization and rehydrated from price_snapshots on restart, so the
-        // series survives a bounce instead of resetting to "just now" and hiding
-        // an in-progress outage. Null until the very first finalization: leave
-        // the series ABSENT there, since a zero renders as a 1970 timestamp and
-        // would page a hub that is merely still starting up.
-        if(oracle.lastSuccessfulRoundTime) lastFinalizedTs.set({}, oracle.lastSuccessfulRoundTime / 1000);
-        if(Number.isFinite(Number(oracle.currentRound))) currentRound.set({}, Number(oracle.currentRound));
-        if(Number.isFinite(Number(oracle.consecutiveSkippedRounds))) {
-            skippedStreak.set({}, Number(oracle.consecutiveSkippedRounds));
-        }
-        // Read through the consensus handle rather than getSubmissionsInfo(), whose
-        // round_timeouts field is the same value behind an RPC that also queries the
-        // DB; the point of these series is a detector that survives that path failing.
-        // setMonotonic, not set: startOracle() mints a fresh OracleConsensus, and a
-        // counter that walks backwards breaks every rate() over it.
-        const consensus = oracle.oracleConsensus;
-        if(consensus && Number.isFinite(Number(consensus._roundTimeouts))) {
-            roundTimeouts.setMonotonic({}, Number(consensus._roundTimeouts));
-        }
-        if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
-            singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
-        }
-    });
-
-    return true;
+    return { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds };
 }
+
+// One scrape of the oracle-round series from live in-memory OracleRound state.
+function collectOracleSeries(hub, { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds }){
+    const oracle = hub.getOracle();
+    if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
+    // lastSuccessfulRoundTime is stamped by markRoundFinalized on a genuine
+    // finalization and rehydrated from price_snapshots on restart, so the
+    // series survives a bounce instead of resetting to "just now" and hiding
+    // an in-progress outage. Null until the very first finalization: leave
+    // the series ABSENT there, since a zero renders as a 1970 timestamp and
+    // would page a hub that is merely still starting up.
+    if(oracle.lastSuccessfulRoundTime) lastFinalizedTs.set({}, oracle.lastSuccessfulRoundTime / 1000);
+    if(Number.isFinite(Number(oracle.currentRound))) currentRound.set({}, Number(oracle.currentRound));
+    if(Number.isFinite(Number(oracle.consecutiveSkippedRounds))) {
+        skippedStreak.set({}, Number(oracle.consecutiveSkippedRounds));
+    }
+    // Read through the consensus handle rather than getSubmissionsInfo(), whose
+    // round_timeouts field is the same value behind an RPC that also queries the
+    // DB; the point of these series is a detector that survives that path failing.
+    // setMonotonic, not set: startOracle() mints a fresh OracleConsensus, and a
+    // counter that walks backwards breaks every rate() over it.
+    const consensus = oracle.oracleConsensus;
+    if(consensus && Number.isFinite(Number(consensus._roundTimeouts))) {
+        roundTimeouts.setMonotonic({}, Number(consensus._roundTimeouts));
+    }
+    if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
+        singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
+    }
+}
+
 
 // A real, finite reading. Null / undefined / '' are MISSING readings, and
 // Number() maps every one of them to 0, so they have to be rejected first.
@@ -142,6 +153,16 @@ function installHubStakeShareMetrics(observability, hub){
     const registry = observability && observability.registry;
     if(!registry || !hub) return false;
 
+    const series = registerStakeShareSeries(registry);
+    registry.addCollector(() => {
+        collectStakeShareSeries(hub, series);
+    });
+
+    return true;
+}
+
+// The stake-share series, one label set per watched chain and capability.
+function registerStakeShareSeries(registry){
     const labelNames = ['chain', 'capability'];
     const shareRatio = registry.gauge({
         name: 'xchain_stake_share_ratio',
@@ -167,43 +188,44 @@ function installHubStakeShareMetrics(observability, hub){
         name: 'xchain_stake_share_alerting',
         help: '1 when any watched chain/capability sits within one new stake of the weighted commit gate, or under it'
     });
-
-    registry.addCollector(() => {
-        // Rebuild every series from scratch each pass. Skipping set() on an unmeasured
-        // reading leaves the PREVIOUS sample registered, so the absent-on-unavailable
-        // rule below degraded silently into "keep serving the last healthy number":
-        // after a failed indexer read every later scrape still rendered meets_gate 1
-        // as a current measurement. This collector is the sole writer of these five
-        // gauges and re-derives all of them from the watcher's entry set immediately
-        // below, inside this same synchronous pass, so a reset can never drop a
-        // still-valid reading; it drops only readings nothing re-measured. Reset
-        // BEFORE the watcher guard so a hub that LOSES its watcher goes quiet too,
-        // which is what that guard already intends for a hub that never had one.
-        shareRatio.reset();
-        headroom.reset();
-        stakesToHalt.reset();
-        meetsGate.reset();
-        alerting.reset();
-        const watcher = hub.stakeShareWatcher;
-        // No watcher (config-only hub) or no operator sources configured: emit no
-        // series at all rather than a zero, which would read as a lost gate and page.
-        if(!watcher || !watcher.monitor) return;
-        alerting.set({}, watcher.monitor.isAlerting() ? 1 : 0);
-        for(const e of watcher.monitor.entries.values()){
-            const labels = { chain: e.chain, capability: e.capability };
-            // An entry with nothing measured (unavailable / unconfigured) carries
-            // nulls. Leave those series ABSENT: a gap is honest about a missing
-            // reading, a zero is a false claim that the share collapsed.
-            // Null-checked BEFORE Number(), which turns both null and '' into a
-            // perfectly finite 0 - the exact false zero this guard exists to avoid.
-            if(isNum(e.shareRatio))   shareRatio.set(labels, Number(e.shareRatio));
-            if(isNum(e.headroom))     headroom.set(labels, Number(e.headroom));
-            if(isNum(e.stakesToHalt)) stakesToHalt.set(labels, Number(e.stakesToHalt));
-            if(typeof e.meetsGate === 'boolean') meetsGate.set(labels, e.meetsGate ? 1 : 0);
-        }
-    });
-
-    return true;
+    return { shareRatio, headroom, stakesToHalt, meetsGate, alerting };
 }
+
+// One scrape of the stake-share series from the watcher's in-memory monitor.
+function collectStakeShareSeries(hub, { shareRatio, headroom, stakesToHalt, meetsGate, alerting }){
+    // Rebuild every series from scratch each pass. Skipping set() on an unmeasured
+    // reading leaves the PREVIOUS sample registered, so the absent-on-unavailable
+    // rule below degraded silently into "keep serving the last healthy number":
+    // after a failed indexer read every later scrape still rendered meets_gate 1
+    // as a current measurement. This collector is the sole writer of these five
+    // gauges and re-derives all of them from the watcher's entry set immediately
+    // below, inside this same synchronous pass, so a reset can never drop a
+    // still-valid reading; it drops only readings nothing re-measured. Reset
+    // BEFORE the watcher guard so a hub that LOSES its watcher goes quiet too,
+    // which is what that guard already intends for a hub that never had one.
+    shareRatio.reset();
+    headroom.reset();
+    stakesToHalt.reset();
+    meetsGate.reset();
+    alerting.reset();
+    const watcher = hub.stakeShareWatcher;
+    // No watcher (config-only hub) or no operator sources configured: emit no
+    // series at all rather than a zero, which would read as a lost gate and page.
+    if(!watcher || !watcher.monitor) return;
+    alerting.set({}, watcher.monitor.isAlerting() ? 1 : 0);
+    for(const e of watcher.monitor.entries.values()){
+        const labels = { chain: e.chain, capability: e.capability };
+        // An entry with nothing measured (unavailable / unconfigured) carries
+        // nulls. Leave those series ABSENT: a gap is honest about a missing
+        // reading, a zero is a false claim that the share collapsed.
+        // Null-checked BEFORE Number(), which turns both null and '' into a
+        // perfectly finite 0 - the exact false zero this guard exists to avoid.
+        if(isNum(e.shareRatio))   shareRatio.set(labels, Number(e.shareRatio));
+        if(isNum(e.headroom))     headroom.set(labels, Number(e.headroom));
+        if(isNum(e.stakesToHalt)) stakesToHalt.set(labels, Number(e.stakesToHalt));
+        if(typeof e.meetsGate === 'boolean') meetsGate.set(labels, e.meetsGate ? 1 : 0);
+    }
+}
+
 
 module.exports = { installHubOracleMetrics, installHubStakeShareMetrics };
