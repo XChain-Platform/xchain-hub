@@ -175,7 +175,7 @@ describe('Regression: validator setup/run fixes', function () {
         it('throws immediately on every credential/privilege error code @regression-p0', function () {
             const db = new Database('localhost', 3306, 'hub_test', 'baduser', 'badpass');
             for (const code of FATAL) {
-                expect(() => db._failFastIfFatal({ code }, 'connecting'),
+                expect(() => db.failFastIfFatal({ code }, 'connecting'),
                     `${code} should be fatal`).to.throw(/Fatal DB error/);
             }
         });
@@ -183,7 +183,7 @@ describe('Regression: validator setup/run fixes', function () {
         it('does NOT throw on transient errors (keeps waiting) @regression-p0', function () {
             const db = new Database('localhost', 3306, 'hub_test', 'user', 'pass');
             for (const code of TRANSIENT) {
-                expect(() => db._failFastIfFatal(code ? { code } : null, 'connecting'),
+                expect(() => db.failFastIfFatal(code ? { code } : null, 'connecting'),
                     `${code} should be transient`).to.not.throw();
             }
         });

@@ -451,7 +451,7 @@ describe('Database', function () {
                     return [{ col: 'network' }, { col: 'source_chain' }];
                 return [];
             });
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             let alter = mockConn.query.getCalls().find(c => /ALTER TABLE/.test(c.args[0]));
             expect(alter, 'ALTER issued').to.exist;
             expect(alter.args[0]).to.match(/DROP PRIMARY KEY, ADD PRIMARY KEY \(network, source_chain\)/);
@@ -469,20 +469,20 @@ describe('Database', function () {
                     return [{ col: 'network' }, { col: 'source_chain' }];
                 return [];
             });
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             let alters = mockConn.query.getCalls().filter(c => /ALTER TABLE/.test(c.args[0]));
             expect(alters.length).to.equal(1);
         });
 
         it('no-ops once the key already covers both columns', async function () {
             primaryKeyOf(['network', 'source_chain']);
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
         });
 
         it('no-ops when the table is not there yet (a fresh install ships the right key)', async function () {
             primaryKeyOf([]);
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
         });
 
@@ -491,7 +491,7 @@ describe('Database', function () {
         it('refuses to touch the key when the network column has not landed', async function () {
             primaryKeyOf(['source_chain'], ['source_chain', 'retraction_generation']);
             let err = sinon.stub(console, 'error');
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
             expect(err.getCalls().map(c => String(c.args[0])).join('\n')).to.contain('missing network');
         });
@@ -500,7 +500,7 @@ describe('Database', function () {
         it('reports loudly when the re-key did not take', async function () {
             primaryKeyOf(['source_chain']);
             let err = sinon.stub(console, 'error');
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             expect(err.getCalls().map(c => String(c.args[0])).join('\n')).to.contain('did not take');
         });
 
@@ -518,7 +518,7 @@ describe('Database', function () {
                 return [];
             });
             let err = sinon.stub(console, 'error');
-            await db._migratePriceFencePrimaryKey();
+            await db.migratePriceFencePrimaryKey();
             expect(err.called).to.equal(true);
             expect(mockConn.release.called, 'connection released').to.equal(true);
         });

@@ -202,7 +202,7 @@ class Database {
     // are NOT fatal; callers keep waiting on those. Without this, a misconfigured
     // DB user (e.g. one lacking CREATE DATABASE) makes startup hang forever on a
     // 5s retry loop instead of surfacing the real problem.
-    _failFastIfFatal(e, action){
+    failFastIfFatal(e, action){
         const FATAL = new Set([
             'ER_ACCESS_DENIED_ERROR',          // wrong user/password
             'ER_DBACCESS_DENIED_ERROR',        // user has no rights on this database
@@ -235,7 +235,7 @@ class Database {
                 await db.end();
                 return results.length > 0;
             } catch (e){
-                this._failFastIfFatal(e, 'checking database existence');
+                this.failFastIfFatal(e, 'checking database existence');
                 console.log('Database connection error:', e.code || 'unknown');
                 console.log("Error checking if " + this.dbName + " exists. Trying again in 5 seconds...");
                 await this._sleep(5000);
@@ -259,7 +259,7 @@ class Database {
                 await db.end();
                 return true;
             } catch(e){
-                this._failFastIfFatal(e, 'creating the database');
+                this.failFastIfFatal(e, 'creating the database');
                 console.log("Database creation error:", e.code || 'unknown');
                 console.log("Error creating " + this.dbName + ". Trying again in 5 seconds...");
                 await this._sleep(5000);
@@ -366,8 +366,8 @@ class Database {
             ['chain', 'network', 'checkpoint_seq']
         );
         await this._migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
-        await this._dropIndexIfExists('state_checkpoints', 'chain_block_seq');
-        await this._dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
+        await this.dropIndexIfExists('state_checkpoints', 'chain_block_seq');
+        await this.dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
         // Widen capability_snapshots.uq_cap_snap to add `source`. At/above
         // STAKE_WEIGHTED_QUORUM a signing key delegated by two staking sources yields
         // one row per (source, pubkey); the old 3-column key collapsed them on
@@ -419,12 +419,12 @@ class Database {
         // the fence's upsert would key on source_chain and one network's retraction would
         // overwrite another's. That is the bug this item exists to remove, so the re-key is
         // the migration, not the column.
-        await this._migratePriceFencePrimaryKey();
+        await this.migratePriceFencePrimaryKey();
         // The mirror admission columns (spec §5.5, C28, C35). A JS helper and NOT a dated
         // .sql, because this repo HAS no dated-.sql runner: the two files under
         // xchain-hub/migrations/ are applied by hand, so a migration copied from the
         // indexer's style would sit there and never run on a single deployed hub.
-        await this._migrateAdmissionColumns();
+        await this.migrateAdmissionColumns();
     }
 
     // Add the per-chain admission height columns to every mirrored table that carries one.
@@ -439,7 +439,7 @@ class Database {
     // no backfill and a node that has not crossed the flag day is byte-identical to today.
     // No index: the barrier compares a per-table watermark, not this column, and the
     // consuming selects already have their own covering keys.
-    async _migrateAdmissionColumns(){
+    async migrateAdmissionColumns(){
         const TABLES = {
             cross_chain_matches:        ['btc', 'ltc', 'doge'],
             cross_chain_calls:          ['btc', 'ltc', 'doge'],
@@ -451,14 +451,14 @@ class Database {
         };
         for(let table of Object.keys(TABLES))
             for(let chain of TABLES[table])
-                await this._migrateAddNullableColumn(table, 'admit_block_' + chain, 'BIGINT UNSIGNED DEFAULT NULL');
+                await this.migrateAddNullableColumn(table, 'admit_block_' + chain, 'BIGINT UNSIGNED DEFAULT NULL');
 
         // oracle_prices takes ONE unqualified column, not the per-chain map. It is the only
         // unsigned rail: no signatures, no canonical, nothing to stamp a map into. Its height
         // is the PUBLISHING chain's, which source_chain already names, so the barrier certifies
         // it against heights[oracle_prices][source_chain] rather than against the reading
         // chain's own B, and every chain reads the row without needing an entry of its own.
-        await this._migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
     }
 
     // Add one nullable column if the table exists and does not already carry it.
@@ -472,7 +472,7 @@ class Database {
     // after it and the hub boot down with it. The consequence of the column being absent is
     // bounded and stated: this hub cannot stamp admission heights, so above the activation
     // it refuses to finalize those rows rather than producing rows no verifier can rebuild.
-    async _migrateAddNullableColumn(table, column, columnDef){
+    async migrateAddNullableColumn(table, column, columnDef){
         let db = await this.getConnection();
         try {
             let rows = await db.query(
@@ -515,16 +515,16 @@ class Database {
     // A failure here is logged, not thrown: the pre-migration chain-keyed fence still
     // rejects stale replays (over-broadly, across networks), so refusing to boot would
     // trade a scoping defect for an outage.
-    async _migratePriceFencePrimaryKey(){
+    async migratePriceFencePrimaryKey(){
         const table = 'price_ingest_watermarks';
         let db = await this.getConnection();
         try {
-            let present = await this._liveIndexColumns(db, table, 'PRIMARY');
+            let present = await this.liveIndexColumns(db, table, 'PRIMARY');
             // [] means the table is not here yet (a fresh install creates it from the SQL
             // source, already correctly keyed). Nothing to migrate either way.
             if(present.length === 0 || (present[0] === 'network' && present[1] === 'source_chain')) return;
 
-            let missing = await this._missingIndexColumns(db, table, '(network, source_chain)');
+            let missing = await this.missingIndexColumns(db, table, '(network, source_chain)');
             if(missing.length > 0){
                 console.error('Migration: cannot re-key ' + table + ' on (network, source_chain); the table is '
                     + 'missing ' + missing.join(', ') + '. The fence stays chain-keyed, so one network\'s '
@@ -534,7 +534,7 @@ class Database {
             }
 
             await db.query('ALTER TABLE `' + table + '` DROP PRIMARY KEY, ADD PRIMARY KEY (network, source_chain)');
-            let after = await this._liveIndexColumns(db, table, 'PRIMARY');
+            let after = await this.liveIndexColumns(db, table, 'PRIMARY');
             if(after[0] === 'network' && after[1] === 'source_chain')
                 console.log('Migration: re-keyed ' + table + ' on (network, source_chain); the price ingest '
                     + 'fence is now per network, not shared across every network on this hub DB.');
@@ -627,7 +627,7 @@ class Database {
     // Drop an index if it exists (idempotent). It retires an index that a
     // later schema revision superseded, so a node created from an older release
     // does not keep carrying it after the migration runs.
-    async _dropIndexIfExists(table, indexName){
+    async dropIndexIfExists(table, indexName){
         let db = await this.getConnection();
         try {
             let existing = await db.query(
@@ -676,7 +676,7 @@ class Database {
     // Columns a live index actually covers, lowercased, in key order. [] when the
     // index is absent. Read back after every DDL step in _widenUniqueKey, because a
     // statement that did not throw is not proof that the key is there.
-    async _liveIndexColumns(db, table, indexName){
+    async liveIndexColumns(db, table, indexName){
         let rows = await db.query(
             "SELECT column_name AS col FROM information_schema.statistics " +
             "WHERE table_schema = ? AND table_name = ? AND index_name = ? ORDER BY seq_in_index",
@@ -688,7 +688,7 @@ class Database {
     // Columns named by an index spec that the table does not have. This is the errno
     // 1072 case ("key column doesn't exist in table") read one statement early, which
     // is what lets the widen refuse before it has touched the existing key.
-    async _missingIndexColumns(db, table, indexColumns){
+    async missingIndexColumns(db, table, indexColumns){
         let wanted = indexSpecColumns(indexColumns);
         if(wanted.length === 0) return [];
         let rows = await db.query(
@@ -722,15 +722,15 @@ class Database {
         let db = await this.getConnection();
         let dropped = false;   // set once the original key is gone, which is what arms the guard
         try {
-            let present = await this._liveIndexColumns(db, table, indexName);
+            let present = await this.liveIndexColumns(db, table, indexName);
 
             // A temporary key means an earlier run died mid-sequence. Finish that run
             // first: promote it to the real name if the real name is free, then retire it.
-            if((await this._liveIndexColumns(db, table, tempName)).length > 0){
+            if((await this.liveIndexColumns(db, table, tempName)).length > 0){
                 if(present.length === 0){
                     dropped = true;
                     await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
-                    present = await this._liveIndexColumns(db, table, indexName);
+                    present = await this.liveIndexColumns(db, table, indexName);
                 }
                 if(present.length > 0){
                     await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
@@ -745,7 +745,7 @@ class Database {
             }
             if(present.indexOf(String(requiredColumn).toLowerCase()) !== -1) return;   // already widened
 
-            let missing = await this._missingIndexColumns(db, table, indexColumns);
+            let missing = await this.missingIndexColumns(db, table, indexColumns);
             if(missing.length > 0){
                 // The existing key is untouched, so the table is exactly as constrained as
                 // it was; the widen simply does not happen on this boot.
@@ -756,20 +756,20 @@ class Database {
             }
 
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + tempName + ' ' + indexColumns);
-            if((await this._liveIndexColumns(db, table, tempName)).length === 0)
+            if((await this.liveIndexColumns(db, table, tempName)).length === 0)
                 throw new Error('the wider key did not appear after ADD ' + tempName);
 
             dropped = true;
             await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + indexName);
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
-            if((await this._liveIndexColumns(db, table, indexName)).indexOf(String(requiredColumn).toLowerCase()) === -1)
+            if((await this.liveIndexColumns(db, table, indexName)).indexOf(String(requiredColumn).toLowerCase()) === -1)
                 throw new Error('the widened key did not appear under its own name');
 
             await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
             console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
         } catch(e){
             console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
-            if(dropped) await this._assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand);
+            if(dropped) await this.assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand);
         } finally {
             await db.release();
         }
@@ -779,7 +779,7 @@ class Database {
     // soon as either the final or the temporary key is live AND unique, since either one
     // still constrains the same columns. Anything else, a failed probe included, refuses
     // the boot: an unconstrained table admits duplicates no later read can tell apart.
-    async _assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand){
+    async assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand){
         let enforcing = null;
         try {
             for(const name of [indexName, tempName]){

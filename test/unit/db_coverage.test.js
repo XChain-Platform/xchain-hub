@@ -76,20 +76,20 @@ describe('Database: extended coverage', function () {
          'ER_SPECIFIC_ACCESS_DENIED_ERROR', 'ER_PASSWORD_NO_MATCH'].forEach(function (code) {
             it('throws a descriptive error on fatal code ' + code, function () {
                 const { db } = makeDb();
-                expect(() => db._failFastIfFatal(fatalErr(code), 'testing'))
+                expect(() => db.failFastIfFatal(fatalErr(code), 'testing'))
                     .to.throw(new RegExp('Fatal DB error while testing \\(' + code + '\\)'));
             });
         });
 
         it('is a no-op for a transient error code', function () {
             const { db } = makeDb();
-            expect(() => db._failFastIfFatal(fatalErr('ECONNREFUSED'), 'connecting')).to.not.throw();
+            expect(() => db.failFastIfFatal(fatalErr('ECONNREFUSED'), 'connecting')).to.not.throw();
         });
 
         it('is a no-op when the error is null/undefined', function () {
             const { db } = makeDb();
-            expect(() => db._failFastIfFatal(null, 'x')).to.not.throw();
-            expect(() => db._failFastIfFatal(undefined, 'x')).to.not.throw();
+            expect(() => db.failFastIfFatal(null, 'x')).to.not.throw();
+            expect(() => db.failFastIfFatal(undefined, 'x')).to.not.throw();
         });
     });
 
