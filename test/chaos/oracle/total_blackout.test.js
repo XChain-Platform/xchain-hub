@@ -12,9 +12,9 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const PriceFetcher    = require('../../../src/PriceFetcher');
-const OracleRound     = require('../../../src/OracleRound');
-const OracleConsensus = require('../../../src/OracleConsensus');
+const PriceFetcher    = require('../../../src/oracle/price_fetcher');
+const OracleRound     = require('../../../src/oracle/round');
+const OracleConsensus = require('../../../src/oracle/consensus');
 const { createMockHub }        = require('../../helpers/mockHub');
 const { VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');

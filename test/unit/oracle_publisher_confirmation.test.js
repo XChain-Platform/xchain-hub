@@ -21,7 +21,7 @@ const path       = require('path');
 const sinon      = require('sinon');
 const { expect } = require('chai');
 
-const OraclePublisher = require('../../src/OraclePublisher.js');
+const OraclePublisher = require('../../src/oracle/publisher.js');
 const { waitUntil }   = require('../helpers/waitUntil');
 
 const ME   = 'aa'.repeat(32);
@@ -461,7 +461,7 @@ describe('OraclePublisher landing guards', function () {
 // its whole ancestor package. Nine transactions, nine hours, the newest paying
 // 1.36 per kB against ancestors paying 0.003.
 describe('OraclePublisher confirmed-input policy @regression', function () {
-    const OraclePublisher = require('../../src/OraclePublisher.js');
+    const OraclePublisher = require('../../src/oracle/publisher.js');
 
     function pub(cfg) {
         return new OraclePublisher({ p2pConfig: Object.assign({}, cfg || {}), db: null,

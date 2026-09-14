@@ -12,7 +12,7 @@
 
 const { expect } = require('chai');
 const { buildOraclePricesSnapshotQuery, MAX_SNAPSHOT_ROWS } =
-    require('../../src/oraclePricesSnapshotQuery');
+    require('../../src/oracle/prices_snapshot_query');
 const { DB_METHODS } = require('../helpers/mockHub');
 
 // The two statements now live in src/db/oracle.js and the builder names which one

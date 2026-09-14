@@ -22,7 +22,7 @@ const crypto     = require('crypto');
 const sinon      = require('sinon');
 const { expect } = require('chai');
 
-const OraclePublisher = require('../../src/OraclePublisher.js');
+const OraclePublisher = require('../../src/oracle/publisher.js');
 const { waitUntil }   = require('../helpers/waitUntil');
 const { PRICE_BATCH_COMPRESSION_MARKER, inflatePriceBatchBody } = require('../../src/price_batch_compression.js');
 const { DB_METHODS }  = require('../helpers/mockHub.js');

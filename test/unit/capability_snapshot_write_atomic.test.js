@@ -137,7 +137,7 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
         // Paths relative to this suite, so each one names the writer's file wherever
         // its feature directory keeps it.
         const WRITERS = ['../../src/StateCheckpointEngine.js', '../../src/CrossChainDexEngine.js',
-                         '../../src/CrossChainCallEngine.js', '../../src/OracleConsensus.js',
+                         '../../src/CrossChainCallEngine.js', '../../src/oracle/consensus.js',
                          '../../src/RetractionConsensus.js', '../../src/attestation/relay.js'];
         let offenders = [];
         for (const name of WRITERS) {

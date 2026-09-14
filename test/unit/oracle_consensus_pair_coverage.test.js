@@ -15,7 +15,7 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 

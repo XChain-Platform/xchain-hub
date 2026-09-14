@@ -13,7 +13,7 @@
 const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const PriceAggregator  = require('../../src/PriceAggregator');
+const PriceAggregator  = require('../../src/oracle/price_aggregator');
 const { createMockHub } = require('../helpers/mockHub');
 
 // Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)

@@ -89,9 +89,9 @@ describe('await-safe spend gating on the hub effectors', function () {
     it('OraclePublisher: two overlapping publish passes spend one window slot, not two', async function () {
         const entry  = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/OraclePublisher', {
+        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            './EncoderClient': function () { return null; }
+            '../EncoderClient': function () { return null; }
         });
 
         // One broadcast per window: the ceiling is what the second pass must hit.
@@ -126,9 +126,9 @@ describe('await-safe spend gating on the hub effectors', function () {
     it('OraclePublisher: a declined round leaves no publish-intent row behind', async function () {
         const entry  = { round: 9, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/OraclePublisher', {
+        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            './EncoderClient': function () { return null; }
+            '../EncoderClient': function () { return null; }
         });
 
         const pub = new OraclePublisher(makeOracleHub({

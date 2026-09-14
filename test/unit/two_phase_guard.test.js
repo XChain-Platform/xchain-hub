@@ -37,7 +37,7 @@ const CALL_SITES = [
     'src/StateAnchorPublisher.js',
     'src/attestation/publisher.js',
     'src/attestation/relay.js',
-    'src/OraclePublisher.js',
+    'src/oracle/publisher.js',
     'src/FullNodeChallengeRound.js'
 ];
 

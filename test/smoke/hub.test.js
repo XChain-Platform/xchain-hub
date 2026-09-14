@@ -26,8 +26,8 @@ const { createMockHub } = require('../helpers/mockHub');
 const { makeValidator, buildSubmissions, SAMPLE_PRICES } = require('../helpers/fixtures');
 
 const XChainHub        = require('../../src/XChainHub');
-const PriceFetcher     = require('../../src/PriceFetcher');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const PriceFetcher     = require('../../src/oracle/price_fetcher');
+const OracleConsensus  = require('../../src/oracle/consensus');
 
 const API_ENTRY = path.resolve(__dirname, '../../src/api.js');
 

@@ -1099,16 +1099,16 @@ describe('XChainHub', function () {
                 handlers, oracleConsensus, slashDetector,
                 modules: {
                     './db':                  function () { return mockDb; },
-                    './OracleConsensus.js':  function () { return oracleConsensus; },
-                    './OracleRound.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
+                    './oracle/consensus.js':  function () { return oracleConsensus; },
+                    './oracle/round.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
                     './RewardTracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
                     './SlashDetector.js':    function () { return slashDetector; },
                     // Stubbed here too: this describe block is about validator-set
                     // freshness, not the signing round, and the fixture peerManager
                     // below has no .on(), which the real OracleBatchSigner.start()
                     // would call.
-                    './OracleBatchSigner.js': function () { return { start: sinon.stub().resolves(), stop: sinon.stub().resolves(), getStats: sinon.stub().returns({}) }; },
-                    './OraclePublisher.js':  function () { return { start: sinon.stub().resolves() }; },
+                    './oracle/batch_signer.js': function () { return { start: sinon.stub().resolves(), stop: sinon.stub().resolves(), getStats: sinon.stub().returns({}) }; },
+                    './oracle/publisher.js':  function () { return { start: sinon.stub().resolves() }; },
                     './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
                 }
             };
@@ -1176,11 +1176,11 @@ describe('XChainHub', function () {
         function batchSignerDeps() {
             return {
                 './db':                 function () { return mockDb; },
-                './OracleConsensus.js': function () { return { setValidatorSet: sinon.stub(), on: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
-                './OracleRound.js':     function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
+                './oracle/consensus.js': function () { return { setValidatorSet: sinon.stub(), on: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
+                './oracle/round.js':     function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
                 './RewardTracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
                 './SlashDetector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
-                './OraclePublisher.js': function () { return { start: sinon.stub().resolves() }; },
+                './oracle/publisher.js': function () { return { start: sinon.stub().resolves() }; },
                 './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
             };
         }

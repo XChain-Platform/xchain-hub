@@ -11,7 +11,7 @@
 const { expect } = require('chai');
 const swq            = require('../../src/stake_weighted_quorum.js');
 const Consensus      = require('../../src/Consensus.js');
-const OracleConsensus = require('../../src/OracleConsensus.js');
+const OracleConsensus = require('../../src/oracle/consensus.js');
 
 // SWQ-TRUNC: the round-locking normalizations rebuild a snapshot's validators with
 // `.map(...)`, which drops the `truncated` marker CapabilitySnapshot sets on the

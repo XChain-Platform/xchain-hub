@@ -31,21 +31,21 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const eq                = require('./equivocation_header.js');
-const pricePair         = require('./price_pair_activation.js');
-const priceScale        = require('./price_scale_activation.js');
-const priceSigTally     = require('./price_sig_tally_activation.js');
-const swq               = require('./stake_weighted_quorum.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const eq                = require('../equivocation_header.js');
+const pricePair         = require('../price_pair_activation.js');
+const priceScale        = require('../price_scale_activation.js');
+const priceSigTally     = require('../price_sig_tally_activation.js');
+const swq               = require('../stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
-        MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
-const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
-const { bcgt }          = require('./bcmath.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
-const roundBandLib      = require('./lib/oracle_round_band.js');
-const snapWrite         = require('./lib/capability_snapshot_write.js');
-const ah                = require('./lib/admission_height.js');
+        MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('../constants.js');
+const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
+const { bcgt }          = require('../bcmath.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { normalizeRetractionBounds } = require('../lib/retraction_bounds.js');
+const roundBandLib      = require('./oracle_round_band.js');
+const snapWrite         = require('../lib/capability_snapshot_write.js');
+const ah                = require('../lib/admission_height.js');
 // The COIN-KEYED producer predicate, taken from the twin rather than from the hub's
 // admission seam above, because the seam does not carry it: every SIGNED rail's era block
 // is a BTC height, so `ah.isAdmissionEra` reads the BTC key and that is all those rails
@@ -53,8 +53,8 @@ const ah                = require('./lib/admission_height.js');
 // so its era must be judged on that chain's own key or an LTC height would be compared
 // against a BTC activation. HubDbBroadcaster already reaches the twin directly for the
 // same kind of non-canonical read.
-const { isMirrorAdmissionProducerActive } = require('./mirror_admission_activation.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
+const { isMirrorAdmissionProducerActive } = require('../mirror_admission_activation.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a

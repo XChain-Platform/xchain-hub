@@ -33,7 +33,7 @@ const devband = require('./lib/deviation_band.js');
 // The per-round move bound the aggregation clamp applies, read from its one definition
 // in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
 // does not require this file, so there is no cycle.
-const { maxChangeForPair } = require('./OracleConsensus.js');
+const { maxChangeForPair } = require('./oracle/consensus.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 

@@ -56,13 +56,13 @@
 
 'use strict';
 
-const Database = require('./db');
-const bcmath   = require('./bcmath.js');
-const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('./xchainPrice.js');
-const { getWindowFills } = require('./xchainPriceQuery.js');
+const Database = require('../db');
+const bcmath   = require('../bcmath.js');
+const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('../xchainPrice.js');
+const { getWindowFills } = require('../xchainPriceQuery.js');
 const { PRICE_MAX, XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
         XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC, XCHAIN_PRICE_MIN_BTC_VOLUME,
-        DERIVED_PAIRS } = require('./constants.js');
+        DERIVED_PAIRS } = require('../constants.js');
 
 // The pair this source produces. Taken from DERIVED_PAIRS rather than re-spelled, so
 // the producer and the admission allow-list cannot drift into a pair that is

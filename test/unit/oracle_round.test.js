@@ -31,8 +31,8 @@ describe('OracleRound', function () {
             ])
         };
 
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return mockPriceFetcher; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return mockPriceFetcher; }
         });
 
         hub = createMockHub({
@@ -141,7 +141,7 @@ describe('OracleRound', function () {
 
     describe('formatXchainPriceMeta(): the derivation audit line', function () {
 
-        const { formatXchainPriceMeta } = require('../../src/OracleRound');
+        const { formatXchainPriceMeta } = require('../../src/oracle/round');
         const WINDOW = { fromBlockExclusive: 1925, toBlockInclusive: 2925 };
 
         it('records every input behind a derived print', function () {

@@ -36,8 +36,8 @@ describe('OracleRound (extra coverage)', function () {
             ])
         };
 
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return mockPriceFetcher; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return mockPriceFetcher; }
         });
 
         hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });

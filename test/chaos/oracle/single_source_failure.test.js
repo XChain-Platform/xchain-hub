@@ -13,8 +13,8 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const nock       = require('nock');
-const PriceFetcher = require('../../../src/PriceFetcher');
-const OracleRound  = require('../../../src/OracleRound');
+const PriceFetcher = require('../../../src/oracle/price_fetcher');
+const OracleRound  = require('../../../src/oracle/round');
 const { createMockHub }        = require('../../helpers/mockHub');
 const { SAMPLE_PRICES }        = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');

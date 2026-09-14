@@ -36,13 +36,13 @@
  *
  ********************************************************************/
 
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const swq               = require('./stake_weighted_quorum.js');
-const pst               = require('./price_sig_tally_activation.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
-const ah                = require('./lib/admission_height.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const swq               = require('../stake_weighted_quorum.js');
+const pst               = require('../price_sig_tally_activation.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
+const ah                = require('../lib/admission_height.js');
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';

@@ -22,7 +22,7 @@ describe('Fuzz: PriceFetcher', function () {
 
     beforeEach(function () {
         axiosStub    = { get: sinon.stub() };
-        PriceFetcher = proxyquire('../../src/PriceFetcher', { axios: axiosStub });
+        PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
         pf           = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
     });
 

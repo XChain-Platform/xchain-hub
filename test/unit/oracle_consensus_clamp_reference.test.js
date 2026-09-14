@@ -17,7 +17,7 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 const bcmath          = require('../../src/bcmath');
 const { ORACLE_MAX_CHANGE_PER_ROUND } = require('../../src/constants');
 const { createMockHub } = require('../helpers/mockHub');

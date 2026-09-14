@@ -25,8 +25,8 @@
 const net               = require('net');
 const { expect }        = require('chai');
 const PeerManager       = require('../../src/PeerManager');
-const OracleBatchSigner = require('../../src/OracleBatchSigner');
-const OracleConsensus   = require('../../src/OracleConsensus');
+const OracleBatchSigner = require('../../src/oracle/batch_signer');
+const OracleConsensus   = require('../../src/oracle/consensus');
 const ValidatorIdentity = require('../../src/ValidatorIdentity');
 const { waitUntil }     = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');

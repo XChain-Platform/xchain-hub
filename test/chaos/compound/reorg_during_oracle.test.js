@@ -13,8 +13,8 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const crypto     = require('crypto');
-const OracleRound     = require('../../../src/OracleRound');
-const OracleConsensus = require('../../../src/OracleConsensus');
+const OracleRound     = require('../../../src/oracle/round');
+const OracleConsensus = require('../../../src/oracle/consensus');
 const ReorgHandler    = require('../../../src/ReorgHandler');
 const { createMockHub }                = require('../../helpers/mockHub');
 const { VALIDATORS_4, SAMPLE_PRICES }  = require('../../helpers/fixtures');

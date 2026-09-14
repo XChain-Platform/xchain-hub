@@ -175,7 +175,7 @@ describe('Performance: Dependency Degradation', function () {
 
     describe('6c: varied API latency', function () {
         it('price fetch timing scales with slowest source', async function () {
-            let PriceFetcher = require('../../src/PriceFetcher');
+            let PriceFetcher = require('../../src/oracle/price_fetcher');
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',

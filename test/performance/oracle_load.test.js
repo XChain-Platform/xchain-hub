@@ -194,7 +194,7 @@ describe('Performance: Oracle Round Under Load', function () {
 
     describe('price fetch performance', function () {
         it('parallel price fetch completes quickly with fast APIs', async function () {
-            let PriceFetcher = require('../../src/PriceFetcher');
+            let PriceFetcher = require('../../src/oracle/price_fetcher');
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',
@@ -218,7 +218,7 @@ describe('Performance: Oracle Round Under Load', function () {
         });
 
         it('price fetch degrades gracefully with one slow source', async function () {
-            let PriceFetcher = require('../../src/PriceFetcher');
+            let PriceFetcher = require('../../src/oracle/price_fetcher');
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',

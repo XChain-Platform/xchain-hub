@@ -360,7 +360,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleConsensus: Minimum submissions', function () {
-        const OracleConsensus = require('../../src/OracleConsensus');
+        const OracleConsensus = require('../../src/oracle/consensus');
 
         let hub, pm, oracleRound, oc;
 
@@ -411,7 +411,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleConsensus: Price sanity bounds', function () {
-        const OracleConsensus = require('../../src/OracleConsensus');
+        const OracleConsensus = require('../../src/oracle/consensus');
 
         let oc;
 
@@ -453,7 +453,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleRound: Submission validation', function () {
-        const OracleRound = require('../../src/OracleRound');
+        const OracleRound = require('../../src/oracle/round');
 
         let hub, oracleRound;
 
@@ -625,7 +625,7 @@ describe('Security Hardening', function () {
 
     describe('Consensus engines: sender-membership guard', function () {
         const Consensus       = require('../../src/Consensus');
-        const OracleConsensus = require('../../src/OracleConsensus');
+        const OracleConsensus = require('../../src/oracle/consensus');
         const CrossChainEngine = require('../../src/CrossChainEngine');
 
         // Populate the peer registry so the guard is active, then inject a
@@ -1078,7 +1078,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PriceFetcher: Response validation', function () {
-        const PriceFetcher = require('../../src/PriceFetcher');
+        const PriceFetcher = require('../../src/oracle/price_fetcher');
 
         it('rejects prices >= 1e12 (upper bound) from CoinGecko', async function () {
             let pf = new PriceFetcher({ COINGECKO_API_KEY: '', PRICE_FETCH_TIMEOUT: 5000 });

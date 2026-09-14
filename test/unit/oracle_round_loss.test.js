@@ -17,7 +17,7 @@
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const proxyquire        = require('proxyquire');
-const OracleConsensus   = require('../../src/OracleConsensus');
+const OracleConsensus   = require('../../src/oracle/consensus');
 const diagnostics       = require('../../src/consensusDiagnostics');
 const observability     = require('../../src/observability');
 const { createMockHub } = require('../helpers/mockHub');
@@ -87,8 +87,8 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         let hub, or, consensus, storeSkipped;
 
         beforeEach(function () {
-            const OracleRound = proxyquire('../../src/OracleRound', {
-                './PriceFetcher': function () {
+            const OracleRound = proxyquire('../../src/oracle/round', {
+                './price_fetcher': function () {
                     return { fetchPrices: sinon.stub().resolves([{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }]) };
                 }
             });

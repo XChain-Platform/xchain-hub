@@ -63,10 +63,10 @@ const NETWORK   = 'regtest';
 const ARMED_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/PriceAggregator.js',
-    '../../src/OracleBatchSigner.js',
-    '../../src/OraclePublisher.js',
-    '../../src/OracleConsensus.js'
+    '../../src/oracle/price_aggregator.js',
+    '../../src/oracle/batch_signer.js',
+    '../../src/oracle/publisher.js',
+    '../../src/oracle/consensus.js'
 ];
 
 let armed = null;
@@ -78,10 +78,10 @@ function armTwins(atHeight) {
     for (const p of paths) delete require.cache[p];
     process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(atHeight === undefined ? ADMIT_AT : atHeight);
 
-    const PriceAggregator  = require('../../src/PriceAggregator.js');
-    const OracleBatchSigner = require('../../src/OracleBatchSigner.js');
-    const OraclePublisher  = require('../../src/OraclePublisher.js');
-    const OracleConsensus  = require('../../src/OracleConsensus.js');
+    const PriceAggregator  = require('../../src/oracle/price_aggregator.js');
+    const OracleBatchSigner = require('../../src/oracle/batch_signer.js');
+    const OraclePublisher  = require('../../src/oracle/publisher.js');
+    const OracleConsensus  = require('../../src/oracle/consensus.js');
     const act              = require('../../src/mirror_admission_activation.js');
 
     // Put the process back exactly as it was found; the classes captured above keep the

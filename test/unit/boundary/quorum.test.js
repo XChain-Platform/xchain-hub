@@ -13,7 +13,7 @@
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const Consensus        = require('../../../src/Consensus');
-const OracleConsensus  = require('../../../src/OracleConsensus');
+const OracleConsensus  = require('../../../src/oracle/consensus');
 const CrossChainEngine = require('../../../src/CrossChainEngine');
 const ReorgHandler     = require('../../../src/ReorgHandler');
 const { createMockHub }       = require('../../helpers/mockHub');

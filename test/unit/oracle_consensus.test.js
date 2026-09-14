@@ -13,7 +13,7 @@
 const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const swq              = require('../../src/stake_weighted_quorum.js');
 const { createMockHub }       = require('../helpers/mockHub');
 const { waitUntil }           = require('../helpers/waitUntil');

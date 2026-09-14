@@ -14,8 +14,8 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
-const PriceFetcher     = require('../../src/PriceFetcher');
+const OracleConsensus  = require('../../src/oracle/consensus');
+const PriceFetcher     = require('../../src/oracle/price_fetcher');
 const { createMockHub }       = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 

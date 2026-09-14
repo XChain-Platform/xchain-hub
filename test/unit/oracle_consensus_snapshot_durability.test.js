@@ -16,13 +16,13 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 
 describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', function () {
     let hub, oc, oracleRound;
     const ROUND = 5;
-    // Mirrors FINALIZE_RETRY_MAX_MS in src/OracleConsensus.js (module-private).
+    // Mirrors FINALIZE_RETRY_MAX_MS in src/oracle/consensus.js (module-private).
     const FINALIZE_RETRY_MAX_MS = 30000;
 
     function makePending() {

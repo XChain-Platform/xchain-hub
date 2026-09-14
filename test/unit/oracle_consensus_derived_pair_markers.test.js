@@ -19,8 +19,8 @@
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const OracleConsensus   = require('../../src/OracleConsensus');
-const PriceFetcher      = require('../../src/PriceFetcher');
+const OracleConsensus   = require('../../src/oracle/consensus');
+const PriceFetcher      = require('../../src/oracle/price_fetcher');
 const { DERIVED_PAIRS } = require('../../src/constants.js');
 const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 

@@ -22,7 +22,7 @@
 const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const PriceAggregator   = require('../../src/PriceAggregator');
+const PriceAggregator   = require('../../src/oracle/price_aggregator');
 const { createMockHub } = require('../helpers/mockHub');
 const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
 // The pair-name flag day's own map. Every shipped network is genesis-on since the

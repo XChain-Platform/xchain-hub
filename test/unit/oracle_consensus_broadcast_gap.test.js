@@ -19,7 +19,7 @@
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const OracleConsensus   = require('../../src/OracleConsensus');
+const OracleConsensus   = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 
 describe('OracleConsensus: post-commit price broadcast gap (#4459)', function () {

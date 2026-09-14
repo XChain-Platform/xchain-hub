@@ -287,8 +287,8 @@ describe('OracleRound._executeRound overlap guard', function () {
 
     beforeEach(function () {
         fetchPrices = sinon.stub().resolves([{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }]);
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return { fetchPrices: (...a) => fetchPrices(...a) }; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: (...a) => fetchPrices(...a) }; }
         });
         hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
         pm  = hub._peerManager;
@@ -534,7 +534,7 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
 
 describe('OraclePublisher._processQueue overlap guard', function () {
 
-    const OraclePublisher = require('../../src/OraclePublisher');
+    const OraclePublisher = require('../../src/oracle/publisher');
     const MY_PUB = 'aa'.repeat(32);
 
     let queueFile;

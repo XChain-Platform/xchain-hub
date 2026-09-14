@@ -20,8 +20,8 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../src/OracleConsensus');
-const OracleRound     = require('../../src/OracleRound');
+const OracleConsensus = require('../../src/oracle/consensus');
+const OracleRound     = require('../../src/oracle/round');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 const { DB_METHODS } = require('../helpers/mockHub.js');

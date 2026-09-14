@@ -24,13 +24,13 @@ const swq       = require('../../src/stake_weighted_quorum.js');
 const snapWrite = require('../../src/lib/capability_snapshot_write.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
-const OracleConsensus       = require('../../src/OracleConsensus.js');
+const OracleConsensus       = require('../../src/oracle/consensus.js');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
 const CrossChainDexEngine   = require('../../src/CrossChainDexEngine.js');
 const CrossChainCallEngine  = require('../../src/CrossChainCallEngine.js');
 const RetractionConsensus   = require('../../src/RetractionConsensus.js');
 const AttestationRelay      = require('../../src/attestation/relay.js');
-const PriceAggregator       = require('../../src/PriceAggregator.js');
+const PriceAggregator       = require('../../src/oracle/price_aggregator.js');
 const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
 
 // Count mode is only reachable BELOW a network's stake-weighted activation height, and

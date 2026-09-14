@@ -50,8 +50,8 @@ const LEGACY_AT = ADMIT_AT - 1;
 const HUB_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/OracleConsensus.js',
-    '../../src/PriceAggregator.js'
+    '../../src/oracle/consensus.js',
+    '../../src/oracle/price_aggregator.js'
 ];
 const INDEXER_MODULES = [
     '../../../xchain-indexer/src/mirror_admission_activation.js',
@@ -97,8 +97,8 @@ function armTwins() {
     for (const p of paths) delete require.cache[p];
     process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
 
-    const OracleConsensus = require('../../src/OracleConsensus.js');
-    const PriceAggregator = require('../../src/PriceAggregator.js');
+    const OracleConsensus = require('../../src/oracle/consensus.js');
+    const PriceAggregator = require('../../src/oracle/price_aggregator.js');
     const act             = require('../../src/mirror_admission_activation.js');
     const indexer         = indexerPaths ? require('../../../xchain-indexer/src/consensus/ed25519.js') : null;
 

@@ -146,7 +146,7 @@ describe('price_batch_compression: consensus constants @regression', function(){
         // cannot import across repo boundaries, so this is what keeps the
         // fourth copy of the name from drifting away from the other three.
         // The publisher lives in this repo, so there is nothing to skip on.
-        const pub = path.join(__dirname, '..', '..', 'src', 'OraclePublisher.js');
+        const pub = path.join(__dirname, '../../src/oracle/publisher.js');
         const m = /const\s+PRICE_WIRE_MAX_BYTES\s*=\s*(\d+)\s*;/.exec(fs.readFileSync(pub, 'utf8'));
         assert.ok(m, 'PRICE_WIRE_MAX_BYTES declaration not found in ' + pub);
         assert.strictEqual(parseInt(m[1], 10), c.PRICE_WIRE_MAX_BYTES,

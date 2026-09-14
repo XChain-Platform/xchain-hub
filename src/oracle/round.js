@@ -25,19 +25,19 @@
  *
  ********************************************************************/
 
-const PriceFetcher = require('./PriceFetcher.js');
-const XchainPriceSource = require('./XchainPriceSource.js');
-const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activation.js');
-const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
-const { roundBand, describeImplausibleRound } = require('./lib/oracle_round_band.js');
-const { canonicalPrice } = require('./lib/canonical_price.js');
-const { noteRoundLost } = require('./consensusDiagnostics');
+const PriceFetcher = require('./price_fetcher.js');
+const XchainPriceSource = require('./xchain_price_source.js');
+const { isXchainPriceActive, roundStartSeconds } = require('../xchain_price_activation.js');
+const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
+const { roundBand, describeImplausibleRound } = require('./oracle_round_band.js');
+const { canonicalPrice } = require('./canonical_price.js');
+const { noteRoundLost } = require('../consensusDiagnostics');
 
 // Burned round numbers per scheduler gap that also get a skipped row; a wider gap
 // is an outage, recorded once by range rather than as a flood of rows on return.
 const ROUND_GAP_SKIP_ROW_CAP = 12;
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
+        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('../constants.js');
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
 

@@ -27,22 +27,22 @@
 
 const crypto            = require('crypto');
 const EventEmitter      = require('events');
-const PriceFetcher      = require('./PriceFetcher.js');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
+const PriceFetcher      = require('./price_fetcher.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
-        XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('./constants.js');
-const swq               = require('./stake_weighted_quorum.js');
-const ocr               = require('./oracle_clamp_reference_activation.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const eq                = require('./equivocation_header.js');
-const bcmath            = require('./bcmath.js');
-const devband           = require('./lib/deviation_band.js');
-const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
-const { canonicalValidatorOrder } = require('./validator_order.js');
-const snapWrite         = require('./lib/capability_snapshot_write.js');
-const { noteDrop, noteRoundLost } = require('./consensusDiagnostics');
-const ah                = require('./lib/admission_height.js');
+        XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('../constants.js');
+const swq               = require('../stake_weighted_quorum.js');
+const ocr               = require('../oracle_clamp_reference_activation.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const eq                = require('../equivocation_header.js');
+const bcmath            = require('../bcmath.js');
+const devband           = require('../lib/deviation_band.js');
+const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
+const { canonicalValidatorOrder } = require('../validator_order.js');
+const snapWrite         = require('../lib/capability_snapshot_write.js');
+const { noteDrop, noteRoundLost } = require('../consensusDiagnostics');
+const ah                = require('../lib/admission_height.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';

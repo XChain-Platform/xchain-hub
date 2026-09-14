@@ -34,9 +34,9 @@ function loadModule() {
         closeSync:     sinon.stub(),
         readFileSync:  sinon.stub().returns('')
     };
-    OraclePublisher = proxyquire('../../src/OraclePublisher', {
+    OraclePublisher = proxyquire('../../src/oracle/publisher', {
         fs: fsMock,
-        './EncoderClient': function () { return null; }
+        '../EncoderClient': function () { return null; }
     });
 }
 

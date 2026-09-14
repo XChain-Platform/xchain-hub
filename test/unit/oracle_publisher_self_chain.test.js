@@ -33,7 +33,7 @@ const path       = require('path');
 const sinon      = require('sinon');
 const { expect } = require('chai');
 
-const OraclePublisher = require('../../src/OraclePublisher.js');
+const OraclePublisher = require('../../src/oracle/publisher.js');
 
 const ME   = 'aa'.repeat(32);
 const ADDR = 'DPubLisherAddr1111111111111111111';

@@ -21,8 +21,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-const OracleRound        = require('../../src/OracleRound');
-const OracleConsensus    = require('../../src/OracleConsensus');
+const OracleRound        = require('../../src/oracle/round');
+const OracleConsensus    = require('../../src/oracle/consensus');
 const CapabilityRegistry = require('../../src/CapabilityRegistry');
 const StakeWeightFeed    = require('../../src/StakeWeightFeed');
 const { createMockHub }  = require('../helpers/mockHub');

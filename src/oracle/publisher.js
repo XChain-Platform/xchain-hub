@@ -84,23 +84,23 @@
 const fs            = require('fs');
 const path          = require('path');
 const crypto        = require('crypto');
-const EncoderClient = require('./EncoderClient.js');
-const SpendGuard    = require('./lib/spend_guard.js');
-const OracleBatchSigner = require('./OracleBatchSigner.js');
-const swq           = require('./stake_weighted_quorum.js');
-const pst           = require('./price_sig_tally_activation.js');
-const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
-const { sumUtxosCoins } = require('./lib/utxo_balance.js');
-const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const { abandonBuild }           = require('./lib/encoder_reservation.js');
+const EncoderClient = require('../EncoderClient.js');
+const SpendGuard    = require('../lib/spend_guard.js');
+const OracleBatchSigner = require('./batch_signer.js');
+const swq           = require('../stake_weighted_quorum.js');
+const pst           = require('../price_sig_tally_activation.js');
+const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { sumUtxosCoins } = require('../lib/utxo_balance.js');
+const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { abandonBuild }           = require('../lib/encoder_reservation.js');
 
 // ~10 min. Translates the rank-staggered takeover window from BTC blocks (the
 // unit the window anchor is denominated in) into wall-clock, the same way
 // AttestationPublisher does for its own failover.
 const APPROX_BTC_BLOCK_MS = 600000;
-const { positiveIntConfig } = require('./lib/config_int.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const axios         = require('axios');
 
 // The chain every PRICE batch lands on, and therefore the indexer the backlog
@@ -114,10 +114,10 @@ const PRICE_LANDING_COIN = 'DOGE';
 const LANDED_BATCH_PAGE = 500;
 const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
-        LEGACY_BATCH_WINDOW_ROUNDS } = require('./lib/price_batch_cadence.js');
+        LEGACY_BATCH_WINDOW_ROUNDS } = require('./price_batch_cadence.js');
 const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
-        PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
-const ah = require('./lib/admission_height.js');
+        PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
+const ah = require('../lib/admission_height.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is

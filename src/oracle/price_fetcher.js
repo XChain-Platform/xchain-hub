@@ -32,8 +32,8 @@
 
 const axios = require('axios');
 
-const { PRICE_MAX } = require('./constants.js');
-const bcmath = require('./bcmath.js');
+const { PRICE_MAX } = require('../constants.js');
+const bcmath = require('../bcmath.js');
 
 // CoinGecko coin IDs for the 3 supported coins
 const COINGECKO_IDS = { 'BTC': 'bitcoin', 'LTC': 'litecoin', 'DOGE': 'dogecoin' };
@@ -80,7 +80,7 @@ function krakenResultCandidates(altname) {
 // to coins/ alone is picked up here automatically while v1 ingest still calls it an
 // invalid coin. Pinned to the v1 fence and to the indexer config by
 // test/unit/constants-conformance.test.js (#7215).
-const coins = require('./coins');
+const coins = require('../coins');
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 

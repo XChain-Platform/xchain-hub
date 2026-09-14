@@ -22,9 +22,9 @@ const proxyquire = require('proxyquire');
 const SpendGuard = require('../../src/lib/spend_guard.js');
 
 function loadOraclePublisher(fsMock) {
-    return proxyquire('../../src/OraclePublisher', {
+    return proxyquire('../../src/oracle/publisher', {
         fs: fsMock,
-        './EncoderClient': function () { return null; }
+        '../EncoderClient': function () { return null; }
     });
 }
 

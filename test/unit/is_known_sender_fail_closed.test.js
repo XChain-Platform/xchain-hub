@@ -37,9 +37,9 @@ const KEY_STRANGER = 'cc'.repeat(32);   // in neither
 // admission therefore had to follow it.
 const CHAIN_KEYED = [
     { name: 'Consensus',        cls: require('../../src/Consensus'),        method: '_isKnownSender' },
-    { name: 'OracleConsensus',  cls: require('../../src/OracleConsensus'),  method: '_isKnownSender' },
+    { name: 'OracleConsensus',  cls: require('../../src/oracle/consensus'),  method: '_isKnownSender' },
     { name: 'CrossChainEngine', cls: require('../../src/CrossChainEngine'), method: '_isKnownSender' },
-    { name: 'OracleRound',      cls: require('../../src/OracleRound'),      method: '_isRegisteredSender' },
+    { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: '_isRegisteredSender' },
 ];
 
 // Governance and ReorgHandler deliberately do NOT appear above. Both derive their
@@ -188,7 +188,7 @@ describe('vote admission follows the chain-effective signer set', function () {
 });
 
 describe('one key is one vote (count-mode forgery bound)', function () {
-    const OracleConsensus  = require('../../src/OracleConsensus');
+    const OracleConsensus  = require('../../src/oracle/consensus');
     const CrossChainEngine = require('../../src/CrossChainEngine');
 
     // A tally that keyed on envelope.sender could be inflated to a full quorum by

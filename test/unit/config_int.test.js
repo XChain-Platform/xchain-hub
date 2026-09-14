@@ -15,7 +15,7 @@ const sinon = require('sinon');
 const { positiveIntConfig } = require('../../src/lib/config_int.js');
 const AttestationConsensus = require('../../src/attestation/consensus.js');
 const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus.js');
-const OracleConsensus = require('../../src/OracleConsensus.js');
+const OracleConsensus = require('../../src/oracle/consensus.js');
 const PeerManager = require('../../src/PeerManager.js');
 const { createMockHub } = require('../helpers/mockHub');
 
