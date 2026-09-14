@@ -17,7 +17,7 @@
  * The hub's configs table is service discovery for the whole mesh, and
  * xchain-node writes real credentials into it: the coin node's rpc
  * user/pass, and the indexer/decoder/checkpoint DB user/pass
- * (xchain-node src/config/constants.js SERVICE_REGISTRY hubConfig
+ * (xchain-node src/config/index.js SERVICE_REGISTRY hubConfig
  * fields). getallconfigs used to serve that tree verbatim to every
  * caller that cleared the sensitive-read key, so ANY operational read
  * against the hub - a health probe, a `curl | jq`, a support paste, an
