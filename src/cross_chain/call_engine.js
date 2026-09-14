@@ -179,6 +179,23 @@ class CrossChainCallEngine extends EventEmitter {
             };
         }
 
+        this.initRoundTracking();
+        this.createRelayConsensus();
+
+        this._pollTimer = null;
+        this._polling   = false;
+
+        // Process-lifetime counter for result-relay attempt failures (one per
+        // per-call catch in pollTargetResults). Surfaced by getcrosschaincallstats.
+        this._resultAttemptFailures = 0;
+
+        // Node-local result-relay backoff (M-14): call_id -> { attempts, nextAt (ms epoch) }.
+        // Parked entries are excluded from the result poll's hot window until nextAt.
+        this._resultBackoff = new Map();
+    }
+
+    // The in-flight round set and the retraction fence a finalize write re-checks.
+    initRoundTracking(){
         // Round ids currently in PBFT but not yet written (mirrors DexEngine._inflight).
         this._inflight = new Set();
 
@@ -193,7 +210,9 @@ class CrossChainCallEngine extends EventEmitter {
         this._retractionFence = [];
         this._retractionSeq   = 0;
         this._pendingWrites   = new Set();
+    }
 
+    createRelayConsensus(){
         // PBFT consensus over each relay row. Distinct message types keep XCALL
         // gossip out of the DEX match rounds; idField binds rounds to round_id.
         this.consensus = new CrossChainDexConsensus(this, {
@@ -219,17 +238,6 @@ class CrossChainCallEngine extends EventEmitter {
         this.consensus.on('match:abandoned', (ev) => {
             this._inflight.delete(String(ev.matchId));
         });
-
-        this._pollTimer = null;
-        this._polling   = false;
-
-        // Process-lifetime counter for result-relay attempt failures (one per
-        // per-call catch in pollTargetResults). Surfaced by getcrosschaincallstats.
-        this._resultAttemptFailures = 0;
-
-        // Node-local result-relay backoff (M-14): call_id -> { attempts, nextAt (ms epoch) }.
-        // Parked entries are excluded from the result poll's hot window until nextAt.
-        this._resultBackoff = new Map();
     }
 
     async start(){
@@ -372,6 +380,21 @@ class CrossChainCallEngine extends EventEmitter {
         let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
+        let row = this.buildDispatchRow(coin, network, call, callId, roundId, snapshotBlock);
+
+        if(!await this.stampAdmission(row)) return;
+
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        this._inflight.add(roundId);
+        try {
+            await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
+        } catch(e){
+            this._inflight.delete(roundId);
+            throw e;
+        }
+    }
+
+    buildDispatchRow(coin, network, call, callId, roundId, snapshotBlock){
         let row = {
             round_id:              roundId,
             call_id:               callId,
@@ -396,17 +419,7 @@ class CrossChainCallEngine extends EventEmitter {
             // generation. Metadata only; NOT part of the signed canonical.
             push_generation:       Number(call.push_generation) || 0
         };
-
-        if(!await this.stampAdmission(row)) return;
-
-        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
-        this._inflight.add(roundId);
-        try {
-            await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
-        } catch(e){
-            this._inflight.delete(roundId);
-            throw e;
-        }
+        return row;
     }
 
     // Discover dispatch rows targeting `coin` whose injected execution has
@@ -792,38 +805,7 @@ class CrossChainCallEngine extends EventEmitter {
     async writeFinalizedRowFenced(ev, row, startSeq){
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical
-        // EVERY hub persists the capability snapshot for the row's snapshot_block,
-        // not just the round leader: the indexers verify the row's signatures
-        // against capability_snapshots in whichever hub DB they mirror, and a
-        // follower's DB may be the only one they read. Deterministic from BTC
-        // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
-        //
-        // FAIL CLOSED, on the rationale CrossChainDexEngine.writeFinalizedMatch spells
-        // out in full (item 2385): the persist is a PRECONDITION of the row below, not a
-        // best-effort side-write. A swallowed DB throw, or a silent zero-row persist (the
-        // sentinel snapshot degrades to [] on an indexer RPC error / 401-403, so the
-        // INSERT loop never runs, never throws, never warns), would commit and broadcast
-        // a finalized XCALL/XEXEC row whose validator_signatures no capability_snapshot
-        // in this hub's DB can verify. On either failure skip the insert/broadcast, drop
-        // the in-flight reservation, and forget the finalized round so a later poll
-        // re-proposes cleanly, exactly as retractCallsForReorg does. The two engines are
-        // kept in lockstep by design; this is the error path that had drifted.
-        let persistedRows = 0;
-        try {
-            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
-        } catch(e){
-            logger.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
-                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this.deferFinalize(row);
-            return;
-        }
-        if(!persistedRows){
-            logger.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
-                          row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring ' +
-                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round)');
-            this.deferFinalize(row);
-            return;
-        }
+        if(!(await this.persistRowSnapshot(row))) return;
         // Resolved into the value list rather than onto `row`: the row object feeds the
         // canonical and the retraction paths, and btc_chain_id is transport, never consensus.
         // The XCALL canonical enumerates its fields explicitly, so this value has no path
@@ -868,6 +850,42 @@ class CrossChainCallEngine extends EventEmitter {
                     (row.phase === 'result' ? (' [' + row.result_status + ']') : '') +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('call:' + row.phase, { callId: row.call_id });
+    }
+
+    async persistRowSnapshot(row){
+        // EVERY hub persists the capability snapshot for the row's snapshot_block,
+        // not just the round leader: the indexers verify the row's signatures
+        // against capability_snapshots in whichever hub DB they mirror, and a
+        // follower's DB may be the only one they read. Deterministic from BTC
+        // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
+        //
+        // FAIL CLOSED, on the rationale CrossChainDexEngine.writeFinalizedMatch spells
+        // out in full (item 2385): the persist is a PRECONDITION of the row below, not a
+        // best-effort side-write. A swallowed DB throw, or a silent zero-row persist (the
+        // sentinel snapshot degrades to [] on an indexer RPC error / 401-403, so the
+        // INSERT loop never runs, never throws, never warns), would commit and broadcast
+        // a finalized XCALL/XEXEC row whose validator_signatures no capability_snapshot
+        // in this hub's DB can verify. On either failure skip the insert/broadcast, drop
+        // the in-flight reservation, and forget the finalized round so a later poll
+        // re-proposes cleanly, exactly as retractCallsForReorg does. The two engines are
+        // kept in lockstep by design; this is the error path that had drifted.
+        let persistedRows = 0;
+        try {
+            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+        } catch(e){
+            logger.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this.deferFinalize(row);
+            return false;
+        }
+        if(!persistedRows){
+            logger.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+                          row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring ' +
+                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round)');
+            this.deferFinalize(row);
+            return false;
+        }
+        return true;
     }
 
     // Release a round that finalized in PBFT but whose fail-closed precondition refused
