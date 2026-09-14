@@ -123,6 +123,29 @@ class CrossChainDexEngine extends EventEmitter {
             };
         }
 
+        this.initMatchState(cfg);
+
+        // PBFT consensus over each match. Single-node (quorum 0) collapses to an
+        // immediate self-sign + finalize, so behavior with no federation is unchanged.
+        this.consensus = new CrossChainDexConsensus(this);
+        this.consensus.on('match:finalized', (ev) => {
+            this.writeFinalizedMatch(ev).catch(err =>
+                logger.error(nodeUtil.format('CrossChainDex: write finalized match error:', err && err.message)));
+        });
+        // Release the inflight slot for a round the consensus abandons (stale under
+        // sustained message loss) so the next poll re-proposes it instead of the
+        // match wedging permanently. Mirrors CrossChainCallEngine.
+        this.consensus.on('match:abandoned', (ev) => {
+            this._inflight.delete(String(ev.matchId));
+        });
+
+        this._pollTimer = null;
+        this._matching  = false;   // poll self-overlap guard, see _discoverAndMatch()
+    }
+
+    // The matching state a new engine starts from: the committed-fill ledger and its
+    // readiness flag, the in-flight round set, and the per-coin confirmation floors.
+    initMatchState(cfg){
         // Per-offer committed-fill ledger, keyed `<chain>:<action_index>` →
         // { give, get } cumulative amounts already locked into finalized (non-retracted)
         // matches. The authoritative reservation source (Phase B): the hub derives an
@@ -177,23 +200,6 @@ class CrossChainDexEngine extends EventEmitter {
             }
             this.minConfirmations[tick] = val;
         }
-
-        // PBFT consensus over each match. Single-node (quorum 0) collapses to an
-        // immediate self-sign + finalize, so behavior with no federation is unchanged.
-        this.consensus = new CrossChainDexConsensus(this);
-        this.consensus.on('match:finalized', (ev) => {
-            this.writeFinalizedMatch(ev).catch(err =>
-                logger.error(nodeUtil.format('CrossChainDex: write finalized match error:', err && err.message)));
-        });
-        // Release the inflight slot for a round the consensus abandons (stale under
-        // sustained message loss) so the next poll re-proposes it instead of the
-        // match wedging permanently. Mirrors CrossChainCallEngine.
-        this.consensus.on('match:abandoned', (ev) => {
-            this._inflight.delete(String(ev.matchId));
-        });
-
-        this._pollTimer = null;
-        this._matching  = false;   // poll self-overlap guard, see _discoverAndMatch()
     }
 
     async start(){
@@ -330,38 +336,7 @@ class CrossChainDexEngine extends EventEmitter {
             // latency from every poll tick without changing which offers are matched or
             // in what order. Per-coin try/catch is preserved so one slow/failed indexer
             // still yields an empty book for that coin rather than aborting the whole round.
-            await Promise.all(ALLOWED_CHAINS.map(async (coin) => {
-                if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
-                try {
-                    // Page the full open book via the keyset cursor rather than a one-shot
-                    // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
-                    // offers would otherwise silently drop the newest, which are never discovered
-                    // or matched. fetchOpenOffers loops until the indexer reports the book is no
-                    // longer truncated (bounded by a hard page cap so a misbehaving indexer that
-                    // keeps flagging truncated can't spin forever).
-                    let res = await this.fetchOpenOffers(coin, { limit: 500 });
-                    // Tag every offer with its home indexer's network (authoritative). An offer
-                    // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
-                    // the whole coin's book rather than risk a network-agnostic match.
-                    let net = res && res.network ? String(res.network) : '';
-                    let latest = Number(res && res.latest_block_index);
-                    // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
-                    // only the follower's validateProposedMatch (_findOpenOffer): the single-node
-                    // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
-                    // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
-                    // is silently inert on a single operator and a match can settle against a
-                    // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
-                    // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60); an
-                    // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
-                    let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
-                                              (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
-                    offersByCoin[coin] = (res && res.orders && net)
-                        ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
-                        : [];
-                } catch(e){
-                    offersByCoin[coin] = [];
-                }
-            }));
+            await Promise.all(ALLOWED_CHAINS.map((coin) => this.loadOfferBook(coin, offersByCoin)));
             for(let desc of this.findMatches(offersByCoin)){
                 try {
                     await this.finalizeMatch(desc);
@@ -371,6 +346,41 @@ class CrossChainDexEngine extends EventEmitter {
             }
         } finally {
             this._matching = false;
+        }
+    }
+
+    // One chain's confirmed open book into offersByCoin[coin], tagged with its home network.
+    // A failed or network-less read yields an empty book for that chain, never a thrown tick.
+    async loadOfferBook(coin, offersByCoin){
+        if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
+        try {
+            // Page the full open book via the keyset cursor rather than a one-shot
+            // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
+            // offers would otherwise silently drop the newest, which are never discovered
+            // or matched. fetchOpenOffers loops until the indexer reports the book is no
+            // longer truncated (bounded by a hard page cap so a misbehaving indexer that
+            // keeps flagging truncated can't spin forever).
+            let res = await this.fetchOpenOffers(coin, { limit: 500 });
+            // Tag every offer with its home indexer's network (authoritative). An offer
+            // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
+            // the whole coin's book rather than risk a network-agnostic match.
+            let net = res && res.network ? String(res.network) : '';
+            let latest = Number(res && res.latest_block_index);
+            // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
+            // only the follower's validateProposedMatch (_findOpenOffer): the single-node
+            // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
+            // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
+            // is silently inert on a single operator and a match can settle against a
+            // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
+            // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60); an
+            // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
+            let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
+                                      (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
+            offersByCoin[coin] = (res && res.orders && net)
+                ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
+                : [];
+        } catch(e){
+            offersByCoin[coin] = [];
         }
     }
 
@@ -436,6 +446,54 @@ class CrossChainDexEngine extends EventEmitter {
     // (earlier). Fill quantities are computed on effective_remaining (committed-aware), so
     // the same mirrored state always re-derives the same fill (PBFT determinism).
     tryOrderMatch(a, b){
+        let priced = this.orderPricing(a, b);
+        if(!priced) return null;
+        let { maker, taker, ownership, takerGivePrice, takerGetPrice, takerRem, makerRem } = priced;
+
+        // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
+        let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
+        let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
+        // PRECISION 64, matching order_match.js:197/202 exactly.
+        //
+        // These two multiplications ran at precision 18 while the indexer's identical
+        // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above
+        // already produces a 64-digit rate. Truncating the product to 18 places threw
+        // away digits the indexer keeps, so for a price that is not exactly
+        // representable the hub and the indexer derived DIFFERENT fill quantities from
+        // the same pair of offers. This file's bcmath header states the two must be
+        // byte-equivalent; at 18 they were not, and a hub that finalizes a fill the
+        // indexer will not reproduce is the livelock the finding pair documents.
+        let give_from_get = bc.bcmul(max_get, takerGetPrice, 64);
+        let takerGive, takerGet;
+        if(bc.bcgt(give_from_get, max_give)){
+            takerGive = String(max_give);
+            takerGet  = String(bc.bcmul(max_give, takerGivePrice, 64));
+        } else {
+            takerGive = String(give_from_get);
+            takerGet  = String(max_get);
+        }
+        let fill = this.quantizeFill(maker, taker, takerGive, takerGet);
+        if(!fill) return null;
+        takerGive = fill.takerGive;
+        takerGet  = fill.takerGet;
+
+        if(ownership){
+            // Ownership orders are single-fill exact (order_match.js:166-180): the fill must
+            // equal the full canonical sides, no partials.
+            let expGive = Number(taker.give_ownership || 0) === 1 ? '1' : String(taker.give_amount);
+            let expGet  = Number(taker.get_ownership  || 0) === 1 ? '1' : String(taker.get_amount);
+            if(!this.amountsEqual(takerGive, expGive) || !this.amountsEqual(takerGet, expGet)) return null;
+        }
+
+        // taker gives takerGive (its escrow); maker gives takerGet (== what the taker receives).
+        let aGiveFill = (a === taker) ? takerGive : takerGet;
+        let bGiveFill = (b === taker) ? takerGive : takerGet;
+        return this.buildDesc(a, b, 'order', 'order', aGiveFill, bGiveFill);
+    }
+
+    // The structural and price-cross gates of an ORDER pair, then its maker and taker with
+    // their limit prices and remaining capacity; null when the pair cannot fill.
+    orderPricing(a, b){
         // Each side must give what the other wants (same token pair, mirrored ownership flags).
         if(a.give_coin !== b.get_coin || a.get_coin !== b.give_coin) return null;
         if((a.give_tick || '') !== (b.get_tick || '')) return null;
@@ -462,29 +520,10 @@ class CrossChainDexEngine extends EventEmitter {
         let makerRem = this.effectiveRemaining(maker);
         if(bc.bclte(takerRem.give, 0) || bc.bclte(makerRem.give, 0)) return null;
         if(bc.bclte(takerRem.get,  0) || bc.bclte(makerRem.get,  0)) return null;
+        return { maker, taker, ownership, takerGivePrice, takerGetPrice, takerRem, makerRem };
+    }
 
-        // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
-        let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
-        let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
-        // PRECISION 64, matching order_match.js:197/202 exactly.
-        //
-        // These two multiplications ran at precision 18 while the indexer's identical
-        // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above
-        // already produces a 64-digit rate. Truncating the product to 18 places threw
-        // away digits the indexer keeps, so for a price that is not exactly
-        // representable the hub and the indexer derived DIFFERENT fill quantities from
-        // the same pair of offers. This file's bcmath header states the two must be
-        // byte-equivalent; at 18 they were not, and a hub that finalizes a fill the
-        // indexer will not reproduce is the livelock the finding pair documents.
-        let give_from_get = bc.bcmul(max_get, takerGetPrice, 64);
-        let takerGive, takerGet;
-        if(bc.bcgt(give_from_get, max_give)){
-            takerGive = String(max_give);
-            takerGet  = String(bc.bcmul(max_give, takerGivePrice, 64));
-        } else {
-            takerGive = String(give_from_get);
-            takerGet  = String(max_get);
-        }
+    quantizeFill(maker, taker, takerGive, takerGet){
         // Grid snap (gap CLOSED): the indexer follows the clamp with
         // bcround(amount, <that tick's DECIMALS>) on BOTH derived amounts
         // (order_match.js:219-220). That is what enforces indivisibility (a 0-decimal NFT
@@ -524,19 +563,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Zero-drop AFTER quantization, matching order_match.js's order (clamp, round,
         // then drop): dust that rounds to zero is not settled as a fill.
         if(bc.bclte(takerGive, 0) || bc.bclte(takerGet, 0)) return null;
-
-        if(ownership){
-            // Ownership orders are single-fill exact (order_match.js:166-180): the fill must
-            // equal the full canonical sides, no partials.
-            let expGive = Number(taker.give_ownership || 0) === 1 ? '1' : String(taker.give_amount);
-            let expGet  = Number(taker.get_ownership  || 0) === 1 ? '1' : String(taker.get_amount);
-            if(!this.amountsEqual(takerGive, expGive) || !this.amountsEqual(takerGet, expGet)) return null;
-        }
-
-        // taker gives takerGive (its escrow); maker gives takerGet (== what the taker receives).
-        let aGiveFill = (a === taker) ? takerGive : takerGet;
-        let bGiveFill = (b === taker) ? takerGive : takerGet;
-        return this.buildDesc(a, b, 'order', 'order', aGiveFill, bGiveFill);
+        return { takerGive, takerGet };
     }
 
     // The decimal grid of an offer's GIVE side, or null when it cannot be established.
@@ -629,6 +656,30 @@ class CrossChainDexEngine extends EventEmitter {
         let effectiveTime = this._nowSeconds() +
             Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
 
+        let row = this.buildMatchRow(desc, matchId, snapshotBlock, effectiveTime);
+        if(!(await this.stampMatchAdmission(row, matchId))) return;
+
+        // Resolve the cross_chain validator set at snapshot_block (deterministic,
+        // BTC-anchored) so every node computes the same quorum. The leader of the
+        // round persists + mirrors these rows to indexers (in consensus PROPOSE).
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+
+        // Reserve this fill in-flight so a later poll doesn't re-propose it before the
+        // committed ledger is updated by writeFinalizedMatch.
+        this._inflight.add(matchId);
+        try {
+            // Run the PBFT round. quorum 0 (single operator) self-signs + finalizes inline;
+            // a federation gathers 2f+1 independent signatures, then 'match:finalized' fires
+            // and writeFinalizedMatch writes + mirrors the row.
+            await this.consensus.propose(matchId, { row: row, snapshot: { validators: validators, count: validators.length } });
+        } catch(e){
+            this._inflight.delete(matchId);            // round failed to start; allow a retry
+            throw e;
+        }
+    }
+
+    buildMatchRow(desc, matchId, snapshotBlock, effectiveTime){
+        let lo = desc.lo, hi = desc.hi;
         // lo = canonical-lower. On lo's chain, lo's escrow releases to hi's payout
         // (hi.get_address, hi's receive addr on lo's chain). On hi's chain, hi's escrow
         // releases to lo's payout. a_amount/b_amount = the FILL settled by THIS match.
@@ -667,7 +718,10 @@ class CrossChainDexEngine extends EventEmitter {
             a_push_generation: Number(lo.push_generation) || 0,
             b_push_generation: Number(hi.push_generation) || 0
         };
+        return row;
+    }
 
+    async stampMatchAdmission(row, matchId){
         // The ADMISSION MAP, stamped over the chains that READ this match (a_chain OR
         // b_chain, from the consuming selects) at this hub's own fresh admission tip on
         // each, plus the table's block margin. Height-gated on the row's own
@@ -687,31 +741,14 @@ class CrossChainDexEngine extends EventEmitter {
                 logger.error('CrossChainDex: refusing to finalize match ' + matchId.substring(0,16) +
                     '... at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' +
                     readSet.join(' / '));
-                return;
+                return false;
             }
         }
         // Every column named at every height, so a legacy row carries explicit NULLs rather
         // than an absent key the driver would have to coerce. NULL is the legacy row and it
         // binds by effective_time, which is what a below-the-activation match must do.
         Object.assign(row, ah.admitBlocksToColumns(admitMap));
-
-        // Resolve the cross_chain validator set at snapshot_block (deterministic,
-        // BTC-anchored) so every node computes the same quorum. The leader of the
-        // round persists + mirrors these rows to indexers (in consensus PROPOSE).
-        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
-
-        // Reserve this fill in-flight so a later poll doesn't re-propose it before the
-        // committed ledger is updated by writeFinalizedMatch.
-        this._inflight.add(matchId);
-        try {
-            // Run the PBFT round. quorum 0 (single operator) self-signs + finalizes inline;
-            // a federation gathers 2f+1 independent signatures, then 'match:finalized' fires
-            // and writeFinalizedMatch writes + mirrors the row.
-            await this.consensus.propose(matchId, { row: row, snapshot: { validators: validators, count: validators.length } });
-        } catch(e){
-            this._inflight.delete(matchId);            // round failed to start; allow a retry
-            throw e;
-        }
+        return true;
     }
 
     // Persist a consensus-finalized match (2f+1 signatures attached) and mirror it. Update
@@ -794,39 +831,7 @@ class CrossChainDexEngine extends EventEmitter {
     // SAME match_id and canonical. Returns true only when our own view confirms the
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
-        // Reservation-ledger gate. The follower check below is NOT independent of the
-        // leader's: it re-derives filled_before from this same this.committed, so a hub
-        // whose ledger failed to rebuild would co-sign exactly the over-fill it would
-        // have proposed. Refuse to sign rather than sign blind.
-        if(!this._committedReady){
-            logger.warn('CrossChainDex: refusing to co-sign a proposed match; the reservation ledger has not rebuilt');
-            return false;
-        }
-        if(!row || row.a_chain === row.b_chain) return false;
-        // Canonical integer spellings. These fields are signed verbatim but the
-        // indexer's settlement pass rebuilds the canonical from the mirrored BIGINT row,
-        // so a leader-supplied '041' for an action index passes every Number()-based
-        // re-derivation below yet finalizes a match whose signatures no settling indexer
-        // can reproduce - both escrows locked with no path to retry. Fail closed first;
-        // an honest leader builds these with Number(), so an honest round never sees it.
-        if(!allCanonicalInts(row, DEX_CANONICAL_INT_FIELDS)) return false;
-        // Leader-chosen effective_time is ADOPTED (it is not part of the match_id, so a
-        // follower cannot re-derive it) and signed into the canonical. Bound it to a sane
-        // window of our own clock, exactly as CrossChainCallEngine.validateProposedMatch
-        // does for relay rows. The window is ASYMMETRIC. Its upper half stops a Byzantine
-        // leader stamping a far-future effective_time and finalizing a match whose indexer
-        // settlement (applied at effective_time <= block_time) never fires, locking BOTH
-        // matched escrows indefinitely (a griefing / liveness attack). Its lower half is
-        // the propagation floor (#4202): a match effective at or behind our clock is
-        // eligible the instant it finalizes, so the indexer that already holds the
-        // mirrored row settles a block ahead of one still receiving it and the two legs'
-        // settlement action indexes diverge. Honest leaders now stamp a forward margin
-        // sized to the slower leg, comfortably above RELAY_MIN_FUTURE_S, so neither half
-        // rejects an honest proposal (same clock-skew tolerance as the call relay).
-        let now = this._nowSeconds();
-        if(!Number.isFinite(Number(row.effective_time)) ||
-           Number(row.effective_time) - now > 3600 ||
-           Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
+        if(!this.proposedMatchInBounds(row)) return false;
         let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
         let b = await this._findOpenOffer(row.b_chain, Number(row.b_action_index));
         if(!a || !b) return false;
@@ -860,6 +865,45 @@ class CrossChainDexEngine extends EventEmitter {
         if((Number(row.b_push_generation) || 0) !== (Number(desc.hi.push_generation) || 0)) return false;
         let derivedId = this._deriveMatchId(desc.lo, desc.hi, Number(row.snapshot_block), desc.loFilledBefore, desc.hiFilledBefore);
         if(String(derivedId).toLowerCase() !== String(row.match_id).toLowerCase()) return false;
+        return true;
+    }
+
+    // The gates a proposed match clears before any indexer read: a rebuilt reservation
+    // ledger, two distinct chains, canonical integer spellings and the effective_time window.
+    proposedMatchInBounds(row){
+        // Reservation-ledger gate. The follower check below is NOT independent of the
+        // leader's: it re-derives filled_before from this same this.committed, so a hub
+        // whose ledger failed to rebuild would co-sign exactly the over-fill it would
+        // have proposed. Refuse to sign rather than sign blind.
+        if(!this._committedReady){
+            logger.warn('CrossChainDex: refusing to co-sign a proposed match; the reservation ledger has not rebuilt');
+            return false;
+        }
+        if(!row || row.a_chain === row.b_chain) return false;
+        // Canonical integer spellings. These fields are signed verbatim but the
+        // indexer's settlement pass rebuilds the canonical from the mirrored BIGINT row,
+        // so a leader-supplied '041' for an action index passes every Number()-based
+        // re-derivation below yet finalizes a match whose signatures no settling indexer
+        // can reproduce - both escrows locked with no path to retry. Fail closed first;
+        // an honest leader builds these with Number(), so an honest round never sees it.
+        if(!allCanonicalInts(row, DEX_CANONICAL_INT_FIELDS)) return false;
+        // Leader-chosen effective_time is ADOPTED (it is not part of the match_id, so a
+        // follower cannot re-derive it) and signed into the canonical. Bound it to a sane
+        // window of our own clock, exactly as CrossChainCallEngine.validateProposedMatch
+        // does for relay rows. The window is ASYMMETRIC. Its upper half stops a Byzantine
+        // leader stamping a far-future effective_time and finalizing a match whose indexer
+        // settlement (applied at effective_time <= block_time) never fires, locking BOTH
+        // matched escrows indefinitely (a griefing / liveness attack). Its lower half is
+        // the propagation floor (#4202): a match effective at or behind our clock is
+        // eligible the instant it finalizes, so the indexer that already holds the
+        // mirrored row settles a block ahead of one still receiving it and the two legs'
+        // settlement action indexes diverge. Honest leaders now stamp a forward margin
+        // sized to the slower leg, comfortably above RELAY_MIN_FUTURE_S, so neither half
+        // rejects an honest proposal (same clock-skew tolerance as the call relay).
+        let now = this._nowSeconds();
+        if(!Number.isFinite(Number(row.effective_time)) ||
+           Number(row.effective_time) - now > 3600 ||
+           Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
         return true;
     }
 
