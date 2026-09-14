@@ -150,7 +150,7 @@ let cachedValues = null;
 // yields 87637dfa instead of 26ba9cce in a checkout without node_modules, since
 // stake_weighted_quorum.js requires mathjs: two revisions measured that way both carry
 // the wrong number and FALSELY MATCH. A moved carrier still reads ABSENT, the state
-// bin/check-frozen-set.js exists to refuse and must therefore keep seeing.
+// xchain-hub/bin/check-frozen-set.js exists to refuse and must therefore keep seeing.
 function loadGateModule(mod){
     const file = path.join(__dirname, mod + '.js');
     if (!fs.existsSync(file)) return null;
