@@ -98,16 +98,49 @@ function fmt(t){
     return (t instanceof Date) ? t.toISOString().replace('T', ' ').slice(0, 19) : String(t);
 }
 
-async function main(){
-    let args = parseArgs(process.argv.slice(2));
-    if(args.help){ usage(); return 0; }
-
+// The connection env is checked in full before anything else runs, so a missing
+// variable is named rather than surfacing as a driver error mid-sweep.
+function connectionSecret(){
     for(let v of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_USER']){
         if(!process.env[v]) throw new Error('Missing required env var ' + v);
     }
     // Accepts the deprecated HUB_DB_PASS too; see src/secret-env.js.
     let dbSecret = resolveSecretEnv('HUB_DB_PASS');
     if(!dbSecret) throw new Error('Missing required env var HUB_DB_SECRET');
+    return dbSecret;
+}
+
+// One database of the sweep. Returns the stale rows it still holds: what remains
+// after an --apply, or everything in range on a dry run.
+async function sweepDatabase(name, args, opts, dbSecret){
+    let db = new Database(process.env.HUB_DB_HOST, process.env.HUB_DB_PORT, name,
+                          process.env.HUB_DB_USER, dbSecret);
+    try {
+        let before = await prune.summarizeStale(db, opts);
+        console.log(name + ': before');
+        console.log(describe(before));
+
+        if(!args.apply && args.blocks){
+            for(let b of await prune.listStaleBlocks(db, opts, args.blocks))
+                console.log('    block ' + b.snapshotBlock + ' ' + b.capability + ': ' + b.rows +
+                            ' rows, written ' + fmt(b.minCreated) + ' .. ' + fmt(b.maxCreated));
+        }
+
+        if(!args.apply) return before.total;
+        let res = await prune.pruneStale(db, opts);
+        console.log(name + ': deleted ' + res.deleted + ' rows in ' + res.batches +
+                    ' batch(es), remaining in range ' + res.remaining);
+        return res.remaining;
+    } finally {
+        await db.close();
+    }
+}
+
+async function main(){
+    let args = parseArgs(process.argv.slice(2));
+    if(args.help){ usage(); return 0; }
+
+    let dbSecret = connectionSecret();
 
     let dbNames = args.dbs.length ? args.dbs : [process.env.HUB_DB_NAME];
     if(!dbNames[0]) throw new Error('No database given: pass --db or set HUB_DB_NAME');
@@ -124,32 +157,8 @@ async function main(){
                 ', mode ' + (args.apply ? 'APPLY' : 'DRY RUN'));
 
     let leftover = 0;
-    for(let name of dbNames){
-        let db = new Database(process.env.HUB_DB_HOST, process.env.HUB_DB_PORT, name,
-                              process.env.HUB_DB_USER, dbSecret);
-        try {
-            let before = await prune.summarizeStale(db, opts);
-            console.log(name + ': before');
-            console.log(describe(before));
-
-            if(!args.apply && args.blocks){
-                for(let b of await prune.listStaleBlocks(db, opts, args.blocks))
-                    console.log('    block ' + b.snapshotBlock + ' ' + b.capability + ': ' + b.rows +
-                                ' rows, written ' + fmt(b.minCreated) + ' .. ' + fmt(b.maxCreated));
-            }
-
-            if(args.apply){
-                let res = await prune.pruneStale(db, opts);
-                console.log(name + ': deleted ' + res.deleted + ' rows in ' + res.batches +
-                            ' batch(es), remaining in range ' + res.remaining);
-                leftover += res.remaining;
-            } else {
-                leftover += before.total;
-            }
-        } finally {
-            await db.close();
-        }
-    }
+    for(let name of dbNames)
+        leftover += await sweepDatabase(name, args, opts, dbSecret);
 
     if(args.apply && leftover > 0){
         console.error('FAILED: ' + leftover + ' stale rows still in range after prune');
