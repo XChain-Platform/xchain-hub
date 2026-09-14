@@ -55,6 +55,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const hubConfig = require('../config');
 
 const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
@@ -109,10 +110,10 @@ function ensureIsolatedDir(dirPath) {
 //   { ok: false, reason, detail }
 //
 // `ctx` (optional) seams in test overrides:
-//   ctx.env              : env source (defaults to process.env)
+//   ctx.env              : env source (defaults to the live process environment)
 //   ctx.defaultConfigDir : pin the "default isolated dir" (hermetic tests)
 function resolveHubLlmAuth(ctx) {
-    const envSource = (ctx && ctx.env) || process.env;
+    const envSource = hubConfig.env(ctx && ctx.env);
     const defaultDir = trim(envSource.HUB_CLAUDE_DEFAULT_CONFIG_DIR)
         || trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
 
@@ -173,7 +174,7 @@ function resolveHubLlmAuth(ctx) {
 // { ok: false, reason, detail }. HUB_OPENAI_API_KEY (hub-scoped) wins over
 // OPENAI_API_KEY (ambient), mirroring the HUB_-prefix convention above.
 function resolveOpenAiAuth(ctx) {
-    const envSource = (ctx && ctx.env) || process.env;
+    const envSource = hubConfig.env(ctx && ctx.env);
     const hubKey = trim(envSource.HUB_OPENAI_API_KEY);
     const key    = trim(envSource.OPENAI_API_KEY);
     if (hubKey) return { ok: true, transport: 'openai_api', source: 'hub_api_key', apiKey: hubKey };

@@ -46,6 +46,8 @@
 
 'use strict';
 
+const hubConfig = require('../config');
+
 const DEFAULT_WINDOW_MS = 3600000; // 1 hour
 
 class SpendCeiling {
@@ -57,9 +59,9 @@ class SpendCeiling {
         cfg = cfg || {};
         let maxKey    = prefix + '_MAX_PUBLISHES_PER_WINDOW';
         let windowKey = prefix + '_SPEND_WINDOW_MS';
-        this.maxPerWindow = parseInt(process.env[maxKey] || cfg[maxKey] || '0', 10);
+        this.maxPerWindow = parseInt(hubConfig.env()[maxKey] || cfg[maxKey] || '0', 10);
         if (!Number.isFinite(this.maxPerWindow) || this.maxPerWindow < 0) this.maxPerWindow = 0;
-        this.windowMs = parseInt(process.env[windowKey] || cfg[windowKey] || String(DEFAULT_WINDOW_MS), 10);
+        this.windowMs = parseInt(hubConfig.env()[windowKey] || cfg[windowKey] || String(DEFAULT_WINDOW_MS), 10);
         if (!Number.isFinite(this.windowMs) || this.windowMs <= 0) this.windowMs = DEFAULT_WINDOW_MS;
         this.label = label || prefix;
         this._spends = [];   // broadcast timestamps within the current window

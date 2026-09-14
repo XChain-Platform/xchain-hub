@@ -40,6 +40,7 @@
 
 const axios = require('axios');
 const coins = require('../coins');
+const hubConfig = require('../config');
 const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('../lib/stake_share_monitor.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -76,7 +77,7 @@ class StakeShareWatcher {
     constructor(hub, opts) {
         opts = opts || {};
         this.hub  = hub;
-        this.env  = opts.env || process.env;
+        this.env  = hubConfig.env(opts.env);
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
         this._axios = opts.axios || axios;
 

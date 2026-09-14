@@ -40,6 +40,8 @@
  *
  ********************************************************************/
 
+const hubConfig = require('./config');
+
 // Legacy name -> redaction-safe name. Explicit rather than derived from a
 // suffix rule: `SIGNING_PRIVKEY_HEX` has no `_PASS` tail to rewrite, and a
 // derivation clever enough to cover it would be harder to audit than the table.
@@ -60,10 +62,10 @@ const SECRET_ENV_ALIASES = Object.freeze({
  * only the legacy name is present.
  *
  * @param {string} legacyName          e.g. 'HUB_DB_PASS'
- * @param {object} [env=process.env]
+ * @param {object} [env=hubConfig.env()]
  * @returns {string|undefined}
  */
-function resolveSecretEnv(legacyName, env = process.env) {
+function resolveSecretEnv(legacyName, env = hubConfig.env()) {
     const aliasName = SECRET_ENV_ALIASES[legacyName];
     if (!aliasName) {
         throw new Error('resolveSecretEnv: unknown secret env var ' + legacyName +
@@ -91,10 +93,10 @@ function resolveSecretEnv(legacyName, env = process.env) {
  * name. Callers log these once at boot so an operator finds out from their own
  * hub, not from a leaked transcript.
  *
- * @param {object} [env=process.env]
+ * @param {object} [env=hubConfig.env()]
  * @returns {Array<{legacy: string, preferred: string}>}
  */
-function deprecatedSecretEnvNames(env = process.env) {
+function deprecatedSecretEnvNames(env = hubConfig.env()) {
     const found = [];
     for (const [legacyName, aliasName] of Object.entries(SECRET_ENV_ALIASES)) {
         const aliasValue  = env[aliasName];

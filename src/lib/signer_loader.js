@@ -54,6 +54,8 @@
  *
  ********************************************************************/
 
+const hubConfig = require('../config');
+
 // The rail the signer contract has always meant, and the only one every module
 // written before `chains` existed signs for. It is both the default declaration
 // and the default a wiring site gets when it names no chain.
@@ -108,7 +110,7 @@ function buildSignerHooks(mod, modulePath){
 }
 
 function loadSignerHooks(env){
-    env = env || process.env;
+    env = hubConfig.env(env);
     let modulePath = env.HUB_SIGNER_MODULE || '';
     if(!modulePath) return null;
 
