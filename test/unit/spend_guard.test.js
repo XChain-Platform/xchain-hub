@@ -329,7 +329,7 @@ describe('SpendGuard', function () {
 
         it('defaults the path under ./data when persistTo() is given none', function () {
             const g = new SpendGuard(PFX, cfg, 'SGTEST-LABEL');
-            g._loadState = function () {};                            // do not read a real hub file
+            g.loadState = function () {};                            // do not read a real hub file
             g.persistTo();
             // Resolved once, at arm time: a relative default plus a later chdir would
             // split one effector's window across two files, which reads as the very

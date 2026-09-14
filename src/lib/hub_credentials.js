@@ -58,7 +58,7 @@ const os = require('os');
 
 const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
-function _trim(v) { return (v == null) ? '' : String(v).trim(); }
+function trim(v) { return (v == null) ? '' : String(v).trim(); }
 
 // A real `.credentials.json` is a few hundred bytes. Anything past this is not
 // a credentials file, and reading it into memory to prove that is not worth it.
@@ -68,11 +68,11 @@ const MAX_CREDENTIALS_BYTES = 256 * 1024;
 // hand-assembled files put the same fields at the top level, so both shapes count.
 // A refresh token alone is enough: the CLI redeems it for an access token on the
 // next spawn.
-function _hasUsableToken(parsed) {
+function hasUsableToken(parsed) {
     if (!parsed || typeof parsed !== 'object') return false;
     const envelopes = [parsed];
     if (parsed.claudeAiOauth && typeof parsed.claudeAiOauth === 'object') envelopes.push(parsed.claudeAiOauth);
-    return envelopes.some((e) => _trim(e.accessToken) !== '' || _trim(e.refreshToken) !== '');
+    return envelopes.some((e) => trim(e.accessToken) !== '' || trim(e.refreshToken) !== '');
 }
 
 // A config dir counts as authenticated only when its `.credentials.json` actually
@@ -90,7 +90,7 @@ function _checkConfigDir(dirPath) {
         const credPath = path.join(dirPath, '.credentials.json');
         const credStat = fs.statSync(credPath);
         if (!credStat.isFile() || credStat.size === 0 || credStat.size > MAX_CREDENTIALS_BYTES) return false;
-        return _hasUsableToken(JSON.parse(fs.readFileSync(credPath, 'utf8')));
+        return hasUsableToken(JSON.parse(fs.readFileSync(credPath, 'utf8')));
     } catch { return false; }
 }
 
@@ -98,7 +98,7 @@ function _checkConfigDir(dirPath) {
 // keeps the CLI's state writes out of the host operator's ambient `~/.claude`
 // and gives the spawn a directory it is allowed to write. It is not a precedence
 // trick; a spawn's CLAUDE_CODE_OAUTH_TOKEN is honoured whatever the dir holds.
-function _ensureIsolatedDir(dirPath) {
+function ensureIsolatedDir(dirPath) {
     try { fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 }); }
     catch { /* non-fatal: CLI creates it if absent or fails cleanly */ }
 }
@@ -113,15 +113,15 @@ function _ensureIsolatedDir(dirPath) {
 //   ctx.defaultConfigDir : pin the "default isolated dir" (hermetic tests)
 function resolveHubLlmAuth(ctx) {
     const envSource = (ctx && ctx.env) || process.env;
-    const defaultDir = _trim(envSource.HUB_CLAUDE_DEFAULT_CONFIG_DIR)
-        || _trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
+    const defaultDir = trim(envSource.HUB_CLAUDE_DEFAULT_CONFIG_DIR)
+        || trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
 
-    const hubDir   = _trim(envSource.HUB_CLAUDE_CONFIG_DIR);
-    const cliDir   = _trim(envSource.CLAUDE_CONFIG_DIR);
-    const hubToken = _trim(envSource.HUB_CLAUDE_CODE_OAUTH_TOKEN);
-    const cliToken = _trim(envSource.CLAUDE_CODE_OAUTH_TOKEN);
-    const hubApiKey = _trim(envSource.HUB_ANTHROPIC_API_KEY);
-    const apiKey   = _trim(envSource.ANTHROPIC_API_KEY);
+    const hubDir   = trim(envSource.HUB_CLAUDE_CONFIG_DIR);
+    const cliDir   = trim(envSource.CLAUDE_CONFIG_DIR);
+    const hubToken = trim(envSource.HUB_CLAUDE_CODE_OAUTH_TOKEN);
+    const cliToken = trim(envSource.CLAUDE_CODE_OAUTH_TOKEN);
+    const hubApiKey = trim(envSource.HUB_ANTHROPIC_API_KEY);
+    const apiKey   = trim(envSource.ANTHROPIC_API_KEY);
 
     if (hubDir && _checkConfigDir(hubDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'hub_config_dir', env: { CLAUDE_CONFIG_DIR: hubDir } };
@@ -134,11 +134,11 @@ function resolveHubLlmAuth(ctx) {
     // under the hub's own directory rather than the host operator's.
     const isolatedDir = hubDir || cliDir || defaultDir;
     if (hubToken) {
-        _ensureIsolatedDir(isolatedDir);
+        ensureIsolatedDir(isolatedDir);
         return { ok: true, transport: 'claude_spawn', source: 'hub_token', env: { CLAUDE_CODE_OAUTH_TOKEN: hubToken, CLAUDE_CONFIG_DIR: isolatedDir } };
     }
     if (cliToken) {
-        _ensureIsolatedDir(isolatedDir);
+        ensureIsolatedDir(isolatedDir);
         return { ok: true, transport: 'claude_spawn', source: 'cli_token', env: { CLAUDE_CODE_OAUTH_TOKEN: cliToken, CLAUDE_CONFIG_DIR: isolatedDir } };
     }
 
@@ -174,8 +174,8 @@ function resolveHubLlmAuth(ctx) {
 // OPENAI_API_KEY (ambient), mirroring the HUB_-prefix convention above.
 function resolveOpenAiAuth(ctx) {
     const envSource = (ctx && ctx.env) || process.env;
-    const hubKey = _trim(envSource.HUB_OPENAI_API_KEY);
-    const key    = _trim(envSource.OPENAI_API_KEY);
+    const hubKey = trim(envSource.HUB_OPENAI_API_KEY);
+    const key    = trim(envSource.OPENAI_API_KEY);
     if (hubKey) return { ok: true, transport: 'openai_api', source: 'hub_api_key', apiKey: hubKey };
     if (key)    return { ok: true, transport: 'openai_api', source: 'api_key',     apiKey: key };
     return {

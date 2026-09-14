@@ -74,7 +74,7 @@ const CLI_CREDENTIAL_ENV_KEYS = [
 // branch of resolveHubLlmAuth sets CLAUDE_CONFIG_DIR, so scrubbing it changes nothing
 // today; it is in the list so a future branch that omits it cannot inherit the
 // operator's dir by accident.
-function _childEnv(authEnv) {
+function childEnv(authEnv) {
     const env = { ...process.env };
     for (const key of CLI_CREDENTIAL_ENV_KEYS) delete env[key];
     return { ...env, ...(authEnv || {}) };
@@ -97,7 +97,7 @@ const AVAILABILITY_ERROR_TYPES = ['overloaded_error', 'rate_limit_error'];
 // prometheus-guardrails learned from live payloads.
 const REFUSAL_TEXT_RE = /safeguards flagged|flagged by (?:our|the) safeguards|content[ _-]?(?:policy|filter)\s*(?:violation|refusal)|blocked by (?:our|the) (?:content|safety) (?:policy|filter|system)/i;
 
-function _statusOf(value) {
+function statusOf(value) {
     let n = Number(value);
     return Number.isFinite(n) ? n : null;
 }
@@ -117,7 +117,7 @@ function _statusOf(value) {
 // the whole stdout blob: a bare status token is matched by word boundary, and a usage
 // or cost figure ("input_tokens":500) would otherwise read as a 500. A miss keeps
 // today's answer, so the worst case of too tight a scan is the behaviour that shipped.
-function _cliFailureIsTransient(stdout, stderr) {
+function cliFailureIsTransient(stdout, stderr) {
     let json = null;
     try { json = JSON.parse(stdout); } catch { /* free-form output; text scan below */ }
     const envelope = (json && typeof json === 'object') ? json : {};
@@ -143,8 +143,8 @@ function _cliFailureIsTransient(stdout, stderr) {
     // api_error_status is the field the CLI's result envelope actually carries the
     // vendor's HTTP status on, and it rides on the SUCCESS-shaped result, so it is read
     // alongside the error-shaped status fields rather than instead of them (item 7756).
-    for (const status of [_statusOf(envelope.api_error_status), _statusOf(err.api_error_status),
-                          _statusOf(envelope.status), _statusOf(err.status), _statusOf(err.code)]) {
+    for (const status of [statusOf(envelope.api_error_status), statusOf(err.api_error_status),
+                          statusOf(envelope.status), statusOf(err.status), statusOf(err.code)]) {
         if (status === 429 || (status >= 500 && status <= 599)) return true;
     }
     const type = String(err.type || envelope.type || envelope.subtype || '').toLowerCase();
@@ -231,7 +231,7 @@ async function runClaudePrint(opts) {
         const child = spawn(CLAUDE_BIN, args, {
             cwd,
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: _childEnv(auth.env)
+            env: childEnv(auth.env)
         });
 
         // Classification contract shared with the HTTP transports (providers/llm.js):
@@ -287,7 +287,7 @@ async function runClaudePrint(opts) {
                 // Everything unrecognized -- auth, 4xx, an exhausted --max-budget-usd,
                 // a refusal -- keeps the hard classification.
                 const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : '');
-                if (_cliFailureIsTransient(stdout, stderr)) rejectTransient(msg);
+                if (cliFailureIsTransient(stdout, stderr)) rejectTransient(msg);
                 else                                        rejectHard(msg);
                 return;
             }
@@ -317,7 +317,7 @@ async function runClaudePrint(opts) {
                 // rather than on the non-zero branch above. Consult the same classifier,
                 // refusal first, so it fails over to the next judge instead of burning the
                 // round. Everything it does not recognize keeps today's hard rejection.
-                if (!isRefusal && _cliFailureIsTransient(stdout, '')) {
+                if (!isRefusal && cliFailureIsTransient(stdout, '')) {
                     rejectTransient('claude-spawn: CLI returned no result text' +
                         (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
                     return;
@@ -353,7 +353,7 @@ async function runClaudePrint(opts) {
                 // to mention a status token would otherwise re-ask a model that already
                 // answered, which is the verdict-shopping the refusal precedence exists to
                 // prevent. Only the envelope's own status and diagnostic fields decide.
-                if (!isRefusal && _cliFailureIsTransient(stdout, '')) {
+                if (!isRefusal && cliFailureIsTransient(stdout, '')) {
                     rejectTransient('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
                         (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
                     return;
