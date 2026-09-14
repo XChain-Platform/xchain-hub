@@ -31,7 +31,7 @@ const { canonicalValidatorOrder } = require('./rollcall/validator_order.js');
 // Federation-uniform oracle co-sign band: the absolute floor under the slash band
 // (see _validateSlashBandFloor). constants.js requires nothing, so no cycle.
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
-const { noteDrop } = require('./consensusDiagnostics');
+const { noteDrop } = require('./consensus/diagnostics');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';

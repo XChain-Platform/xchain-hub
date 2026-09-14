@@ -65,11 +65,11 @@
  ********************************************************************/
 
 const crypto            = require('crypto');
-const ValidatorIdentity = require('./ValidatorIdentity');
-const swq               = require('./stake_weighted_quorum.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { isRetractionSigningActive } = require('./retraction_signing_activation.js');
-const snapWrite         = require('./lib/capability_snapshot_write.js');
+const ValidatorIdentity = require('../ValidatorIdentity');
+const swq               = require('../stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { isRetractionSigningActive } = require('../retraction_signing_activation.js');
+const snapWrite         = require('../lib/capability_snapshot_write.js');
 
 const XRETRACT_SIGN_REQ  = 'XRETRACT_SIGN_REQ';
 const XRETRACT_SIGN      = 'XRETRACT_SIGN';

@@ -19,7 +19,7 @@
 const assert            = require('assert');
 const crypto            = require('crypto');
 const { EventEmitter }  = require('events');
-const RetractionConsensus = require('../../src/RetractionConsensus.js');
+const RetractionConsensus = require('../../src/consensus/retraction.js');
 const ValidatorIdentity   = require('../../src/ValidatorIdentity.js');
 const { waitUntil }       = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');

@@ -13,7 +13,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const fc         = require('fast-check');
-const Consensus  = require('../../src/Consensus');
+const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { makeValidator } = require('../helpers/fixtures');
 const gen               = require('./helpers/generators');

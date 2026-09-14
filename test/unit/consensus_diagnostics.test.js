@@ -20,7 +20,7 @@ const { expect }        = require('chai');
 const OracleConsensus   = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
-const diagnostics       = require('../../src/consensusDiagnostics');
+const diagnostics       = require('../../src/consensus/diagnostics');
 const observability     = require('../../src/observability');
 
 describe('consensus diagnostics: silent PBFT drops become records (AT2)', function () {

@@ -26,7 +26,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/Consensus');
+const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
 

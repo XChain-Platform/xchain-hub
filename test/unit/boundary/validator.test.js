@@ -19,7 +19,7 @@ let mockDb;
 const XChainHub = proxyquire('../../../src/XChainHub', {
     './db':                 function () { return mockDb; },
     './PeerManager.js':     function () { return null; },
-    './Consensus.js':       function () {},
+    './consensus/pbft.js':       function () {},
     './ValidatorIdentity.js': function () {},
     './oracle/consensus.js': function () {},
     './oracle/round.js':     function () {},

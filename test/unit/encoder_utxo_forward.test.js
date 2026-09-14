@@ -34,7 +34,7 @@ const CALL_SITES = [
     'src/attestation/publisher.js',
     'src/attestation/relay.js',
     'src/oracle/publisher.js',
-    'src/FullNodeChallengeRound.js'
+    'src/consensus/full_node_challenge_round.js'
 ];
 
 function utxos(n) {

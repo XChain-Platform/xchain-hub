@@ -60,7 +60,7 @@ const { positiveIntConfig } = require('../lib/config_int.js');
 const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const coins             = require('../coins');
-const { noteCheckpointStalled } = require('../consensusDiagnostics');
+const { noteCheckpointStalled } = require('../consensus/diagnostics');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';

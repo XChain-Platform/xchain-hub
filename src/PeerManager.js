@@ -28,7 +28,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const rulesDigest = require('./consensus_rules_digest.js');
 const coins            = require('./coins');
 const { positiveIntConfig } = require('./lib/config_int.js');
-const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
+const { notePeerReject, stampRemoteIp } = require('./consensus/diagnostics');
 // The roster below credits RollcallRound only where the engine would really start,
 // so it reads the engine's own activation source rather than a copy of it.
 const rollcallActivation = require('./rollcall_activation.js');

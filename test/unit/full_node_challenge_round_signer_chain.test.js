@@ -29,7 +29,7 @@ const vm           = require('vm');
 const sinon        = require('sinon');
 const EventEmitter = require('events');
 
-const FullNodeChallengeRound = require('../../src/FullNodeChallengeRound.js');
+const FullNodeChallengeRound = require('../../src/consensus/full_node_challenge_round.js');
 const { applySignerHooks, buildSignerHooks } = require('../../src/lib/signer-loader.js');
 
 const TEMPLATE = path.join(__dirname, '..', '..', 'examples', 'doge-signer.example.js');

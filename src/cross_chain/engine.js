@@ -29,7 +29,7 @@ const coins        = require('../coins');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
-const { noteDrop } = require('../consensusDiagnostics');
+const { noteDrop } = require('../consensus/diagnostics');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';

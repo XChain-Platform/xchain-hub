@@ -36,7 +36,7 @@ const KEY_STRANGER = 'cc'.repeat(32);   // in neither
 // The four engines whose quorum denominator comes from chain state and whose
 // admission therefore had to follow it.
 const CHAIN_KEYED = [
-    { name: 'Consensus',        cls: require('../../src/Consensus'),        method: '_isKnownSender' },
+    { name: 'Consensus',        cls: require('../../src/consensus/pbft'),        method: '_isKnownSender' },
     { name: 'OracleConsensus',  cls: require('../../src/oracle/consensus'),  method: '_isKnownSender' },
     { name: 'CrossChainEngine', cls: require('../../src/cross_chain/engine'), method: '_isKnownSender' },
     { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: '_isRegisteredSender' },
@@ -241,7 +241,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
 });
 
 describe('Consensus._quorumMet counts signing keys', function () {
-    const Consensus = require('../../src/Consensus');
+    const Consensus = require('../../src/consensus/pbft');
 
     it('counts the KEY set, not the addr set, when keys are present', function () {
         const self = Object.create(Consensus.prototype);

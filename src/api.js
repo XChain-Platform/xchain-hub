@@ -30,7 +30,7 @@ patchConsole({ service: 'xchain-hub', version: require('../package.json').versio
 // The hub relies on per-tick .catch() and has no uncaughtException handler at
 // all, so a throw outside a promise chain exits with node's default stderr dump
 // and nothing a collector can key on.
-const { installCrashHandlers, noteShutdown } = require('./consensusDiagnostics');
+const { installCrashHandlers, noteShutdown } = require('./consensus/diagnostics');
 installCrashHandlers({ service: 'xchain-hub' });
 
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');

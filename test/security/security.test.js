@@ -255,7 +255,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus: Sequence monotonicity', function () {
-        const Consensus = require('../../src/Consensus');
+        const Consensus = require('../../src/consensus/pbft');
 
         let hub, pm, consensus;
 
@@ -320,7 +320,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus: Minimum quorum warning', function () {
-        const Consensus = require('../../src/Consensus');
+        const Consensus = require('../../src/consensus/pbft');
 
         it('refuses to propose (fail closed) when minValidators > 1 and no deterministic snapshot', async function () {
             // Hardened behavior (federation-split guard): a multi-hub federation with no
@@ -624,7 +624,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus engines: sender-membership guard', function () {
-        const Consensus       = require('../../src/Consensus');
+        const Consensus       = require('../../src/consensus/pbft');
         const OracleConsensus = require('../../src/oracle/consensus');
         const CrossChainEngine = require('../../src/cross_chain/engine');
 

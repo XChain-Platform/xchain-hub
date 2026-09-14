@@ -20,7 +20,7 @@ const DatabaseStub = function() { return mockDb; };
 const XChainHub = proxyquire('../../../src/XChainHub', {
     './db':                  DatabaseStub,
     './PeerManager.js':      function() { return null; },
-    './Consensus.js':        function() {},
+    './consensus/pbft.js':        function() {},
     './ValidatorIdentity.js':function() {},
     './oracle/consensus.js':  function() {},
     './oracle/round.js':      function() {},

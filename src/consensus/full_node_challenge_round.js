@@ -50,17 +50,17 @@ const crypto            = require('crypto');
 const fs                = require('fs');
 const path              = require('path');
 const axios             = require('axios');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const EncoderClient      = require('./EncoderClient.js');
-const SpendGuard         = require('./lib/spend_guard.js');
-const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
-const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const eq                = require('./equivocation_header.js');
-const activation        = require('./lib/fullnode_activation.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const EncoderClient      = require('../EncoderClient.js');
+const SpendGuard         = require('../lib/spend_guard.js');
+const { isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const eq                = require('../equivocation_header.js');
+const activation        = require('../lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
 // parameters. See the constructor.
-const coins             = require('./coins/index.js');
+const coins             = require('../coins/index.js');
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
 const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';

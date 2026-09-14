@@ -26,7 +26,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/Consensus');
+const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_4, makeValidator, makeFederationSnapshot, fixturePubkeyForAddr } = require('../helpers/fixtures');
 

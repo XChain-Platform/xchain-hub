@@ -41,7 +41,7 @@ const devband           = require('../lib/deviation_band.js');
 const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
-const { noteDrop, noteRoundLost } = require('../consensusDiagnostics');
+const { noteDrop, noteRoundLost } = require('../consensus/diagnostics');
 const ah                = require('../lib/admission_height.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';

@@ -60,7 +60,7 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } =
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('../constants.js');
-const { noteDrop } = require('../consensusDiagnostics');
+const { noteDrop } = require('../consensus/diagnostics');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';

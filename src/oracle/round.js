@@ -31,7 +31,7 @@ const { isXchainPriceActive, roundStartSeconds } = require('../xchain_price_acti
 const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
 const { roundBand, describeImplausibleRound } = require('./oracle_round_band.js');
 const { canonicalPrice } = require('./canonical_price.js');
-const { noteRoundLost } = require('../consensusDiagnostics');
+const { noteRoundLost } = require('../consensus/diagnostics');
 
 // Burned round numbers per scheduler gap that also get a skipped row; a wider gap
 // is an outage, recorded once by range rather than as a flood of rows on return.

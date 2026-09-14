@@ -12,7 +12,7 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const Consensus        = require('../../../src/Consensus');
+const Consensus        = require('../../../src/consensus/pbft');
 const OracleConsensus  = require('../../../src/oracle/consensus');
 const CrossChainEngine = require('../../../src/cross_chain/engine');
 const ReorgHandler     = require('../../../src/anchor/reorg_handler');

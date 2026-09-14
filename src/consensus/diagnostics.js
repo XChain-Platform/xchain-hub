@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { getLogger, getRegistry } = require('./observability');
+const { getLogger, getRegistry } = require('../observability');
 
 // Every reason a consensus message can disappear. Kept closed so a typo becomes
 // an unknown-reason line rather than a new metric series nobody is watching.

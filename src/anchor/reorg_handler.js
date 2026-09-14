@@ -39,7 +39,7 @@ const axios        = require('axios');
 const EventEmitter = require('events');
 const coins        = require('../coins');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
-const { noteDrop } = require('../consensusDiagnostics');
+const { noteDrop } = require('../consensus/diagnostics');
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
