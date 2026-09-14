@@ -83,7 +83,7 @@ function childEnv(authEnv) {
 
 // A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
 // an outcome the model actually produced. The boundary is the one providers/llm.js
-// `_isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included);
+// `isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included);
 // it is restated here rather than imported because llm.js already requires this module
 // and a back-import would be circular. The two definitions are a pair: move one, move
 // the other.
@@ -112,7 +112,7 @@ function statusOf(value) {
 // vendor's HTTP status on the success-shaped result), status / error.status /
 // error.code, error.type / type / subtype, and the message text plus the string
 // entries of the errors[] array. The 429-plus-any-5xx boundary itself is unchanged, so
-// the paired _isTransientStatus in providers/llm.js does not move with this.
+// the paired isTransientStatus in providers/llm.js does not move with this.
 //
 // The text scan is deliberately fed stderr plus the envelope's MESSAGE fields, never
 // the whole stdout blob: a bare status token is matched by word boundary, and a usage

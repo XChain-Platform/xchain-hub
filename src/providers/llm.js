@@ -1521,7 +1521,7 @@ function buildJudgePrompt(candidates) {
 // to no_quorum while transient/undefined advances to the next judge model (see
 // the transport-only invariant in agree()). Moving the 429/5xx boundary here
 // therefore changes which vendor errors earn a same-round judge fallback.
-function _isTransientStatus(status) {
+function isTransientStatus(status) {
     let s = Number(status);
     return s === 429 || (s >= 500 && s <= 599);
 }
@@ -1547,7 +1547,7 @@ function _httpStatusError(res, vendorLabel, json, str) {
                : 'HTTP ' + res.statusCode + ': ' + String(str).substring(0, 200);
     let err = new Error('llm: ' + vendorLabel + ': ' + detail);
     err.httpStatus = res.statusCode;
-    err.transient  = _isTransientStatus(res.statusCode);
+    err.transient  = isTransientStatus(res.statusCode);
     return err;
 }
 
@@ -1603,7 +1603,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         let err = new Error('llm: Anthropic API: ' + msg);
                         err.httpStatus = res.statusCode;
-                        err.transient  = _isTransientStatus(res.statusCode);
+                        err.transient  = isTransientStatus(res.statusCode);
                         safeReject(err);
                         return;
                     }
@@ -1619,7 +1619,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     // as a hard malformed-response error.
                     let err = new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
-                    err.transient  = _isTransientStatus(res.statusCode);
+                    err.transient  = isTransientStatus(res.statusCode);
                     safeReject(err);
                 }
             });
@@ -1672,7 +1672,7 @@ async function callOpenAi(apiPath, body, apiKey, options) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         let err = new Error('llm: OpenAI API: ' + msg);
                         err.httpStatus = res.statusCode;
-                        err.transient  = _isTransientStatus(res.statusCode);
+                        err.transient  = isTransientStatus(res.statusCode);
                         safeReject(err);
                         return;
                     }
@@ -1688,7 +1688,7 @@ async function callOpenAi(apiPath, body, apiKey, options) {
                     // as a hard malformed-response error.
                     let err = new Error('llm: OpenAI API: malformed response (' + str.substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
-                    err.transient  = _isTransientStatus(res.statusCode);
+                    err.transient  = isTransientStatus(res.statusCode);
                     safeReject(err);
                 }
             });

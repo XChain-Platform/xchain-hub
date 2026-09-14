@@ -478,7 +478,7 @@ describe('claude-spawn runClaudePrint()', function () {
     // agree() stops the judge fallback chain on transient===false, so a non-zero exit
     // must not land there unconditionally: a 529 seen through the CLI would kill the
     // round while the identical outage over HTTPS fails over to the next judge. The
-    // boundary is the HTTP transports' own (_isTransientStatus: 429 plus any 5xx).
+    // boundary is the HTTP transports' own (isTransientStatus: 429 plus any 5xx).
 
     it('classifies a CLI-reported 529 overload as transient', async function () {
         let stdout = JSON.stringify({
