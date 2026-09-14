@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * db.js bridge_transfers writers and readers, over a recording driver so the
+ * src/db/index.js bridge_transfers writers and readers, over a recording driver so the
  * SQL and its parameters are what is asserted.
  *
  * transfer_id is a pure function of the source leg, so a leg reorged out and
