@@ -154,8 +154,8 @@ describe('ring caps reject a negative operator value', function () {
 
         // The eviction a negative cap defeated: two distinct ids both stay seen,
         // so a re-broadcast of either is still suppressed.
-        pm._addToDedup('msg-1');
-        pm._addToDedup('msg-2');
+        pm.addToDedup('msg-1');
+        pm.addToDedup('msg-2');
         expect(pm.seenIds.has('msg-1')).to.be.true;
         expect(pm.seenIds.has('msg-2')).to.be.true;
     });

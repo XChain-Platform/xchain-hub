@@ -84,7 +84,7 @@ describe('Fuzz: PeerManager', function () {
                 ),
                 function (payload) {
                     let ws = mockWs();
-                    expect(function () { pm._handleInbound(ws, JSON.stringify(payload), null); }).to.not.throw();
+                    expect(function () { pm.handleInbound(ws, JSON.stringify(payload), null); }).to.not.throw();
                 }
             ), { numRuns: 300 });
         });
@@ -94,7 +94,7 @@ describe('Fuzz: PeerManager', function () {
                 fc.string({ minLength: 0, maxLength: 500 }),
                 function (raw) {
                     let ws = mockWs();
-                    expect(function () { pm._handleInbound(ws, raw, null); }).to.not.throw();
+                    expect(function () { pm.handleInbound(ws, raw, null); }).to.not.throw();
                 }
             ), { numRuns: 300 });
         });
@@ -122,7 +122,7 @@ describe('Fuzz: PeerManager', function () {
                 let raw = JSON.stringify(badEnvelope);
                 let emitted = 0;
                 pm.on('message', function () { emitted++; });
-                pm._handleInbound(ws, raw, null);
+                pm.handleInbound(ws, raw, null);
                 expect(emitted).to.equal(0);
                 pm.removeAllListeners('message');
             }), { numRuns: 100 });
@@ -140,7 +140,7 @@ describe('Fuzz: PeerManager', function () {
                 let ws = mockWs();
                 let emitted = 0;
                 pm.on('message', function () { emitted++; });
-                expect(function () { pm._handleInbound(ws, raw, null); }).to.not.throw();
+                expect(function () { pm.handleInbound(ws, raw, null); }).to.not.throw();
                 expect(emitted).to.equal(0);
                 pm.removeAllListeners('message');
             }), { numRuns: 10 });
@@ -157,7 +157,7 @@ describe('Fuzz: PeerManager', function () {
 
                 let emitted = 0;
                 pm.on('message', function () { emitted++; });
-                pm._handleInbound(ws, JSON.stringify(envelope), envelope.sender);
+                pm.handleInbound(ws, JSON.stringify(envelope), envelope.sender);
                 expect(emitted).to.equal(1);
                 pm.removeAllListeners('message');
             }), { numRuns: 200 });
@@ -174,9 +174,9 @@ describe('Fuzz: PeerManager', function () {
                 let emitted = 0;
                 pm.on('message', function () { emitted++; });
 
-                pm._handleInbound(ws, raw, envelope.sender);
-                pm._handleInbound(ws, raw, envelope.sender);
-                pm._handleInbound(ws, raw, envelope.sender);
+                pm.handleInbound(ws, raw, envelope.sender);
+                pm.handleInbound(ws, raw, envelope.sender);
+                pm.handleInbound(ws, raw, envelope.sender);
 
                 expect(emitted).to.equal(1);
                 pm.removeAllListeners('message');
@@ -201,7 +201,7 @@ describe('Fuzz: PeerManager', function () {
 
                     let emitted = 0;
                     pm.on('message', function () { emitted++; });
-                    pm._handleInbound(ws, JSON.stringify(selfEnvelope), null);
+                    pm.handleInbound(ws, JSON.stringify(selfEnvelope), null);
                     expect(emitted).to.equal(0);
                     pm.removeAllListeners('message');
                 }
@@ -219,7 +219,7 @@ describe('Fuzz: PeerManager', function () {
                         let ws = mockWs();
                         ws._peerAddr = e.sender;
                         pm.peers.set(e.sender, { ws: ws, state: 'open', lastSeen: 0 });
-                        pm._handleInbound(ws, JSON.stringify(e), e.sender);
+                        pm.handleInbound(ws, JSON.stringify(e), e.sender);
                     }
 
                     expect(pm.seenIds.size).to.equal(uniqueIds.size);
@@ -240,7 +240,7 @@ describe('Fuzz: PeerManager', function () {
                 fc.string({ minLength: 1, maxLength: 20 }),
                 fc.record({ key: fc.string({ maxLength: 10 }) }),
                 function (type, data) {
-                    let env = pm._buildEnvelope(type, data);
+                    let env = pm.buildEnvelope(type, data);
                     expect(env).to.have.property('type', type);
                     expect(env).to.have.property('id').that.is.a('string').and.not.empty;
                     expect(env).to.have.property('sender', SELF_ADDR);

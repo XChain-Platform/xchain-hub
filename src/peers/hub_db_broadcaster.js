@@ -190,7 +190,7 @@ class AdmissionHeightWatermark {
     }
 
     /** The newest tip observed for `chain` at or before `cutoffMs`, or null. */
-    _settledHeight(chain, cutoffMs){
+    settledHeight(chain, cutoffMs){
         let obs = this._obs.get(normalizeChain(chain) || '');
         if(!obs) return null;
         for(let i = obs.length - 1; i >= 0; i--)
@@ -298,7 +298,7 @@ class AdmissionHeightWatermark {
             let chains = spec.chains || this.federationChains;
             let entry  = {};
             for(let c of chains){
-                let settled = this._settledHeight(c, now - window);
+                let settled = this.settledHeight(c, now - window);
                 // One BELOW the settled tip: the observation proves the tip was at or below
                 // settled - 1 before it was recorded, which is what the claim needs.
                 let base  = (settled === null) ? null : settled - 1;
@@ -469,7 +469,7 @@ class HubDbBroadcaster {
         this._admissionHub = hub;
         if (this._admissionTimer) return true;
         let tick = () => {
-            this._sampleAdmission().catch((e) =>
+            this.sampleAdmission().catch((e) =>
                 console.error('HubDbBroadcaster: admission watermark sample failed:', e && e.message ? e.message : e));
         };
         this._admissionTimer = setInterval(tick, this.admissionSampleMs);
@@ -483,7 +483,7 @@ class HubDbBroadcaster {
     //
     // Every step degrades to "no entry" rather than to a guess, because a watermark entry
     // this hub cannot justify is a completeness claim over rows it may not hold.
-    async _sampleAdmission() {
+    async sampleAdmission() {
         let hub = this._admissionHub;
         let w   = this.admissionWatermark;
         if (!hub || !w) return;

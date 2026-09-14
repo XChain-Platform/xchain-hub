@@ -548,7 +548,7 @@ describe('admission height watermark: the frames that carry it', function () {
             },
         };
         b.attachAdmissionSource(hub);
-        await b._sampleAdmission();
+        await b.sampleAdmission();
 
         // The floor came back from storage and is published immediately, before any
         // observation of this process has aged.

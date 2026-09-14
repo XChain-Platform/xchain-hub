@@ -50,13 +50,13 @@ describe('Security Hardening', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true }, null);
             pm.validatorPubkeys = new Map();
             let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
 
         it('accepts unsigned messages when requireSigs is false', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);
             let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
-            expect(pm._verifySignature(envelope)).to.be.true;
+            expect(pm.verifySignature(envelope)).to.be.true;
         });
 
         it('rejects a signed message when validatorPubkeys is null (fail closed, not bootstrap-accept)', function () {
@@ -67,7 +67,7 @@ describe('Security Hardening', function () {
             pm.validatorPubkeys = null;
             let envelope = { type: 'PBFT_PRE_PREPARE', id: 'x1', sender: 'ws://attacker:9',
                              timestamp: Date.now(), sig: 'deadbeef', data: {} };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
     });
 
@@ -106,7 +106,7 @@ describe('Security Hardening', function () {
         }
 
         it('accepts a message whose sender matches the signing key', function () {
-            expect(makePm()._verifySignature(signedAs(addrA))).to.be.true;
+            expect(makePm().verifySignature(signedAs(addrA))).to.be.true;
         });
 
         it('rejects a message that names another validator addr but is signed by a different key', function () {
@@ -114,14 +114,14 @@ describe('Security Hardening', function () {
             // to be B. Membership passes and the signature is genuine, but the
             // sender it claims (B) is registered to a DIFFERENT key, so it must be
             // dropped. This is the quorum-forgery / median-poisoning primitive.
-            expect(makePm()._verifySignature(signedAs(addrB))).to.be.false;
+            expect(makePm().verifySignature(signedAs(addrB))).to.be.false;
         });
 
         it('rejects the forgery even when the effective signer set alone would admit the key', function () {
             let pm = makePm();
             // Registry still binds addrB -> B's key; effective set admits A's key.
             // The binding (registry) must win over bare membership.
-            expect(pm._verifySignature(signedAs(addrB))).to.be.false;
+            expect(pm.verifySignature(signedAs(addrB))).to.be.false;
         });
     });
 
@@ -162,10 +162,10 @@ describe('Security Hardening', function () {
         it('evicts oldest entry when dedup cache reaches max', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_DEDUP_CACHE_MAX: '5' }, null);
             for (let i = 0; i < 5; i++) {
-                pm._addToDedup('id-' + i);
+                pm.addToDedup('id-' + i);
             }
             expect(pm.seenIds.size).to.equal(5);
-            pm._addToDedup('id-5');
+            pm.addToDedup('id-5');
             expect(pm.seenIds.size).to.equal(5);
             expect(pm.seenIds.has('id-0')).to.be.false;
             expect(pm.seenIds.has('id-5')).to.be.true;
@@ -245,7 +245,7 @@ describe('Security Hardening', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);
             let warnStub = sinon.stub(console, 'warn');
             let mockWs = { _peerAddr: null };
-            pm._handleInbound(mockWs, 'not-json{{{', null);
+            pm.handleInbound(mockWs, 'not-json{{{', null);
             expect(warnStub.calledWith(sinon.match('P2P: Invalid JSON'))).to.be.true;
         });
     });

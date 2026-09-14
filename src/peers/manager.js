@@ -299,7 +299,7 @@ class PeerManager extends EventEmitter {
     // its chain (pushpricebatch and its siblings). WHICH rpc methods are allowed
     // there is decided in api.js, on the request stamp set below, because the
     // method name lives in a body this layer has not read yet.
-    _isFeedRequest(req) {
+    isFeedRequest(req) {
         if (!req || !req.url) return false;
         if (req.method === 'GET') {
             return req.url === FEED_SNAPSHOT_PREFIX || req.url.startsWith(FEED_SNAPSHOT_PREFIX + '/');
@@ -310,7 +310,7 @@ class PeerManager extends EventEmitter {
         return false;
     }
 
-    _isFeedUpgrade(req) {
+    isFeedUpgrade(req) {
         return !!(req && req.url && req.url.startsWith(FEED_SUBSCRIBE_PATH));
     }
 
@@ -335,7 +335,7 @@ class PeerManager extends EventEmitter {
         // left to hang on an open socket (the pre-feed behaviour of a handler-less
         // server), so a stray probe cannot hold a connection open.
         this.httpServer = http.createServer((req, res) => {
-            if (this.feedRequestHandler && this._isFeedRequest(req)) {
+            if (this.feedRequestHandler && this.isFeedRequest(req)) {
                 // Stamp the request as having arrived on the PUBLIC port. api.js
                 // reads this to hold a stamped request to the indexer push
                 // allowlist; an unstamped request (the private API port) keeps the
@@ -355,7 +355,7 @@ class PeerManager extends EventEmitter {
             // then HubDbBroadcaster). They never enter the gossip WebSocket server,
             // so a feed client is never in this.peers: it cannot be broadcast to,
             // relayed to, counted in any quorum, or pinged as a peer.
-            if (this._isFeedUpgrade(req)) {
+            if (this.isFeedUpgrade(req)) {
                 if (this.feedUpgradeHandler) this.feedUpgradeHandler(req, socket, head);
                 else socket.destroy();
                 return;
@@ -380,12 +380,12 @@ class PeerManager extends EventEmitter {
             ws._isAlive   = true;
             ws._remoteIp  = remoteIp;
 
-            ws.on('message', (raw) => this._handleInbound(ws, raw, null));
+            ws.on('message', (raw) => this.handleInbound(ws, raw, null));
             ws.on('pong', () => { ws._isAlive = true; });
             ws.on('close', (code, reason) => {
                 let reasonStr = reason && reason.length ? reason.toString() : '';
                 console.log('Inbound ws closed from ' + (ws._peerAddr || 'unknown') + ' (code=' + code + ', reason="' + reasonStr + '")');
-                this._removeInboundPeer(ws);
+                this.removeInboundPeer(ws);
             });
             ws.on('error', (e) => console.error('Inbound peer error:', e));
         });
@@ -417,12 +417,12 @@ class PeerManager extends EventEmitter {
             this._connectToPeer(addr);
             // Record seed in DB (fire and forget). validator_id is the peer's own addr,
             // not ours; we are recording the peer, not ourselves.
-            this._recordPeer(addr, addr, true);
+            this.recordPeer(addr, addr, true);
         }
 
-        this._startHeartbeat();
-        this._startDedupPruner();
-        this._startPingInterval();
+        this.startHeartbeat();
+        this.startDedupPruner();
+        this.startPingInterval();
     }
 
     async stop() {
@@ -477,14 +477,14 @@ class PeerManager extends EventEmitter {
         try { me = String(this.identity.getPubkeyHex()).toLowerCase(); }
         catch (e) { me = null; }
         this._holdVerdict = me ? !set.has(me) : false;
-        this._announceAuthoringHold(set, me);
+        this.announceAuthoringHold(set, me);
         return this._holdVerdict;
     }
 
     // One info line per signer-set CHANGE, never per round. Keyed on the set's
     // members rather than the Set object, because the refresh installs a new
     // object every poll and announcing per object would print every 30s.
-    _announceAuthoringHold(set, me) {
+    announceAuthoringHold(set, me) {
         let held = this._holdVerdict;
         let fp   = [...set].sort().join(',');
         let prev = this._holdAnnounced;
@@ -510,10 +510,10 @@ class PeerManager extends EventEmitter {
         // caller in src/ reads the return.
         if (this.authoringHeld()) return null;
 
-        let envelope = this._buildEnvelope(type, data);
+        let envelope = this.buildEnvelope(type, data);
 
         // Mark own message as seen (with cache bound)
-        this._addToDedup(envelope.id);
+        this.addToDedup(envelope.id);
 
         let serialized = JSON.stringify(envelope);
 
@@ -533,9 +533,9 @@ class PeerManager extends EventEmitter {
         let peer = this.peers.get(addr);
         if (!peer || !peer.ws || peer.ws.readyState !== WebSocket.OPEN) return false;
 
-        let envelope = this._buildEnvelope(type, data);
+        let envelope = this.buildEnvelope(type, data);
 
-        this._addToDedup(envelope.id);
+        this.addToDedup(envelope.id);
         this._send(peer.ws, JSON.stringify(envelope));
         return true;
     }
@@ -557,7 +557,7 @@ class PeerManager extends EventEmitter {
         return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }
 
-    _buildEnvelope(type, data) {
+    buildEnvelope(type, data) {
         let envelope = {
             type:      type,
             id:        this._makeId(),
@@ -591,7 +591,7 @@ class PeerManager extends EventEmitter {
     // failure) still applies. It is an out-param rather than a richer return
     // because every caller and test treats this method as a predicate, and the
     // boolean is the security-critical value.
-    _verifySignature(envelope, outcome) {
+    verifySignature(envelope, outcome) {
         // If signatures not required, accept unsigned messages
         if (!this.requireSigs && !envelope.sig) return true;
         // If signatures required but missing, reject
@@ -606,7 +606,7 @@ class PeerManager extends EventEmitter {
             // a key we'd reject anyway). Admit iff the key is in the chain
             // effective set OR the registry's pubkey set (addr-independent).
             let inSet = (this.effectiveSignerSet && this.effectiveSignerSet.has(pk))
-                     || this._registryHasPubkey(pk);
+                     || this.registryHasPubkey(pk);
             // Not a member: reject when sigs are required (fail closed); preserve
             // the permissive mode otherwise, matching the unknown-sender path.
             // The reason is reported separately from a crypto failure: a joining
@@ -667,7 +667,7 @@ class PeerManager extends EventEmitter {
     // registry is Map<addr, pubkeyHex>; Option A uses it as an addr-independent
     // pubkey SET so a rotated key is admitted as soon as the registry carries it
     // under any addr.
-    _registryHasPubkey(pubkeyHexLower) {
+    registryHasPubkey(pubkeyHexLower) {
         if (!this.validatorPubkeys) return false;
         for (let v of this.validatorPubkeys.values()) {
             if (v && v.toLowerCase() === pubkeyHexLower) return true;
@@ -683,7 +683,7 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    _handleInbound(ws, rawData, knownAddr) {
+    handleInbound(ws, rawData, knownAddr) {
         let envelope;
         try {
             envelope = JSON.parse(rawData);
@@ -718,7 +718,7 @@ class PeerManager extends EventEmitter {
         }
 
         if (this.seenIds.has(envelope.id)) return;
-        this._addToDedup(envelope.id);
+        this.addToDedup(envelope.id);
 
         // Per-peer rate limiting: established federation peers get the higher
         // known-peer ceiling so a consensus burst is never dropped (a dropped PBFT
@@ -755,7 +755,7 @@ class PeerManager extends EventEmitter {
         // throttling here: the per-peer rate limit above already bounds this line,
         // exactly as it did for the single invalid-signature message.
         let verdict = {};
-        if (!this._verifySignature(envelope, verdict)) {
+        if (!this.verifySignature(envelope, verdict)) {
             let peer = ws._remoteIp || envelope.sender;
             if (verdict.reason === 'not_in_signer_set') {
                 let blocks = PeerManager.stakeActivationBlocks(this.config.HUB_NETWORK);
@@ -773,7 +773,7 @@ class PeerManager extends EventEmitter {
 
         if (knownAddr === null && ws._peerAddr === null) {
             ws._peerAddr = envelope.sender;
-            this._registerInboundPeer(ws, envelope.sender);
+            this.registerInboundPeer(ws, envelope.sender);
         }
 
         let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
@@ -785,7 +785,7 @@ class PeerManager extends EventEmitter {
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
         // publisher and will diverge from peerAddr on relayed messages.
-        this._recordPeer(peerAddr, peerAddr, false);
+        this.recordPeer(peerAddr, peerAddr, false);
 
         // Consensus sees only the envelope, never the socket, so the one
         // identity a remote cannot mint is stamped on here. Non-enumerable and
@@ -795,7 +795,7 @@ class PeerManager extends EventEmitter {
         this.emit('message', envelope);
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp, envelope.data);
-            this._notePeerRules(envelope);
+            this.notePeerRules(envelope);
         }
         // Capability gossip; see CapabilityRegistry.
         if (envelope.type === 'CAPABILITY_ACTIVATED' ||
@@ -804,7 +804,7 @@ class PeerManager extends EventEmitter {
             this.emit('capability', envelope);
         }
 
-        this._relay(envelope, ws);
+        this.relay(envelope, ws);
     }
 
     // Relay a message to all peers except the source ws and the original sender.
@@ -812,7 +812,7 @@ class PeerManager extends EventEmitter {
     // via a different ws (e.g., our outbound to a peer who reached us via their
     // outbound), which both wastes bandwidth and trips the self-connection guard
     // on the other side when the receiving ws is freshly opened.
-    _relay(envelope, sourceWs) {
+    relay(envelope, sourceWs) {
         let serialized = JSON.stringify(envelope);
         for (let [addr, peer] of this.peers) {
             if (addr === envelope.sender) continue;
@@ -822,7 +822,7 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    _registerInboundPeer(ws, addr) {
+    registerInboundPeer(ws, addr) {
         let existing = this.peers.get(addr);
 
         // If we already have an outbound connection to this peer, keep the outbound
@@ -846,7 +846,7 @@ class PeerManager extends EventEmitter {
         console.log('Inbound peer connected: ' + addr);
     }
 
-    _removeInboundPeer(ws) {
+    removeInboundPeer(ws) {
         // Only the peers-map cleanup is gated on ws._peerAddr. That field is set in
         // _registerInboundPeer, which runs only once an inbound frame has cleared the
         // JSON/type/timestamp/rate/signature checks, whereas the per-IP count is
@@ -918,7 +918,7 @@ class PeerManager extends EventEmitter {
             ws = new WebSocket(url, { maxPayload: maxPayload });
         } catch (e) {
             console.error('Failed to create WebSocket to ' + addr + ':', e);
-            this._scheduleReconnect(addr);
+            this.scheduleReconnect(addr);
             return;
         }
 
@@ -936,7 +936,7 @@ class PeerManager extends EventEmitter {
             console.log('Connected to peer: ' + addr);
         });
 
-        ws.on('message', (raw) => this._handleInbound(ws, raw, addr));
+        ws.on('message', (raw) => this.handleInbound(ws, raw, addr));
         ws.on('pong', () => { ws._isAlive = true; });
 
         ws.on('close', (code, reason) => {
@@ -947,7 +947,7 @@ class PeerManager extends EventEmitter {
             }
             peer.state = 'closed';
             peer.ws = null;
-            this._scheduleReconnect(addr);
+            this.scheduleReconnect(addr);
         });
 
         // Do NOT log here. A dial that is refused by design (a federation port
@@ -963,7 +963,7 @@ class PeerManager extends EventEmitter {
         peer.ws = ws;
     }
 
-    _scheduleReconnect(addr) {
+    scheduleReconnect(addr) {
         if (!this.running) return;
 
         let peer = this.peers.get(addr);
@@ -1012,7 +1012,7 @@ class PeerManager extends EventEmitter {
     // some peer disagrees is mildly useful; telling them that THEIR OWN hub is the
     // odd one out is the message that gets a node upgraded, and it is the message
     // nothing in the platform sent before this.
-    _notePeerRules(envelope) {
+    notePeerRules(envelope) {
         let sender = envelope && envelope.sender;
         if (!sender) return;
         let data   = envelope.data || {};
@@ -1029,14 +1029,14 @@ class PeerManager extends EventEmitter {
         // existed. That is worth saying once per throttle window, but it is NOT a
         // mismatch: it carries no claim to disagree with.
         if (digest === null) {
-            this._warnRulesOnce('legacy:' + sender, 'P2P: peer ' + sender + ' advertises no consensus-rules digest' +
+            this.warnRulesOnce('legacy:' + sender, 'P2P: peer ' + sender + ' advertises no consensus-rules digest' +
                 ' (version ' + (this.peerRules.get(sender).version || 'unknown') + '); it predates the digest and cannot be' +
                 ' checked for flag-day agreement. Ask its operator to upgrade.');
             return;
         }
         if (digest === mine) return;
 
-        this._warnRulesOnce('peer:' + sender, 'P2P: CONSENSUS-RULE MISMATCH with peer ' + sender +
+        this.warnRulesOnce('peer:' + sender, 'P2P: CONSENSUS-RULE MISMATCH with peer ' + sender +
             ' (its version ' + (this.peerRules.get(sender).version || 'unknown') + '). It applies different flag-day' +
             ' heights than this hub, so the two will disagree about which actions are valid once a differing gate is' +
             ' reached. peer=' + digest.substring(0, 16) + '... ours=' + mine.substring(0, 16) + '...');
@@ -1057,14 +1057,14 @@ class PeerManager extends EventEmitter {
         for (let [d, n] of tally) if (n > topCount) { topCount = n; topDigest = d; }
         let mineCount = (tally.get(mine) || 0) + 1;   // +1: this hub's own vote
         if (topDigest && topDigest !== mine && topCount >= mineCount) {
-            this._warnRulesOnce('self', 'P2P: THIS HUB IS RUNNING CONSENSUS RULES THE FEDERATION DOES NOT SHARE. ' +
+            this.warnRulesOnce('self', 'P2P: THIS HUB IS RUNNING CONSENSUS RULES THE FEDERATION DOES NOT SHARE. ' +
                 topCount + ' of ' + (live + 1) + ' peers agree on ' + topDigest.substring(0, 16) + '... while this hub has ' +
                 mine.substring(0, 16) + '... Once the chain reaches a gate where they differ, this hub will judge actions' +
                 ' differently from the federation and its state will diverge. UPGRADE THIS NODE.');
         }
     }
 
-    _warnRulesOnce(key, message) {
+    warnRulesOnce(key, message) {
         let now  = Date.now();
         let last = this._rulesWarnedAt.get(key) || 0;
         if (now - last < this.rulesWarnIntervalMs) return;
@@ -1092,7 +1092,7 @@ class PeerManager extends EventEmitter {
         };
     }
 
-    _startHeartbeat() {
+    startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
         let version = '0.0.0';
         try { version = require('../../package.json').version; } catch(e) {}
@@ -1109,7 +1109,7 @@ class PeerManager extends EventEmitter {
         }, interval);
     }
 
-    _startDedupPruner() {
+    startDedupPruner() {
         this.dedupTimer = setInterval(() => {
             let now = Date.now();
             for (let [id, expiresAt] of this.seenIds) {
@@ -1124,7 +1124,7 @@ class PeerManager extends EventEmitter {
         }, this.config.P2P_DEDUP_PRUNE_INTERVAL || 30000);
     }
 
-    _startPingInterval() {
+    startPingInterval() {
         this.pingTimer = setInterval(() => {
             // Ping outbound dialed peers only. Inbound peers also live in this.peers
             // (after _registerInboundPeer) but are pinged via wss.clients below.
@@ -1157,7 +1157,7 @@ class PeerManager extends EventEmitter {
     }
 
     // Add a message ID to the dedup cache, enforcing the size bound
-    _addToDedup(id) {
+    addToDedup(id) {
         if (this.seenIds.size >= this.dedupCacheMax) {
             let oldest = this.seenIds.keys().next().value;
             this.seenIds.delete(oldest);
@@ -1185,7 +1185,7 @@ class PeerManager extends EventEmitter {
     }
 
     // Record/update a peer in the database (fire and forget)
-    _recordPeer(addr, validatorId, isSeed) {
+    recordPeer(addr, validatorId, isSeed) {
         if (!this.db) return;
         this.db.setP2pPeer(addr, validatorId, isSeed ? 1 : 0)
             .catch(e => console.error('Error recording peer:', e));
