@@ -23,8 +23,8 @@ const proxyquire   = require('proxyquire');
 
 const OracleRound        = require('../../src/oracle/round');
 const OracleConsensus    = require('../../src/oracle/consensus');
-const CapabilityRegistry = require('../../src/CapabilityRegistry');
-const StakeWeightFeed    = require('../../src/StakeWeightFeed');
+const CapabilityRegistry = require('../../src/validators/capability_registry');
+const StakeWeightFeed    = require('../../src/validators/stake_weight_feed');
 const { createMockHub }  = require('../helpers/mockHub');
 const { makeValidator }  = require('../helpers/fixtures');
 
@@ -109,7 +109,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
                 return countResult(body.params.capability, body.params.block_index);
             return { data: { result: null } };
         }) };
-        CapabilitySnapshot = proxyquire('../../src/CapabilitySnapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
 
         hub = createMockHub({ p2pConfig: { HUB_NETWORK: 'testnet', ORACLE_EPOCH_START: 1704067200000 } });
         db  = hub.db;

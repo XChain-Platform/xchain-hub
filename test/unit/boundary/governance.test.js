@@ -12,7 +12,7 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Governance   = require('../../../src/Governance');
+const Governance   = require('../../../src/validators/governance');
 const { createMockHub }            = require('../../helpers/mockHub');
 const { VALIDATORS_3, makeValidator } = require('../../helpers/fixtures');
 

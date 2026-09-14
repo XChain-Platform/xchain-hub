@@ -29,7 +29,7 @@ const path                 = require('path');
 const { expect }           = require('chai');
 const sinon                = require('sinon');
 const AttestationConsensus = require('../../src/attestation/consensus.js');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
+const ValidatorIdentity    = require('../../src/validators/identity.js');
 const { isCanonicalIntSpelling } = require('../../src/attestation/attest_response_canonical.js');
 const { ATTEST_RESPONSE_FORWARD_S } = require('../../src/attestation/attest_response_timing.js');
 

@@ -42,7 +42,7 @@
 
 const crypto            = require('crypto');
 const EventEmitter      = require('events');
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const eq                = require('../equivocation_header.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { positiveIntConfig } = require('../lib/config_int.js');

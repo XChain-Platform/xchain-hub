@@ -14,7 +14,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const SlashGovernance = require('../../src/SlashGovernance');
+const SlashGovernance = require('../../src/validators/slash_governance');
 const { parseSlashPenaltyParam, computeEvidenceHash, SLASH_PENALTY_PREFIX } = SlashGovernance;
 const { createMockHub } = require('../helpers/mockHub');
 
@@ -278,7 +278,7 @@ describe('SlashGovernance', function () {
 
     describe('integration with Governance proposal:finalized', function () {
         it('a passed SLASH_PENALTY proposal executes the penalty via the event', async function () {
-            const Governance = require('../../src/Governance');
+            const Governance = require('../../src/validators/governance');
             const { VALIDATORS_3 } = require('../helpers/fixtures');
 
             let ghub = createMockHub();

@@ -186,9 +186,10 @@ const DYNAMIC_EDGES = [
         why: 'the cross-chain bridge engine requires each of its three activation gates by computed path',
     },
     {
-        from: 'src/ProviderRegistry.js',
-        // getModule requires './providers/<id>.js' where the id comes from a
-        // database row, so no literal in the repo names a provider module and both
+        from: 'src/validators/provider_registry.js',
+        // getModule requires src/providers/<id>.js from the registry's feature
+        // directory, where the id comes from a database row, so no literal in
+        // the repo names a provider module and both
         // of them read unreachable without this edge. A failed load returns null
         // and the provider is simply unavailable, which is the same silent shape
         // the two gates above have.

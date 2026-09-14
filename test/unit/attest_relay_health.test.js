@@ -23,7 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
-const { ConsensusInputMonitor } = require('../../src/lib/consensus_input_monitor.js');
+const { ConsensusInputMonitor } = require('../../src/validators/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub');
 

@@ -24,14 +24,14 @@
 
 const crypto = require('crypto');
 const EventEmitter = require('events');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./CapabilityRegistry.js');
-const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
-const { canonicalValidatorOrder } = require('./rollcall/validator_order.js');
+const ValidatorIdentity = require('./identity.js');
+const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./capability_registry.js');
+const { parseAttestationProviderParam } = require('./provider_registry.js');
+const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 // Federation-uniform oracle co-sign band: the absolute floor under the slash band
 // (see _validateSlashBandFloor). constants.js requires nothing, so no cycle.
-const { ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
-const { noteDrop } = require('./consensus/diagnostics');
+const { ORACLE_DEVIATION_THRESHOLD } = require('../constants.js');
+const { noteDrop } = require('../consensus/diagnostics');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';

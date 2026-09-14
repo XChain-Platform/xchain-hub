@@ -12,8 +12,8 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Governance   = require('../../src/Governance');
-const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const Governance   = require('../../src/validators/governance');
+const ValidatorIdentity = require('../../src/validators/identity');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3 }    = require('../helpers/fixtures');
 

@@ -29,7 +29,7 @@
 const sinon                 = require('sinon');
 const { expect }            = require('chai');
 const PeerManager           = require('../../src/PeerManager');
-const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const ValidatorIdentity     = require('../../src/validators/identity');
 const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
 const { DB_METHODS }        = require('../helpers/mockHub.js');
 

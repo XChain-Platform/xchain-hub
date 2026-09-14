@@ -1636,7 +1636,7 @@ describe('OracleConsensus', function () {
     // -----------------------------------------------------------------
 
     describe('PRICE v0 signature helpers', function () {
-        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+        const ValidatorIdentity = require('../../src/validators/identity');
 
         it('_buildPriceV0Payload sorts pairs canonically', function () {
             let payload = oc._buildPriceV0Payload(5, 1700000000, [

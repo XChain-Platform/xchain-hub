@@ -491,7 +491,7 @@ describe('XChainHub', function () {
     // -----------------------------------------------------------------
 
     describe('capability governance hot-reload', function () {
-        const CapabilityRegistry = require('../../src/CapabilityRegistry');
+        const CapabilityRegistry = require('../../src/validators/capability_registry');
         let hub;
 
         beforeEach(function () {
@@ -1102,7 +1102,7 @@ describe('XChainHub', function () {
                     './oracle/consensus.js':  function () { return oracleConsensus; },
                     './oracle/round.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
                     './anchor/reward_tracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
-                    './SlashDetector.js':    function () { return slashDetector; },
+                    './validators/slash_detector.js':    function () { return slashDetector; },
                     // Stubbed here too: this describe block is about validator-set
                     // freshness, not the signing round, and the fixture peerManager
                     // below has no .on(), which the real OracleBatchSigner.start()
@@ -1179,7 +1179,7 @@ describe('XChainHub', function () {
                 './oracle/consensus.js': function () { return { setValidatorSet: sinon.stub(), on: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
                 './oracle/round.js':     function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
                 './anchor/reward_tracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
-                './SlashDetector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
+                './validators/slash_detector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
                 './oracle/publisher.js': function () { return { start: sinon.stub().resolves() }; },
                 './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
             };
@@ -1243,7 +1243,7 @@ describe('XChainHub', function () {
             return {
                 publisher,
                 modules: {
-                    './ProviderRegistry.js':       function () { return { load: sinon.stub().resolves(), loadGovernanceHistory: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
+                    './validators/provider_registry.js':       function () { return { load: sinon.stub().resolves(), loadGovernanceHistory: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
                     './attestation/consensus.js':   function () { return { start: sinon.stub().resolves(), on: sinon.stub() }; },
                     './attestation/round.js':       function () { return { start: sinon.stub().resolves(), setConsensus: sinon.stub() }; },
                     './attestation/publisher.js':   function () { return publisher; },

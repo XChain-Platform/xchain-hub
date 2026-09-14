@@ -26,7 +26,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7, snapshot_block: 100 };

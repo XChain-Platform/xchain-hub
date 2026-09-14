@@ -26,7 +26,7 @@
  */
 
 const assert = require('assert');
-const SlashDetector = require('../../src/SlashDetector');
+const SlashDetector = require('../../src/validators/slash_detector');
 const RewardTracker = require('../../src/anchor/reward_tracker');
 const { DB_METHODS } = require('../helpers/mockHub');
 

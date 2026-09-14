@@ -21,7 +21,7 @@
 const { expect }              = require('chai');
 const StateCheckpointEngine   = require('../../src/anchor/checkpoint_engine');
 const StateAnchorPublisher    = require('../../src/anchor/publisher');
-const ValidatorIdentity       = require('../../src/ValidatorIdentity');
+const ValidatorIdentity       = require('../../src/validators/identity');
 const swq                     = require('../../src/stake_weighted_quorum');
 const { resolveQuorumNetwork } = require('../../src/anchor/quorum_network');
 const { waitUntil }           = require('../helpers/waitUntil');

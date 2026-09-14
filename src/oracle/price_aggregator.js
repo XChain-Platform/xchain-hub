@@ -31,7 +31,7 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const eq                = require('../equivocation_header.js');
 const pricePair         = require('../price_pair_activation.js');
 const priceScale        = require('../price_scale_activation.js');

@@ -84,7 +84,7 @@ const fs    = require('fs');
 const path  = require('path');
 const axios = require('axios');
 
-const ValidatorIdentity          = require('../ValidatorIdentity.js');
+const ValidatorIdentity          = require('../validators/identity.js');
 const EncoderClient              = require('../EncoderClient.js');
 const SpendGuard                 = require('../lib/spend_guard.js');
 const StateAnchorPublisher       = require('../anchor/publisher.js');

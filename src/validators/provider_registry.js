@@ -25,6 +25,8 @@
  *
  ********************************************************************/
 
+const path = require('path');
+
 const DEFAULTS = {
     http_get: {
         provider_id:            'http_get',
@@ -136,7 +138,7 @@ class ProviderRegistry {
         // Loaded provider definitions: providerId -> def object
         this.providers = new Map();
 
-        // Lazy-loaded provider modules: providerId -> require('./providers/<id>.js')
+        // Lazy-loaded provider modules: providerId -> the module at src/providers/<id>.js
         this.modules = new Map();
 
         // Block-anchored provider-config history: providerId -> array of
@@ -469,7 +471,8 @@ class ProviderRegistry {
         if (!this.providers.has(providerId)) return null;
         if (this.modules.has(providerId)) return this.modules.get(providerId);
         try {
-            let mod = require('./providers/' + providerId + '.js');
+            // The providers stay in src/providers/, one directory above this registry.
+            let mod = require(path.join(__dirname, '..', 'providers', providerId + '.js'));
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
                 catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId, e); }

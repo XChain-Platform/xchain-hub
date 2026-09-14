@@ -37,11 +37,11 @@
  ********************************************************************/
 
 const axios = require('axios');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 // Consensus-input fetches fail closed but used to fail SILENTLY for
 // every reason except auth and echo mismatch. The monitor counts every outcome,
 // owns the log throttle, and raises the alert that /health reports.
-const { ConsensusInputMonitor, REASONS, classifyFetchError } = require('./lib/consensus_input_monitor.js');
+const { ConsensusInputMonitor, REASONS, classifyFetchError } = require('./consensus_input_monitor.js');
 
 // Operator-facing detail lines for the non-transport failure classes. Held as
 // constants because each is raised from all four fetchers and must read the
@@ -70,7 +70,7 @@ const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 // light.js) must bury by the SAME depth the signer buried by. A hub-local 6 and
 // a verifier-local 6 that drift apart resolve different validator sets for the
 // same declared height with nothing logged.
-const { CANONICAL_REORG_BUFFER } = require('./snapshot_reorg_buffer.js');
+const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
 
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the

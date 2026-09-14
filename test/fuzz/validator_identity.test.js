@@ -12,7 +12,7 @@
 
 const { expect }        = require('chai');
 const fc                = require('fast-check');
-const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const ValidatorIdentity = require('../../src/validators/identity');
 const gen               = require('./helpers/generators');
 
 describe('Fuzz: ValidatorIdentity', function () {

@@ -15,7 +15,7 @@ const { expect }       = require('chai');
 const WebSocket        = require('ws');
 const testDb           = require('../../helpers/testDb');
 const { createPeerPair, buildEnvelope, sendEnvelope, waitForEvent } = require('../../helpers/testPeerNetwork');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const ValidatorIdentity = require('../../../src/validators/identity');
 const { waitUntil }     = require('../../helpers/waitUntil');
 
 // Order-preserving flush. The transport delivers frames in order, so a probe sent

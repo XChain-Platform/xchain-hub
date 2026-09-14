@@ -31,7 +31,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { waitUntil }        = require('../helpers/waitUntil');
 
 const BLOCK = 100;

@@ -94,7 +94,7 @@ describe('Regression: validator setup/run fixes', function () {
     // -----------------------------------------------------------------
     describe('REG-VAL-003: capability qualification is fail-closed', function () {
         const XChainHub         = require('../../src/XChainHub');
-        const CapabilityRegistry = require('../../src/CapabilityRegistry');
+        const CapabilityRegistry = require('../../src/validators/capability_registry');
 
         // Build a stub hub that exposes exactly what refreshOwnQualification
         // touches, wired to the real registry + real decimal-compare methods.

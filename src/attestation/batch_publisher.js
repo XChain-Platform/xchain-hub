@@ -86,7 +86,7 @@ const crypto = require('crypto');
 
 const EncoderClient     = require('../EncoderClient.js');
 const SpendGuard        = require('../lib/spend_guard.js');
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const swq               = require('../stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { forwardableUtxos }  = require('../lib/encoder_utxo_forward.js');

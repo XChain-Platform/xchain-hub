@@ -18,7 +18,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 
 const NETWORK   = 'regtest';
 const MAX_BLOCK = 100;                       // the network-wide max the caller resolves at

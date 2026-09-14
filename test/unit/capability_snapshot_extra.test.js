@@ -31,7 +31,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/CapabilitySnapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
     });
 
     afterEach(function () {

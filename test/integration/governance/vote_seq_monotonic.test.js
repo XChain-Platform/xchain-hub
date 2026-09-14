@@ -27,8 +27,8 @@
 
 const { expect }   = require('chai');
 const testDb       = require('../../helpers/testDb');
-const Governance   = require('../../../src/Governance');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const Governance   = require('../../../src/validators/governance');
+const ValidatorIdentity = require('../../../src/validators/identity');
 const { createMockHub } = require('../../helpers/mockHub');
 
 const PROPOSAL = 'gov:MIN_STAKE:seq';

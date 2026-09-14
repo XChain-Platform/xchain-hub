@@ -65,7 +65,7 @@
  ********************************************************************/
 
 const crypto            = require('crypto');
-const ValidatorIdentity = require('../ValidatorIdentity');
+const ValidatorIdentity = require('../validators/identity');
 const swq               = require('../stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isRetractionSigningActive } = require('../retraction_signing_activation.js');

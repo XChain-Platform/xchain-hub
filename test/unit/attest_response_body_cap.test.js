@@ -22,7 +22,7 @@
 const { expect }           = require('chai');
 const sinon                = require('sinon');
 const AttestationConsensus = require('../../src/attestation/consensus.js');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
+const ValidatorIdentity    = require('../../src/validators/identity.js');
 const {
     ATTEST_RESPONSE_BODY_MAX_BYTES,
     bodyByteLength,

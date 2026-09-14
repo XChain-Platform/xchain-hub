@@ -34,8 +34,8 @@ function loadModule(selfTestResults) {
             )
         };
     }
-    CapabilityRegistry = proxyquire('../../src/CapabilityRegistry', {
-        './capabilities/index.js': selfTestStubs
+    CapabilityRegistry = proxyquire('../../src/validators/capability_registry', {
+        '../capabilities/index.js': selfTestStubs
     });
 }
 
@@ -83,7 +83,7 @@ describe('CapabilityRegistry', function () {
     describe('constructor', function () {
         it('loads KNOWN_CAPABILITIES from module export', function () {
             loadModule();
-            let { KNOWN_CAPABILITIES } = require('../../src/CapabilityRegistry');
+            let { KNOWN_CAPABILITIES } = require('../../src/validators/capability_registry');
             expect(KNOWN_CAPABILITIES).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node']);
         });
 

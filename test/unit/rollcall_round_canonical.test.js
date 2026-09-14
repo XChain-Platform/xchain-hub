@@ -28,7 +28,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const RollcallRound     = require('../../src/rollcall/round.js');
-const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
+const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
                               'protocol', 'test-vectors', 'rollcall_canonical.json');

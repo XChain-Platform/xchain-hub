@@ -19,11 +19,11 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
-const Governance = require('../../src/Governance');
+const Governance = require('../../src/validators/governance');
 const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 
-const CapabilityRegistry = proxyquire('../../src/CapabilityRegistry', {
-    './capabilities/index.js': {}
+const CapabilityRegistry = proxyquire('../../src/validators/capability_registry', {
+    '../capabilities/index.js': {}
 });
 
 describe('governance/capability read RPC queries', function () {

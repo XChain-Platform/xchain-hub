@@ -13,7 +13,7 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const RewardTracker  = require('../../src/anchor/reward_tracker');
-const SlashDetector  = require('../../src/SlashDetector');
+const SlashDetector  = require('../../src/validators/slash_detector');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 

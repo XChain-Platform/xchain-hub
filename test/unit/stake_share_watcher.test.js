@@ -18,7 +18,7 @@
 
 const { expect } = require('chai');
 
-const StakeShareWatcher = require('../../src/StakeShareWatcher.js');
+const StakeShareWatcher = require('../../src/validators/stake_share_watcher.js');
 const { LEVELS } = require('../../src/lib/stake_share_monitor.js');
 
 const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];

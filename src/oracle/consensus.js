@@ -28,7 +28,7 @@
 const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const PriceFetcher      = require('./price_fetcher.js');
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
         XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('../constants.js');
 const swq               = require('../stake_weighted_quorum.js');

@@ -21,15 +21,15 @@ const XChainHub = proxyquire('../../../src/XChainHub', {
     './db':                 function () { return mockDb; },
     './PeerManager.js':     function () { return null; },
     './consensus/pbft.js':       function () {},
-    './ValidatorIdentity.js': function () {},
+    './validators/identity.js': function () {},
     './oracle/consensus.js': function () {},
     './oracle/round.js':     function () {},
     './anchor/reward_tracker.js':   function () {},
-    './SlashDetector.js':   function () {},
+    './validators/slash_detector.js':   function () {},
     './cross_chain/engine.js': function () {},
     './anchor/reorg_handler.js':    function () {},
     './cross_chain/swap_tracker.js':     function () {},
-    './Governance.js':      function () {}
+    './validators/governance.js':      function () {}
 });
 
 describe('Boundary: Fee Quote Calculation', function () {

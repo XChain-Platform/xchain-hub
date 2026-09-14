@@ -12,7 +12,7 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ValidatorIdentity  = require('../../src/ValidatorIdentity');
+const ValidatorIdentity  = require('../../src/validators/identity');
 const PeerManager        = require('../../src/PeerManager');
 const { DB_METHODS }     = require('../helpers/mockHub');
 

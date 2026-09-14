@@ -37,7 +37,7 @@
 const sinon                = require('sinon');
 const { expect }           = require('chai');
 const AttestationConsensus = require('../../src/attestation/consensus');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const llm                  = require('../../src/providers/llm');
 const { createMockHub }    = require('../helpers/mockHub');
 

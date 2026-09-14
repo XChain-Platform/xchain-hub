@@ -38,7 +38,7 @@
 const { expect }        = require('chai');
 const sinon             = require('sinon');
 const crypto            = require('crypto');
-const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
+const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 

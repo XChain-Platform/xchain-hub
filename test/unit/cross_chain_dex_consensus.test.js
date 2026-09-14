@@ -19,7 +19,7 @@
 
 const { expect }             = require('chai');
 const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus');
-const ValidatorIdentity      = require('../../src/ValidatorIdentity');
+const ValidatorIdentity      = require('../../src/validators/identity');
 const { waitUntil }          = require('../helpers/waitUntil');
 
 // Canonical format byte-identical to the indexer verifier (cross_settle._canonical).

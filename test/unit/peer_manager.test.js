@@ -13,7 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const EventEmitter       = require('events');
-const ValidatorIdentity  = require('../../src/ValidatorIdentity');
+const ValidatorIdentity  = require('../../src/validators/identity');
 const PeerManager        = require('../../src/PeerManager');
 const observability      = require('../../src/observability');
 const { waitUntil }      = require('../helpers/waitUntil');

@@ -48,7 +48,7 @@
  *
  ********************************************************************/
 
-const coins = require('./coins');
+const coins = require('../coins');
 
 class StakeWeightFeed {
 

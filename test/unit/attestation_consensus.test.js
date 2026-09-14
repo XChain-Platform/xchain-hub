@@ -14,7 +14,7 @@ const sinon                = require('sinon');
 const crypto               = require('crypto');
 const { expect }           = require('chai');
 const AttestationConsensus = require('../../src/attestation/consensus');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { createMockHub }    = require('../helpers/mockHub');
 
 // Minimal provider registry: the COMMIT/buffer paths exercised here never

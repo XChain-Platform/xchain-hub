@@ -36,7 +36,7 @@
  *
  ********************************************************************/
 
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const swq               = require('../stake_weighted_quorum.js');
 const pst               = require('../price_sig_tally_activation.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');

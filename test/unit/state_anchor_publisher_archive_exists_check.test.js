@@ -29,7 +29,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 
 const CP = {
     chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),

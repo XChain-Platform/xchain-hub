@@ -15,7 +15,7 @@ const fs   = require('fs');
 const path = require('path');
 const crd  = require('../../src/consensus_rules_digest.js');
 const PeerManager = require('../../src/PeerManager.js');
-const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
+const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const INDEXER_COPY = path.resolve(__dirname, '../../../xchain-indexer/src/consensus_rules_digest.js');
 

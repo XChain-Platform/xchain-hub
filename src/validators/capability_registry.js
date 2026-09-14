@@ -24,7 +24,7 @@
  ********************************************************************/
 
 const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
-const SELF_TESTS = require('./capabilities/index.js');
+const SELF_TESTS = require('../capabilities/index.js');
 
 // Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE into
 // { capability } (lowercased), or null if it is not a known-capability MIN_STAKE field.

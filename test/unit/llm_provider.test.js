@@ -379,7 +379,7 @@ describe('llm provider, _setConfig', function () {
         // The knob this warning was built for is gone from the shipped defaults, so a
         // fresh hub no longer advertises a governance value the runtime cannot read.
         it('no longer ships judge_equivalence_threshold in the llm provider defaults', function () {
-            const { DEFAULTS } = require('../../src/ProviderRegistry');
+            const { DEFAULTS } = require('../../src/validators/provider_registry');
             let ac = DEFAULTS && DEFAULTS.llm && DEFAULTS.llm.additional_config;
             expect(ac).to.be.an('object');
             expect(ac).to.not.have.property('judge_equivalence_threshold');

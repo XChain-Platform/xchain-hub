@@ -16,7 +16,7 @@
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const ar                   = require('../../src/anchor_reward_activation');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

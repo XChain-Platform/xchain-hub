@@ -51,7 +51,7 @@
 
 const EventEmitter      = require('events');
 const axios             = require('axios');
-const ValidatorIdentity = require('../ValidatorIdentity.js');
+const ValidatorIdentity = require('../validators/identity.js');
 const swq               = require('../stake_weighted_quorum.js');
 const eq                = require('../equivocation_header.js');
 const ckpt              = require('../checkpoint_commitment_activation.js');

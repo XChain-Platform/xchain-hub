@@ -15,8 +15,8 @@ const { expect }     = require('chai');
 const EventEmitter   = require('events');
 const testDb         = require('../../helpers/testDb');
 const { VALIDATORS_4 } = require('../../helpers/fixtures');
-const Governance     = require('../../../src/Governance');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const Governance     = require('../../../src/validators/governance');
+const ValidatorIdentity = require('../../../src/validators/identity');
 
 // Generate fixed test keypairs
 const TEST_KEYS = [];

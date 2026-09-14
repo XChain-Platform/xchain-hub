@@ -12,7 +12,7 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ProviderRegistry   = require('../../src/ProviderRegistry');
+const ProviderRegistry   = require('../../src/validators/provider_registry');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ describe('ProviderRegistry', function () {
 
     describe('DEFAULTS export', function () {
         it('exports DEFAULTS object', function () {
-            let { DEFAULTS } = require('../../src/ProviderRegistry');
+            let { DEFAULTS } = require('../../src/validators/provider_registry');
             expect(DEFAULTS).to.have.property('http_get');
             expect(DEFAULTS).to.have.property('llm');
             expect(DEFAULTS.llm.additional_config).to.have.property('judge_model');

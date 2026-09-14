@@ -26,7 +26,7 @@
 
 module.exports = {
     // Inserts a row into governance_proposals.
-    // Moved here from src/Governance.js:372.
+    // Moved here from src/validators/governance.js:372.
     async createGovernanceProposalByProposalId(proposalId, proposerPubkey, parameter, currentValue, proposedValue, rationale, now, votingEnd, activation, snapshotJson) {
         return this.doQuery(`INSERT INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
@@ -35,7 +35,7 @@ module.exports = {
     },
 
     // Inserts a row into governance_proposals.
-    // Moved here from src/Governance.js:711.
+    // Moved here from src/validators/governance.js:711.
     async createGovernanceProposalByProposalIdAndProposerPubkey(proposalId, proposer_pubkey, parameter, currentValue, proposedValue, rationale, localVotingEnd, activation, snapshotJson) {
         return this.doQuery(`INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
@@ -44,25 +44,25 @@ module.exports = {
     },
 
     // Reads rows from governance_proposals.
-    // Moved here from src/Governance.js:326.
+    // Moved here from src/validators/governance.js:326.
     async findGovernanceProposalsByParameter(parameter) {
         return this.doQuery(`SELECT id FROM governance_proposals WHERE parameter = ? AND status = 'voting'`, [parameter]);
     },
 
     // Reads rows from governance_proposals.
-    // Moved here from src/Governance.js:493.
+    // Moved here from src/validators/governance.js:493.
     async findGovernanceProposalsByProposalId(proposalId) {
         return this.doQuery('SELECT * FROM governance_proposals WHERE proposal_id = ?', [proposalId]);
     },
 
     // Reads rows from governance_proposals.
-    // Moved here from src/Governance.js:403.
+    // Moved here from src/validators/governance.js:403.
     async findGovernanceProposalsByProposalIdInVoting(proposalId) {
         return this.doQuery(`SELECT * FROM governance_proposals WHERE proposal_id = ? AND status = 'voting'`, [proposalId]);
     },
 
     // Reads rows from governance_proposals.
-    // Moved here from src/CapabilityRegistry.js:185, src/ProviderRegistry.js:430.
+    // Moved here from src/validators/capability_registry.js:185, src/validators/provider_registry.js:430.
     async findGovernanceProposalsByStatus() {
         return this.doQuery(`SELECT parameter, proposed_value, activation_block
                    FROM governance_proposals
@@ -71,61 +71,61 @@ module.exports = {
     },
 
     // Reads rows from governance_proposals.
-    // Moved here from src/Governance.js:983.
+    // Moved here from src/validators/governance.js:983.
     async findGovernanceProposalsByStatusAndVotingEnd() {
         return this.doQuery(`SELECT * FROM governance_proposals WHERE status = 'voting' AND voting_end <= NOW()`);
     },
 
     // Reads rows from governance_votes.
-    // Moved here from src/Governance.js:882.
+    // Moved here from src/validators/governance.js:882.
     async findGovernanceVotes(proposalId) {
         return this.doQuery('SELECT voter_pubkey, vote FROM governance_votes WHERE proposal_id = ?', [proposalId]);
     },
 
     // Reads rows from governance_votes.
-    // Moved here from src/Governance.js:498.
+    // Moved here from src/validators/governance.js:498.
     async findGovernanceVotesWithCreatedAt(proposalId) {
         return this.doQuery('SELECT voter_pubkey, vote, created_at FROM governance_votes WHERE proposal_id = ?', [proposalId]);
     },
 
     // Reads rows from governance_votes.
-    // Moved here from src/Governance.js:1014.
+    // Moved here from src/validators/governance.js:1014.
     async findGovernanceVotesWithSignature(proposal_id) {
         return this.doQuery('SELECT voter_pubkey, vote, signature, vote_seq FROM governance_votes WHERE proposal_id = ?', [proposal_id]);
     },
 
     // Reads one row from governance_proposals.
-    // Moved here from src/Governance.js:332, src/Governance.js:693.
+    // Moved here from src/validators/governance.js:332, src/validators/governance.js:693.
     async getGovernanceProposalByParameter(parameter) {
         return this.doQuery(`SELECT voting_end FROM governance_proposals WHERE parameter = ? AND status = 'failed' ORDER BY voting_end DESC LIMIT 1`, [parameter]);
     },
 
     // Reads one row from governance_proposals.
-    // Moved here from src/Governance.js:861.
+    // Moved here from src/validators/governance.js:861.
     async getGovernanceProposalElectorate(proposalId) {
         return this.doQuery('SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
     },
 
     // Reads one row from governance_proposals.
-    // Moved here from src/Governance.js:791.
+    // Moved here from src/validators/governance.js:791.
     async getGovernanceProposalElectorateInVoting(proposalId) {
         return this.doQuery(`SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1`, [proposalId]);
     },
 
     // Reads one row from governance_proposals.
-    // Moved here from src/Governance.js:912.
+    // Moved here from src/validators/governance.js:912.
     async getGovernanceProposalParameterChange(proposalId) {
         return this.doQuery('SELECT parameter, current_value, proposed_value, activation_block FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
     },
 
     // Reads one row from governance_votes.
-    // Moved here from src/Governance.js:427.
+    // Moved here from src/validators/governance.js:427.
     async getGovernanceVote(proposalId, voterPubkey) {
         return this.doQuery('SELECT vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ? LIMIT 1', [proposalId, voterPubkey]);
     },
 
     // Inserts or updates a row in governance_votes.
-    // Moved here from src/Governance.js:733.
+    // Moved here from src/validators/governance.js:733.
     async setGovernanceVote(proposalId, voterPubkey, vote, signature, seq) {
         return this.doQuery(`INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature, vote_seq)
              VALUES (?, ?, ?, ?, ?)
@@ -137,7 +137,7 @@ module.exports = {
     },
 
     // Updates governance_proposals.
-    // Moved here from src/Governance.js:899, src/Governance.js:1034.
+    // Moved here from src/validators/governance.js:899, src/validators/governance.js:1034.
     async updateGovernanceProposal(applyStatus, proposalId) {
         return this.doQuery(`UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'`, [applyStatus, proposalId]);
     },
@@ -146,7 +146,7 @@ module.exports = {
     // parameter the caller passed. The WHERE clauses are built from the filters
     // present; the limit is parsed and clamped to 1..500 before it reaches the
     // statement, so the interpolated LIMIT can never carry caller text.
-    // Moved here from src/Governance.js:434.
+    // Moved here from src/validators/governance.js:434.
     async findGovernanceProposalsFiltered(status, parameter, limit) {
         let query = "SELECT * FROM governance_proposals";
         let where = [];
@@ -168,7 +168,7 @@ module.exports = {
     // Reads rows from governance_votes, narrowed to whichever of proposal and voter
     // the caller passed. Same clause-building and limit clamp as the proposal list
     // above; the signature column is left out on purpose (see the call site).
-    // Moved here from src/Governance.js:456.
+    // Moved here from src/validators/governance.js:456.
     async findGovernanceVotesFiltered({ proposalId, voterPubkey, limit } = {}) {
         let query = "SELECT id, proposal_id, voter_pubkey, vote, created_at FROM governance_votes";
         let where = [];

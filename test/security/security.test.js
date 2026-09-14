@@ -83,7 +83,7 @@ describe('Security Hardening', function () {
 
     describe('PeerManager: Sender<->key binding', function () {
         const PeerManager       = require('../../src/PeerManager');
-        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+        const ValidatorIdentity = require('../../src/validators/identity');
 
         const A = ValidatorIdentity.generate();
         const B = ValidatorIdentity.generate();
@@ -798,7 +798,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Governance: Voter authorization', function () {
-        const Governance = require('../../src/Governance');
+        const Governance = require('../../src/validators/governance');
 
         let hub, gov;
 
@@ -844,7 +844,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Governance: Length limits', function () {
-        const Governance = require('../../src/Governance');
+        const Governance = require('../../src/validators/governance');
 
         let hub, gov;
 
@@ -939,7 +939,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('SlashDetector: Input validation', function () {
-        const SlashDetector = require('../../src/SlashDetector');
+        const SlashDetector = require('../../src/validators/slash_detector');
 
         let hub, sd;
 

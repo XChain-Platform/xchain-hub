@@ -27,13 +27,13 @@
  ********************************************************************/
 
 const crypto = require('crypto');
-const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
-const bcmath = require('./bcmath.js');
-const devband = require('./lib/deviation_band.js');
+const { ORACLE_DEVIATION_THRESHOLD } = require('../constants');
+const bcmath = require('../bcmath.js');
+const devband = require('../lib/deviation_band.js');
 // The per-round move bound the aggregation clamp applies, read from its one definition
 // in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
 // does not require this file, so there is no cycle.
-const { maxChangeForPair } = require('./oracle/consensus.js');
+const { maxChangeForPair } = require('../oracle/consensus.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 

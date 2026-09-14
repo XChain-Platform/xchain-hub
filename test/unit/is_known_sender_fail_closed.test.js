@@ -48,7 +48,7 @@ const CHAIN_KEYED = [
 // chain-denominator/registry-numerator mismatch this change fixes, and neither should
 // start admitting on chain state alone. They keep the registry-keyed predicate.
 const REGISTRY_KEYED = [
-    { name: 'Governance',   cls: require('../../src/Governance'),   method: '_isKnownSender' },
+    { name: 'Governance',   cls: require('../../src/validators/governance'),   method: '_isKnownSender' },
     { name: 'ReorgHandler', cls: require('../../src/anchor/reorg_handler'), method: '_isKnownSender' },
 ];
 
