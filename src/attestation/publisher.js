@@ -179,7 +179,7 @@ class AttestationPublisher {
         // the send done, so whether the BTC tx landed is unknown. Never auto-rebroadcast
         // (that is the second-fee spend the marker exists to prevent); surfaced at
         // startup by hydratePublishedMarkers for an operator to verify and replay.
-        // Holds `_publicationKey` entries, plus a bare request id for a pre-upgrade
+        // Holds `publicationKey` entries, plus a bare request id for a pre-upgrade
         // marker row that names no status and so holds the whole request.
         this._quarantinedRequests = new Set();
 
@@ -499,7 +499,7 @@ class AttestationPublisher {
             this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
             this._ambiguousSends.delete(rid);
             this.recordSpend(rid, result && result.txid, 'live');   // durable spend audit
-            this._publishedRequests.mark(this._publicationKey(rid, responseStatus));
+            this._publishedRequests.mark(this.publicationKey(rid, responseStatus));
             await this.markPublished(rid, result && result.txid, responseStatus);   // restart-surviving marker
             this.removeFromQueue(new Set([rid]));
         } catch (e) {
@@ -587,7 +587,7 @@ class AttestationPublisher {
     // PENDING and RETRYABLE on the indexer, so the next round can finalize the same
     // request ok, and a request-keyed guard reads that ok as a duplicate and drops the
     // response the requester paid for.
-    _publicationKey(rid, status){ return rid + '|' + String(status || 'ok'); }
+    publicationKey(rid, status){ return rid + '|' + String(status || 'ok'); }
 
     // Statuses a marker row records as broadcast, or null when the row names none.
     // Null is NOT "nothing published": it is a row written before `sent_statuses`
@@ -603,7 +603,7 @@ class AttestationPublisher {
     // request held by a pre-upgrade marker row.
     isPublishedInProcess(rid, status){
         return this._publishedRequests.has(rid)
-            || this._publishedRequests.has(this._publicationKey(rid, status));
+            || this._publishedRequests.has(this.publicationKey(rid, status));
     }
 
     // Read the durable marker for a request, or null when none exists / no DB is wired.
@@ -677,14 +677,14 @@ class AttestationPublisher {
                 if (sent === null){
                     this._publishedRequests.mark(rid);
                 } else {
-                    for (let s of sent) this._publishedRequests.mark(this._publicationKey(rid, s));
+                    for (let s of sent) this._publishedRequests.mark(this.publicationKey(rid, s));
                 }
             } else if (armed === null){
                 this._quarantinedRequests.add(rid);
                 quarantined.push(rid.substring(0,16) + '...');
             }
             if (armed !== null){
-                this._quarantinedRequests.add(this._publicationKey(rid, armed));
+                this._quarantinedRequests.add(this.publicationKey(rid, armed));
                 quarantined.push(rid.substring(0,16) + '... (' + armed + ')');
             }
         }
@@ -847,7 +847,7 @@ class AttestationPublisher {
     // consistent with a same-process duplicate.
     async durableSendGate(rid, status){
         let st = String(status || 'ok');
-        if (this._quarantinedRequests.has(rid) || this._quarantinedRequests.has(this._publicationKey(rid, st))){
+        if (this._quarantinedRequests.has(rid) || this._quarantinedRequests.has(this.publicationKey(rid, st))){
             logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') is quarantined (publish intent ' +
                 'recorded before a crash, on-chain state unknown); not re-broadcasting, awaiting operator replay');
             return 'sent';
@@ -871,7 +871,7 @@ class AttestationPublisher {
                 logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') has a durable sent marker (txid ' +
                     (marker.txid || '<none>') + ', published ' + (sent === null ? '<unrecorded>' : Array.from(sent).join(',')) +
                     '); not re-broadcasting');
-                this._publishedRequests.mark(this._publicationKey(rid, st));
+                this._publishedRequests.mark(this.publicationKey(rid, st));
                 return 'sent';
             }
         }
@@ -1091,7 +1091,7 @@ class AttestationPublisher {
     // duplicate on-chain ATTEST response, which is exactly the double-spend the
     // at-most-once set and the ambiguous-send cooldown exist to prevent. The guard is a
     // wrapper rather than inline so the finally cannot be skipped by any of the body's
-    // early returns; a rejected _fetchPendingRequestIds must not wedge the sweep, since
+    // early returns; a rejected fetchPendingRequestIds must not wedge the sweep, since
     // only this timer ever drains the WAL.
     async _processQueue(){
         if (this._sweeping){
@@ -1127,7 +1127,7 @@ class AttestationPublisher {
         // Authoritative double-broadcast guard: any request no longer in the
         // indexer's pending set has already landed on-chain (or expired past its
         // deadline) and must not be re-broadcast.
-        let pendingIds = await this._fetchPendingRequestIds();
+        let pendingIds = await this.fetchPendingRequestIds();
         if (pendingIds === null){
             // Indexer unreachable; we can't tell which entries already landed,
             // so we defer rather than risk a double-broadcast. Retried next sweep.
@@ -1241,7 +1241,7 @@ class AttestationPublisher {
                 let result = await broadcaster(entry.wire, { requestId: entry.requestId });
                 // Arm the at-most-once guard the instant the fee is spent, so a failed
                 // dequeue rewrite below cannot let the next sweep re-broadcast this entry.
-                this._publishedRequests.mark(this._publicationKey(rid, entryStatus));
+                this._publishedRequests.mark(this.publicationKey(rid, entryStatus));
                 this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
                 this._ambiguousSends.delete(rid);
                 await this.markPublished(rid, result && result.txid, entryStatus);   // restart-surviving marker
@@ -1281,7 +1281,7 @@ class AttestationPublisher {
     // Sweep the indexer's pending attestation_requests into a Set of request IDs.
     // Returns null on any failure (indexer unreachable / error) so callers can
     // distinguish "nothing pending" (empty Set) from "couldn't determine".
-    async _fetchPendingRequestIds(){
+    async fetchPendingRequestIds(){
         let url = await this._resolveBtcIndexerUrl();
         if (!url) return null;
 

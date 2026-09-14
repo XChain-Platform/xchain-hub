@@ -303,7 +303,7 @@ class CrossChainDexEngine extends EventEmitter {
 
     async _discoverAndMatch(){
         // Poll self-overlap guard (house convention: FullNodeChallengeRound._tick,
-        // AttestationRound._pollPending). The poll is a bare setInterval at 15s while one
+        // AttestationRound.pollPending). The poll is a bare setInterval at 15s while one
         // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
         // so a slow indexer lets the next interval fire on top of this one. Two overlapping
         // passes read the SAME order books and the same this.committed ledger (which only

@@ -658,7 +658,7 @@ describe('AttestationSpotChecker: stats retention', function () {
         seedRow(db, 'old',    120 * DAY);
         seedRow(db, 'recent',   2 * DAY);
 
-        const pruned = await sc._pruneStats();
+        const pruned = await sc.pruneStats();
         expect(pruned, 'only the row past the 90-day default window').to.equal(1);
         expect(db.rows.map(r => r.request_id)).to.deep.equal(['recent']);
         expect(sc.statsPruned).to.equal(1);
@@ -671,7 +671,7 @@ describe('AttestationSpotChecker: stats retention', function () {
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
         seedRow(db, 'hour-old', 60 * 60 * 1000);
 
-        const pruned = await sc._pruneStats();
+        const pruned = await sc.pruneStats();
         expect(pruned, 'an hour-old row is still inside the 24h failure window').to.equal(0);
         expect(db.counts.retentionWindowSec).to.equal(Math.ceil(sc.failureWindowMs / 1000));
     });
@@ -684,7 +684,7 @@ describe('AttestationSpotChecker: stats retention', function () {
         seedRow(db, 'ancient', 400 * DAY);
 
         expect(sc.statsRetentionMs).to.equal(0);
-        expect(await sc._pruneStats()).to.equal(0);
+        expect(await sc.pruneStats()).to.equal(0);
         expect(db.counts.retentionDeletes, 'no DELETE is issued at all').to.equal(0);
         expect(db.rows).to.have.length(1);
     });
@@ -709,7 +709,7 @@ describe('AttestationSpotChecker: stats retention', function () {
     it('a failing sweep is swallowed and never breaks the judging path', async function () {
         const db = makeFakeDb();
         const sc = new AttestationSpotChecker(makeHub({ db }), makeProviderRegistry(true));
-        sinon.stub(sc, '_pruneStats').rejects(new Error('DB gone'));
+        sinon.stub(sc, 'pruneStats').rejects(new Error('DB gone'));
         sinon.stub(console, 'warn');
 
         sc.register('r1', 'http_get', 'e');
@@ -720,7 +720,7 @@ describe('AttestationSpotChecker: stats retention', function () {
 
     it('is a safe no-op with no DB wired', async function () {
         const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry(true));
-        expect(await sc._pruneStats()).to.equal(0);
+        expect(await sc.pruneStats()).to.equal(0);
     });
 });
 

@@ -140,7 +140,7 @@ class AttestationSpotChecker {
         this._tickInFlight   = false;   // scheduler self-overlap guard, see schedulerTick()
         this._sweepInFlight  = false;   // same guard for the re-judge sweep
 
-        // Durable-outcome retention, see _pruneStats(). 0 (explicitly configured)
+        // Durable-outcome retention, see pruneStats(). 0 (explicitly configured)
         // disables the sweep; anything unparseable or negative falls back to the
         // default rather than silently disabling it.
         this.statsRetentionMs = parseInt(cfg.SPOT_CHECK_STATS_RETENTION_MS);
@@ -581,7 +581,7 @@ class AttestationSpotChecker {
     // over; at the 90-day default nothing reorg-reachable is anywhere near the cutoff,
     // which is why no block-height clamp is needed on top. Returns rows deleted.
     // Throws on a DB error, and the caller decides what that costs.
-    async _pruneStats(){
+    async pruneStats(){
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function') return 0;
         if (!this.statsRetentionMs || this.statsRetentionMs <= 0) return 0;
@@ -606,7 +606,7 @@ class AttestationSpotChecker {
         let now = Date.now();
         if (now - this._statsSweptAt < STATS_SWEEP_MIN_INTERVAL_MS) return;
         this._statsSweptAt = now;
-        this._statsSweep = this._pruneStats().catch((e) => {
+        this._statsSweep = this.pruneStats().catch((e) => {
             logger.warn('AttestationSpotChecker: spot-check stats retention sweep failed ' +
                          '(the outcome table keeps growing until it succeeds): ' +
                          (e && e.message ? e.message : e));

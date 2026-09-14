@@ -235,7 +235,7 @@ describe('AttestationBatchPublisher', function () {
     // one request that differ only in the stamp; keying on request_id alone read that
     // as "appears twice" on the hub holding both and as a field mismatch on a hub
     // holding one, so no such window could be co-signed (AT5 pass 19).
-    describe('_matchesLocalWindow row identity', function () {
+    describe('matchesLocalWindow row identity', function () {
         function variants(){
             let rid = crypto.randomBytes(32).toString('hex');
             let a = makeRow({ request_id: rid, effective_time: 1780000120 });
@@ -247,15 +247,15 @@ describe('AttestationBatchPublisher', function () {
             let hub = makeHub({ dir: dir });
             let p   = new AttestationBatchPublisher(hub);
             let { a, b } = variants();
-            expect(p._matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p._matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
+            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
         });
 
         it('still refuses the same variant twice', function () {
             let hub = makeHub({ dir: dir });
             let p   = new AttestationBatchPublisher(hub);
             let { a } = variants();
-            let v = p._matchesLocalWindow([a, Object.assign({}, a)], [a]);
+            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
             expect(v.ok).to.equal(false);
             expect(v.why).to.match(/appears twice/);
         });
@@ -264,10 +264,10 @@ describe('AttestationBatchPublisher', function () {
             let hub = makeHub({ dir: dir });
             let p   = new AttestationBatchPublisher(hub);
             let { a, b } = variants();
-            let notHeld = p._matchesLocalWindow([a, b], [a]);
+            let notHeld = p.matchesLocalWindow([a, b], [a]);
             expect(notHeld.ok).to.equal(false);
             expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p._matchesLocalWindow([a], [a, b]);
+            let notProposed = p.matchesLocalWindow([a], [a, b]);
             expect(notProposed.ok).to.equal(false);
             expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
         });
@@ -336,7 +336,7 @@ describe('AttestationBatchPublisher', function () {
     // made it one: sweep() walks past a window it could not publish, so a newer window
     // can carry a marker while an older one carries none, and a floor above that older
     // window drops it forever.
-    describe('_resolveFloorWindow', function () {
+    describe('resolveFloorWindow', function () {
 
         function markerAt(windowStart, status){
             return { network: 'regtest', window_start: windowStart, window_end: windowStart + WINDOW_S,
@@ -349,8 +349,8 @@ describe('AttestationBatchPublisher', function () {
             let now = 200 * WINDOW_S;
             p._nowSeconds = () => now;
 
-            expect(await p._resolveFloorWindow()).to.equal(p.windowStartFor(now));
-            p._floorWindow = await p._resolveFloorWindow();
+            expect(await p.resolveFloorWindow()).to.equal(p.windowStartFor(now));
+            p._floorWindow = await p.resolveFloorWindow();
             expect(await p.pendingWindows(now),
                 'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
         });
@@ -363,7 +363,7 @@ describe('AttestationBatchPublisher', function () {
             let p = new AttestationBatchPublisher(hub);
             p._nowSeconds = () => now;
 
-            p._floorWindow = await p._resolveFloorWindow();
+            p._floorWindow = await p.resolveFloorWindow();
 
             expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
                 .to.equal(now - 3 * WINDOW_S);
@@ -385,7 +385,7 @@ describe('AttestationBatchPublisher', function () {
             let p = new AttestationBatchPublisher(hub);
             p._nowSeconds = () => now;
 
-            p._floorWindow = await p._resolveFloorWindow();
+            p._floorWindow = await p.resolveFloorWindow();
 
             expect(p._floorWindow).to.equal(now - WINDOW_S);
             expect(await p.pendingWindows(now)).to.deep.equal([]);
@@ -399,7 +399,7 @@ describe('AttestationBatchPublisher', function () {
             let p = new AttestationBatchPublisher(hub);
             p._nowSeconds = () => now;
 
-            p._floorWindow = await p._resolveFloorWindow();
+            p._floorWindow = await p.resolveFloorWindow();
 
             expect(await p.pendingWindows(now)).to.deep.equal([]);
             expect(p.stats.coverageGapsDetected).to.equal(0);
@@ -414,7 +414,7 @@ describe('AttestationBatchPublisher', function () {
             let p = new AttestationBatchPublisher(hub);
             p._nowSeconds = () => now;
 
-            p._floorWindow = await p._resolveFloorWindow();
+            p._floorWindow = await p.resolveFloorWindow();
 
             expect(await p.pendingWindows(now),
                 'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);

@@ -127,7 +127,7 @@ class AttestationRound {
         // house convention (XChainIndexer _hubConfigPollRunning, XChainDecoder
         // mempoolBusy, HubPushQueue draining): a poll that outruns pollMs under a
         // slow/partitioned indexer or a tightened ATTESTATION_POLL_MS must not
-        // stack a second concurrent _pollPending that races this.pollCursor.
+        // stack a second concurrent pollPending that races this.pollCursor.
         this._pollRunning    = false;
 
         // positiveIntConfig, not `parseInt(cfg) || DEFAULT`, for the reason
@@ -248,10 +248,10 @@ class AttestationRound {
             return;
         }
         this._pollTimer = setInterval(() => {
-            this._pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: poll error:', e)));
+            this.pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: poll error:', e)));
         }, this.pollMs);
         // Kick the first poll without waiting for the interval
-        this._pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: initial poll error:', e)));
+        this.pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: initial poll error:', e)));
         logger.info('AttestationRound: started (poll=' + this.pollMs + 'ms, confirmations=' + this.confirmations + ')');
     }
 
@@ -274,7 +274,7 @@ class AttestationRound {
         return this.observedTip ? Object.assign({}, this.observedTip) : null;
     }
 
-    async _pollPending(){
+    async pollPending(){
         if(!this.identity) return;  // observer-only hub; nothing to propose
         // In-flight guard: if a prior poll is still awaiting the
         // indexer, skip this tick rather than stack a concurrent run that races

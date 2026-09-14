@@ -271,7 +271,7 @@ class AttestationBatchPublisher {
         // read, because both answers are about what this hub has already resolved.
         try {
             await this.hydrateMarkers();
-            this._floorWindow = await this._resolveFloorWindow();
+            this._floorWindow = await this.resolveFloorWindow();
         } catch(e){
             logger.error('AttestationBatchPublisher: could not hydrate durable batch markers ' +
                           '(publishing is deferred until they read): ' + (e && e.message));
@@ -398,7 +398,7 @@ class AttestationBatchPublisher {
     // and the restart drops it below the floor forever even though it is still inside the
     // catch-up horizon. Flooring on the oldest marker keeps the anti-backfill job the
     // comment above describes and makes no claim about completion.
-    async _resolveFloorWindow(){
+    async resolveFloorWindow(){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this._nowSeconds());
         let rows = await db.getAttestPublishedBatch(this.network);
@@ -965,7 +965,7 @@ class AttestationBatchPublisher {
             this.refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
             return;
         }
-        let verdict = this._matchesLocalWindow(d.rows, mine);
+        let verdict = this.matchesLocalWindow(d.rows, mine);
         if(!verdict.ok){
             this.refuse(windowStart, verdict.why);
             return;
@@ -1007,7 +1007,7 @@ class AttestationBatchPublisher {
     // field mismatch on a hub that held one, so no such window could ever be co-signed
     // (regtest ladder, AT5 pass 19). The same request with the same stamp twice is
     // still a malformed window and is still refused.
-    _matchesLocalWindow(proposed, mine){
+    matchesLocalWindow(proposed, mine){
         const keyOf = (r) => String((r && r.request_id) || '').toLowerCase() + '@' +
                              String(r && r.effective_time == null ? '' : r.effective_time);
         let byKey = new Map(mine.map(r => [keyOf(r), r]));

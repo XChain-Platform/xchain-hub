@@ -139,7 +139,7 @@ class AttestationConsensus extends EventEmitter {
         // within the window a finalized rid still needs suppression, i.e. from
         // an `ok` finalization until the indexer flips that request out of
         // `getpendingattestation_requests` (roughly the BTC confirmation
-        // horizon that gates `_pollPending` -> `propose()`). If it is set too
+        // horizon that gates `pollPending` -> `propose()`). If it is set too
         // low on a busy hub a rid can be evicted while its request is still
         // pending; the only remaining suppressor is `finalized.has(rid)` in
         // `propose()`, so premature eviction turns double-publish suppression
@@ -953,7 +953,7 @@ class AttestationConsensus extends EventEmitter {
     // arriving afterwards is stored by _handlePropose but never re-verified against
     // the winner canonical and never counted into pending.signatures. The
     // winner-canonical sweep further down runs exactly once, at the moment the winner
-    // is established, and _establishNonOkWinner's sweep is guarded the same way.
+    // is established, and establishNonOkWinner's sweep is guarded the same way.
     //
     // So a late proposer's signature reaches the set ONLY through its own PREPARE or
     // COMMIT, each verified over the winner canonical at its own handler. That is a
@@ -987,7 +987,7 @@ class AttestationConsensus extends EventEmitter {
         // canonical on every hub), so no judge call and no leader gate.
         let okProposals = [...pending.proposals.values()].filter(p => (p.status || 'ok') === 'ok');
         if(okProposals.length === 0){
-            this._establishNonOkWinner(rid, 'provider_error');
+            this.establishNonOkWinner(rid, 'provider_error');
             return;
         }
 
@@ -1070,7 +1070,7 @@ class AttestationConsensus extends EventEmitter {
         //     still holds the old one; mutating that would broadcast a dead round's
         //     PREPARE. Identity, not presence, is the check that catches it.
         // The judge spend is lost in both cases, which is the correct trade against
-        // emitting an unfulfillable response. _establishNonOkWinner is already guarded
+        // emitting an unfulfillable response. establishNonOkWinner is already guarded
         // this way, which is why only this ok path could overwrite.
         if(this.pending.get(rid) !== pending || pending.finalized || pending.winner) return;
 
@@ -1083,7 +1083,7 @@ class AttestationConsensus extends EventEmitter {
             // Phase 4: publish an explicit STATUS=no_quorum ATTEST v1 (audit
             // row; the request stays pending on the indexer so later retry
             // rounds can still fulfill it before the deadline).
-            this._establishNonOkWinner(rid, 'no_quorum');
+            this.establishNonOkWinner(rid, 'no_quorum');
             return;
         }
 
@@ -1231,7 +1231,7 @@ class AttestationConsensus extends EventEmitter {
     // The indexer treats both as RETRYABLE: the request stays pending, so a
     // later round (e.g. after the model-fallback ladder advances) can still
     // fulfill it. Throttled to one publication per (request_id, status).
-    _establishNonOkWinner(rid, status){
+    establishNonOkWinner(rid, status){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized || pending.winner) return;
 
@@ -1388,7 +1388,7 @@ class AttestationConsensus extends EventEmitter {
                 return;
             }
             // Whitelist the adopted status to the exact set a hub can DERIVE
-            // (`_establishNonOkWinner` only ever emits these two). `status` is
+            // (`establishNonOkWinner` only ever emits these two). `status` is
             // the raw wire value; without this gate a single Byzantine
             // responsible sender could forge any other non-ok status (e.g. the
             // indexer-terminal 'expired'), have honest peers whose own fetch

@@ -4917,7 +4917,7 @@ class StateAnchorPublisher {
     // tx but the ACK was lost in transport) would double-broadcast and burn the
     // fee twice: the rebuilt tx spends different UTXOs, so both can confirm.
     // Mirrors AttestationPublisher's authoritative pre-replay existence check
-    // (_fetchPendingRequestIds): when the caller can answer "did this anchor
+    // (fetchPendingRequestIds): when the caller can answer "did this anchor
     // already land?" it passes `existsCheck`, consulted BEFORE every attempt
     // (attempt 0 too, closing the lost-ACK-from-a-previous-flush window) and
     // POLLED after an ambiguous send error before giving up.

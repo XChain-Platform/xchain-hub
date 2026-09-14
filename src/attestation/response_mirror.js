@@ -310,7 +310,7 @@ class AttestationResponseMirror {
         // the signatures ARRIVED at this hub (a Map walked in insertion order), and that
         // order differs hub to hub for the same quorum. Everything downstream that
         // compares rows across hubs compares these two JSON columns byte for byte: the
-        // batch co-sign (`_matchesLocalWindow`, ATTEST_BATCH_ROW_FIELDS) refused every
+        // batch co-sign (`matchesLocalWindow`, ATTEST_BATCH_ROW_FIELDS) refused every
         // window carrying a real response on the regtest ladder with `differs on
         // signer_pubkeys` while all four responsible hubs held the same three signers
         // (2026-09-05, AT5). Sorting here keeps the pubkey-at-index-i-signed-signature-

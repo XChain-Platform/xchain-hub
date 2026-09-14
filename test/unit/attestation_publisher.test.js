@@ -16,7 +16,7 @@
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
  * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * _computeResponsible, _fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -837,9 +837,9 @@ describe('AttestationPublisher: _resolveBtcIndexerUrl', function () {
     });
 });
 
-// ---------- _fetchPendingRequestIds -----------------------------------------
+// ---------- fetchPendingRequestIds -----------------------------------------
 
-describe('AttestationPublisher: _fetchPendingRequestIds', function () {
+describe('AttestationPublisher: fetchPendingRequestIds', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -850,7 +850,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
         const hub = makeHub(MY_PUB, { _resolveBtcIndexerUrl: async () => null });
         const pub = new AttestationPublisher(hub);
         pub.queuePath = path.join(os.tmpdir(), 'test-' + process.pid + '.jsonl');
-        const result = await pub._fetchPendingRequestIds();
+        const result = await pub.fetchPendingRequestIds();
         expect(result).to.be.null;
     });
 
@@ -868,7 +868,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
                 }
             });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.instanceof(Set);
         expect(ids.has('aa'.repeat(32))).to.equal(true);
         expect(ids.has('bb'.repeat(32))).to.equal(true);
@@ -884,7 +884,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
                 result: { requests: [] }
             });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.instanceof(Set);
         expect(ids.size).to.equal(0);
     });
@@ -898,7 +898,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
                 result: { error: 'method not found' }
             });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.null;
     });
 
@@ -908,7 +908,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
             .post('/rpc')
             .replyWithError('ECONNREFUSED');
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.null;
     });
 
@@ -929,7 +929,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
         const pub = makePublisher(MY_PUB, {
             btcIndexerHeaders: () => { throw { code: 'ECONNREFUSED' }; }   // plain object, no .message
         });
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.null;
     });
 
@@ -943,7 +943,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
                 result: {}  // no requests field
             });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids).to.be.instanceof(Set);
         expect(ids.size).to.equal(0);
     });
@@ -962,7 +962,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
                 }
             });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids.size).to.equal(1);
         expect(ids.has('aa'.repeat(32))).to.equal(true);
     });
@@ -979,7 +979,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
             .post('/rpc')
             .reply(200, { jsonrpc: '2.0', id: 1, result: { requests } });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids.size).to.equal(50);
     });
 
@@ -1005,7 +1005,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
             .post('/rpc')
             .reply(200, { jsonrpc: '2.0', id: 1, result: { requests: page2 } });
 
-        const ids = await pub._fetchPendingRequestIds();
+        const ids = await pub.fetchPendingRequestIds();
         expect(ids.size).to.equal(101);
         expect(ids.has('ff'.repeat(32))).to.equal(true);
     });
@@ -1309,7 +1309,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         // No broadcast hook configured
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['aa'.repeat(32)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['aa'.repeat(32)]));
         const warnStub = sinon.stub(console, 'warn');
 
         writeQueue(queueFile, [{
@@ -1335,17 +1335,17 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         pub.queuePath = queueFile;
         // Write an empty queue
         fs.writeFileSync(queueFile, '');
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());
         await pub._processQueue();  // should return immediately, no throw
-        // Verify _fetchPendingRequestIds was NOT called (early return)
+        // Verify fetchPendingRequestIds was NOT called (early return)
         // (We can check by seeing the stub was not called)
-        // Actually the stub is set up; the early return happens before _fetchPendingRequestIds
+        // Actually the stub is set up; the early return happens before fetchPendingRequestIds
     });
 
     it('uses singular "entry" in the unreachable-indexer log when exactly 1 entry is queued', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(null);  // indexer unreachable
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(null);  // indexer unreachable
         const warnStub = sinon.stub(console, 'warn');
 
         writeQueue(queueFile, [{
@@ -1369,7 +1369,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         pub.queuePath = queueFile;
         const bcast = sinon.stub().resolves({ txid: 'should-not-fire' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['cc'.repeat(32)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['cc'.repeat(32)]));
 
         // responsible array does NOT include MY_PUB → _myRank returns null → skip
         writeQueue(queueFile, [{
@@ -1391,7 +1391,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         pub.leaderRetryMs = 999999;  // very long; entry without ts treated as ts=0 so age=now >= very-long is false
         const bcast = sinon.stub().resolves({ txid: 'should-not-fire' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['dd'.repeat(32)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['dd'.repeat(32)]));
 
         // Entry with no ts field; ts falls back to 0, age = Date.now() which is large
         // but with leaderRetryMs = 999999 the entry is ONLY eligible if age >= leaderRetryMs
@@ -1420,7 +1420,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         // Return result without txid
         const bcast = sinon.stub().resolves({});
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['ee'.repeat(32)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['ee'.repeat(32)]));
         const logStub = sinon.stub(console, 'log');
 
         writeQueue(queueFile, [{
@@ -1447,7 +1447,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         const refused = new Error('connect ECONNREFUSED'); refused.code = 'ECONNREFUSED';
         const bcast = sinon.stub().rejects(refused);
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['bb'.repeat(32)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['bb'.repeat(32)]));
         const errStub = sinon.stub(console, 'error');
 
         writeQueue(queueFile, [{
@@ -1631,7 +1631,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
     it('disabled: _processQueue does not query the indexer or broadcast (item 2678)', async function () {
         process.env.ATTEST_ENABLED = 'false';
         const pub = makePublisher(MY_PUB);
-        const fetchStub = sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());
+        const fetchStub = sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: '33'.repeat(32),
@@ -1663,7 +1663,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         pub.spendLogPath = path.join(os.tmpdir(), 'attest-spend-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
         const rid = 'ab'.repeat(32);
         pub.setBroadcastHook(sinon.stub().resolves({ txid: 'txid-123' }));
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1681,7 +1681,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         const rid1 = '88'.repeat(32), rid2 = '99'.repeat(32);
         pub.setBroadcastHook(sinon.stub().resolves({ txid: 'x' }));
         const bcast = pub.broadcastFn;
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid1, rid2]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid1, rid2]));
         writeQueue(pub.queuePath, [
             { ts: Date.now() - 10 * 60000, requestId: rid1, wire: wireFor(rid1), responsible: [MY_PUB], leaderPubkey: MY_PUB },
             { ts: Date.now() - 10 * 60000, requestId: rid2, wire: wireFor(rid2), responsible: [MY_PUB], leaderPubkey: MY_PUB }
@@ -1713,7 +1713,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         pub._ambiguousSends.set(rid, Date.now());   // just now, within cooldown
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1728,7 +1728,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         pub._ambiguousSends.set(rid, Date.now() - 5000);   // older than cooldown
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1742,7 +1742,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         pub._ambiguousSends.set(rid, Date.now());
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());   // landed/expired
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());   // landed/expired
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1854,7 +1854,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         const pub = makePublisher(MY_PUB, { db });
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1869,7 +1869,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         await pub.hydratePublishedMarkers();
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1883,7 +1883,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         const pub = makePublisher(MY_PUB, { db });
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
         await pub._processQueue();
@@ -1942,7 +1942,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(pub2._quarantinedRequests.size, 'a never-sent request must not be quarantined').to.equal(0);
         const bcast2 = sinon.stub().resolves({ txid: 'tx-2' });
         pub2.setBroadcastHook(bcast2);
-        sinon.stub(pub2, '_fetchPendingRequestIds').resolves(new Set([blocked]));
+        sinon.stub(pub2, 'fetchPendingRequestIds').resolves(new Set([blocked]));
         writeQueue(pub2.queuePath, readQueue(pub2.queuePath).map(e => Object.assign({}, e, { ts: Date.now() - 60 * 60000 })));
         await pub2._processQueue();
         expect(bcast2.called, 'the deferred response must publish in the later window').to.equal(true);

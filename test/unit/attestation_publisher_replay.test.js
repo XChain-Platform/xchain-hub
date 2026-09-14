@@ -74,7 +74,7 @@ describe('AttestationPublisher: crash replay and follower failover', function ()
         const pub = makePublisher();
         const bcast = sinon.stub().resolves({ txid: 'replay-txid' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['cc' + 'cc'.repeat(31)]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['cc' + 'cc'.repeat(31)]));
 
         const rid = 'cc' + 'cc'.repeat(31);
         writeQueue(queueFile, [{
@@ -95,7 +95,7 @@ describe('AttestationPublisher: crash replay and follower failover', function ()
         const pub = makePublisher();
         const bcast = sinon.stub().resolves({ txid: 'should-not-fire' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());  // nothing pending, already landed
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());  // nothing pending, already landed
 
         const rid = 'dd' + 'dd'.repeat(31);
         writeQueue(queueFile, [{
@@ -119,7 +119,7 @@ describe('AttestationPublisher: crash replay and follower failover', function ()
         const bcast = sinon.stub().resolves({ txid: 'stepin-txid' });
         pub.setBroadcastHook(bcast);
         const rid = 'ff' + 'ff'.repeat(31);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
 
         const baseEntry = {
             requestId: rid,
@@ -185,7 +185,7 @@ describe('AttestationPublisher: crash replay and follower failover', function ()
         const pub = makePublisher();
         const bcast = sinon.stub().resolves({ txid: 'nope' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(null);  // indexer unreachable
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(null);  // indexer unreachable
 
         const rid = '33'.repeat(32);
         writeQueue(queueFile, [{
@@ -263,7 +263,7 @@ describe('AttestationPublisher: non-ok (Phase 4) publication discipline', functi
         const pub = makePublisher(MY_PUB);
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         // Older than failoverWindowBlocks * approxBlockMs (2 * 10min default).
         writeQueue(queueFile, [{
             ts:           Date.now() - (3 * 600000),
@@ -284,7 +284,7 @@ describe('AttestationPublisher: non-ok (Phase 4) publication discipline', functi
         const pub = makePublisher(MY_PUB);
         const bcast = sinon.stub().resolves({ txid: 'retry-txid' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         // Old enough to clear the leader-retry grace, young enough to keep.
         writeQueue(queueFile, [{
             ts:           Date.now() - 120000,

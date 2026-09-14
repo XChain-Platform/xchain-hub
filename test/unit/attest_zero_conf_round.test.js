@@ -140,7 +140,7 @@ describe('AttestationRound zero-confirmation flip', function () {
             let hub = makeHub({ network: network, _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let spy = sinon.stub(ar, '_startRound').resolves();
-            return ar._pollPending().then(() => spy);
+            return ar.pollPending().then(() => spy);
         }
 
         it('admits a regtest request in the very block it was mined in', async function () {

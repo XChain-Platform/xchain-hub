@@ -247,7 +247,7 @@ describe('AttestationPublisher._processQueue overlap guard', function () {
         // 30s failover poll fires again. Both sweeps read the same queue FILE.
         const { gate, release } = makeGate();
         let first = true;
-        sinon.stub(pub, '_fetchPendingRequestIds').callsFake(async () => {
+        sinon.stub(pub, 'fetchPendingRequestIds').callsFake(async () => {
             if (first) { first = false; await gate; }
             return new Set([RID.toLowerCase()]);
         });
@@ -269,7 +269,7 @@ describe('AttestationPublisher._processQueue overlap guard', function () {
         pub.setBroadcastHook(bcast);
         writeQueue([leaderEntry()]);
 
-        const fetchStub = sinon.stub(pub, '_fetchPendingRequestIds').rejects(new Error('indexer exploded'));
+        const fetchStub = sinon.stub(pub, 'fetchPendingRequestIds').rejects(new Error('indexer exploded'));
         await pub._processQueue().catch(() => {});     // start()'s wrapper swallows this
         expect(pub._sweeping, 'a rejected sweep must not wedge the failover poll').to.equal(false);
 
