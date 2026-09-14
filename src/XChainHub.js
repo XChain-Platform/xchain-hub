@@ -164,9 +164,12 @@ class XChainHub {
     }
 
     async start(){
-        // Verify the bundled coin files against CONSENSUS_CONFIG_PIN before any DB or
-        // serving work: the hub serves consensusHashes federation-wide, so a drifted
-        // bundle must halt boot. A null pin skips; a mismatch on an armed network throws.
+        // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN before any DB
+        // or serving work, mirroring the indexer's boot check. The hub is the platform's
+        // config oracle: it acts on this config for PBFT, oracle and attestation AND serves
+        // consensusHashes to every consumer, so a drifted bundle must halt boot rather than
+        // propagate federation-wide. A null pin skips; a mismatch on an armed network throws,
+        // which is fail-closed.
         for(const net of coins.NETWORKS) coins.verifyConsensusPin(net);
 
         this.db = new Database(this.dbHost, this.dbPort, this.dbName, this.dbUser, this.dbPass);
@@ -177,7 +180,8 @@ class XChainHub {
         // Started here, not in startP2P: receiving on-chain PRICE actions needs no
         // consensus, so a standalone hub still aggregates.
         this.priceAggregator = new PriceAggregator(this);
-        // Mirrors aggregator row writes onto the hub-DB sync channel indexers subscribe to.
+        // Mirrors aggregator row writes onto the hub-DB sync channel over WebSocket, which
+        // indexers running in distributed mode subscribe to.
         this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {}, this.db);
         this.priceAggregator.on('row:inserted', (event) => {
             this.hubDbBroadcaster.broadcastRow(event);
@@ -230,11 +234,13 @@ class XChainHub {
         }
 
         // MUST succeed before the P2P listener opens: a null registry makes
-        // verifySignature accept any signed envelope from any sender.
+        // verifySignature accept any signed envelope from any sender. On a DB failure this
+        // throws, so start() below is never reached.
         await this._loadValidatorPubkeys();
 
-        // An empty (non-null) registry is fine: it rejects every unknown sender, the
-        // correct pre-bootstrap state while validators are still registering.
+        // Fail closed: refuse to open the P2P listener with a null registry. An empty
+        // (non-null) registry is fine: it rejects every unknown sender, the correct
+        // pre-bootstrap state while validators are still registering.
         if(!this.peerManager.validatorPubkeys){
             throw new Error('Validator registry not loaded; refusing to start the P2P listener (database unavailable?)');
         }
@@ -352,7 +358,8 @@ class XChainHub {
         this.slashDetector = new SlashDetector(this);
 
         this.oracleConsensus.on('round:finalized', async (event) => {
-            // A rejection out of an EventEmitter listener is an unhandled rejection.
+            // db.doQuery throws on query errors, and a rejection out of an EventEmitter
+            // listener is an unhandled rejection, which exits the process.
             try {
                 // event.participants are SIGNING KEYS (OracleConsensus tallies votes
                 // by proven key), so they need no registry translation. That is the
@@ -366,8 +373,9 @@ class XChainHub {
                 await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
                 // Re-loaded per round: the set captured at startOracle() goes stale, so
-                // rotated-in validators escaped slashing and removed ones kept accruing
-                // misses. On a transient load failure keep the last-known-good set.
+                // rotated-in validators escaped slashing and removed ones kept accruing misses.
+                // On a transient load failure fall back to the last-known-good set rather than
+                // skipping the participation check for the round.
                 let currentValidators = await this._loadValidatorSet();
                 if(currentValidators.length > 0){
                     validators = currentValidators;
@@ -393,10 +401,13 @@ class XChainHub {
         this.oracleBatchSigner = new OracleBatchSigner(this);
         await this.oracleBatchSigner.start();
 
-        // Queues finalized rounds for DOGE publishing; inert until a transport is wired.
+        // Subscribes to round:finalized and queues finalized rounds for DOGE publishing.
+        // Inert until the operator wires a transport through setBroadcastHook() and
+        // setBalanceHook().
         this.oraclePublisher = new OraclePublisher(this);
-        // The single wiring point for ALL on-chain DOGE publishing: StateAnchorPublisher
-        // borrows these hooks via resolveSigner(). Throws on a broken module.
+        // The single wiring point for ALL on-chain DOGE publishing by the operator-supplied
+        // HUB_SIGNER_MODULE: StateAnchorPublisher borrows these hooks via resolveSigner().
+        // Throws on a broken module.
         //
         // Every applySignerHooks call below names the rail its publisher settles on.
         // The operator signer holds ONE key; the loader refuses to wire it into a
@@ -416,15 +427,17 @@ class XChainHub {
         return this.oracle;
     }
 
-    // Must run after startGovernance: the hot-reload wiring below attaches to
-    // this.governance, and silently attaches nothing when it is still null.
+    // No-op when P2P is not active. Must run after startGovernance: the hot-reload
+    // wiring below attaches to this.governance, and silently attaches nothing when it
+    // is still null.
     async startAttestation(){
         if(!this.peerManager) return;
 
         this.providerRegistry = new ProviderRegistry(this);
         await this.providerRegistry.load();
-        // Rebuild the block-anchored provider-config history so a freshly-started hub
-        // resolves the same fetch/judge model per block as a long-running one.
+        // Rebuild the block-anchored provider-config history from finalized governance
+        // proposals so a freshly-started hub resolves the same fetch/judge model per block
+        // as a long-running one.
         await this.providerRegistry.loadGovernanceHistory();
 
         this.attestationConsensus = new AttestationConsensus(this, this.providerRegistry);
@@ -432,8 +445,8 @@ class XChainHub {
         this.attestationRound.setConsensus(this.attestationConsensus);
 
         this.attestationPublisher  = new AttestationPublisher(this);
-        // Mirrors startOracle's signer wiring: without it a validator finalizes ATTEST
-        // responses but never broadcasts them and the queue grows forever.
+        // Mirrors startOracle's HUB_SIGNER_MODULE wiring: without it a validator finalizes
+        // ATTEST responses but never broadcasts them and the queue grows forever.
         // Wired on the DOGE rail it has always used. Its response leg is retired in
         // practice by AttestationResponseMirror, and the leg's own chain
         // declaration belongs with that retirement, not with this change; the
@@ -490,7 +503,8 @@ class XChainHub {
             this.governance.on('proposal:finalized', () => {
                 this.providerRegistry.hotReload().then(() => {
                     // A proposal may widen deadline_window_blocks, the horizon the fixed
-                    // nonOkPublished ring cap must clear; re-check the floor on change.
+                    // nonOkPublished ring cap must clear. Re-check the floor on change so
+                    // the warning lands then, not later when evictions start burning fees.
                     if(this.attestationConsensus && typeof this.attestationConsensus.checkNonOkSizingFloor === 'function')
                         this.attestationConsensus.checkNonOkSizingFloor();
                 }).catch(e =>
@@ -505,8 +519,9 @@ class XChainHub {
                     logger.error(nodeUtil.format('Capability config hot-reload failed:', e)));
             });
 
-            // Append block-anchored ATTESTATION_PROVIDER changes so the fetch/judge model
-            // resolves deterministically at the request's block. No-op otherwise.
+            // Append block-anchored ATTESTATION_PROVIDER changes to the provider config history
+            // so the LLM fetch/judge model resolves deterministically at the request's block on
+            // every hub. No-op for non-provider params.
             this.governance.on('proposal:finalized', (ev) => {
                 this.applyProviderGovernanceChange(ev).catch(e =>
                     logger.error(nodeUtil.format('Provider config history update failed:', e)));
@@ -573,13 +588,15 @@ class XChainHub {
 
         await this.crossChain.start();
 
-        // Matches cross-chain ORDER/SWAP offers and settles them over XSETTLE. Idles
-        // unless at least one chain's indexer URL is configured.
+        // Matches cross-chain ORDER/SWAP offers and drives their settlement over the
+        // validator-broadcast XSETTLE rail. Idles harmlessly unless at least one chain's
+        // <COIN>_INDEXER_URL is configured.
         this.crossChainDex = new CrossChainDexEngine(this);
         await this.crossChainDex.start();
 
-        // XCALL: confirmation-gates contract-emitted call requests, PBFTs the dispatch
-        // and result rows, and mirrors them to indexers. Idles without indexer URLs.
+        // XCALL: confirmation-gates contract-emitted call requests, PBFTs the dispatch and
+        // result rows, and mirrors them to indexers on the same transport as
+        // cross_chain_matches, so a call costs no chain write. Idles without indexer URLs.
         this.crossChainCalls = new CrossChainCallEngine(this);
         await this.crossChainCalls.start();
 
@@ -590,17 +607,20 @@ class XChainHub {
         await this.crossChainBridge.start();
 
         // Quorum-signed per-chain ledger/actions/contract hash commitments, written
-        // off-chain and streamed over the hub-DB mirror so consumers can verify state.
+        // off-chain to state_checkpoints and streamed over the hub-DB mirror so explorers
+        // and wallets can verify indexer state.
         this.stateCheckpoints = new StateCheckpointEngine(this);
         await this.stateCheckpoints.start();
 
-        // Collects 2f+1 co-signatures over quorum-class reorg-retraction broadcasts
-        // before they reach the mirror stream. Below the flag-day or without an
-        // identity, engines fall through to the legacy unsigned broadcast.
+        // Signed retractions: collects 2f+1 co-signatures over quorum-class
+        // reorg-retraction broadcasts before they reach the mirror stream. The engines
+        // route their retract-path deletions through it; below the flag-day or without an
+        // identity they fall through to the legacy unsigned broadcast.
         this.retractionConsensus = new RetractionConsensus(this);
 
-        // Commits checkpoints (v0) and the cross-chain match archive (v1/v2) on DOGE so
-        // federation state is recoverable from chain parse alone. No-op when unconfigured.
+        // Commits the latest checkpoints (v0) and the cross-chain match archive (v1/v2) on
+        // DOGE so federation state is recoverable from chain parse alone. A clean no-op
+        // when DOGE publishing is not configured.
         this.stateAnchorPublisher = new StateAnchorPublisher(this);
         await this.stateAnchorPublisher.start();
     }
@@ -638,8 +658,9 @@ class XChainHub {
         this.governance.setValidatorSet(validators);
         await this.governance.start();
 
-        // 'proposal:finalized' fires on the tally leader AND every follower's local
-        // re-tally, so a passed SLASH_PENALTY executes federation-wide with no new message.
+        // Governance-mediated penalty execution over slash_proposals. 'proposal:finalized'
+        // fires on the tally leader AND every follower's local re-tally of GOV_RESULT, so a
+        // passed SLASH_PENALTY executes federation-wide with no new wire message.
         this.slashGovernance = new SlashGovernance(this);
         this.governance.on('proposal:finalized', (ev) => {
             this.slashGovernance.applyFinalized(ev).catch(e =>
@@ -648,7 +669,8 @@ class XChainHub {
         });
     }
 
-    // penalty: 'suspend' | 'dismiss'; the evidence is the validator's pending slash_proposals.
+    // Create a SLASH_PENALTY governance proposal over the validator's pending
+    // slash_proposals evidence. penalty: 'suspend' or 'dismiss'.
     async proposeSlashPenalty(validatorPubkey, penalty, rationale){
         if(!this.slashGovernance) throw new Error('Governance not active');
         return await this.slashGovernance.proposeSlashPenalty(validatorPubkey, penalty, rationale);
@@ -705,8 +727,9 @@ class XChainHub {
         return await this.swapTracker.getSwaps(status, limit);
     }
 
-    // Read-only views of the hub's own cross_chain_calls table; a call_id resolves
-    // to both XCALL phases of one call's lifecycle.
+    // Read-only views of the hub's own cross_chain_calls table: getCrossChainCall
+    // resolves a call_id to both XCALL phases of one call's lifecycle, and
+    // listCrossChainCalls lists rows under optional filters.
     async getCrossChainCall(callId){
         if(!this.crossChainCalls) return null;
         return await this.crossChainCalls.getCall(callId);
@@ -786,7 +809,8 @@ class XChainHub {
                         });
                     }
 
-                    // Serialized to a JSON string before storage.
+                    // The JSON blob params (GAS_SCHEDULE, STAKING), serialized to a JSON
+                    // string before storage.
                     for(let nextParam of JSON_BLOB_PARAMS){
                         let nextValue = moduleLevel[nextParam];
                         if(nextValue === null || nextValue === undefined) continue;
@@ -817,7 +841,8 @@ class XChainHub {
         }
     }
 
-    // sinceUpdatedAt (optional): epoch-seconds cursor; omit it for the full tree.
+    // sinceUpdatedAt (optional): an epoch-seconds cursor. Supplied, only rows changed
+    // after that instant come back; omit it for the full tree.
     async getAllConfigs(sinceUpdatedAt){
         return await this.db.getAllConfigs(sinceUpdatedAt);
     }
@@ -858,7 +883,8 @@ class XChainHub {
 
     // Rotate the signing key at `addr`: retire the current active key, activate the new
     // one, reload and propagate. The manual transport-registry equivalent of the
-    // on-chain DELEGATE path. Rejects an addr with no active validator.
+    // on-chain DELEGATE path. Rejects an addr with no active validator; use
+    // registerValidator for a fresh addr.
     async rotateValidator(addr, newSigningPubkey){
         if(!newSigningPubkey || !/^[0-9a-fA-F]{64}$/.test(newSigningPubkey))
             throw new Error('Invalid signing pubkey (must be 64 hex chars)');
@@ -879,7 +905,8 @@ class XChainHub {
         return true;
     }
 
-    // Deregister by signing_pubkey OR addr: mark the active row(s) 'removed', then reload.
+    // Deregister by signing_pubkey OR addr: mark the active row(s) 'removed', then
+    // reload and propagate the new set.
     async deregisterValidator({ signingPubkey, addr }){
         if(!signingPubkey && !addr)
             throw new Error('signing_pubkey or addr is required');
@@ -978,8 +1005,10 @@ class XChainHub {
     }
 
     // status: optional. Default 'finalized' (the historical contract; fee and price
-    // consumers must never see skipped/disputed rows). 'all' adds skipped and disputed
-    // rows so health consumers see failure states instead of an older finalized round.
+    // consumers must never see skipped/disputed rows). 'all' adds skipped (the round
+    // produced no usable price for the pair) and disputed (reorg-retracted) rows so
+    // health consumers see failure states instead of silently falling back to an older
+    // finalized round.
     async getPriceSnapshots(limit, status) {
         if (status === 'all') return await this.db.findPriceSnapshotsAnyStatus(limit || 50);
         return await this.db.findPriceSnapshotsFinalized(limit || 50);
@@ -1069,13 +1098,16 @@ class XChainHub {
             } catch (e) { /* non-registry pair or unknown network; try the next candidate */ }
         }
         // Registry unavailable (the bundle is vendored, so this should not happen). null
-        // makes the caller's `maxAge > 0` guard fail open rather than hardcode the constant.
+        // makes the caller's `maxAge > 0` guard fail open on staleness rather than
+        // reintroduce a hardcoded copy of the consensus-pinned constant.
         return null;
     }
 
-    // Latest finalized snapshot for a pair plus a staleness verdict:
-    // { row, fresh, stale, missing, ageSeconds, maxAgeSeconds }. A snapshot with no
-    // usable block_timestamp is never aged out, since its age is unknown.
+    // Latest finalized snapshot for a coin pair plus a staleness verdict:
+    // { row, fresh, stale, missing, ageSeconds, maxAgeSeconds }. A snapshot whose
+    // reference-block timestamp is older than the oracle max age is flagged stale so
+    // callers can refuse it rather than serve it. A snapshot with no usable
+    // block_timestamp is never aged out, since its age is unknown.
     async getPriceStatus(coinPair) {
         let rows = await this.db.getFinalizedPriceSnapshotByCoinPair(coinPair);
         let maxAge = this.oracleMaxAgeSeconds(coinPair);
@@ -1089,15 +1121,17 @@ class XChainHub {
         return { row: row, fresh: !stale, stale: stale, missing: false, ageSeconds: age, maxAgeSeconds: maxAge };
     }
 
-    // Freshest finalized price, or null when missing OR stale, so getFeeQuote fails closed
-    // rather than quoting an outdated round. Use getPriceStatus to tell the two apart.
+    // Freshest finalized price for a coin pair, or null when missing OR stale, so
+    // getFeeQuote fails closed: it treats an unavailable price as an error rather than
+    // quoting an outdated round. Use getPriceStatus to tell stale from missing.
     async getPrice(coinPair) {
         let s = await this.getPriceStatus(coinPair);
         return s.fresh ? s.row : null;
     }
 
-    // validators: [{ signing_pubkey, addr }] from an external source. Upsert-only: this
-    // never retires a row, so it cannot drain the set to empty.
+    // validators: [{ signing_pubkey, addr }] from an external source, the indexer's
+    // staking data being the usual one. Upsert-only: this never retires a row, so it
+    // cannot drain the set to empty.
     async syncValidators(validators) {
         if (!Array.isArray(validators)) throw new Error('validators must be an array');
 
@@ -1155,7 +1189,8 @@ class XChainHub {
     }
 
     async getFeeQuote(action, chain) {
-        // The hub's own network, so a testnet or regtest hub reads its own config rows.
+        // The hub's own deployment network (mainnet, testnet or regtest), so a testnet or
+        // regtest hub reads its own config rows instead of always reading mainnet's.
         let network = this.network || 'mainnet';
 
         // Values come from the canonical per-chain bundle, never an inline literal and never
@@ -1217,7 +1252,8 @@ class XChainHub {
             throw new Error('XCHAIN/USD oracle price is zero or negative; cannot compute fee quote');
         }
 
-        // Exactly 8 decimals, trailing zeros preserved, matching indexer fee charging.
+        // Exactly 8 decimals, trailing zeros preserved, matching the toFixed(8) shape the
+        // consumer tests and the indexer's fee charging expect.
         const fmt8 = (v) => mathjs.format(mathjs.bignumber(String(v)), {notation: 'fixed', precision: 8});
 
         let result = {
@@ -1266,8 +1302,9 @@ class XChainHub {
         for(let k of KEYS){
             if(k in parsed) this.p2pConfig[k] = parsed[k];
         }
-        // Consumers read cfg.FULLNODE.BTC_RPC; accept the README's 'full_node' spelling
-        // as an alias so the documented override is not dropped by the whitelist.
+        // Consumers read cfg.FULLNODE.BTC_RPC; accept the README's 'full_node' spelling as
+        // an alias so the documented HUB_CAPABILITY_CONFIG override reaches selfTest
+        // instead of being dropped by the whitelist.
         if(this.p2pConfig.full_node && !this.p2pConfig.FULLNODE){
             this.p2pConfig.FULLNODE = this.p2pConfig.full_node;
         }
@@ -1310,8 +1347,9 @@ class XChainHub {
                 'only bypass on a venue where every hub runs the SAME override.');
             return;
         }
-        // STAKING is network-independent but resolves through the same getCoinConfig path
-        // consumers use. Staking is BTC-anchored, so only BTC's floors gate quorum.
+        // STAKING is network-independent in the registry (no per-network overrides) but
+        // resolves through the same getCoinConfig path consumers use. Staking is
+        // BTC-anchored, so only BTC's floors gate quorum.
         let network = this.network || 'mainnet';
         let canonicalCaps;
         try {
@@ -1327,7 +1365,8 @@ class XChainHub {
         for(let [cap, entry] of Object.entries(caps)){
             let canonical = canonicalCaps[cap];
             if(!canonical){
-                // Unknown to the canonical registry: nothing to assert against.
+                // Unknown to the canonical registry: nothing to assert against. The
+                // registry and self-test layers already surface unusable capabilities.
                 logger.warn('Capability "' + cap + '" is not in the canonical coins registry; ' +
                     'MIN_STAKE not asserted.');
                 continue;
@@ -1377,7 +1416,8 @@ class XChainHub {
             'validator set / quorum N forks across the federation. Fix capabilities.json ' +
             'to the canonical values (XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 to bypass on a ' +
             'coordinated test venue).';
-        // Strict only on a declared consensus network; standalone and regtest warn.
+        // Strict only on a declared consensus network; a standalone hub (no network, so no
+        // consensus runs) and regtest venues warn instead of refusing.
         if(this.network === 'mainnet' || this.network === 'testnet'){
             let err = new Error(detail);
             err.code = 'MIN_STAKE_MISMATCH';
@@ -1447,9 +1487,10 @@ class XChainHub {
     }
 
     async startCapabilities(configFilePath){
-        // Load the operator capability config BEFORE constructing the registry, which
-        // snapshots p2pConfig.CAPABILITIES. Without it the self-tests read an empty
-        // config and every config-bearing capability fails with "config missing".
+        // Load the operator capability config (MIN_STAKE thresholds plus the per-capability
+        // self-test blocks) BEFORE constructing the registry, which snapshots
+        // p2pConfig.CAPABILITIES at construction time. Without it the self-tests read an
+        // empty config and every config-bearing capability fails with "config missing".
         if(configFilePath){
             try {
                 this.loadCapabilityConfigFile(configFilePath);
@@ -1469,8 +1510,8 @@ class XChainHub {
         logger.info('NODEPROOF full-node tier: ' +
             fullnodeActivation.describeActivation(this.p2pConfig && this.p2pConfig.FULLNODE));
         this.capabilityRegistry = new CapabilityRegistry(this);
-        // Rebuild block-anchored MIN_STAKE history so a restart resolves the same
-        // per-block thresholds as long-running peers.
+        // Rebuild block-anchored MIN_STAKE history from finalized governance proposals so a
+        // restarted hub resolves the same per-block thresholds as long-running peers.
         await this.capabilityRegistry.loadGovernanceHistory();
 
         if(this.peerManager){
@@ -1512,9 +1553,10 @@ class XChainHub {
                 }
             }
 
-            // Poll the BTC indexer for own on-chain stake and feed refreshOwnQualification
-            // so qualification tracks STAKE/UNSTAKE. URL from env first, then the configs
-            // table; no timer is attached when no URL resolves.
+            // Poll the BTC indexer for own on-chain stake and feed refreshOwnQualification so
+            // qualification tracks STAKE/UNSTAKE without manual intervention. URL from env
+            // first, then the hub's own configs table (populated by xchain-node); no timer is
+            // attached when no URL resolves.
             let initialUrl = await this._resolveBtcIndexerUrl();
             if(initialUrl){
                 this.pollOwnStake(pubkey).catch(e => {
@@ -1535,7 +1577,9 @@ class XChainHub {
         logger.info('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity; peer-receive only)'));
 
         // Surface the genesis MIN_STAKE per capability so an operator can check it against
-        // the indexer's frozen configs/<COIN>.js constants; a mismatch would fork.
+        // the indexer's frozen configs/<COIN>.js constants. Governance MIN_STAKE changes are
+        // disabled pre-launch, so these genesis values are the thresholds the hub locks
+        // quorum against for every block, and a mismatch with the indexer would fork.
         try {
             let genesis = this.capabilityRegistry.getCapabilities()
                 .map(cap => cap + '=' + String(this.capabilityRegistry.getMinStake(cap)))
@@ -1635,10 +1679,11 @@ class XChainHub {
             }, { timeout: 5000 });
             let result = res && res.data && res.data.result;
             if(!result || result.error) return null;
-            // Guard against anchoring on a stale tip. `lag` is how far the indexer's
-            // committed tip trails the decoder's; past a configurable gap the tip no
-            // longer reflects recent chain state, so degrade rather than lock a stale
-            // validator set into the round.
+            // Guard against anchoring a snapshot on a stale tip. `lag` is how far the indexer's
+            // committed tip trails the decoder's; an indexer processing far behind (repeated
+            // contract watchdog timeouts, say) no longer reflects recent chain state, so past a
+            // configurable gap treat the tip as untrustworthy and degrade rather than lock a
+            // stale validator set into the consensus round.
             let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
             if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
             if(result.lag != null && Number(result.lag) > maxLag){
@@ -1935,8 +1980,9 @@ class XChainHub {
         return url;
     }
 
-    // True only when the indexer at `url` positively reports another coin. Unknown,
-    // unreachable or no coin field means false. Verdicts cache per URL: 'ok' is permanent,
+    // True only when the indexer at `url` positively reports serving a coin other than
+    // `want`. Unknown, unreachable or no coin field means false, so an unverifiable
+    // answer never blocks. Verdicts cache per URL: 'ok' is permanent for the process,
     // a mismatch is re-probed on the TTL so a repointed hub recovers on its own.
     async _indexerCoinMismatch(url, want){
         if(hubConfig.INDEXER_COIN_CHECK === '0') return false;
@@ -1949,7 +1995,8 @@ class XChainHub {
 
         let coin = null;
         try {
-            // getblockhashes is the one federation read that names the chain it answers for.
+            // getblockhashes is the one federation read that names the chain it answers for,
+            // and it is already on the hub's allowed surface.
             let res = await axios.post(url, {
                 jsonrpc: '2.0', id: Date.now(), method: 'getblockhashes', params: {}
             }, { headers: this.btcIndexerHeaders(), timeout: 5000 });
@@ -1999,10 +2046,13 @@ class XChainHub {
         // A hub that declared its network (any validator, and a standalone hub whose
         // operator set HUB_NETWORK) reads ONLY that network's indexer. The preference
         // order below is a dev-loop convenience for a hub that declared none, and on a
-        // multi-network tree it silently handed a mainnet-gated hub the regtest indexer.
+        // multi-network tree it silently handed a mainnet-gated hub the regtest indexer,
+        // which then fed the checkpoint, attestation and cross-chain engines another
+        // chain's state.
         if(this.network) return urlFor(cc[this.network]);
-        // Standalone/dev: prefer regtest > testnet > mainnet so dev loops Just Work.
-        // Production should set <COIN>_INDEXER_API_URL explicitly.
+        // Standalone or dev (no HUB_NETWORK, so no consensus runs): prefer regtest >
+        // testnet > mainnet so dev loops Just Work. Production should set
+        // <COIN>_INDEXER_API_URL explicitly.
         for(let net of ['regtest', 'testnet', 'mainnet']){
             let url = urlFor(cc[net]);
             if(url) return url;
@@ -2010,8 +2060,9 @@ class XChainHub {
         return null;
     }
 
-    // Entry point for an integration that observed this hub's on-chain stake change;
-    // gossips activation only when the active state actually moves.
+    // Entry point for an integration that observed this hub's on-chain stake change.
+    // Recomputes qualification and gossips activation, the gossip only when the active
+    // state actually moves.
     async refreshOwnQualification(stakeAmount, blockIndex){
         if(!this.identity || !this.capabilityRegistry) return;
         let pubkey = this.identity.getPubkeyHex();
@@ -2078,14 +2129,16 @@ class XChainHub {
         } else {
             this.capabilityRegistry.applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
         }
-        // Drop cached snapshots for this capability so the next consensus read re-queries
-        // under the new threshold. The cache key already folds in min_stake, so this only
-        // reclaims the unreachable entries early.
+        // Drop cached validator-set snapshots for this capability so the next consensus
+        // read re-queries the indexer under the new threshold. The cache key already folds
+        // in min_stake, so this only reclaims the unreachable entries early rather than
+        // waiting out the TTL.
         if(this.capabilitySnapshot && typeof this.capabilitySnapshot.flushCapability === 'function'){
             this.capabilitySnapshot.flushCapability(parsed.capability);
         }
-        // Re-evaluate own qualification now against the latest observed stake; the
-        // periodic poll reconciles with fresh on-chain truth on its next tick.
+        // Re-evaluate own qualification now against the latest observed stake; the periodic
+        // stake poll reconciles with fresh on-chain truth on its next tick, and doing it
+        // here too closes the window without waiting for that.
         await this.refreshOwnQualification(this._latestStakeAmount, this._latestBlockIndex);
     }
 
@@ -2105,8 +2158,9 @@ class XChainHub {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
             // The provider stake floor rides the same entry. Read here as well as in
-            // loadGovernanceHistory: this is the LIVE path and that is the RESTART replay,
-            // and a floor seen by only one would diverge restarted hubs from long-running ones.
+            // ProviderRegistry.loadGovernanceHistory: this is the LIVE apply path and that is
+            // the RESTART replay path, and a floor seen by only one would have a restarted hub
+            // and a long-running one resolve different floors for the same block.
             ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
             // The PBFT consensus_strategy rides it too, on the same both-paths rule.
             cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
