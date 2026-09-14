@@ -137,7 +137,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
 describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
 
-    const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+    const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 
     function makeChecker(injector) {
         const hub = {
@@ -194,7 +194,7 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
 
 describe('AttestationPublisher._processQueue overlap guard', function () {
 
-    const AttestationPublisher = require('../../src/AttestationPublisher');
+    const AttestationPublisher = require('../../src/attestation/publisher');
     const MY_PUB = 'aa'.repeat(32);
     const RID    = 'cc'.repeat(32);
 

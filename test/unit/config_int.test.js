@@ -13,7 +13,7 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const { positiveIntConfig } = require('../../src/lib/config_int.js');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
 const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus.js');
 const OracleConsensus = require('../../src/OracleConsensus.js');
 const PeerManager = require('../../src/PeerManager.js');

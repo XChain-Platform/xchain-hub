@@ -29,7 +29,7 @@ const path  = require('path');
 const sinon = require('sinon');
 const nock  = require('nock');
 const { expect } = require('chai');
-const AttestationPublisher = require('../../src/AttestationPublisher');
+const AttestationPublisher = require('../../src/attestation/publisher');
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

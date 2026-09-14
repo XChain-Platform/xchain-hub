@@ -83,7 +83,7 @@ let AttestationRound;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    AttestationRound = proxyquire('../../src/AttestationRound', { axios: axiosStub });
+    AttestationRound = proxyquire('../../src/attestation/round', { axios: axiosStub });
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ describe('AttestationRound', function () {
         // both suites called green. It returns null rather than [] where the rule
         // selects nobody, which is the caller's "rank unknown" signal.
         describe('AttestationPublisher._computeResponsible over the same vectors', function () {
-            const AttestationPublisher = require('../../src/AttestationPublisher.js');
+            const AttestationPublisher = require('../../src/attestation/publisher.js');
             const os   = require('os');
             const path = require('path');
 
@@ -1626,7 +1626,7 @@ describe('AttestationRound', function () {
 
     describe('module exports', function () {
         it('exports ATTEST_PROPOSE constant', function () {
-            let { ATTEST_PROPOSE } = require('../../src/AttestationRound');
+            let { ATTEST_PROPOSE } = require('../../src/attestation/round');
             expect(ATTEST_PROPOSE).to.equal('ATTEST_PROPOSE');
         });
     });

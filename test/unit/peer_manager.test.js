@@ -1089,7 +1089,7 @@ describe('PeerManager', function () {
 
         const rca                  = require('../../src/rollcall_activation.js');
         const RollcallRound        = require('../../src/RollcallRound.js');
-        const AttestationRelay     = require('../../src/AttestationRelay.js');
+        const AttestationRelay     = require('../../src/attestation/relay.js');
         const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
         const { spawnSync }        = require('child_process');
 

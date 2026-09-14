@@ -72,7 +72,7 @@ let AttestationRound;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    AttestationRound = proxyquire('../../src/AttestationRound', { axios: axiosStub });
+    AttestationRound = proxyquire('../../src/attestation/round', { axios: axiosStub });
 }
 
 describe('AttestationRound zero-confirmation flip', function () {

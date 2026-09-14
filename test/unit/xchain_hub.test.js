@@ -14,7 +14,7 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 describe('XChainHub', function () {
@@ -1244,10 +1244,10 @@ describe('XChainHub', function () {
                 publisher,
                 modules: {
                     './ProviderRegistry.js':       function () { return { load: sinon.stub().resolves(), loadGovernanceHistory: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
-                    './AttestationConsensus.js':   function () { return { start: sinon.stub().resolves(), on: sinon.stub() }; },
-                    './AttestationRound.js':       function () { return { start: sinon.stub().resolves(), setConsensus: sinon.stub() }; },
-                    './AttestationPublisher.js':   function () { return publisher; },
-                    './AttestationSpotChecker.js': function () { return { start: sinon.stub().resolves() }; }
+                    './attestation/consensus.js':   function () { return { start: sinon.stub().resolves(), on: sinon.stub() }; },
+                    './attestation/round.js':       function () { return { start: sinon.stub().resolves(), setConsensus: sinon.stub() }; },
+                    './attestation/publisher.js':   function () { return publisher; },
+                    './attestation/spot_checker.js': function () { return { start: sinon.stub().resolves() }; }
                 }
             };
         }

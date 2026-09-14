@@ -42,25 +42,25 @@
 
 const crypto            = require('crypto');
 const EventEmitter      = require('events');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const eq                = require('./equivocation_header.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const eq                = require('../equivocation_header.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
 // The response canonical in both eras, and the spelling rule the appended field
 // must obey. Byte-twinned with the indexer's copy; never reimplement either here.
 const { buildResponseCanonicalRaw, isCanonicalIntSpelling } = require('./attest_response_canonical.js');
 // Era selection, keyed on the REQUEST's own block (never the response's).
-const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
-const ah                = require('./lib/admission_height.js');
-const { resolveAttestResponseForwardS } = require('./lib/attest_response_timing.js');
+const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
+const ah                = require('../lib/admission_height.js');
+const { resolveAttestResponseForwardS } = require('./attest_response_timing.js');
 // Body-size ceiling every proposed/signed response must clear, leader and
 // follower alike (spec §5.3, D40/D41, row 9). Applies in both canonical eras.
 const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } =
-    require('./lib/attest_response_body_cap.js');
+    require('./attest_response_body_cap.js');
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
-const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
-const { noteDrop } = require('./consensusDiagnostics');
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('../constants.js');
+const { noteDrop } = require('../consensusDiagnostics');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';

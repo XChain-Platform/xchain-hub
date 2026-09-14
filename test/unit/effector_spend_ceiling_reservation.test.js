@@ -40,7 +40,7 @@ const os         = require('os');
 const path       = require('path');
 
 const SpendGuard       = require('../../src/lib/spend_guard.js');
-const AttestationRelay = require('../../src/AttestationRelay.js');
+const AttestationRelay = require('../../src/attestation/relay.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A promise plus the handle that settles it, so a test can park a broadcast

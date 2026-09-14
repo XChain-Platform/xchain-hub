@@ -32,24 +32,24 @@
 
 const crypto = require('crypto');
 const axios  = require('axios');
-const bc     = require('./bcmath.js');
-const swq    = require('./stake_weighted_quorum.js');
-const esc    = require('./attestation_escalation.js');
-const wid    = require('./attest_responsible_widening_activation.js');
+const bc     = require('../bcmath.js');
+const swq    = require('../stake_weighted_quorum.js');
+const esc    = require('./escalation.js');
+const wid    = require('../attest_responsible_widening_activation.js');
 // The zero-confirmation flag day. Selects the effective confirmation count for a
 // request (confirmationsFor) and carries the boot-time ordering assertion the
 // constructor runs; keyed on the REQUEST's own block, never on the tip.
-const zc     = require('./attest_zero_conf_activation.js');
+const zc     = require('../attest_zero_conf_activation.js');
 // The leader-rotation silent-slot skip flag day. Keyed on the REQUEST's own block
 // like the two above, so every hub flips the leader arithmetic on the same request
 // rather than on whichever tip it happened to poll.
-const lss    = require('./attest_leader_silence_skip_activation.js');
+const lss    = require('../attest_leader_silence_skip_activation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
 // unrecognised block-anchored strategy against; shared with the dispatch sites it names.
-const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES } = require('./constants.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES } = require('../constants.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 

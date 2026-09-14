@@ -96,20 +96,20 @@ const fs     = require('fs');
 const path   = require('path');
 const axios  = require('axios');
 
-const eq          = require('./equivocation_header.js');
-const swq         = require('./stake_weighted_quorum.js');
-const attestRelay = require('./attest_relay_activation.js');
-const rejectSlot  = require('./attest_relay_reject_slot_activation.js');
-const snapWrite   = require('./lib/capability_snapshot_write.js');
-const coins       = require('./coins');
+const eq          = require('../equivocation_header.js');
+const swq         = require('../stake_weighted_quorum.js');
+const attestRelay = require('../attest_relay_activation.js');
+const rejectSlot  = require('../attest_relay_reject_slot_activation.js');
+const snapWrite   = require('../lib/capability_snapshot_write.js');
+const coins       = require('../coins');
 
-const EncoderClient          = require('./EncoderClient.js');
-const SpendGuard             = require('./lib/spend_guard.js');
-const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
-const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
-const { allCanonicalInts } = require('./lib/canonical_int.js');
-const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const EncoderClient          = require('../EncoderClient.js');
+const SpendGuard             = require('../lib/spend_guard.js');
+const CrossChainDexConsensus = require('../CrossChainDexConsensus.js');
+const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { allCanonicalInts } = require('../lib/canonical_int.js');
+const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
 // parseInt() off the v3/v4 wire. request_id / response_hash are hex, and

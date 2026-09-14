@@ -82,14 +82,14 @@
 
 const crypto = require('crypto');
 const axios  = require('axios');
-const abw    = require('./lib/attest_batch_wire.js');
-const swq    = require('./stake_weighted_quorum.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const wid    = require('./attest_responsible_widening_activation.js');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
-const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./lib/attest_response_body_cap.js');
-const ah     = require('./lib/admission_height.js');
+const abw    = require('../lib/attest_batch_wire.js');
+const swq    = require('../stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const wid    = require('../attest_responsible_widening_activation.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
+const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./attest_response_body_cap.js');
+const ah     = require('../lib/admission_height.js');
 
 // The mirrored column set, in the order the snapshot route (api.js
 // GET /hub-db/snapshot/attestation_responses) selects them. The INSERT and the

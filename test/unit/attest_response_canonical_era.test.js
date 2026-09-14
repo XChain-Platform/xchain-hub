@@ -28,10 +28,10 @@ const fs                   = require('fs');
 const path                 = require('path');
 const { expect }           = require('chai');
 const sinon                = require('sinon');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
-const { isCanonicalIntSpelling } = require('../../src/attest_response_canonical.js');
-const { ATTEST_RESPONSE_FORWARD_S } = require('../../src/lib/attest_response_timing.js');
+const { isCanonicalIntSpelling } = require('../../src/attestation/attest_response_canonical.js');
+const { ATTEST_RESPONSE_FORWARD_S } = require('../../src/attestation/attest_response_timing.js');
 
 // Captured from the engine at HEAD~ (before the mirror-era canonical landed), by
 // building the canonical for this exact round on a network whose activation map
@@ -231,7 +231,7 @@ describe('mirror-era ATTEST response canonical, driven through a round', functio
         // by design (it is what the canonical-shape suites use), so a NEW call site
         // that forgot the era would be silently legacy - which is precisely the
         // per-code-path fork decision D69 names. This test is the guard.
-        let src   = fs.readFileSync(path.join(__dirname, '../../src/AttestationConsensus.js'), 'utf8');
+        let src   = fs.readFileSync(path.join(__dirname, '../../src/attestation/consensus.js'), 'utf8');
         let lines = src.split('\n');
         let sites = [];
         lines.forEach((line, i) => {

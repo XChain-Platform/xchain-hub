@@ -36,14 +36,14 @@ const axios        = require('axios');
 const { expect }   = require('chai');
 const EventEmitter = require('events');
 
-const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const AttestationResponseMirror = require('../../src/attestation/response_mirror');
 const { MIRROR_COLUMNS, GOSSIP_COLUMNS, ATTEST_RESULT, PARK_MAX } = AttestationResponseMirror;
 
-const AttestationRound     = require('../../src/AttestationRound');
-const AttestationConsensus = require('../../src/AttestationConsensus');
+const AttestationRound     = require('../../src/attestation/round');
+const AttestationConsensus = require('../../src/attestation/consensus');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const eq                   = require('../../src/equivocation_header.js');
-const { buildResponseCanonicalRaw } = require('../../src/attest_response_canonical.js');
+const { buildResponseCanonicalRaw } = require('../../src/attestation/attest_response_canonical.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const RID            = '11'.repeat(32);

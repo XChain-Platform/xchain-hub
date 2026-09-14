@@ -23,7 +23,7 @@ const os    = require('os');
 const path  = require('path');
 const sinon = require('sinon');
 const { expect } = require('chai');
-const AttestationPublisher = require('../../src/AttestationPublisher');
+const AttestationPublisher = require('../../src/attestation/publisher');
 
 const MY_PUB     = 'aa'.repeat(32);
 const LEADER_PUB = 'bb'.repeat(32);

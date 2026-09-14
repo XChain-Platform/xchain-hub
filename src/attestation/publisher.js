@@ -69,15 +69,15 @@
 const fs            = require('fs');
 const path          = require('path');
 const crypto        = require('crypto');
-const swq           = require('./stake_weighted_quorum.js');
-const bcmath        = require('./bcmath.js');
+const swq           = require('../stake_weighted_quorum.js');
+const bcmath        = require('../bcmath.js');
 const axios         = require('axios');
-const EncoderClient = require('./EncoderClient.js');
-const SpendGuard    = require('./lib/spend_guard.js');
-const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
-const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
+const EncoderClient = require('../EncoderClient.js');
+const SpendGuard    = require('../lib/spend_guard.js');
+const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
 
 const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence

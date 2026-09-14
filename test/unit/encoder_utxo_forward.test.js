@@ -31,8 +31,8 @@ const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../src/lib/enco
 // Every default-broadcast pipeline that fetches UTXOs and forwards them.
 const CALL_SITES = [
     'src/StateAnchorPublisher.js',
-    'src/AttestationPublisher.js',
-    'src/AttestationRelay.js',
+    'src/attestation/publisher.js',
+    'src/attestation/relay.js',
     'src/OraclePublisher.js',
     'src/FullNodeChallengeRound.js'
 ];
@@ -105,7 +105,8 @@ describe('encoder_utxo_forward', function () {
         // forwards the raw array re-introduces the cap failure on that path alone.
         for (const rel of CALL_SITES) {
             const src = fs.readFileSync(path.resolve(__dirname, '../../', rel), 'utf8');
-            assert.ok(/require\(['"]\.\/lib\/encoder_utxo_forward\.js['"]\)/.test(src),
+            // A publisher inside a feature directory reaches the helper through '../lib/'.
+            assert.ok(/require\(['"]\.\.?\/lib\/encoder_utxo_forward\.js['"]\)/.test(src),
                 rel + ' does not require the shared UTXO-forward helper');
             assert.ok(/utxos:\s*forwardableUtxos\(/.test(src),
                 rel + ' builds create_tx utxos without forwardableUtxos(); the encoder cap is unguarded there');

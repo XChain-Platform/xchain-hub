@@ -34,7 +34,7 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.js');
+const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');

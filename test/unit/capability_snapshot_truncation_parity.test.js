@@ -29,9 +29,9 @@ const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
 const CrossChainDexEngine   = require('../../src/CrossChainDexEngine.js');
 const CrossChainCallEngine  = require('../../src/CrossChainCallEngine.js');
 const RetractionConsensus   = require('../../src/RetractionConsensus.js');
-const AttestationRelay      = require('../../src/AttestationRelay.js');
+const AttestationRelay      = require('../../src/attestation/relay.js');
 const PriceAggregator       = require('../../src/PriceAggregator.js');
-const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.js');
+const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
 
 // Count mode is only reachable BELOW a network's stake-weighted activation height, and
 // mainnet is the one network whose height is not 0. The premise is asserted, not assumed:

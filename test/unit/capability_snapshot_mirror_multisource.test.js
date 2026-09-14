@@ -24,7 +24,7 @@ const { EventEmitter } = require('events');
 
 const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
 const CrossChainDexEngine  = require('../../src/CrossChainDexEngine.js');
-const AttestationRelay     = require('../../src/AttestationRelay.js');
+const AttestationRelay     = require('../../src/attestation/relay.js');
 const RetractionConsensus  = require('../../src/RetractionConsensus.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

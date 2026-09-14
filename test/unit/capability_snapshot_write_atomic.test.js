@@ -138,7 +138,7 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
         // its feature directory keeps it.
         const WRITERS = ['../../src/StateCheckpointEngine.js', '../../src/CrossChainDexEngine.js',
                          '../../src/CrossChainCallEngine.js', '../../src/OracleConsensus.js',
-                         '../../src/RetractionConsensus.js', '../../src/AttestationRelay.js'];
+                         '../../src/RetractionConsensus.js', '../../src/attestation/relay.js'];
         let offenders = [];
         for (const name of WRITERS) {
             const src = fs.readFileSync(path.join(__dirname, name), 'utf8');

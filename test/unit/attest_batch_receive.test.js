@@ -32,7 +32,7 @@ const crypto = require('crypto');
 const sinon  = require('sinon');
 const { expect } = require('chai');
 
-const AttestationResponseMirror = require('../../src/AttestationResponseMirror.js');
+const AttestationResponseMirror = require('../../src/attestation/response_mirror.js');
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');

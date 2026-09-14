@@ -84,18 +84,18 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
-const EncoderClient     = require('./EncoderClient.js');
-const SpendGuard        = require('./lib/spend_guard.js');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const swq               = require('./stake_weighted_quorum.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { forwardableUtxos }  = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const { isAmbiguousSendError, isNeverSentError } = require('./lib/idempotent_broadcast.js');
-const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('./attest_response_mirror_activation.js');
-const snapWrite = require('./lib/capability_snapshot_write.js');
-const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./lib/attest_response_timing.js');
-const abw = require('./lib/attest_batch_wire.js');
+const EncoderClient     = require('../EncoderClient.js');
+const SpendGuard        = require('../lib/spend_guard.js');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const swq               = require('../stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { forwardableUtxos }  = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { isAmbiguousSendError, isNeverSentError } = require('../lib/idempotent_broadcast.js');
+const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('../attest_response_mirror_activation.js');
+const snapWrite = require('../lib/capability_snapshot_write.js');
+const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
+const abw = require('../lib/attest_batch_wire.js');
 
 // The two P2P envelope types this engine owns. There is no message-type registry on
 // the hub: every engine subscribes to PeerManager's 'message' event and switches on

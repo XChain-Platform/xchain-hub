@@ -42,7 +42,7 @@ const fs         = require('fs');
 const os         = require('os');
 const path       = require('path');
 
-const AttestationRelay = require('../../src/AttestationRelay.js');
+const AttestationRelay = require('../../src/attestation/relay.js');
 const eq               = require('../../src/equivocation_header.js');
 const rejectSlot       = require('../../src/attest_relay_reject_slot_activation.js');
 

@@ -32,7 +32,7 @@ const crypto     = require('crypto');
 const { expect } = require('chai');
 const EventEmitter = require('events');
 
-const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const AttestationResponseMirror = require('../../src/attestation/response_mirror');
 const { DB_METHODS }            = require('../helpers/mockHub.js');
 
 const PUB_A = 'aa'.repeat(32);

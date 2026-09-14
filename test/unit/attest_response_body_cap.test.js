@@ -21,13 +21,13 @@
 
 const { expect }           = require('chai');
 const sinon                = require('sinon');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
 const {
     ATTEST_RESPONSE_BODY_MAX_BYTES,
     bodyByteLength,
     assertBodyWithinCap
-} = require('../../src/lib/attest_response_body_cap.js');
+} = require('../../src/attestation/attest_response_body_cap.js');
 
 const RID      = 'ab'.repeat(16);
 const META     = 'tag=1';

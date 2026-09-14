@@ -13,7 +13,7 @@
 const sinon                  = require('sinon');
 const { expect }             = require('chai');
 const EventEmitter           = require('events');
-const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 const { DB_METHODS }         = require('../helpers/mockHub.js');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -388,7 +388,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
 
     const sinon = require('sinon');
     const { expect } = require('chai');
-    const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+    const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 
     afterEach(function () { sinon.restore(); });
 
