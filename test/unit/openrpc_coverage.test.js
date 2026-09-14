@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * Drift guard: docs/openrpc.json must list exactly the methods exposed by
- * the jsonRpcController in src/api.js, and its x-auth flags must match the
+ * the JSON-RPC route families under src/api/rpc/, and its x-auth flags must match the
  * WRITE_METHODS set. Regenerate with: node docs/openrpc.build.js
  */
 
@@ -22,12 +22,20 @@ const fs     = require('fs');
 const path   = require('path');
 const assert = require('assert');
 
+// The controller is merged from the route families under src/api/rpc/, each of which
+// declares its methods at the object-method indent the extraction below reads.
+function readRpcFamilies() {
+    const dir = path.join(__dirname, '../../src/api/rpc');
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.js')).sort()
+        .map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
+}
+
 describe('openrpc.json method coverage', () => {
 
     const src  = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
     const spec = JSON.parse(fs.readFileSync(path.join(__dirname, '../../docs/openrpc.json'), 'utf8'));
 
-    const block = src.slice(src.indexOf('jsonRpcController = {'), src.indexOf('jsonRouter('));
+    const block = readRpcFamilies();
     const controllerMethods = [...block.matchAll(/^\s{8}async\s+([a-z][a-z0-9_]*)\s*\(/gm)].map((m) => m[1]);
 
     const writeBlock = src.slice(src.indexOf('WRITE_METHODS'), src.indexOf(']', src.indexOf('WRITE_METHODS')));
@@ -69,7 +77,7 @@ describe('openrpc.json method coverage', () => {
     // and the dashboard's oracle-feed panel depends on both of the missing two, so
     // a rename or removal of exactly the fields protecting it from fork and
     // staleness masking was invisible to a contract-driven client. Read each
-    // handler's real argument names out of src/api.js: a destructured signature
+    // handler's real argument names out of src/api/rpc/: a destructured signature
     // names them directly, and the handlers taking the whole params object are
     // recovered from their `params.<name>` reads.
     const handlerParams = (() => {
