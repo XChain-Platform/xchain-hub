@@ -67,31 +67,7 @@ class CrossChainEngine extends EventEmitter {
         this.peerManager = hub.getPeerManager();
         this.db          = hub.db;
 
-        // Validator set (shared with consensus/oracle)
-        this.validatorSet = [];
-
-        // Per-chain-pair validator sets: Map<'BTC-DOGE', [{pubkey, addr}]>
-        this.chainPairValidators = new Map();
-
-        // Pending attestations: Map<attestationId, pending>
-        this.pendingAttestations = new Map();
-
-        // Finalized attestation IDs, bounded FIFO (R2-CCF4): this set is a
-        // steady-state dedup guard that only ever grew, so a long-lived hub
-        // leaked one entry per finalized attestation forever. Cap it with an
-        // insertion-order ring, mirroring CrossChainDexConsensus.markFinalized.
-        // The window only needs to outlast in-flight rounds for the same id, so
-        // a large bound is ample; re-finalization after eviction is harmless
-        // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
-        this.finalized = new Set();
-        this._finalizedOrder = [];
-        this.finalizedMax = positiveIntConfig(hubConfig.XCHAIN_ATTEST_FINALIZED_MAX, 10000, 'XCHAIN_ATTEST_FINALIZED_MAX');
-
-        // Message handler
-        this._messageHandler = null;
-
-        // Sequence counter for attestation ordering
-        this.seq = 0;
+        this.initRoundState();
 
         // Config
         this.timeout = parseInt(hubConfig.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
@@ -122,6 +98,34 @@ class CrossChainEngine extends EventEmitter {
                 key: process.env[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
             };
         }
+    }
+
+    initRoundState() {
+        // Validator set (shared with consensus/oracle)
+        this.validatorSet = [];
+
+        // Per-chain-pair validator sets: Map<'BTC-DOGE', [{pubkey, addr}]>
+        this.chainPairValidators = new Map();
+
+        // Pending attestations: Map<attestationId, pending>
+        this.pendingAttestations = new Map();
+
+        // Finalized attestation IDs, bounded FIFO (R2-CCF4): this set is a
+        // steady-state dedup guard that only ever grew, so a long-lived hub
+        // leaked one entry per finalized attestation forever. Cap it with an
+        // insertion-order ring, mirroring CrossChainDexConsensus.markFinalized.
+        // The window only needs to outlast in-flight rounds for the same id, so
+        // a large bound is ample; re-finalization after eviction is harmless
+        // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
+        this.finalized = new Set();
+        this._finalizedOrder = [];
+        this.finalizedMax = positiveIntConfig(hubConfig.XCHAIN_ATTEST_FINALIZED_MAX, 10000, 'XCHAIN_ATTEST_FINALIZED_MAX');
+
+        // Message handler
+        this._messageHandler = null;
+
+        // Sequence counter for attestation ordering
+        this.seq = 0;
     }
 
     // Set the validator set for quorum and leader calculation
@@ -205,37 +209,8 @@ class CrossChainEngine extends EventEmitter {
         // Single-node fallback
         let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
         if (quorum === 0) {
-            // quorum 0 has two causes: a genuine single-operator deployment (no
-            // federation) OR an EMPTY cross_chain capability snapshot in a real
-            // federation (bootstrap / misconfig). Unilaterally minting an 'attested'
-            // row is only safe in the first case. If a capability snapshot resolved at
-            // this block but carried NO qualifying validators, refuse: finalizing over
-            // an empty federation snapshot mints an attestation no peer ratified and no
-            // depth-verification gated (the same empty-snapshot hazard fixed for the
-            // DEX). When no snapshot resolved (genuine single node) keep the fast path.
-            let snap = (this.hub.capabilitySnapshot && btcBlockHeight)
-                ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
-                : null;
-            if (snap && Array.isArray(snap.validators) && snap.validators.length === 0) {
-                throw new Error('CrossChain: refusing to finalize attestation ' + attestationId +
-                    ' unilaterally over an EMPTY cross_chain snapshot (block ' + btcBlockHeight +
-                    '); will retry when the snapshot populates');
-            }
-            let attestation = {
-                attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
-                destChain, confirmations, status: 'attested',
-                validatorCount: 1, consensusProof: '[]'
-            };
-            await this.storeAttestation(attestation);
-            // Same post-store bookkeeping the consensus path does in
-            // checkCommitQuorum. Without it a single-operator hub wrote an
-            // 'attested' row that nothing downstream ever heard about: SwapTracker
-            // subscribes to 'attestation:finalized', so its swap_records rows sat at
-            // 'initiated' forever, and a repeat request re-ran the whole path instead
-            // of short-circuiting on the finalized ring.
-            this.markFinalized(attestationId);
-            this.emit('attestation:finalized', attestation);
-            return attestation;
+            return await this.finalizeSingleNode(attestationId, sourceChain, sourceActionIndex,
+                destChain, confirmations, btcBlockHeight);
         }
 
         // Check if this node is the leader for this chain pair
@@ -252,46 +227,90 @@ class CrossChainEngine extends EventEmitter {
         let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
 
         return new Promise((resolve, reject) => {
-            let pending = {
-                attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
-                destChain, confirmations, digest,
-                // Lock the quorum at round-start so every PREPARE/COMMIT check
-                // for this attestation uses a consistent threshold, even if the
-                // validator set changes mid-round. Mirrors Consensus/OracleConsensus.
-                quorum,
-                memberPubkeys,
-                btcBlockHeight: btcBlockHeight || null,
-                prepares: new Set(),
-                commits:  new Set(),
-                finalized: false,
-                timer:    null,
-                resolve, reject
-            };
-
-            // Add own PREPARE
-            // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see addVote).
-            let selfPkOnPropose = this.selfPubkey();
-            if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
-            this.pendingAttestations.set(attestationId, pending);
-
-            // Timeout
-            pending.timer = setTimeout(() => {
-                if (!pending.finalized) {
-                    pending.finalized = true;
-                    this.pendingAttestations.delete(attestationId);
-                    reject(new Error('Attestation timeout for ' + attestationId));
-                }
-            }, this.timeout);
-
-            // Broadcast PROPOSE
-            this.peerManager.broadcast(XCHAIN_ATTEST_PROPOSE, {
-                attestationId, sourceChain,
-                sourceActionIndex: parseInt(sourceActionIndex),
-                destChain, confirmations, digest, btcBlockHeight
-            });
-
-            this.checkPrepareQuorum(attestationId);
+            this.openAttestationRound({ attestationId, sourceChain, sourceActionIndex, destChain,
+                confirmations, digest, quorum, memberPubkeys, btcBlockHeight }, resolve, reject);
         });
+    }
+
+    // The single-operator fast path: store and announce an attestation no peer co-signs,
+    // refused when a federation snapshot resolved empty at this block.
+    async finalizeSingleNode(attestationId, sourceChain, sourceActionIndex, destChain, confirmations, btcBlockHeight) {
+        // quorum 0 has two causes: a genuine single-operator deployment (no
+        // federation) OR an EMPTY cross_chain capability snapshot in a real
+        // federation (bootstrap / misconfig). Unilaterally minting an 'attested'
+        // row is only safe in the first case. If a capability snapshot resolved at
+        // this block but carried NO qualifying validators, refuse: finalizing over
+        // an empty federation snapshot mints an attestation no peer ratified and no
+        // depth-verification gated (the same empty-snapshot hazard fixed for the
+        // DEX). When no snapshot resolved (genuine single node) keep the fast path.
+        let snap = (this.hub.capabilitySnapshot && btcBlockHeight)
+            ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
+            : null;
+        if (snap && Array.isArray(snap.validators) && snap.validators.length === 0) {
+            throw new Error('CrossChain: refusing to finalize attestation ' + attestationId +
+                ' unilaterally over an EMPTY cross_chain snapshot (block ' + btcBlockHeight +
+                '); will retry when the snapshot populates');
+        }
+        let attestation = {
+            attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
+            destChain, confirmations, status: 'attested',
+            validatorCount: 1, consensusProof: '[]'
+        };
+        await this.storeAttestation(attestation);
+        // Same post-store bookkeeping the consensus path does in
+        // checkCommitQuorum. Without it a single-operator hub wrote an
+        // 'attested' row that nothing downstream ever heard about: SwapTracker
+        // subscribes to 'attestation:finalized', so its swap_records rows sat at
+        // 'initiated' forever, and a repeat request re-ran the whole path instead
+        // of short-circuiting on the finalized ring.
+        this.markFinalized(attestationId);
+        this.emit('attestation:finalized', attestation);
+        return attestation;
+    }
+
+    // Open the leader's round: lock its quorum and member set, arm the timeout, broadcast PROPOSE.
+    openAttestationRound(round, resolve, reject) {
+        let { attestationId, sourceChain, sourceActionIndex, destChain,
+              confirmations, digest, quorum, memberPubkeys, btcBlockHeight } = round;
+        let pending = {
+            attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
+            destChain, confirmations, digest,
+            // Lock the quorum at round-start so every PREPARE/COMMIT check
+            // for this attestation uses a consistent threshold, even if the
+            // validator set changes mid-round. Mirrors Consensus/OracleConsensus.
+            quorum,
+            memberPubkeys,
+            btcBlockHeight: btcBlockHeight || null,
+            prepares: new Set(),
+            commits:  new Set(),
+            finalized: false,
+            timer:    null,
+            resolve, reject
+        };
+
+        // Add own PREPARE
+        // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see addVote).
+        let selfPkOnPropose = this.selfPubkey();
+        if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
+        this.pendingAttestations.set(attestationId, pending);
+
+        // Timeout
+        pending.timer = setTimeout(() => {
+            if (!pending.finalized) {
+                pending.finalized = true;
+                this.pendingAttestations.delete(attestationId);
+                reject(new Error('Attestation timeout for ' + attestationId));
+            }
+        }, this.timeout);
+
+        // Broadcast PROPOSE
+        this.peerManager.broadcast(XCHAIN_ATTEST_PROPOSE, {
+            attestationId, sourceChain,
+            sourceActionIndex: parseInt(sourceActionIndex),
+            destChain, confirmations, digest, btcBlockHeight
+        });
+
+        this.checkPrepareQuorum(attestationId);
     }
 
     // Get stored attestations
@@ -464,52 +483,8 @@ class CrossChainEngine extends EventEmitter {
 
         // Create pending if not exists
         if (!this.pendingAttestations.has(attestationId)) {
-            // Lock quorum from the same block-boundary cross_chain snapshot the
-            // leader used (btcBlockHeight carried in the envelope) so every hub
-            // freezes the same N for this round. Falls back to the live set when
-            // the indexer is unreachable or the envelope predates this field.
-            let quorum;
-            try {
-                quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
-            } catch (err) {
-                // Fail closed: _resolveQuorum throws when federated but no
-                // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
-                // rather than PREPARE over a locally-derived quorum peers aren't using.
-                logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
-                return;
-            }
-            // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
-            // single-operator fast path (requestAttestation, which self-signs only after
-            // confirming no federation snapshot resolved), reaching _handlePropose means a
-            // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
-            // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
-            // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
-            // mint an 'attested' row no quorum ratified, which downstream indexers then settle
-            // from escrow. This is the same empty-snapshot hazard the leader path already guards
-            // and the DEX engine was hardened against. Refuse; the round retries once the
-            // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
-            if (quorum === 0) {
-                logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
-                    ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
-                return;
-            }
-            // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
-            // follower and leader gate their tallies on the identical member set.
-            let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
-            this.pendingAttestations.set(attestationId, {
-                attestationId, sourceChain, sourceActionIndex, destChain,
-                confirmations, digest,
-                memberPubkeys,
-                btcBlockHeight: btcBlockHeight || null,
-                quorum,
-                prepares: new Set(),
-                commits:  new Set(),
-                finalized: false,
-                timer: setTimeout(() => {
-                    this.pendingAttestations.delete(attestationId);
-                }, this.timeout * 2),
-                resolve: null, reject: null
-            });
+            if (!(await this.openFollowerRound({ attestationId, sourceChain, sourceActionIndex, destChain,
+                confirmations, digest, btcBlockHeight }))) return;
         }
 
         let pending = this.pendingAttestations.get(attestationId);
@@ -523,6 +498,59 @@ class CrossChainEngine extends EventEmitter {
         });
 
         this.checkPrepareQuorum(attestationId);
+    }
+
+    // A follower's round for a verified PROPOSE, over the quorum and member set of the block the
+    // leader named. False when this hub refuses to PREPARE.
+    async openFollowerRound(round) {
+        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest, btcBlockHeight } = round;
+        // Lock quorum from the same block-boundary cross_chain snapshot the
+        // leader used (btcBlockHeight carried in the envelope) so every hub
+        // freezes the same N for this round. Falls back to the live set when
+        // the indexer is unreachable or the envelope predates this field.
+        let quorum;
+        try {
+            quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+        } catch (err) {
+            // Fail closed: _resolveQuorum throws when federated but no
+            // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
+            // rather than PREPARE over a locally-derived quorum peers aren't using.
+            logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
+            return false;
+        }
+        // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
+        // single-operator fast path (requestAttestation, which self-signs only after
+        // confirming no federation snapshot resolved), reaching _handlePropose means a
+        // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
+        // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
+        // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
+        // mint an 'attested' row no quorum ratified, which downstream indexers then settle
+        // from escrow. This is the same empty-snapshot hazard the leader path already guards
+        // and the DEX engine was hardened against. Refuse; the round retries once the
+        // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
+        if (quorum === 0) {
+            logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
+                ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
+            return false;
+        }
+        // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
+        // follower and leader gate their tallies on the identical member set.
+        let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
+        this.pendingAttestations.set(attestationId, {
+            attestationId, sourceChain, sourceActionIndex, destChain,
+            confirmations, digest,
+            memberPubkeys,
+            btcBlockHeight: btcBlockHeight || null,
+            quorum,
+            prepares: new Set(),
+            commits:  new Set(),
+            finalized: false,
+            timer: setTimeout(() => {
+                this.pendingAttestations.delete(attestationId);
+            }, this.timeout * 2),
+            resolve: null, reject: null
+        });
+        return true;
     }
 
     handlePrepare(envelope) {
