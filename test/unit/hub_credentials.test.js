@@ -68,7 +68,7 @@ describe('resolveHubLlmAuth: credential resolution chain', function () {
     });
 
     it('skips an empty HUB_CLAUDE_CONFIG_DIR and falls through to CLAUDE_CONFIG_DIR', function () {
-        const empty    = _tmpDir();              // empty dir: _checkConfigDir returns false
+        const empty    = _tmpDir();              // empty dir: checkConfigDir returns false
         const populated = _populate(_tmpDir());
         const r = resolveHubLlmAuth({
             env: { HUB_CLAUDE_CONFIG_DIR: empty, CLAUDE_CONFIG_DIR: populated },

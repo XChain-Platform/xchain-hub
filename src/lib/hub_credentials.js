@@ -40,7 +40,7 @@
  *      point it at a nonexistent dir to disable this fallback, e.g. for
  *      hermetic tests on a host that has a populated ~/.claude-xchain)
  *
- * The `_checkConfigDir` gate ensures empty, stale or logged-out dir values
+ * The `checkConfigDir` gate ensures empty, stale or logged-out dir values
  * fall through cleanly to the next candidate: it reads `.credentials.json`
  * and requires a non-empty access or refresh token, so a dir that merely
  * exists never masks a credential that would actually serve the round.
@@ -84,7 +84,7 @@ function hasUsableToken(parsed) {
 // instead of falling through to the credential that would serve the round.
 //
 // Token values are never returned or logged from here; the answer is a boolean.
-function _checkConfigDir(dirPath) {
+function checkConfigDir(dirPath) {
     try {
         if (!fs.statSync(dirPath).isDirectory()) return false;
         const credPath = path.join(dirPath, '.credentials.json');
@@ -123,10 +123,10 @@ function resolveHubLlmAuth(ctx) {
     const hubApiKey = trim(envSource.HUB_ANTHROPIC_API_KEY);
     const apiKey   = trim(envSource.ANTHROPIC_API_KEY);
 
-    if (hubDir && _checkConfigDir(hubDir)) {
+    if (hubDir && checkConfigDir(hubDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'hub_config_dir', env: { CLAUDE_CONFIG_DIR: hubDir } };
     }
-    if (cliDir && _checkConfigDir(cliDir)) {
+    if (cliDir && checkConfigDir(cliDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'cli_config_dir', env: { CLAUDE_CONFIG_DIR: cliDir } };
     }
 
@@ -152,7 +152,7 @@ function resolveHubLlmAuth(ctx) {
         return { ok: true, transport: 'anthropic_api', source: 'api_key', apiKey };
     }
 
-    if (_checkConfigDir(defaultDir)) {
+    if (checkConfigDir(defaultDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'default_config_dir', env: { CLAUDE_CONFIG_DIR: defaultDir } };
     }
 
