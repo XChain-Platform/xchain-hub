@@ -54,6 +54,60 @@ const axios = require('axios');
 // from those call sites, which is its own change.
 const DEFAULT_ENCODER_TIMEOUT_MS = 120000;
 
+// The encoder answers several failures with a non-2xx status AND a JSON-RPC error
+// body carrying the actual reason (401 -32001 Unauthorized, 429 -32029 Too many
+// requests, 400 -32600 Batch too large). axios rejects on those before the
+// response.data.error check below ever runs, so every publisher surface logged the
+// bare 'Request failed with status code 429' and lost the one thing an operator
+// needs: whether the encoder is misconfigured, shedding load, or being handed an
+// oversized batch. Unwrap the body the way CapabilitySnapshot.onFetchError does.
+//
+// Two constraints, both load-bearing:
+//   - RETHROW THE SAME OBJECT, never a fresh Error. isAmbiguousSendError
+//     (lib/idempotent_broadcast.js) reads e.response.status, and so do the
+//     dead-letter records; a wrapper drops both.
+//   - Rewrite the message ONLY below status 500. That classifier reads an
+//     'Encoder RPC error' message as a definitive rejection that is safe to
+//     re-broadcast. A 5xx may already have reached the coin node, so prefixing one
+//     would turn an ambiguous send into a retry and risk a double spend. 5xx
+//     messages therefore pass through untouched.
+//
+// Both branches also mirror the encoder's STRUCTURED error onto the thrown
+// error as `rpcCode` and `rpcData`. create_tx and create_envelope_cancel_tx
+// answer their operational failures (no UTXOs, insufficient funds, missing
+// change address, tracker unavailable) with code -32010 and a stable
+// machine-readable `data.reason`, and that field exists precisely so a caller
+// can branch on the condition instead of matching substrings of a message that
+// is free to be reworded. Attached ADDITIVELY (own properties on the same
+// object, message and `response` untouched) so the classifier rules above are
+// unaffected, and named `rpcData` rather than `data` so it can never be
+// confused with an axios response body.
+// ("Both branches" are unwrapTransportError and resultOrRpcError below.)
+function unwrapTransportError(err) {
+    let rpcErr = err && err.response && err.response.data && err.response.data.error;
+    if (rpcErr && Number(err.response.status) < 500) {
+        err.message = 'Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr));
+    }
+    if (rpcErr) {
+        err.rpcCode = rpcErr.code;
+        err.rpcData = rpcErr.data;
+    }
+    return err;
+}
+
+// The JSON-RPC result of an answered call, or a thrown 'Encoder RPC error' when the
+// 2xx body carries an error.
+function resultOrRpcError(response) {
+    if (response.data && response.data.error) {
+        let rpcErr = response.data.error;
+        let e = new Error('Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr)));
+        e.rpcCode = rpcErr.code;
+        e.rpcData = rpcErr.data;
+        throw e;
+    }
+    return response.data ? response.data.result : null;
+}
+
 class EncoderClient {
 
     constructor(encoderUrl, apiKey, timeout) {
@@ -80,56 +134,15 @@ class EncoderClient {
         };
         let headers = { 'Content-Type': 'application/json' };
         if (this.apiKey) headers['x-api-key'] = this.apiKey;
-        // The encoder answers several failures with a non-2xx status AND a JSON-RPC error
-        // body carrying the actual reason (401 -32001 Unauthorized, 429 -32029 Too many
-        // requests, 400 -32600 Batch too large). axios rejects on those before the
-        // response.data.error check below ever runs, so every publisher surface logged the
-        // bare 'Request failed with status code 429' and lost the one thing an operator
-        // needs: whether the encoder is misconfigured, shedding load, or being handed an
-        // oversized batch. Unwrap the body the way CapabilitySnapshot.onFetchError does.
-        //
-        // Two constraints, both load-bearing:
-        //   - RETHROW THE SAME OBJECT, never a fresh Error. isAmbiguousSendError
-        //     (lib/idempotent_broadcast.js) reads e.response.status, and so do the
-        //     dead-letter records; a wrapper drops both.
-        //   - Rewrite the message ONLY below status 500. That classifier reads an
-        //     'Encoder RPC error' message as a definitive rejection that is safe to
-        //     re-broadcast. A 5xx may already have reached the coin node, so prefixing one
-        //     would turn an ambiguous send into a retry and risk a double spend. 5xx
-        //     messages therefore pass through untouched.
-        //
-        // Both branches also mirror the encoder's STRUCTURED error onto the thrown
-        // error as `rpcCode` and `rpcData`. create_tx and create_envelope_cancel_tx
-        // answer their operational failures (no UTXOs, insufficient funds, missing
-        // change address, tracker unavailable) with code -32010 and a stable
-        // machine-readable `data.reason`, and that field exists precisely so a caller
-        // can branch on the condition instead of matching substrings of a message that
-        // is free to be reworded. Attached ADDITIVELY (own properties on the same
-        // object, message and `response` untouched) so the classifier rules above are
-        // unaffected, and named `rpcData` rather than `data` so it can never be
-        // confused with an axios response body.
+        // A non-2xx answer's JSON-RPC error body is unwrapped onto the SAME thrown
+        // object; the two constraints that shape it are at unwrapTransportError.
         let response;
         try {
             response = await axios.post(this.encoderUrl, body, { headers: headers, timeout: this.timeout });
         } catch (err) {
-            let rpcErr = err && err.response && err.response.data && err.response.data.error;
-            if (rpcErr && Number(err.response.status) < 500) {
-                err.message = 'Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr));
-            }
-            if (rpcErr) {
-                err.rpcCode = rpcErr.code;
-                err.rpcData = rpcErr.data;
-            }
-            throw err;
+            throw unwrapTransportError(err);
         }
-        if (response.data && response.data.error) {
-            let rpcErr = response.data.error;
-            let e = new Error('Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr)));
-            e.rpcCode = rpcErr.code;
-            e.rpcData = rpcErr.data;
-            throw e;
-        }
-        return response.data ? response.data.result : null;
+        return resultOrRpcError(response);
     }
 
     // Fetch UTXOs for an address (proxies to UTXO tracker via encoder).
