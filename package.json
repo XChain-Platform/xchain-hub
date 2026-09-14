@@ -22,6 +22,7 @@
   },
   "scripts": {
     "api": "node ./src/api.js",
+    "lint": "eslint .",
     "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage:check": "c8 --check-coverage --lines 91.6 --statements 91.6 --branches 80.5 --functions 88.1 --reporter=text-summary --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
@@ -51,6 +52,7 @@
     "@stryker-mutator/mocha-runner": "^9.6.1",
     "c8": "^11.0.0",
     "chai": "^4.5.0",
+    "eslint": "^9.39.5",
     "fast-check": "^4.6.0",
     "mocha": "^11.7.5",
     "nock": "^14.0.0",
