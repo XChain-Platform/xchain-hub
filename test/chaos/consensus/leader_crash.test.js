@@ -143,7 +143,7 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         expect(con.view).to.equal(1);
 
         // Leader for seq=1, view=1: validators[(1+1) % 4] = validators[2] → this node
-        expect(con._isLeader(1)).to.be.true;
+        expect(con.isLeader(1)).to.be.true;
 
         // NEW_VIEW should have been broadcast
         expect(hub._peerManager.broadcast.calledWith('PBFT_NEW_VIEW')).to.be.true;
@@ -188,7 +188,7 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         await con.start();
 
-        expect(con._isLeader(1)).to.be.true;
+        expect(con.isLeader(1)).to.be.true;
 
         let config = { coin: 'BTC', param: 'recovered' };
         let digest = makeDigest(config);

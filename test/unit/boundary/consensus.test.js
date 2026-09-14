@@ -141,8 +141,8 @@ describe('Boundary: Consensus (PBFT)', function () {
             expect(threw.message).to.equal('DB down');
         });
 
-        it('_saveSeq converts number to string', async function () {
-            await consensus._saveSeq(100);
+        it('saveSeq converts number to string', async function () {
+            await consensus.saveSeq(100);
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1]).to.include('100');
         });

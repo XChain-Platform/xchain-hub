@@ -269,13 +269,13 @@ describe('FullNodeChallengeRound', function () {
     });
 
     // ── leader election + failover ladder ──────────────────────────────────────
-    describe('_isLeader', function () {
+    describe('isLeader', function () {
         function state(eligible, startedAt) {
             return { challengeId: 'cid', eligible: new Set(eligible), startedAt };
         }
         it('a non-eligible node is never leader', function () {
             const eng = new FullNodeChallengeRound(makeHub());
-            expect(eng._isLeader(state([V1, V2], 0), X)).to.equal(false);
+            expect(eng.isLeader(state([V1, V2], 0), X)).to.equal(false);
         });
         it('rank-0 (lowest hash) leads immediately; others wait', function () {
             const eng = new FullNodeChallengeRound(makeHub());
@@ -286,8 +286,8 @@ describe('FullNodeChallengeRound', function () {
             const now = Date.now();
             const st = state([V1, V2], now);
             sinon.stub(Date, 'now').returns(now);                 // 0 windows elapsed
-            expect(eng._isLeader(st, ranked[0])).to.equal(true);
-            expect(eng._isLeader(st, ranked[1])).to.equal(false);
+            expect(eng.isLeader(st, ranked[0])).to.equal(true);
+            expect(eng.isLeader(st, ranked[1])).to.equal(false);
         });
         it('promotes the next rank as a chain-based failover (state.leadRank)', function () {
             const eng = new FullNodeChallengeRound(makeHub());
@@ -295,13 +295,13 @@ describe('FullNodeChallengeRound', function () {
                 .sort((a, b) => a.h < b.h ? -1 : 1).map(r => r.pk);
             const st = state([V1, V2], 0);
             st.leadRank = 1;                                      // _tick promoted rank 1 (no verdict landed)
-            expect(eng._isLeader(st, ranked[1])).to.equal(true);
-            expect(eng._isLeader(st, ranked[0])).to.equal(false); // rank-0 stood down
+            expect(eng.isLeader(st, ranked[1])).to.equal(true);
+            expect(eng.isLeader(st, ranked[0])).to.equal(false); // rank-0 stood down
         });
     });
 
     // ── deterministic possession answer ───────────────────────────────────────
-    describe('_computeAnswer', function () {
+    describe('computeAnswer', function () {
         const block = { tx: [
             { vout: [{ scriptPubKey: { hex: 's00' } }, { scriptPubKey: { hex: 's01' } }] },
             { vout: [{ scriptPubKey: { hex: 's10' } }] },
@@ -313,21 +313,21 @@ describe('FullNodeChallengeRound', function () {
             const txIdx  = Number(BigInt('0x' + SEED.slice(0, 16)) % BigInt(block.tx.length));
             const vIdx   = Number(BigInt('0x' + SEED.slice(16, 32)) % BigInt(block.tx[txIdx].vout.length));
             const expected = block.tx[txIdx].vout[vIdx].scriptPubKey.hex;
-            expect(await eng._computeAnswer(188, SEED)).to.equal(expected);
+            expect(await eng.computeAnswer(188, SEED)).to.equal(expected);
         });
         it('throws without a coin RPC', async function () {
             const hub = makeHub();
             hub.p2pConfig.cross_chain = {}; hub.p2pConfig.FULLNODE.BTC_RPC = '';
             const eng = new FullNodeChallengeRound(hub);
             let threw = false;
-            try { await eng._computeAnswer(188, SEED); } catch (e) { threw = true; }
+            try { await eng.computeAnswer(188, SEED); } catch (e) { threw = true; }
             expect(threw).to.equal(true);
         });
         it('throws on an empty target block', async function () {
             wireRpc({ block: { tx: [] } });
             const eng = new FullNodeChallengeRound(makeHub());
             let threw = false;
-            try { await eng._computeAnswer(188, SEED); } catch (e) { threw = true; }
+            try { await eng.computeAnswer(188, SEED); } catch (e) { threw = true; }
             expect(threw).to.equal(true);
         });
     });
@@ -465,7 +465,7 @@ describe('FullNodeChallengeRound', function () {
 
     // ── round flow: answer → sign-req → sign → finalize ────────────────────────
     describe('round flow', function () {
-        // single-tx block → deterministic answer; _computeAnswer lowercases the hex.
+        // single-tx block → deterministic answer; computeAnswer lowercases the hex.
         const ANSWER = 'deadbeef';
         const block = { tx: [{ vout: [{ scriptPubKey: { hex: ANSWER } }] }] };
         let clock;

@@ -248,8 +248,8 @@ describe('Regression: Consensus (PBFT)', function () {
             expect(consensus.seq).to.equal(0);
         });
 
-        it('_saveSeq writes to DB @regression-p1', async function () {
-            await consensus._saveSeq(10);
+        it('saveSeq writes to DB @regression-p1', async function () {
+            await consensus.saveSeq(10);
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[0]).to.include('consensus_state');

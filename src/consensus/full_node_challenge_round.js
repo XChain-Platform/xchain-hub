@@ -427,7 +427,7 @@ class FullNodeChallengeRound {
         let amVerifier = !!(myPubkey && eligible.has(myPubkey));
         if(myPubkey && this.coinRpcUrl && (amClaimant || amVerifier)){
             try {
-                state.myAnswer = await this._computeAnswer(target, seed);
+                state.myAnswer = await this.computeAnswer(target, seed);
                 if(amClaimant){
                     // R2-FN2: broadcast (and store) the pubkey-bound digest, never
                     // the plaintext answer. `answers` holds digests for every
@@ -447,7 +447,7 @@ class FullNodeChallengeRound {
 
         logger.info('FullNodeChallengeRound: epoch=' + epoch + ' challenge=' + challengeId.substring(0,16) +
                     '... target=' + target + ' eligible=' + eligible.size + ' claimants=' + claimants.size +
-                    ' leader=' + (this._isLeader(state, myPubkey) ? 'me' : 'peer'));
+                    ' leader=' + (this.isLeader(state, myPubkey) ? 'me' : 'peer'));
 
         // Collection closes from _tick once the tip reaches epoch + closeDepth
         // (chain-anchored); the leader then proposes the PASS list and every node
@@ -466,7 +466,7 @@ class FullNodeChallengeRound {
 
         // Leader proposes the PASS list: claimants whose pubkey-bound digest
         // matches the digest derived from OUR OWN node's answer (R2-FN2).
-        if(this._isLeader(state, myPubkey) && state.myAnswer && !state.passList){
+        if(this.isLeader(state, myPubkey) && state.myAnswer && !state.passList){
             let pass = [];
             for(let pk of state.claimants){
                 if(state.answers.get(pk) === this.answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
@@ -535,7 +535,7 @@ class FullNodeChallengeRound {
         // We must INDEPENDENTLY confirm every listed claimant against our OWN node.
         if(!this.coinRpcUrl) return;
         if(state.myAnswer == null){
-            try { state.myAnswer = await this._computeAnswer(state.target, state.seed); }
+            try { state.myAnswer = await this.computeAnswer(state.target, state.seed); }
             catch(e){ return; }
         }
         let passSet = new Set(pass);
@@ -637,7 +637,7 @@ class FullNodeChallengeRound {
             return;
         }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-        if(!this._isLeader(state, myPubkey)) return;            // only the leader broadcasts
+        if(!this.isLeader(state, myPubkey)) return;            // only the leader broadcasts
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
         if(state.sigs.size < quorum) return;
 
@@ -784,7 +784,7 @@ class FullNodeChallengeRound {
     }
 
     // scriptPubKey (hex) of a seed-selected output in the buried target block.
-    async _computeAnswer(target, seed){
+    async computeAnswer(target, seed){
         let blockHash = await this.coinCall('getblockhash', [Number(target)]);
         let block     = await this.coinCall('getblock', [blockHash, 2]);
         let txs = (block && block.tx) || [];
@@ -853,7 +853,7 @@ class FullNodeChallengeRound {
     // Elected leader = lowest SHA256(challenge_id || pubkey) among eligible
     // verifiers, with a simple elapsed-time failover ladder (the next-ranked
     // verifier takes over a collection window later if no verdict has landed).
-    _isLeader(state, myPubkey){
+    isLeader(state, myPubkey){
         if(!myPubkey || !state.eligible.has(myPubkey)) return false;
         let ranked = Array.from(state.eligible).map(pk => ({
             pk, h: crypto.createHash('sha256').update(state.challengeId).update(pk).digest('hex')
@@ -872,7 +872,7 @@ class FullNodeChallengeRound {
     // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
     //
     // CONSENSUS-CRITICAL: the returned set is the domain of leader election
-    // (_electedLeader / _isLeader) and the 2/3+1 quorum denominator (maybeFinalize).
+    // (_electedLeader / isLeader) and the 2/3+1 quorum denominator (maybeFinalize).
     // On an UNRESOLVED set (any indexer RPC failure: 401 / timeout / transport) this
     // returns null so the caller ABSTAINS (skips the epoch), rather than degrading to
     // the genesis-only subset. A per-hub, reachability-dependent fallback would split

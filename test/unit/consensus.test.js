@@ -239,20 +239,20 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // _isLeader()
+    // isLeader()
     // -----------------------------------------------------------------
 
-    describe('_isLeader()', function () {
+    describe('isLeader()', function () {
         it('returns true when this node is the leader', function () {
             consensus.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[0].addr;
-            expect(consensus._isLeader(0)).to.be.true;
+            expect(consensus.isLeader(0)).to.be.true;
         });
 
         it('returns false when this node is not the leader', function () {
             consensus.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[2].addr;
-            expect(consensus._isLeader(0)).to.be.false;
+            expect(consensus.isLeader(0)).to.be.false;
         });
     });
 
@@ -865,7 +865,7 @@ describe('Consensus (PBFT)', function () {
 
         it('loadSeq fails CLOSED on a read fault, not open at 0 (#970c0586)', async function () {
             // A swallowed read fault would leave seq/lastAppliedSeq at 0 and
-            // reopen the stale-seq replay guard. Mirror _saveSeq: rethrow.
+            // reopen the stale-seq replay guard. Mirror saveSeq: rethrow.
             consensus.lastAppliedSeq = 5;
             hub.db.doQuery.rejects(new Error('injected DB read fault'));
             let threw = false;
@@ -874,25 +874,25 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.lastAppliedSeq, 'guard baseline must not reset to 0').to.equal(5);
         });
 
-        it('_saveSeq writes to DB', async function () {
-            await consensus._saveSeq(10);
+        it('saveSeq writes to DB', async function () {
+            await consensus.saveSeq(10);
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[0]).to.include('consensus_state');
             expect(args[1]).to.include('10');
         });
 
-        it('_saveSeq surfaces DB errors (item 4579: must not silently lose the seq write)', async function () {
+        it('saveSeq surfaces DB errors (item 4579: must not silently lose the seq write)', async function () {
             hub.db.doQuery.rejects(new Error('db down'));
             let threw = false;
-            try { await consensus._saveSeq(5); }
+            try { await consensus.saveSeq(5); }
             catch (e) { threw = true; expect(e.message).to.equal('db down'); }
-            expect(threw, '_saveSeq must reject so checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
+            expect(threw, 'saveSeq must reject so checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
         });
 
         it('loadSeq rethrows a DB read fault so startup fails closed (#970c0586)', async function () {
             // Was: swallowed the error and left seq at 0, silently reopening the
-            // stale-seq replay guard. Now mirrors _saveSeq and rethrows.
+            // stale-seq replay guard. Now mirrors saveSeq and rethrows.
             hub.db.doQuery.rejects(new Error('db down'));
             let threw = false;
             try { await consensus.loadSeq(); } catch (e) { threw = true; }
@@ -1201,18 +1201,18 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.has(5)).to.be.false;
         });
 
-        it('_saveSeq failure: proposal.applied stays false and lastAppliedSeq is not advanced', async function () {
-            // applyConfig succeeds but _saveSeq rejects (transient DB error). The
+        it('saveSeq failure: proposal.applied stays false and lastAppliedSeq is not advanced', async function () {
+            // applyConfig succeeds but saveSeq rejects (transient DB error). The
             // proposal must NOT be marked applied and lastAppliedSeq must not advance,
             // so a subsequent retry can persist the seq row and complete the apply.
             // This is the case described in item 5293 (comment vs. code mismatch).
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
-            // applyConfig resolves; _saveSeq rejects on the first call, then resolves.
+            // applyConfig resolves; saveSeq rejects on the first call, then resolves.
             hub.applyConfig.resolves();
             let saveCallCount = 0;
-            sinon.stub(consensus, '_saveSeq').callsFake(async () => {
+            sinon.stub(consensus, 'saveSeq').callsFake(async () => {
                 saveCallCount++;
                 if (saveCallCount === 1) throw new Error('seq write failed');
             });

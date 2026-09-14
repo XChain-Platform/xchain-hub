@@ -1039,17 +1039,17 @@ class Consensus {
         // Same quorum rule as checkPrepareQuorum; see quorumMet.
         if (this.quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
             // Synchronous in-flight guard, distinct from the durable `applied` marker.
-            // applyConfig/_saveSeq are async, and `applied` is only set after they
-            // resolve (deliberately, so a _saveSeq failure leaves it false for retry).
+            // applyConfig/saveSeq are async, and `applied` is only set after they
+            // resolve (deliberately, so a saveSeq failure leaves it false for retry).
             // Without this flag a second COMMIT that reaches quorum in a later event-loop
             // turn while the apply is still pending would pass the `!applied` gate and run
             // applyConfig a second time for one committed round. Harmless for today's
             // idempotent config upsert, but a hazard for any future non-idempotent apply.
             // Cleared in the catch so a failed apply can still be retried.
             proposal._applying = true;
-            // proposal.applied is set AFTER both applyConfig and _saveSeq succeed.
+            // proposal.applied is set AFTER both applyConfig and saveSeq succeed.
             // Setting it early (before the awaits) would silence the stale-seq gate
-            // on re-entry but leave applied=true after a _saveSeq failure, so the
+            // on re-entry but leave applied=true after a saveSeq failure, so the
             // config is durable but lastAppliedSeq is not advanced and the seq row
             // is never persisted. The comment at ~565 ("the proposal is NOT marked
             // applied") was the intent; this matches the code to that intent.
@@ -1060,7 +1060,7 @@ class Consensus {
                 // diverge and a seq-invalidation consumer would serve stale config;
                 // leaving applied=false lets the proposal be re-queued until the
                 // seq persists.
-                await this._saveSeq(seq);
+                await this.saveSeq(seq);
 
                 // Mark applied only after both steps succeed.
                 proposal.applied = true;
@@ -1317,7 +1317,7 @@ class Consensus {
         return this.leaderAt(seq, this.view, memberPubkeys);
     }
 
-    _isLeader(seq, memberPubkeys) {
+    isLeader(seq, memberPubkeys) {
         let leader = this._getLeader(seq, memberPubkeys);
         return this.isLeaderIdentity(leader, this.peerManager.validatorAddr, this.selfPubkey());
     }
@@ -1363,7 +1363,7 @@ class Consensus {
                 this.lastAppliedSeq = this.seq;
             }
         } catch (e) {
-            // Fail CLOSED, mirroring _saveSeq: a swallowed read fault left
+            // Fail CLOSED, mirroring saveSeq: a swallowed read fault left
             // this.seq/lastAppliedSeq at their constructor 0, so the stale-seq
             // replay guard in _handlePrePrepare (`seq <= this.lastAppliedSeq`)
             // no longer rejected an already-applied seq and the node could not
@@ -1375,7 +1375,7 @@ class Consensus {
         }
     }
 
-    async _saveSeq(seq) {
+    async saveSeq(seq) {
         try {
             await this.db.setConsensusState('last_seq', String(seq), String(seq));
         } catch (e) {
