@@ -19,7 +19,7 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const swq              = require('../../src/stake_weighted_quorum.js');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
@@ -160,9 +160,9 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
     });
 
     it('_hasDeterministicSnapshot separates a NULL snapshot from a present-but-empty one', function () {
-        expect(oc._hasDeterministicSnapshot(null)).to.equal(false);
-        expect(oc._hasDeterministicSnapshot({})).to.equal(false);
-        expect(oc._hasDeterministicSnapshot({ validators: [] })).to.equal(true);
-        expect(oc._hasDeterministicSnapshot({ validators: [{ pubkey: 'aa' }] })).to.equal(true);
+        expect(oc.hasDeterministicSnapshot(null)).to.equal(false);
+        expect(oc.hasDeterministicSnapshot({})).to.equal(false);
+        expect(oc.hasDeterministicSnapshot({ validators: [] })).to.equal(true);
+        expect(oc.hasDeterministicSnapshot({ validators: [{ pubkey: 'aa' }] })).to.equal(true);
     });
 });

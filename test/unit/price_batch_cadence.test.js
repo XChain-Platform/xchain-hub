@@ -20,7 +20,7 @@ const { expect } = require('chai');
 const coins = require('../../src/coins/index.js');
 const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
-        LEGACY_BATCH_WINDOW_ROUNDS } = require('../../src/lib/price_batch_cadence.js');
+        LEGACY_BATCH_WINDOW_ROUNDS } = require('../../src/oracle/price_batch_cadence.js');
 
 // The fleet's shipped values: 10-minute oracle rounds, a 5-minute straggler
 // grace, the default landing reserve, and the consensus-pinned 1800s bound.

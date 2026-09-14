@@ -62,9 +62,9 @@ function loadClaudeSpawn(spawnOpts, authResult) {
         transport: 'claude_spawn',
         env:       {}
     };
-    let { runClaudePrint, CLAUDE_BIN } = proxyquire('../../src/lib/claude-spawn', {
+    let { runClaudePrint, CLAUDE_BIN } = proxyquire('../../src/lib/claude_spawn', {
         'child_process': { spawn: spawnStub },
-        './hub-credentials': { resolveHubLlmAuth: () => auth }
+        './hub_credentials': { resolveHubLlmAuth: () => auth }
     });
     return { runClaudePrint, CLAUDE_BIN, spawnStub };
 }

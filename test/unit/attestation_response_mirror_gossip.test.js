@@ -36,14 +36,14 @@ const axios        = require('axios');
 const { expect }   = require('chai');
 const EventEmitter = require('events');
 
-const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const AttestationResponseMirror = require('../../src/attestation/response_mirror');
 const { MIRROR_COLUMNS, GOSSIP_COLUMNS, ATTEST_RESULT, PARK_MAX } = AttestationResponseMirror;
 
-const AttestationRound     = require('../../src/AttestationRound');
-const AttestationConsensus = require('../../src/AttestationConsensus');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const AttestationRound     = require('../../src/attestation/round');
+const AttestationConsensus = require('../../src/attestation/consensus');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const eq                   = require('../../src/equivocation_header.js');
-const { buildResponseCanonicalRaw } = require('../../src/attest_response_canonical.js');
+const { buildResponseCanonicalRaw } = require('../../src/attestation/attest_response_canonical.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const RID            = '11'.repeat(32);
@@ -196,7 +196,7 @@ function makeHub(overrides){
             getSnapshot:       sinon.stub().resolves({ validators: weightedValidators() })
         },
         providerRegistry:     { getMinStake: () => '1000' },
-        _btcIndexerHeaders:   () => ({}),
+        btcIndexerHeaders:   () => ({}),
         _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;
@@ -576,7 +576,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
 
             // The indexer catches up between cycles.
             post.resolves({ data: { result: { latest_block_index: LATEST_BLOCK, count: 1, requests: [localRequest()] } } });
-            await mirror._drainParked();
+            await mirror.drainParked();
 
             expect(hub.db.table).to.have.length(1);
             expect(mirror._parked.size).to.equal(0);
@@ -589,14 +589,14 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
             await mirror.start();
 
             await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
-            await mirror._drainParked();
+            await mirror.drainParked();
 
             expect(hub.db.table).to.have.length(0);
             expect(mirror._parked.size).to.equal(0);
             expect(mirror.stats.dropped).to.equal(1);
 
             // A second cycle has nothing left to do: the row is gone, not re-parked.
-            await mirror._drainParked();
+            await mirror.drainParked();
             expect(mirror.stats.dropped).to.equal(1);
         });
 

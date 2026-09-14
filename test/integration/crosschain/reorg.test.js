@@ -16,7 +16,7 @@ const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
-const ReorgHandler   = require('../../../src/ReorgHandler');
+const ReorgHandler   = require('../../../src/anchor/reorg_handler');
 const { createIntegrationHub: createTestHub } = require('../../helpers/integrationHub');
 
 describe('Integration: Reorg Handling (SC-5.x)', function () {

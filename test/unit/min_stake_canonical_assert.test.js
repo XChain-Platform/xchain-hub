@@ -230,7 +230,7 @@ describe('XChainHub._assertCanonicalMinStakes', function () {
             let hub = makeHub('mainnet');
             let caps = canonicalCaps();
             caps.cross_chain.MIN_STAKE = '1000.00000000';
-            expect(() => hub._loadCapabilityConfigFile(writeConfig(caps)))
+            expect(() => hub.loadCapabilityConfigFile(writeConfig(caps)))
                 .to.throw().with.property('code', 'MIN_STAKE_MISMATCH');
             // The refused config must not have leaked into p2pConfig (hot-reload
             // keeps serving the previous validated thresholds).
@@ -241,7 +241,7 @@ describe('XChainHub._assertCanonicalMinStakes', function () {
             let hub = makeHub('mainnet');
             let caps = canonicalCaps();
             delete caps.full_node;
-            expect(() => hub._loadCapabilityConfigFile(writeConfig(caps)))
+            expect(() => hub.loadCapabilityConfigFile(writeConfig(caps)))
                 .to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
             expect((hub.p2pConfig && hub.p2pConfig.CAPABILITIES) || undefined).to.equal(undefined);
         });
@@ -266,7 +266,7 @@ describe('XChainHub._assertCanonicalMinStakes', function () {
             let logStub = sinon.stub(console, 'log');
             try {
                 let hub = makeHub('mainnet');
-                hub._loadCapabilityConfigFile(writeConfig(canonicalCaps()));
+                hub.loadCapabilityConfigFile(writeConfig(canonicalCaps()));
                 expect(hub.p2pConfig.CAPABILITIES.cross_chain.MIN_STAKE)
                     .to.equal(CANONICAL.cross_chain.MIN_STAKE);
             } finally { logStub.restore(); }

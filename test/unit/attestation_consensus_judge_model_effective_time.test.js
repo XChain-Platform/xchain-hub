@@ -36,8 +36,8 @@
 
 const sinon                = require('sinon');
 const { expect }           = require('chai');
-const AttestationConsensus = require('../../src/AttestationConsensus');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const AttestationConsensus = require('../../src/attestation/consensus');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const llm                  = require('../../src/providers/llm');
 const { createMockHub }    = require('../helpers/mockHub');
 
@@ -184,7 +184,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
     it('carries a stamp every follower accepts, and every follower adopts exactly that stamp', async function () {
         let { L, N1, N2 } = standUp(JUDGE_S);
 
-        await L.consensus._maybeAdvanceFromProposals(RID);
+        await L.consensus.maybeAdvanceFromProposals(RID);
         let prepare = wire.find(m => m.envelope.type === 'ATTEST_PREPARE' && m.from === pub(leader));
         expect(prepare, 'the leader must have broadcast a PREPARE').to.not.equal(undefined);
         let wireStamp = prepare.envelope.data.effective_time;
@@ -208,7 +208,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
     it('collects exactly the leader and the two followers as signers, all over one canonical', async function () {
         let { L } = standUp(JUDGE_S);
 
-        await L.consensus._maybeAdvanceFromProposals(RID);
+        await L.consensus.maybeAdvanceFromProposals(RID);
         flushWire();
 
         let pending = L.consensus.pending.get(RID);
@@ -233,7 +233,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
     it('finalizes the round instead of running it to the two-minute timeout', async function () {
         let { L, N1, N2 } = standUp(JUDGE_S);
 
-        await L.consensus._maybeAdvanceFromProposals(RID);
+        await L.consensus.maybeAdvanceFromProposals(RID);
         flushWire();
 
         for (let n of [L, N1, N2])
@@ -253,7 +253,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
         // proposal stamp; the assertion is worthless if the two coincide.
         L.clock = T0 + 30;
 
-        await L.consensus._maybeAdvanceFromProposals(RID);
+        await L.consensus.maybeAdvanceFromProposals(RID);
 
         expect(pending.effectiveTime).to.equal(T0 + FORWARD_S);
         expect(pending.effectiveTime).to.not.equal(L.clock + FORWARD_S);
@@ -273,8 +273,8 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
         L.clock  = T0 + 30;
         N1.clock = T0 + 30;
 
-        await L.consensus._maybeAdvanceFromProposals(RID);
-        await N1.consensus._maybeAdvanceFromProposals(RID);
+        await L.consensus.maybeAdvanceFromProposals(RID);
+        await N1.consensus.maybeAdvanceFromProposals(RID);
 
         let lPending = L.consensus.pending.get(RID);
         let nPending = N1.consensus.pending.get(RID);

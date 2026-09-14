@@ -53,7 +53,7 @@
  * AND TWO THAT ARE NEVER A PATH. src/consensus_rules_digest.js loads its shared
  * gate carriers with `require('./' + mod + '.js')` over a literal list, so no
  * string names the file and a missed move reports the gate ABSENT instead of
- * throwing; src/CrossChainBridgeEngine.js loads its three bridge gates the same
+ * throwing; src/cross_chain/bridge_engine.js loads its three bridge gates the same
  * way inside a try/catch that returns null, so a missed move idles the bridge
  * with nothing thrown and nothing logged. Those sites are listed under
  * `dynamicReferences` with the file list they resolve to, form
@@ -859,7 +859,7 @@ function shellReferences(text, lists) {
 /**
  * `require('./' + mod + '.js')` over a literal list, which is how
  * src/consensus_rules_digest.js loads its shared gate carriers and how
- * src/CrossChainBridgeEngine.js loads its three bridge gates. No string names the
+ * src/cross_chain/bridge_engine.js loads its three bridge gates. No string names the
  * loaded file, so neither matcher above nor a grep can see the edge, and BOTH
  * sites swallow the failure: the digest reports a gate it cannot load as ABSENT
  * instead of throwing, and the bridge engine's loadActivation returns null and

@@ -30,10 +30,10 @@ patchConsole({ service: 'xchain-hub', version: require('../package.json').versio
 // The hub relies on per-tick .catch() and has no uncaughtException handler at
 // all, so a throw outside a promise chain exits with node's default stderr dump
 // and nothing a collector can key on.
-const { installCrashHandlers, noteShutdown } = require('./consensusDiagnostics');
+const { installCrashHandlers, noteShutdown } = require('./consensus/diagnostics');
 installCrashHandlers({ service: 'xchain-hub' });
 
-const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
+const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret_env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
 for(const key of REQUIRED_ENV){
@@ -45,7 +45,7 @@ for(const key of REQUIRED_ENV){
 
 // The DB password is checked apart from the list above because it accepts two
 // names: HUB_DB_SECRET (preferred) and the deprecated HUB_DB_PASS. See
-// src/secret-env.js for why the name matters.
+// src/secret_env.js for why the name matters.
 let HUB_DB_SECRET;
 try {
     HUB_DB_SECRET = resolveSecretEnv('HUB_DB_PASS');
@@ -78,20 +78,20 @@ const axios     = require('axios');   // hub-to-indexer RPC (attestation request
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const swq       = require('./stake_weighted_quorum.js');
 const wid       = require('./attest_responsible_widening_activation.js');
-const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
+const { HUB_SCHEMA_VERSION } = require('./hub_schema_version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 // The SAME replacer HubDbBroadcaster.js signs its WS frames with, imported rather than
 // copied: a bootstrap REST read and a streamed WS row must serialize a BIGINT column
 // identically, or a consumer that switches between the two feeds sees the same value
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
-const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
+const { buildOraclePricesSnapshotQuery } = require('./oracle/prices_snapshot_query');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
-const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+const { parseCorsOrigin } = require('./lib/cors_origin.js');
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults.
 const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');
 const roundPresence  = require('./lib/oracle_round_presence.js');   // oracle round presence/divergence
-const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
+const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -145,7 +145,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -712,7 +712,7 @@ async function startApi(){
                     jsonrpc: '2.0', id: Date.now(),
                     method:  'getpendingattestation_requests',
                     params:  params
-                }, { headers: hub._btcIndexerHeaders(), timeout: 5000 });
+                }, { headers: hub.btcIndexerHeaders(), timeout: 5000 });
             } catch (e){ return null; }
             let result = res && res.data && res.data.result;
             if(!result || result.error) return null;
@@ -939,7 +939,7 @@ async function startApi(){
             // the registry default, the correct representative scalar while all
             // registry coins share one bound. Additive: callers that ignore the
             // field are unaffected, and it is null when the registry read fails.
-            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds()};
+            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds()};
         },
 
         // status is optional and additive: omitted/'finalized' preserves the
@@ -967,7 +967,7 @@ async function startApi(){
                 if (with_watermark) {
                     return {
                         watermark: Math.floor(Date.now() / 1000),
-                        oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds(),
+                        oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds(),
                         snapshots,
                     };
                 }
@@ -2511,7 +2511,7 @@ async function startApi(){
     });
 
     // Machine-readable API spec (OpenRPC 1.3.2). Regenerated by docs/openrpc.build.js;
-    // test/unit/openrpc-coverage.test.js keeps it in lockstep with jsonRpcController.
+    // test/unit/openrpc_coverage.test.js keeps it in lockstep with jsonRpcController.
     let openrpcSpec = null;
     app.get('/openrpc.json', (req, res) => {
         if (!openrpcSpec)
@@ -2520,7 +2520,7 @@ async function startApi(){
         res.type('application/json').send(openrpcSpec);
     });
 
-    // Bound JSON-RPC batch cardinality (src/rpcBatchGuard.js). The router below runs
+    // Bound JSON-RPC batch cardinality (src/peers/rpc_batch_guard.js). The router below runs
     // Promise.all over every element of a batch array while the per-IP rate limiter at
     // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
     // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in

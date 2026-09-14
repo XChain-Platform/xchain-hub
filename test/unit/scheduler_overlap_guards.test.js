@@ -57,7 +57,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
     function makeEngine() {
         axiosStub = { post: sinon.stub() };
-        CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: axiosStub });
+        CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: axiosStub });
         const hub = createMockHub();
         hub.db = { doQuery: sinon.stub().resolves([]) };
         hub.capabilitySnapshot = null;
@@ -137,7 +137,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
 describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
 
-    const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+    const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 
     function makeChecker(injector) {
         const hub = {
@@ -164,9 +164,9 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
             return { requestId: 'aa'.repeat(31) + String(calls).padStart(2, '0') };
         });
 
-        const a = checker._schedulerTick();
+        const a = checker.schedulerTick();
         await flush();
-        const b = await checker._schedulerTick();   // fires while a is parked on the gate
+        const b = await checker.schedulerTick();   // fires while a is parked on the gate
         expect(b, 'the guarded tick injected nothing').to.equal(0);
         expect(calls, 'the injector was not called a second time').to.equal(1);
 
@@ -184,9 +184,9 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
             return { requestId: 'bb'.repeat(32) };
         });
 
-        expect(await checker._schedulerTick(), 'failed injection counts nothing').to.equal(0);
+        expect(await checker.schedulerTick(), 'failed injection counts nothing').to.equal(0);
         expect(checker._tickInFlight, 'flag released after a failed injection').to.equal(false);
-        expect(await checker._schedulerTick(), 'the next tick still injects').to.equal(1);
+        expect(await checker.schedulerTick(), 'the next tick still injects').to.equal(1);
     });
 });
 
@@ -194,7 +194,7 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
 
 describe('AttestationPublisher._processQueue overlap guard', function () {
 
-    const AttestationPublisher = require('../../src/AttestationPublisher');
+    const AttestationPublisher = require('../../src/attestation/publisher');
     const MY_PUB = 'aa'.repeat(32);
     const RID    = 'cc'.repeat(32);
 
@@ -207,7 +207,7 @@ describe('AttestationPublisher._processQueue overlap guard', function () {
             attestationConsensus: null,
             capabilitySnapshot: { getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }] }) },
             _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
-            _btcIndexerHeaders: () => ({})
+            btcIndexerHeaders: () => ({})
         };
         const pub = new AttestationPublisher(hub);
         pub.queuePath = queueFile;
@@ -287,8 +287,8 @@ describe('OracleRound._executeRound overlap guard', function () {
 
     beforeEach(function () {
         fetchPrices = sinon.stub().resolves([{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }]);
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return { fetchPrices: (...a) => fetchPrices(...a) }; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: (...a) => fetchPrices(...a) }; }
         });
         hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
         pm  = hub._peerManager;
@@ -373,9 +373,9 @@ describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
         let first = true;
         runAllSelfTests.callsFake(async () => { if (first) { first = false; await gate; } });
 
-        const a = hub._runOwnCapabilityCheck('pk');   // parks inside runAllSelfTests
+        const a = hub.runOwnCapabilityCheck('pk');   // parks inside runAllSelfTests
         await flush();
-        await hub._runOwnCapabilityCheck('pk');       // the interval (or config watch) fires on top
+        await hub.runOwnCapabilityCheck('pk');       // the interval (or config watch) fires on top
 
         expect(runAllSelfTests.callCount, 'the second pass never re-ran the self-tests').to.equal(1);
         expect(broadcast.callCount, 'the second pass broadcast nothing').to.equal(0);
@@ -388,11 +388,11 @@ describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
 
     it('a rejected self-test pass does not wedge the re-check loop', async function () {
         runAllSelfTests.rejects(new Error('capability module blew up'));
-        await hub._runOwnCapabilityCheck('pk').catch(() => {});
+        await hub.runOwnCapabilityCheck('pk').catch(() => {});
         expect(hub._capabilityCheckRunning, 'a failed pass must not wedge the timer').to.equal(false);
 
         runAllSelfTests.resolves();
-        await hub._runOwnCapabilityCheck('pk');
+        await hub.runOwnCapabilityCheck('pk');
         expect(broadcast.callCount, 'the next pass runs normally').to.equal(1);
     });
 });
@@ -409,7 +409,7 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
         hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
         refreshOwnQualification     = sinon.stub().resolves();
         hub.refreshOwnQualification = refreshOwnQualification;
-        hub._btcIndexerHeaders      = () => ({});
+        hub.btcIndexerHeaders      = () => ({});
         hub._resolveBtcIndexerUrl   = async () => 'http://indexer.test';
     });
 
@@ -425,9 +425,9 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
             return 'http://indexer.test';
         };
 
-        const a = hub._pollOwnStake('pk');            // parks before the indexer round-trip
+        const a = hub.pollOwnStake('pk');            // parks before the indexer round-trip
         await flush();
-        await hub._pollOwnStake('pk');                // the interval fires on top
+        await hub.pollOwnStake('pk');                // the interval fires on top
 
         expect(axiosStub.post.callCount, 'the second pass never hit the indexer').to.equal(0);
 
@@ -440,11 +440,11 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
 
     it('a rejected stake poll does not wedge the poll loop', async function () {
         hub._resolveBtcIndexerUrl = async () => { throw new Error('config lookup failed'); };
-        await hub._pollOwnStake('pk').catch(() => {});
+        await hub.pollOwnStake('pk').catch(() => {});
         expect(hub._stakePollRunning, 'a failed poll must not wedge the timer').to.equal(false);
 
         hub._resolveBtcIndexerUrl = async () => 'http://indexer.test';
-        await hub._pollOwnStake('pk');
+        await hub.pollOwnStake('pk');
         expect(refreshOwnQualification.callCount, 'the next poll runs normally').to.equal(1);
     });
 });
@@ -488,9 +488,9 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
             return 200;
         };
 
-        const a = hub._refreshTransportSignerSet();   // parks before the snapshot round-trip
+        const a = hub.refreshTransportSignerSet();   // parks before the snapshot round-trip
         await flush();
-        await hub._refreshTransportSignerSet();       // the interval fires on top
+        await hub.refreshTransportSignerSet();       // the interval fires on top
 
         expect(snapshot.callCount, 'the second pass never asked for a snapshot').to.equal(0);
 
@@ -501,23 +501,23 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
         expect(hub._transportSetRefreshRunning, 'flag released in finally').to.equal(false);
 
         // And the loop still works on the next tick, with the newer block's set.
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.lastCall.args[0].has(NEWER), 'the later tick writes the newer set').to.equal(true);
     });
 
     it('a rejected refresh does not wedge the refresh loop', async function () {
         hub._resolveBtcLatestBlock = async () => { throw new Error('BTC tip lookup failed'); };
-        await hub._refreshTransportSignerSet().catch(() => {});
+        await hub.refreshTransportSignerSet().catch(() => {});
         expect(hub._transportSetRefreshRunning, 'a failed refresh must not wedge the timer').to.equal(false);
 
         hub._resolveBtcLatestBlock = async () => 200;
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'the next refresh runs normally').to.equal(1);
     });
 
     it('an unresolved tip releases the flag without writing the set', async function () {
         hub._resolveBtcLatestBlock = async () => null;
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'no set is written on an unresolved tip').to.equal(0);
         expect(hub._transportSetRefreshRunning, 'the early return still clears the flag').to.equal(false);
     });
@@ -534,7 +534,7 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
 
 describe('OraclePublisher._processQueue overlap guard', function () {
 
-    const OraclePublisher = require('../../src/OraclePublisher');
+    const OraclePublisher = require('../../src/oracle/publisher');
     const MY_PUB = 'aa'.repeat(32);
 
     let queueFile;

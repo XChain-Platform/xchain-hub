@@ -18,7 +18,7 @@
 // from the two header-identical / same-snapshot_block / different-digest messages alone.
 const { expect } = require('chai');
 const eq = require('../../src/equivocation_header.js');
-const Consensus = require('../../src/Consensus.js');
+const Consensus = require('../../src/consensus/pbft.js');
 
 // Stub identity whose sign() echoes its input → lets us assert the EXACT signed bytes.
 const identity = { sign: (s) => 'SIG(' + s + ')', getPubkeyHex: () => 'ABCDEF' };
@@ -30,12 +30,12 @@ describe('EQUIV config canonical (WI-2 bump 2, XCONFIG)', function () {
 
     it('below the flag-day (mainnet) → no equiv fields (vote still counts)', function () {
         const c = mkConsensus('mainnet');
-        expect(c._equivVote(7, 0, 'deadbeef', 5)).to.deep.equal({});
+        expect(c.equivVote(7, 0, 'deadbeef', 5)).to.deep.equal({});
     });
 
     it('at/above the flag-day (regtest) → signs XCONFIG|seq|view||snapshot_block|digest', function () {
         const c = mkConsensus('regtest');
-        const out = c._equivVote(7, 2, 'deadbeef', 480);
+        const out = c.equivVote(7, 2, 'deadbeef', 480);
         // content = `<snapshot_block>|<digest>` so a SLASH proof recovers the membership block.
         const expectedCanonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, 7, 2, '480|deadbeef');
         expect(expectedCanonical).to.equal('EQUIV|XCONFIG|7|2||480|deadbeef');
@@ -44,13 +44,13 @@ describe('EQUIV config canonical (WI-2 bump 2, XCONFIG)', function () {
 
     it('a different view ⇒ a different signed canonical (honest view-change boundary)', function () {
         const c = mkConsensus('regtest');
-        const v0 = c._equivVote(7, 0, 'deadbeef', 480).equiv_sig;
-        const v1 = c._equivVote(7, 1, 'deadbeef', 480).equiv_sig;
+        const v0 = c.equivVote(7, 0, 'deadbeef', 480).equiv_sig;
+        const v1 = c.equivVote(7, 1, 'deadbeef', 480).equiv_sig;
         expect(v0).to.not.equal(v1);
     });
 
     it('no identity → no equiv fields (gate on, but nothing to sign with)', function () {
         const c = new Consensus({ network: 'regtest', getPeerManager: () => ({}), db: {}, getIdentity: () => null });
-        expect(c._equivVote(7, 0, 'deadbeef', 480)).to.deep.equal({});
+        expect(c.equivVote(7, 0, 'deadbeef', 480)).to.deep.equal({});
     });
 });

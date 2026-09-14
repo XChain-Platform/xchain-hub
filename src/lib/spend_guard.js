@@ -169,13 +169,13 @@ class SpendGuard {
     isPaused(){ return this.paused; }
 
     // ---- Gate 2b: cost window helpers ----
-    _prune(now){
+    prune(now){
         let cutoff = now - this.windowMs;
         while (this._spends.length && this._spends[0].t <= cutoff) this._spends.shift();
     }
     spentInWindow(now){
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         let sum = 0;
         for (let e of this._spends) sum += e.cost;
         return sum;
@@ -205,9 +205,9 @@ class SpendGuard {
         // The store already refused a write, so a spend authorised here could not be
         // recorded. Same fail-closed rule reserve() applies, reached by the sites that
         // use the pure-predicate pair instead.
-        if (!this._storeUsable()){
+        if (!this.storeUsable()){
             this.blocked.persist++;
-            return { ok: false, reason: this._persistBlockedReason() };
+            return { ok: false, reason: this.persistBlockedReason() };
         }
 
         // A configured floor that never receives a balance is silently inert:
@@ -251,9 +251,9 @@ class SpendGuard {
     record(cost){
         let now = Date.now();
         this.ceiling.record(now);
-        this._prune(now);
+        this.prune(now);
         this._spends.push({ t: now, cost: this._cost(cost) });
-        this._persist();
+        this.persist();
     }
 
     // ---- Await-safe gate: reserve before the send, release if it never went out ----
@@ -284,7 +284,7 @@ class SpendGuard {
         // indistinguishable, after a restart, from a spend that never happened, so
         // authorising one turns a read-only disk into an unbounded allowance. The hub
         // goes visibly silent instead (operator ruling: fail closed).
-        if (!this._persist()){
+        if (!this.persist()){
             let i = this._spends.findIndex(e => e.reservation === token.id);
             if (i >= 0) this._spends.splice(i, 1);
             this.ceiling.release(token.ceilingHandle);
@@ -312,7 +312,7 @@ class SpendGuard {
         let i = this._spends.findIndex(e => e.reservation === token.id);
         if (i < 0) return;
         this._spends[i].cost = c;
-        this._persist();
+        this.persist();
     }
 
     // The send never went out (blocked, threw, or was abandoned): give the budget
@@ -324,7 +324,7 @@ class SpendGuard {
         let i = this._spends.findIndex(e => e.reservation === token.id);
         if (i >= 0) this._spends.splice(i, 1);
         this.ceiling.release(token.ceilingHandle);
-        this._persist();
+        this.persist();
     }
 
     // ---- Restart persistence ----
@@ -348,7 +348,7 @@ class SpendGuard {
     // the exact defect this method exists to close.
     persistTo(statePath){
         this._statePath = path.resolve(statePath || this.statePath);
-        this._loadState();
+        this.loadState();
         return this;
     }
 
@@ -362,7 +362,7 @@ class SpendGuard {
     //   valid                    -> prune to the live window and rebuild BOTH ceilings.
     // A persisted RESERVATION is loaded as a plain spend: the process that could have
     // released it is gone, and over-counting blocks rather than overspends.
-    _loadState(){
+    loadState(){
         let text;
         try { text = fs.readFileSync(this._statePath, 'utf8'); }
         catch(e){
@@ -372,17 +372,17 @@ class SpendGuard {
                 // read-only disk _persist() lands no byte, so without this the
                 // window resets on every restart and the ceiling is unbounded
                 // across them, which is the one shape this file exists to stop.
-                if (this._storeIsWritable()) return;
-                this._seedConsumed('absent, and its directory does not accept writes');
+                if (this.storeIsWritable()) return;
+                this.seedConsumed('absent, and its directory does not accept writes');
                 return;
             }
-            this._seedConsumed('unreadable (' + (e && e.code ? e.code : 'error') + ')');
+            this.seedConsumed('unreadable (' + (e && e.code ? e.code : 'error') + ')');
             return;
         }
         let saved;
         try { saved = JSON.parse(text); }
-        catch(e){ this._seedConsumed('corrupt JSON'); return; }
-        if (!saved || !Array.isArray(saved.spends)){ this._seedConsumed('unrecognized shape'); return; }
+        catch(e){ this.seedConsumed('corrupt JSON'); return; }
+        if (!saved || !Array.isArray(saved.spends)){ this.seedConsumed('unrecognized shape'); return; }
 
         let now = Date.now();
         let cutoff = now - this.windowMs;
@@ -407,7 +407,7 @@ class SpendGuard {
     // Walks to the nearest existing ancestor because _persist() mkdirs the tree it
     // needs, so an absent directory under a writable parent is still a store this
     // hub can write. Anything else (no permission, no reachable parent) is not.
-    _storeIsWritable(){
+    storeIsWritable(){
         let dir = path.dirname(this._statePath);
         for (let hops = 0; hops < 64; hops++){
             try {
@@ -425,7 +425,7 @@ class SpendGuard {
 
     // Assume the window is spent. Costs at most one window of liveness on a broken
     // store, versus handing a restart a full fresh allowance.
-    _seedConsumed(why){
+    seedConsumed(why){
         let now = Date.now();
         this._spends.push({ t: now, cost: this.maxSpendUsdCents });
         this.ceiling.seedConsumed(now);
@@ -440,7 +440,7 @@ class SpendGuard {
     // restart read an empty window and handed the effector its full allowance back,
     // once per restart, exactly the unbounded-across-restarts shape persistTo() exists
     // to close. Operator ruling 2026-09-09/2026-09-11: fail closed.
-    _persist(){
+    persist(){
         if (!this._statePath) return true;
         try {
             fs.mkdirSync(path.dirname(this._statePath), { recursive: true });
@@ -477,13 +477,13 @@ class SpendGuard {
     // every gate refuses. Re-probes by writing the CURRENT state (idempotent, and the
     // same bytes _persist() would have written), so a hub whose disk comes back
     // resumes on its own rather than needing a restart to notice.
-    _storeUsable(){
+    storeUsable(){
         if (!this._statePath || !this._persistBroken) return true;
-        return this._persist();
+        return this.persist();
     }
 
     // Why the store gate refused, in the same shape as every other gate's reason.
-    _persistBlockedReason(){
+    persistBlockedReason(){
         return this.label + ': spend state at ' + this._statePath + ' is unwritable (' +
                (this._lastPersistError || 'write failed') + '); refusing to authorise a spend ' +
                'this hub cannot record (fail-closed)';
@@ -495,7 +495,7 @@ class SpendGuard {
     // pause in here is what makes a runtime pause reach the primary broadcast path.
     allow(cost){
         if (this.paused) return false;
-        if (!this._storeUsable()) return false;
+        if (!this.storeUsable()) return false;
         let now = Date.now();
         if (!this.ceiling.allow(now)) return false;
         return this.spentInWindow(now) + this._cost(cost) <= this.maxSpendUsdCents;
@@ -504,7 +504,7 @@ class SpendGuard {
     noteBlocked(now){
         now = now || Date.now();
         if (this.paused) return this.label + ': effector spend PAUSED (' + (this.pauseReason || '') + ')';
-        if (this._persistBroken) return this._persistBlockedReason();
+        if (this._persistBroken) return this.persistBlockedReason();
         if (!this.ceiling.allow(now)) return this.ceiling.noteBlocked(now);
         return this.label + ': rolling per-window spend ceiling reached ($' +
                (this.maxSpendUsdCents / 100).toFixed(2) + ')';

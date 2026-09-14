@@ -30,7 +30,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const HUB_COPY     = path.join(__dirname, '../../src/anchor_reward_key.js');
+const HUB_COPY     = path.join(__dirname, '../../src/anchor/anchor_reward_key.js');
 const INDEXER_COPY = path.join(__dirname, '../../../xchain-indexer/src/actions/anchor/anchor_reward_key.js');
 
 // Everything from the strict-mode pragma down: the constant, both forms of the rule and
@@ -42,7 +42,7 @@ function codeOnly(source){
 }
 
 describe('anchor_reward_key twin parity (hub <-> indexer) @regression', function () {
-    const ark = require('../../src/anchor_reward_key.js');
+    const ark = require('../../src/anchor/anchor_reward_key.js');
 
     it('the executable region is byte-identical to the indexer copy', function () {
         if(!fs.existsSync(INDEXER_COPY)){

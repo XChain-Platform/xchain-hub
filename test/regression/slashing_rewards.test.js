@@ -26,8 +26,8 @@
  */
 
 const assert = require('assert');
-const SlashDetector = require('../../src/SlashDetector');
-const RewardTracker = require('../../src/RewardTracker');
+const SlashDetector = require('../../src/validators/slash_detector');
+const RewardTracker = require('../../src/anchor/reward_tracker');
 const { DB_METHODS } = require('../helpers/mockHub');
 
 const PK = (c) => c.repeat(64);   // 64-hex pubkey
@@ -46,7 +46,7 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
     // re-arms on a falsy return so a failed write can be retried next round. A
     // stub returning undefined therefore impersonates a permanently failing DB
     // and re-fires the same offense every round.
-    sd._recordSlashProposal = async (pubkey, offenseType, round) => {
+    sd.recordSlashProposal = async (pubkey, offenseType, round) => {
         slashed.push({ pubkey, offenseType, round });
         return true;
     };

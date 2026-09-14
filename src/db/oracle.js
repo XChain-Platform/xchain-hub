@@ -26,49 +26,49 @@
 
 module.exports = {
     // Deletes from oracle_published_rounds.
-    // Moved here from src/OraclePublisher.js:2878.
+    // Moved here from src/oracle/publisher.js:2878.
     async deleteOraclePublishedRound(cutoff) {
         return this.doQuery('DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL', [cutoff]);
     },
 
     // Deletes from oracle_submissions.
-    // Moved here from src/OracleRound.js:1199.
+    // Moved here from src/oracle/round.js:1199.
     async deleteOracleSubmission(cutoff) {
         return this.doQuery('DELETE FROM oracle_submissions WHERE round_number < ?', [cutoff]);
     },
 
     // Reads rows from oracle_published_rounds.
-    // Moved here from src/OraclePublisher.js:2798.
+    // Moved here from src/oracle/publisher.js:2798.
     async findAllOraclePublishedRounds() {
         return this.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds');
     },
 
     // Reads rows from oracle_published_rounds.
-    // Moved here from src/OraclePublisher.js:2746.
+    // Moved here from src/oracle/publisher.js:2746.
     async findOraclePublishedRoundsByRound(round) {
         return this.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds WHERE round = ?', [round]);
     },
 
     // Reads one row from oracle_prices.
-    // Moved here from src/PriceAggregator.js:1434.
+    // Moved here from src/oracle/price_aggregator.js:1434.
     async getOraclePrice(source_address, source_chain, actionIndex) {
         return this.doQuery('SELECT id, push_generation FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1', [source_address, source_chain, actionIndex]);
     },
 
     // Reads one row from oracle_prices.
-    // Moved here from src/HubDbBroadcaster.js:636.
+    // Moved here from src/peers/hub_db_broadcaster.js:636.
     async getOraclePricesMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
     },
 
     // Inserts or updates a row in oracle_published_rounds.
-    // Moved here from src/OraclePublisher.js:2758.
+    // Moved here from src/oracle/publisher.js:2758.
     async setOraclePublishedRound(round) {
         return this.doQuery('INSERT INTO oracle_published_rounds (round) VALUES (?) ON DUPLICATE KEY UPDATE round = round', [round]);
     },
 
     // Updates oracle_published_rounds.
-    // Moved here from src/OraclePublisher.js:2772.
+    // Moved here from src/oracle/publisher.js:2772.
     async updateOraclePublishedRound(txid, round) {
         return this.doQuery('UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?', [txid, round]);
     },
@@ -77,16 +77,16 @@ module.exports = {
     // INSERT IGNORE relies on the UNIQUE KEY (round, coin_pair, validator_pubkey)
     // so concurrent writes across hubs collapse silently instead of raising
     // ER_DUP_ENTRY (which db.doQuery would log before our catch could filter it).
-    // Moved here from src/OracleRound.js:1137.
+    // Moved here from src/oracle/round.js:1137.
     async createOracleSubmission(roundNumber, coinPair, validatorPubkey, price, sources) {
         return this.doQuery(`INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
                          VALUES (?, ?, ?, ?, ?)`, [roundNumber, coinPair, validatorPubkey, price, sources]);
     },
 
     // Reads rows from oracle_prices: the forward page-walk the indexer bootstrap
-    // mirrors byte-for-byte (see src/oraclePricesSnapshotQuery.js for why it must
+    // mirrors byte-for-byte (see src/oracle/prices_snapshot_query.js for why it must
     // never change). since and limit arrive clamped.
-    // Moved here from src/oraclePricesSnapshotQuery.js:86.
+    // Moved here from src/oracle/prices_snapshot_query.js:86.
     async findOraclePricesAfterId(since, limit) {
         return this.doQuery('SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
@@ -105,7 +105,7 @@ module.exports = {
     // same effective_at (two txs from one operator) return >1 row for that
     // feed; the client re-dedups per feed key, so this is harmless and
     // still bounded to ~= feed count. ORDER BY id keeps output stable.
-    // Moved here from src/oraclePricesSnapshotQuery.js:74.
+    // Moved here from src/oracle/prices_snapshot_query.js:74.
     async findLatestOraclePricesPerFeed(now, limit) {
         return this.doQuery(
             'SELECT op.* FROM oracle_prices op ' +
@@ -118,7 +118,7 @@ module.exports = {
     },
 
     // Forgets the durable publish markers for a set of retracted rounds.
-    // Moved here from src/OraclePublisher.js:2713.
+    // Moved here from src/oracle/publisher.js:2713.
     //
     // `rounds` is the caller's list of parsed integer round numbers; each one is bound as
     // a parameter, so the only thing built from the list is the count of placeholders.
@@ -129,7 +129,7 @@ module.exports = {
     },
 
     // Writes one PRICE v1 oracle row, generation-monotonic.
-    // Moved here from src/PriceAggregator.js:1458.
+    // Moved here from src/oracle/price_aggregator.js:1458.
     //
     // On the (source_chain, action_index) unique key, a lower-or-equal generation never
     // overwrites a newer row, so a late stale push can neither insert an orphan nor clobber
@@ -164,7 +164,7 @@ module.exports = {
     },
 
     // Deletes a rolled-back source chain's PRICE v1 rows, for a reorg retraction.
-    // Moved here from src/PriceAggregator.js:1610.
+    // Moved here from src/oracle/price_aggregator.js:1610.
     //
     // oracle_prices tracks the PRICE v1 action by action_index. `bounded` closes the range at
     // `to` so a row re-published inside the original open-ended range survives a deferred

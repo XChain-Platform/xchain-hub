@@ -15,7 +15,7 @@ const { expect }       = require('chai');
 const WebSocket        = require('ws');
 const testDb           = require('../../helpers/testDb');
 const { createPeerPair, buildEnvelope, sendEnvelope, waitForEvent } = require('../../helpers/testPeerNetwork');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const ValidatorIdentity = require('../../../src/validators/identity');
 const { waitUntil }     = require('../../helpers/waitUntil');
 
 // Order-preserving flush. The transport delivers frames in order, so a probe sent
@@ -177,7 +177,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             let peerAddr = 'ws://signed-peer:10001';
 
             // Create PeerManager with signature requirement
-            let PeerManager = require('../../../src/PeerManager');
+            let PeerManager = require('../../../src/peers/manager');
             let pm = new PeerManager({
                 P2P_VALIDATOR_ADDR:     'ws://hub-sig:10001',
                 P2P_PORT:               0,
@@ -247,7 +247,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
         it('rejects unsigned messages when REQUIRE_SIGNATURES is true', async function () {
             let db = testDb.getDb();
 
-            let PeerManager = require('../../../src/PeerManager');
+            let PeerManager = require('../../../src/peers/manager');
             let pm = new PeerManager({
                 P2P_VALIDATOR_ADDR:     'ws://hub-sig2:10001',
                 P2P_PORT:               0,

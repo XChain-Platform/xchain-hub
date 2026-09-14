@@ -25,7 +25,7 @@ const { expect }           = require('chai');
 const fs                   = require('fs');
 const path                 = require('path');
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
 const { DB_METHODS }       = require('../helpers/mockHub.js');
 
 const BLOCK      = 953200;
@@ -134,11 +134,14 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
     // offending file directly rather than asserting an empty set, so a writer that
     // re-grows its own per-row INSERT is reported by path.
     it('every capability_snapshots writer goes through the shared helper', function () {
-        const WRITERS = ['StateCheckpointEngine.js', 'CrossChainDexEngine.js', 'CrossChainCallEngine.js',
-                         'OracleConsensus.js', 'RetractionConsensus.js', 'AttestationRelay.js'];
+        // Paths relative to this suite, so each one names the writer's file wherever
+        // its feature directory keeps it.
+        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/cross_chain/dex_engine.js',
+                         '../../src/cross_chain/call_engine.js', '../../src/oracle/consensus.js',
+                         '../../src/consensus/retraction.js', '../../src/attestation/relay.js'];
         let offenders = [];
         for (const name of WRITERS) {
-            const src = fs.readFileSync(path.join(__dirname, '../../src', name), 'utf8');
+            const src = fs.readFileSync(path.join(__dirname, name), 'utf8');
             if (!/writeCapabilitySnapshotRows\(/.test(src)) offenders.push(name + ': does not call the shared writer');
             if (/INSERT IGNORE INTO capability_snapshots/.test(src)) offenders.push(name + ': still carries a per-row INSERT');
         }

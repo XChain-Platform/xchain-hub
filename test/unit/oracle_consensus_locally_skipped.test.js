@@ -18,7 +18,7 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { pubkeyForTestSender } = require('../helpers/fixtures');
 
@@ -63,7 +63,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
     });
 
     it('a genuinely finalized round IS still dropped at the finalized guard (contrast)', async function () {
-        oc._markFinalized(ROUND);
+        oc.markFinalized(ROUND);
 
         let known  = sinon.stub(oc, '_isKnownSender').returns(false);
         let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
@@ -77,11 +77,11 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
     });
 
     it('finalizing a locally-skipped round moves it out of locallySkipped into finalized', function () {
-        oc._markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.true;
         expect(oc._locallySkippedOrder).to.include(ROUND);
 
-        oc._markFinalized(ROUND);
+        oc.markFinalized(ROUND);
 
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc._locallySkippedOrder).to.not.include(ROUND);
@@ -107,15 +107,15 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
             finalized:      true
         });
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
     });
 
     it('_markLocallySkipped is a no-op once the round is already finalized', function () {
-        oc._markFinalized(ROUND);
-        oc._markLocallySkipped(ROUND);
+        oc.markFinalized(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
     });
@@ -128,12 +128,12 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         let seen = [];
         oc.on('round:skipped', e => seen.push(e && e.round));
 
-        oc._markLocallySkipped(ROUND);
-        oc._markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(seen).to.deep.equal([ROUND]);
 
-        oc._markFinalized(ROUND + 1);
-        oc._markLocallySkipped(ROUND + 1);
+        oc.markFinalized(ROUND + 1);
+        oc.markLocallySkipped(ROUND + 1);
         expect(seen).to.deep.equal([ROUND]);
     });
 });

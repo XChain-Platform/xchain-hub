@@ -17,7 +17,7 @@
 // keyed on (reward_type, round_number) alone collapsed them into one: the dedup guard
 // dropped the second reward, and the follower cross-check then refused to co-sign a
 // perfectly valid archive because "our local rows credit someone else". round_qualifier
-// (src/anchor_reward_key.js: snapshot_block for the archive leg, 0 for every other type)
+// (src/anchor/anchor_reward_key.js: snapshot_block for the archive leg, 0 for every other type)
 // is what tells them apart.
 //
 // Both suites carry a CONTROL that drives the SAME code against a database which still
@@ -26,8 +26,8 @@
 // collision.
 
 const { expect }           = require('chai');
-const RewardTracker        = require('../../src/RewardTracker');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const RewardTracker        = require('../../src/anchor/reward_tracker');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_LOW   = 'aa'.repeat(32);
@@ -176,7 +176,7 @@ const verify = async (pub, reward, snapshotBlock) => {
     let set   = await pub._resolveCapabilitySet('oracle_publish', snapshotBlock, '');
     let snaps = set.map(v => ({ snapshot_block: snapshotBlock, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
-    return pub._verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [reward],
+    return pub.verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [reward],
                                             capability_snapshots: snaps });
 };
 

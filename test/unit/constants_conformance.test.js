@@ -158,8 +158,8 @@ describe('oracle round-interval shared constants (#2653)', () => {
     });
 
     it('no consumer re-declares the interval/window defaults as bare fallback literals', () => {
-        for (const file of ['api.js', 'OracleRound.js', 'XChainHub.js']) {
-            const src = fs.readFileSync(path.join(__dirname, '../../src', file), 'utf8');
+        for (const file of ['../../src/api.js', '../../src/oracle/round.js', '../../src/XChainHub.js']) {
+            const src = fs.readFileSync(path.join(__dirname, file), 'utf8');
             // The drift vector is a fallback expression like
             // `ORACLE_ROUND_INTERVAL || 600000` on an oracle-cadence line; the
             // constant name is the only allowed way to spell the default. Scoped
@@ -177,8 +177,8 @@ describe('oracle round-interval shared constants (#2653)', () => {
         const { createMockHub } = require('../helpers/mockHub');
         const PriceFetcherStub = function () { return {}; };
         PriceFetcherStub.getCoinPairs = () => ['BTC/USD'];
-        const OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher.js': PriceFetcherStub
+        const OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher.js': PriceFetcherStub
         });
         const or = new OracleRound(createMockHub({ p2pConfig: {} }));
         expect(or.roundInterval).to.equal(constants.DEFAULT_ORACLE_ROUND_INTERVAL_MS);
@@ -202,7 +202,7 @@ describe('PRICE v0 and v1 lanes accept the same coin/fiat universe (#7215)', fun
     const fs   = require('fs');
     const path = require('path');
     const coins        = require('../../src/coins');
-    const PriceFetcher = require('../../src/PriceFetcher');
+    const PriceFetcher = require('../../src/oracle/price_fetcher');
 
     // Split the v0 product back into its two axes. Bound through getCoinPairs()
     // (the surface OracleRound actually consumes) rather than a new export, so the

@@ -28,8 +28,8 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
                 { coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }
             ])
         };
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return mockPriceFetcher; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return mockPriceFetcher; }
         });
         hub = createMockHub({
             p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' }

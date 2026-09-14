@@ -20,9 +20,9 @@ const zlib                  = require('zlib');
 const crypto                = require('crypto');
 const os                    = require('os');
 const path                  = require('path');
-const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
-const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const StateAnchorPublisher  = require('../../src/anchor/publisher');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
+const ValidatorIdentity     = require('../../src/validators/identity');
 const eq                    = require('../../src/equivocation_header.js');
 const ccr                   = require('../../src/cross_chain_royalty_activation.js');
 const { waitUntil }         = require('../helpers/waitUntil');
@@ -500,7 +500,7 @@ describe('StateAnchorPublisher', function () {
                                   checkpoint_seq: CP_ROW.checkpoint_seq }];
         let d = { network: bus.network, snapshot_block: CP_ROW.snapshot_block, txid: txid, sections: sections };
         d.sig_pubkey = signer.pubkey;
-        d.sig = signer.identity.sign(signer.pub._bundleDoneCanonical(d, txid));
+        d.sig = signer.identity.sign(signer.pub.bundleDoneCanonical(d, txid));
         return d;
     }
     function archiveOrder(bus, batchSeq) {
@@ -603,8 +603,8 @@ describe('StateAnchorPublisher', function () {
                 return (attestSigs && attestSigs.length > 0) ? p + 'x'.repeat(9000) : p;
             };
             let intents = 0;
-            let realIntent = nd.pub._recordAnchorIntent.bind(nd.pub);
-            nd.pub._recordAnchorIntent = async function (row) { intents++; return realIntent(row); };
+            let realIntent = nd.pub.recordAnchorIntent.bind(nd.pub);
+            nd.pub.recordAnchorIntent = async function (row) { intents++; return realIntent(row); };
             await startAll(bus);
             await nd.pub.flush();
             expect(nd.published.filter(p => p.split('|')[1] === '0'), 'nothing was broadcast').to.deep.equal([]);
@@ -748,7 +748,7 @@ describe('StateAnchorPublisher', function () {
             let receiver  = order[1];
             let d = mkBundleDone(bus, publisher, 'cc'.repeat(32));
 
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
 
             expect(receiver.db.checkpoints[0].anchor_txid, 'the stamp itself still lands').to.equal('cc'.repeat(32));
             expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length,
@@ -762,7 +762,7 @@ describe('StateAnchorPublisher', function () {
             await startAll(bus);
             let order   = v0Order(bus);
             let impostor = order[order.length - 1];                        // highest rank, never unlocked at since=0
-            let cp = impostor.pub._cpFromRow(impostor.db.checkpoints[0]);
+            let cp = impostor.pub.cpFromRow(impostor.db.checkpoints[0]);
             let canonical = impostor.pub._attestationCanonical(cp, impostor.pubkey);
 
             let collected = 0;
@@ -822,7 +822,7 @@ describe('StateAnchorPublisher', function () {
         it('_archiveAttestationCanonical is byte-identical to the indexer archive reward canonical (EQUIV-wrapped)', function () {
             let bus = buildMesh(1);
             let pub = bus.nodes[0].pub;
-            let cp  = pub._cpFromRow(Object.assign({}, CP_ROW));
+            let cp  = pub.cpFromRow(Object.assign({}, CP_ROW));
             let publisher = bus.nodes[0].pubkey;
             let expected = archiveRewardCanonical(cp, 0, publisher);
             // Sanity: the wrapped form is what the federation signs at/above the EQUIV
@@ -854,11 +854,11 @@ describe('StateAnchorPublisher', function () {
             expect(Number(parts[pubBase + 1]), 'ATTEST_SIG_COUNT').to.equal(1);
             let aPub = parts[pubBase + 2], aSig = parts[pubBase + 3];
             expect(aPub).to.equal(nd.pubkey);
-            let cp = nd.pub._cpFromRow(nd.db.checkpoints[0]);
+            let cp = nd.pub.cpFromRow(nd.db.checkpoints[0]);
             expect(ValidatorIdentity.verify(archiveRewardCanonical(cp, 0, nd.pubkey), aSig, aPub)).to.be.true;
 
             // The wrapper signature still verifies over the UNCHANGED v1 archive canonical.
-            let canonical = nd.pub._archiveCanonical(cp, 0, 1, parts[13], 1);
+            let canonical = nd.pub.archiveCanonical(cp, 0, 1, parts[13], 1);
             expect(ValidatorIdentity.verify(canonical, parts[18], parts[17])).to.be.true;
 
             // The archive lands, rows back-fill, and the anchor_archive reward is recorded.
@@ -884,7 +884,7 @@ describe('StateAnchorPublisher', function () {
             let attestCount = Number(parts[pubBase + 1]);
             expect(attestCount, '2f+1 attestation quorum').to.be.at.least(3);
 
-            let cp = leader.pub._cpFromRow(leader.db.checkpoints[0]);
+            let cp = leader.pub.cpFromRow(leader.db.checkpoints[0]);
             let canonical = archiveRewardCanonical(cp, Number(parts[11]), leader.pubkey);
             let setPubkeys = new Set(bus.nodes.map(n => n.pubkey));
             let signers = [];
@@ -1055,7 +1055,7 @@ describe('StateAnchorPublisher', function () {
         expect(v1[12]).to.equal('1');                                  // MATCH_COUNT
         expect(v1[14]).to.equal('1');                                  // TOTAL_CHUNKS
         let json = zlib.gunzipSync(Buffer.from(v1[15], 'base64url')).toString('utf8');
-        expect(nd.pub._crc32Hex(json)).to.equal(v1[13]);               // BATCH_CRC32 binds the blob
+        expect(nd.pub.crc32Hex(json)).to.equal(v1[13]);               // BATCH_CRC32 binds the blob
         let archive = JSON.parse(json);
         expect(archive.matches.length).to.equal(1);
         expect(archive.matches[0].match_id).to.equal('m1');
@@ -1069,7 +1069,7 @@ describe('StateAnchorPublisher', function () {
         // The v1 signature verifies over the extended canonical.
         let sigCount = Number(v1[16]);
         expect(sigCount).to.equal(1);
-        let canonical = nd.pub._archiveCanonical(nd.pub._cpFromRow(nd.db.checkpoints[0]), 0, 1, v1[13], 1);
+        let canonical = nd.pub.archiveCanonical(nd.pub.cpFromRow(nd.db.checkpoints[0]), 0, 1, v1[13], 1);
         expect(ValidatorIdentity.verify(canonical, v1[18], v1[17])).to.be.true;
 
         expect(nd.db.matches[0].batch_seq).to.equal(0);
@@ -1189,7 +1189,7 @@ describe('StateAnchorPublisher', function () {
         let v1 = leader.published.find(p => p.split('|')[1] === '1').split('|');
         let sigCount = Number(v1[16]);
         expect(sigCount).to.be.at.least(3);                            // quorum 2f+1 = 3
-        let canonical = leader.pub._archiveCanonical(leader.pub._cpFromRow(leader.db.checkpoints[0]), 0, 1, v1[13], 1);
+        let canonical = leader.pub.archiveCanonical(leader.pub.cpFromRow(leader.db.checkpoints[0]), 0, 1, v1[13], 1);
         for (let i = 0; i < sigCount; i++)
             expect(ValidatorIdentity.verify(canonical, v1[18 + 2 * i], v1[17 + 2 * i])).to.be.true;
 
@@ -1427,7 +1427,7 @@ describe('StateAnchorPublisher', function () {
             let set   = await pub._resolveCapabilitySet('oracle_publish', Number(ar.block_index), pub.network);
             let snaps = set.map(v => ({ snapshot_block: Number(ar.block_index), capability: 'oracle_publish',
                                         signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
-            return pub._verifyArchiveAgainstLocal(
+            return pub.verifyArchiveAgainstLocal(
                 { matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
         };
         let good = {
@@ -1597,10 +1597,10 @@ describe('StateAnchorPublisher', function () {
     it('_mayPublish fails closed on an empty election order', function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
-        expect(nd.pub._mayPublish([], 0)).to.equal(false);
-        expect(nd.pub._mayPublish([], 1000)).to.equal(false);
+        expect(nd.pub.mayPublish([], 0)).to.equal(false);
+        expect(nd.pub.mayPublish([], 1000)).to.equal(false);
         // Sanity: a real single-member order in which this hub is rank 0 still may.
-        expect(nd.pub._mayPublish([nd.pubkey], 0)).to.equal(true);
+        expect(nd.pub.mayPublish([nd.pubkey], 0)).to.equal(true);
     });
 
     // ── signing set is resolved at snapshot_block, not the election block ────────
@@ -1668,9 +1668,9 @@ describe('StateAnchorPublisher', function () {
     it('_publishArchive keeps rows pending when the broadcast v1 cannot reach on-chain quorum', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
-        let cp = nd.pub._cpFromRow(nd.db.checkpoints[0]);                  // snapshot_block 100
+        let cp = nd.pub.cpFromRow(nd.db.checkpoints[0]);                  // snapshot_block 100
         let batchSeq = 0, count = 1, crc = 'deadbeef';
-        let canonical = nd.pub._archiveCanonical(cp, batchSeq, count, crc, 1);
+        let canonical = nd.pub.archiveCanonical(cp, batchSeq, count, crc, 1);
         // A 3-member snapshot signing set (quorum 2) but only the leader's own
         // signature collected (1 valid) - the indexer would reject it as invalid.
         let validators = [nd.pubkey, pkOf(1), pkOf(2)];
@@ -1901,16 +1901,16 @@ describe('StateAnchorPublisher', function () {
             let { ids, set } = stakeSet();
             let minority = sigsFrom(ids.slice(1));                    // 3×10% = 30 of 100
             // Count regime would ACCEPT (3 of 4 ≥ 2f+1) - exactly the pre-fix producer bug.
-            expect(pub._quorumVerified(CANON, minority, set, false)).to.equal(true);
+            expect(pub.quorumVerified(CANON, minority, set, false)).to.equal(true);
             // Stake regime REJECTS (3·30 = 90 ≤ 2·100 = 200) - matches the indexer/recovery verdict.
-            expect(pub._quorumVerified(CANON, minority, set, true)).to.equal(false);
+            expect(pub.quorumVerified(CANON, minority, set, true)).to.equal(false);
         });
 
         it('_quorumVerified: adding the 70% holder clears the stake threshold', function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
             let majority = sigsFrom([ids[0], ids[1]]);               // 70 + 10 = 80 of 100
-            expect(pub._quorumVerified(CANON, majority, set, true)).to.equal(true);    // 3·80 = 240 > 200
+            expect(pub.quorumVerified(CANON, majority, set, true)).to.equal(true);    // 3·80 = 240 > 200
         });
 
         it('_quorumVerified: a TRUNCATED weighted set fails CLOSED regardless of stake (XHUB-TRUNC-2)', function () {
@@ -1921,10 +1921,10 @@ describe('StateAnchorPublisher', function () {
             let { ids, set } = stakeSet();
             set.truncated = true;                                    // resolved set overflowed VALIDATOR_QUERY_LIMIT
             let all = sigsFrom(ids);                                 // 100% of stake WOULD clear the 2/3 bar
-            expect(pub._quorumVerified(CANON, all, set, true)).to.equal(false);   // ...but truncated -> fail closed
+            expect(pub.quorumVerified(CANON, all, set, true)).to.equal(false);   // ...but truncated -> fail closed
             // COUNT path is proceed-on-truncation (deterministic cap; matches getQuorum).
             let three = sigsFrom(ids.slice(1));                      // 3 of 4 >= 2f+1
-            expect(pub._quorumVerified(CANON, three, set, false)).to.equal(true);
+            expect(pub.quorumVerified(CANON, three, set, false)).to.equal(true);
         });
 
         it('_quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig', function () {
@@ -1935,7 +1935,7 @@ describe('StateAnchorPublisher', function () {
             let { ids, set } = stakeSet();
             let valid = sigsFrom([ids[0], ids[1]]);                  // 70 + 10 = 80 of 100, clears stake bar
             let poisoned = [{ pubkey: ids[0].getPubkeyHex().toLowerCase(), sig: '00'.repeat(64) }, ...valid];
-            expect(pub._quorumVerified(CANON, poisoned, set, true)).to.equal(true);
+            expect(pub.quorumVerified(CANON, poisoned, set, true)).to.equal(true);
         });
 
         it('_quorumVerified: a pubkey with ONLY invalid sigs is not counted and blocks nothing', function () {
@@ -1943,7 +1943,7 @@ describe('StateAnchorPublisher', function () {
             let { ids, set } = stakeSet();
             let garbageOnly = [{ pubkey: ids[0].getPubkeyHex().toLowerCase(), sig: '00'.repeat(64) },
                                ...sigsFrom(ids.slice(1))];           // 3×10% real = stake-short
-            expect(pub._quorumVerified(CANON, garbageOnly, set, true)).to.equal(false);
+            expect(pub.quorumVerified(CANON, garbageOnly, set, true)).to.equal(false);
         });
 
         it('_checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
@@ -2018,14 +2018,14 @@ describe('StateAnchorPublisher', function () {
         // would after validating the election. The checkpoint (CP_ROW, in the mesh
         // DB) then verifies on-chain via the harness getanchoraction oracle, so the
         // COMPLETE control reaches the reward mirror.
-        follower.pub._recordObservedArchiveLeader(0, leader.pubkey, CP_ROW);
-        follower.pub._recordObservedArchiveLeader(1, leader.pubkey, CP_ROW);
+        follower.pub.recordObservedArchiveLeader(0, leader.pubkey, CP_ROW);
+        follower.pub.recordObservedArchiveLeader(1, leader.pubkey, CP_ROW);
 
         // (1) PARTIAL: a match carries the __partial__ sentinel → the follower must NOT mirror the reward.
         let pMatches = [matchRow('mp', '__partial__')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 0, txid: txid, snapshot_block: snap, matches: pMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(0, txid, pMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(0, txid, pMatches.length))
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'no archive reward on a __partial__ publish').to.be.false;
@@ -2034,9 +2034,9 @@ describe('StateAnchorPublisher', function () {
         // envelope is well-formed enough to reach the reward gate (guards against a false pass
         // where _backfillBatch silently failed for both cases).
         let cMatches = [matchRow('mc', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 1, txid: txid, snapshot_block: snap, matches: cMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(1, txid, cMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(1, txid, cMatches.length))
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'a complete publish DOES mirror the reward').to.be.true;
@@ -2057,10 +2057,10 @@ describe('StateAnchorPublisher', function () {
         let fMatches = [matchRow('m1', 'finalized')];
         let env = () => ({ data: {
             batch_seq: 7, txid: txid, snapshot_block: snap, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: attacker.pubkey, sig: attacker.identity.sign(follower.pub._finalizedCanonical(7, txid, fMatches.length))
+            sig_pubkey: attacker.pubkey, sig: attacker.identity.sign(follower.pub.finalizedCanonical(7, txid, fMatches.length))
         }});
 
-        await follower.pub._handleFinalized(env());
+        await follower.pub.handleFinalized(env());
         let m1 = follower.db.matches.find(m => m.match_id === 'm1');
         expect(m1.archived_status, 'row NOT archived by the forge').to.not.equal('finalized');
         expect(m1.batch_seq, 'no bogus batch_seq stamped').to.equal(null);
@@ -2069,8 +2069,8 @@ describe('StateAnchorPublisher', function () {
         // The SAME envelope IS honored once the follower has observed that member's
         // election (with the batch's checkpoint identity) for the batch, proving the
         // gate (not a malformed envelope) rejected it.
-        follower.pub._recordObservedArchiveLeader(7, attacker.pubkey, CP_ROW);
-        await follower.pub._handleFinalized(env());
+        follower.pub.recordObservedArchiveLeader(7, attacker.pubkey, CP_ROW);
+        await follower.pub.handleFinalized(env());
         expect(follower.db.matches.find(m => m.match_id === 'm1').archived_status,
             'observed leader IS honored').to.equal('finalized');
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
@@ -2116,10 +2116,10 @@ describe('StateAnchorPublisher', function () {
         let forged = () => ({ data: {
             batch_seq: seq, txid: txid, snapshot_block: 100, matches: announced, calls: [], rewards: [],
             sig_pubkey: leader.pubkey,
-            sig: leader.identity.sign(gated.pub._finalizedCanonical(seq, txid, announced.length))
+            sig: leader.identity.sign(gated.pub.finalizedCanonical(seq, txid, announced.length))
         }});
 
-        await gated.pub._handleFinalized(forged());
+        await gated.pub.handleFinalized(forged());
         let m2 = gated.db.matches.find(m => m.match_id === 'm2');
         expect(m2.archived_status, 'a row outside the co-signed archive is NOT suppressed').to.equal(null);
         expect(m2.batch_seq, 'and carries no batch seq').to.equal(null);
@@ -2128,7 +2128,7 @@ describe('StateAnchorPublisher', function () {
         // proposer) still back-fills, so the envelope is valid all the way down and the
         // membership record is the only thing that stopped it above.
         abstaining.pub._observedArchiveContents.clear();
-        await abstaining.pub._handleFinalized(forged());
+        await abstaining.pub.handleFinalized(forged());
         expect(abstaining.db.matches.find(m => m.match_id === 'm2').archived_status,
             'a hub holding no co-signed body abstains and still back-fills').to.equal('finalized');
     });
@@ -2142,12 +2142,12 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(9, leader.pubkey, CP_ROW);        // observed + checkpoint identity stashed
+        follower.pub.recordObservedArchiveLeader(9, leader.pubkey, CP_ROW);        // observed + checkpoint identity stashed
         follower.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });  // the checkpoint was never anchored
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 9, txid: 'dogetx_phantom', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(9, 'dogetx_phantom', fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(9, 'dogetx_phantom', fMatches.length))
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'phantom archive earns no COLLECT-spendable reward').to.equal(false);
@@ -2174,11 +2174,11 @@ describe('StateAnchorPublisher', function () {
         // same way _handleSignReq would. The checkpoint verifies on-chain via the
         // default honest oracle, so the ONLY thing keeping the mirror from firing is
         // the corrected flag-day gate reading the checkpoint's network.
-        follower.pub._recordObservedArchiveLeader(3, leader.pubkey, CP_ROW);
+        follower.pub.recordObservedArchiveLeader(3, leader.pubkey, CP_ROW);
         let cMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 3, txid: 'dogetx_scoped', snapshot_block: 100, matches: cMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(3, 'dogetx_scoped', cMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(3, 'dogetx_scoped', cMatches.length))
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'unscoped hub retires the mirror for a checkpoint at/above its OWN archive flag-day').to.equal(false);
@@ -2193,7 +2193,7 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(11, leader.pubkey, CP_ROW);
+        follower.pub.recordObservedArchiveLeader(11, leader.pubkey, CP_ROW);
         let seen = null;
         follower.pub._indexerCall = async (coin, method, params) => {
             seen = params;
@@ -2203,9 +2203,9 @@ describe('StateAnchorPublisher', function () {
                      actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash };
         };
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 11, txid: 'ab'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(11, 'ab'.repeat(32), fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(11, 'ab'.repeat(32), fMatches.length))
         }});
         expect(seen.txid, 'archive gate binds the announced v1 head txid').to.equal('ab'.repeat(32));
         expect(seen.version, 'archive gate binds ANCHOR v1').to.equal(1);
@@ -2217,14 +2217,14 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(12, leader.pubkey, CP_ROW);
+        follower.pub.recordObservedArchiveLeader(12, leader.pubkey, CP_ROW);
         // The checkpoint IS anchored, but no v1 archive with the announced txid exists:
         // the elected leader is referencing someone else's anchor.
         follower.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 12, txid: 'ff'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(12, 'ff'.repeat(32), fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(12, 'ff'.repeat(32), fMatches.length))
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'referencing a different anchor earns nothing').to.equal(false);
@@ -2238,15 +2238,15 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(4, leader.pubkey);   // leader IS observed for the batch
+        follower.pub.recordObservedArchiveLeader(4, leader.pubkey);   // leader IS observed for the batch
 
         // Announce m1 with a status that diverges from the follower's row
         // ('finalized'): stamping it would mark the row archived under a bogus
         // terminal status and strand it from every future archive round.
         let fMatches = [matchRow('m1', 'attacker_status')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(4, 'dogetx_content', fMatches.length))
         }});
         let m1 = follower.db.matches.find(m => m.match_id === 'm1');
         expect(m1.batch_seq, 'no batch_seq stamped from diverging content').to.equal(null);
@@ -2256,9 +2256,9 @@ describe('StateAnchorPublisher', function () {
         // Control: the TRUE status (and the __partial__ sentinel) both pass, so
         // the rejection above came from the content check, not a malformed envelope.
         let okMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: okMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', okMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(4, 'dogetx_content', okMatches.length))
         }});
         expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq,
             'matching content IS stamped').to.equal(4);
@@ -2268,14 +2268,14 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(5, leader.pubkey);
+        follower.pub.recordObservedArchiveLeader(5, leader.pubkey);
         follower.db.rewardRows.push({ reward_type: 'oracle_round', round_number: 1,
                                       validator_pubkey: leader.pubkey, batch_seq: null, block_index: 100 });
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 5, txid: 'dogetx_rw', snapshot_block: 100, matches: fMatches, calls: [],
             rewards: [{ reward_type: 'oracle_round', round_number: 1, validator_pubkey: leader.pubkey }],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(5, 'dogetx_rw', fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(5, 'dogetx_rw', fMatches.length))
         }});
         expect(follower.db.rewardRows[0].batch_seq, 'indexer-derived reward row NOT stamped').to.equal(null);
         expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq, 'whole message rejected').to.equal(null);
@@ -2285,15 +2285,15 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
-        follower.pub._recordObservedArchiveLeader(6, leader.pubkey);
+        follower.pub.recordObservedArchiveLeader(6, leader.pubkey);
         // d.snapshot_block is unsigned: resolve an EMPTY oracle_publish set at the
         // announced block (membership everywhere else stays intact).
         let orig = follower.pub._getActiveOraclePublishPubkeys.bind(follower.pub);
         follower.pub._getActiveOraclePublishPubkeys = async (blk) => (blk === 999999 ? [] : orig(blk));
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 6, txid: 'dogetx_snap', snapshot_block: 999999, matches: fMatches, calls: [], rewards: [],
-            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(6, 'dogetx_snap', fMatches.length))
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub.finalizedCanonical(6, 'dogetx_snap', fMatches.length))
         }});
         expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq,
             'back-fill itself still applies').to.equal(6);
@@ -2313,7 +2313,7 @@ describe('StateAnchorPublisher', function () {
                                              validator_pubkey: 'aa'.repeat(32), batch_seq: 2, block_index: 100 }] });
         let nd = bus.nodes[0];
 
-        await nd.pub._backfillBatch(9,
+        await nd.pub.backfillBatch(9,
             [{ match_id: 'ma', status: 'finalized' }, { match_id: 'mp', status: 'finalized' }],
             'dogetx_replay', [],
             [{ reward_type: 'anchor_DOGE', round_number: 3, validator_pubkey: 'aa'.repeat(32) }]);
@@ -2334,16 +2334,16 @@ describe('StateAnchorPublisher', function () {
         // A SIGN_REQ that passes the election/rank check (valid sender + election_block)
         // but carries no usable archive (empty archive_b64) still binds the leader,
         // because the bind happens before the co-sign eligibility + archive checks.
-        let canonical = follower.pub._archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
+        let canonical = follower.pub.archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
         await follower.pub._handleSignReq({ data: {
             checkpoint: cp, election_block: 100, batch_seq: batchSeq,
             match_count: 1, batch_crc32: 'deadbeef', total_chunks: 1, archive_b64: '',
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(canonical)
         }});
-        expect(follower.pub._isObservedArchiveLeader(batchSeq, leader.pubkey),
+        expect(follower.pub.isObservedArchiveLeader(batchSeq, leader.pubkey),
             'follower bound the elected leader for the batch').to.equal(true);
         let notLeader = bus.nodes.find(nd => nd !== leader && nd !== follower);
-        expect(follower.pub._isObservedArchiveLeader(batchSeq, notLeader.pubkey),
+        expect(follower.pub.isObservedArchiveLeader(batchSeq, notLeader.pubkey),
             'a non-elected member is not bound').to.equal(false);
     });
 
@@ -2353,7 +2353,7 @@ describe('StateAnchorPublisher', function () {
         let broadcast = [];
         nd.pub.hub.hubDbBroadcaster = { broadcastRow: (ev) => broadcast.push(ev) };
 
-        await nd.pub._backfillBatch(0,
+        await nd.pub.backfillBatch(0,
             [{ match_id: 'm1', status: 'finalized' }, { match_id: 'm2', status: 'retracted' }],
             'dogetx_rebroadcast', [], []);
 
@@ -2375,13 +2375,13 @@ describe('StateAnchorPublisher', function () {
 
         // Null txid = the archive never landed on-chain (rows stay pending); there is
         // no stamp to propagate, so the feed stays quiet.
-        await nd.pub._backfillBatch(0, [{ match_id: 'm1', status: '__partial__' }], null, [], []);
+        await nd.pub.backfillBatch(0, [{ match_id: 'm1', status: '__partial__' }], null, [], []);
         expect(broadcast.length, 'no re-broadcast for a null txid').to.equal(0);
 
         // No broadcaster wired (standalone hub before start()): the back-fill itself
         // must still complete without throwing.
         delete nd.pub.hub.hubDbBroadcaster;
-        await nd.pub._backfillBatch(1, [{ match_id: 'm1', status: 'finalized' }], 'dogetx_x', [], []);
+        await nd.pub.backfillBatch(1, [{ match_id: 'm1', status: 'finalized' }], 'dogetx_x', [], []);
         expect(nd.db.matches.find(m => m.match_id === 'm1').anchor_txid, 'back-fill still applied').to.equal('dogetx_x');
     });
 
@@ -2469,7 +2469,7 @@ describe('StateAnchorPublisher', function () {
         // A GENUINE leader signature over the archive canonical: with the verify ahead
         // of the membership gate, a bogus one would stop BOTH cases before the gate and
         // the control below would prove nothing.
-        let reqCanonical = leader.pub._archiveCanonical(cp, 0, 1, '0', 1);
+        let reqCanonical = leader.pub.archiveCanonical(cp, 0, 1, '0', 1);
         let mkReq = () => ({ data: {
             checkpoint: cp, election_block: 500, batch_seq: 0, match_count: 1, batch_crc32: '0',
             total_chunks: 1, sig_pubkey: leader.pubkey, sig: leader.identity.sign(reqCanonical)
@@ -2518,17 +2518,17 @@ describe('StateAnchorPublisher', function () {
 
         // Spoof: the leader's pubkey with a signature its key never produced.
         await follower.pub._handleSignReq(mkReq('deadbeef'));
-        expect(follower.pub._isObservedArchiveLeader(SEQ, leader.pubkey),
+        expect(follower.pub.isObservedArchiveLeader(SEQ, leader.pubkey),
                'an unsigned SIGN_REQ must not bind the named leader').to.equal(false);
-        expect(follower.pub._observedArchiveCheckpoint(SEQ),
+        expect(follower.pub.observedArchiveCheckpoint(SEQ),
                'nor stash a checkpoint identity for the batch').to.equal(null);
 
         // CONTROL: the same REQ carrying the leader's real signature still records, so
         // the guard is the signature and not some other gate.
-        let canonical = leader.pub._archiveCanonical(cp, SEQ, 1, '0', 1);
+        let canonical = leader.pub.archiveCanonical(cp, SEQ, 1, '0', 1);
         await follower.pub._handleSignReq(mkReq(leader.identity.sign(canonical)));
-        expect(follower.pub._isObservedArchiveLeader(SEQ, leader.pubkey)).to.equal(true);
-        expect(follower.pub._observedArchiveCheckpoint(SEQ).checkpoint_seq).to.equal(Number(cp.checkpoint_seq));
+        expect(follower.pub.isObservedArchiveLeader(SEQ, leader.pubkey)).to.equal(true);
+        expect(follower.pub.observedArchiveCheckpoint(SEQ).checkpoint_seq).to.equal(Number(cp.checkpoint_seq));
     });
 
     it('_handleSignReq: an UNRESOLVED election set fails closed instead of skipping the ladder (#4184)', async function () {
@@ -2543,8 +2543,8 @@ describe('StateAnchorPublisher', function () {
         let cp = Object.assign({}, CP_ROW);                       // snapshot_block = 100
 
         let canonCalls = 0;
-        let origCanon = follower.pub._archiveCanonical.bind(follower.pub);
-        follower.pub._archiveCanonical = (...a) => { canonCalls++; return origCanon(...a); };
+        let origCanon = follower.pub.archiveCanonical.bind(follower.pub);
+        follower.pub.archiveCanonical = (...a) => { canonCalls++; return origCanon(...a); };
 
         let mkReq = () => ({ data: {
             checkpoint: cp, election_block: 500, batch_seq: 0, match_count: 1, batch_crc32: '0',
@@ -2573,8 +2573,8 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         nd.pub._getActiveOraclePublishPubkeys = async () => [nd.pubkey];
-        nd.pub._recordReward = () => {};                     // isolate the UPDATE assertion
-        nd.pub._verifyAnchorOnChain = async () => 'verified';  // isolate from the on-chain gate (covered separately)
+        nd.pub.recordReward = () => {};                     // isolate the UPDATE assertion
+        nd.pub.verifyAnchorOnChain = async () => 'verified';  // isolate from the on-chain gate (covered separately)
         let calls = [];
         nd.pub.db.doQuery = async (sql, params) => {
             calls.push({ sql, params });
@@ -2586,7 +2586,7 @@ describe('StateAnchorPublisher', function () {
         };
         let d = mkBundleDone(bus, nd, 'aa'.repeat(32));
 
-        await nd.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: nd.pubkey, data: d });
+        await nd.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: nd.pubkey, data: d });
 
         let upd = calls.find(c => c.sql.startsWith('UPDATE state_checkpoints SET anchor_txid'));
         expect(upd, 'UPDATE issued').to.exist;
@@ -2608,7 +2608,7 @@ describe('StateAnchorPublisher', function () {
         let receiver = order[1];
         let d = mkBundleDone(bus, attacker, 'aa'.repeat(32));
 
-        await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: attacker.pubkey, data: d });
+        await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: attacker.pubkey, data: d });
 
         expect(receiver.db.checkpoints[0].anchor_txid, 'forged BUNDLE_DONE must not stamp (suppression blocked)').to.equal(null);
         expect(receiver.rewards.length, 'forged BUNDLE_DONE must not mirror a reward (theft blocked)').to.equal(0);
@@ -2621,7 +2621,7 @@ describe('StateAnchorPublisher', function () {
         let receiver  = order[1];
         let d = mkBundleDone(bus, publisher, 'bb'.repeat(32));
 
-        await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+        await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
 
         expect(receiver.db.checkpoints[0].anchor_txid, 'elected publisher BUNDLE_DONE stamps').to.equal('bb'.repeat(32));
         // BELOW the anchor-reward flag-day (outer-suite pin) the hub rows are the
@@ -2661,7 +2661,7 @@ describe('StateAnchorPublisher', function () {
             receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
                 { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                   confirmations: 60, txid: params.txid }, matching);
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'confirmed anchor stamps').to.equal('ab'.repeat(32));
             expect(receiver.rewards.filter(r => r.type === 'anchor_bundle').length, 'confirmed anchor mirrors reward').to.equal(1);
         });
@@ -2670,7 +2670,7 @@ describe('StateAnchorPublisher', function () {
             let bus = buildMesh(3);
             let { publisher, receiver, d } = electedBundleDone(bus, 'ac'.repeat(32));
             receiver.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'phantom anchor must not stamp (suppression blocked)').to.equal(null);
             expect(receiver.rewards.length, 'phantom anchor must not mirror a reward').to.equal(0);
         });
@@ -2687,7 +2687,7 @@ describe('StateAnchorPublisher', function () {
             // Checkpoint is genuinely anchored, but by a DIFFERENT transaction: the
             // filtered lookup misses, and checkpoint_anchored marks it a positive forge.
             receiver.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'forged txid must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'forged txid must not mirror a reward').to.equal(0);
         });
@@ -2699,7 +2699,7 @@ describe('StateAnchorPublisher', function () {
             receiver.pub._indexerCall = async () => Object.assign(
                 { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                   confirmations: 60, txid: 'cd'.repeat(32) }, matching);
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'unbound anchor must not stamp').to.equal(null);
         });
 
@@ -2709,7 +2709,7 @@ describe('StateAnchorPublisher', function () {
             // Pre-filter indexer: ignores the txid param, response carries no txid.
             receiver.pub._indexerCall = async () => Object.assign(
                 { exists: true, status: 'valid', version: 0, confirmations: 60 }, matching);
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'unbindable anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'unbindable anchor must not mirror a reward').to.equal(0);
         });
@@ -2723,7 +2723,7 @@ describe('StateAnchorPublisher', function () {
                 return Object.assign({ exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                                        confirmations: 60, txid: params.txid }, matching);
             };
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(seen.txid, 'V0_DONE binds the announced txid').to.equal('ab'.repeat(32));
         });
 
@@ -2732,7 +2732,7 @@ describe('StateAnchorPublisher', function () {
             let { publisher, receiver, d } = electedBundleDone(bus, 'ad'.repeat(32));
             receiver.pub._indexerCall = async () => Object.assign(
                 { exists: true, status: 'valid', version: 0, confirmations: 59 }, matching);
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, '0..59-conf anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'shallow anchor must not mirror a reward').to.equal(0);
         });
@@ -2742,7 +2742,7 @@ describe('StateAnchorPublisher', function () {
             let { publisher, receiver, d } = electedBundleDone(bus, 'ae'.repeat(32));
             receiver.pub._indexerCall = async () => Object.assign(
                 { exists: true, status: 'invalid: ledger_hash mismatch', version: 0, confirmations: 60 }, matching);
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'decoded-invalid anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'decoded-invalid anchor must not mirror a reward').to.equal(0);
         });
@@ -2763,7 +2763,7 @@ describe('StateAnchorPublisher', function () {
                 { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                   confirmations: 60, txid: params.txid,
                   state_root: '1f'.repeat(32) });                // diverges from CP_ROW.state_root
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'a root-mismatched v0 must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'a root-mismatched v0 must not mirror a reward').to.equal(0);
         });
@@ -2776,7 +2776,7 @@ describe('StateAnchorPublisher', function () {
                 { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                   confirmations: 60, txid: params.txid,
                   block_merkle_root: '2f'.repeat(32) });
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'a merkle-root-mismatched v0 must not stamp').to.equal(null);
         });
 
@@ -2788,7 +2788,7 @@ describe('StateAnchorPublisher', function () {
                 block_hash: 'ff'.repeat(32),                         // diverges from CP_ROW.block_hash
                 ledger_hash: CP_ROW.ledger_hash, actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
             });
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'hash-mismatched anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'hash-mismatched anchor must not mirror a reward').to.equal(0);
         });
@@ -2798,7 +2798,7 @@ describe('StateAnchorPublisher', function () {
             let { publisher, receiver, d } = electedBundleDone(bus, 'ba'.repeat(32));
             let called = 0;
             receiver.pub._indexerCall = async () => { called++; return { exists: true, status: 'valid', confirmations: 60 }; };
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(called, 'no-indexer short-circuits before any RPC').to.equal(0);
             expect(receiver.db.checkpoints[0].anchor_txid, 'unverifiable anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'unverifiable anchor must not mirror a reward').to.equal(0);
@@ -2846,7 +2846,7 @@ describe('StateAnchorPublisher', function () {
 
             let d = mkBundleDone(bus, attacker, 'aa'.repeat(32));
 
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: attacker.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: attacker.pubkey, data: d });
 
             expect(receiver.db.checkpoints[0].anchor_txid, 'non-elected member must not stamp (size-1 set)').to.equal(null);
             expect(receiver.rewards.length, 'non-elected member must not mirror a reward').to.equal(0);
@@ -2861,7 +2861,7 @@ describe('StateAnchorPublisher', function () {
 
             let d = mkBundleDone(bus, elected, 'bb'.repeat(32));
 
-            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: elected.pubkey, data: d });
+            await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: elected.pubkey, data: d });
 
             expect(receiver.db.checkpoints[0].anchor_txid, 'sole elected publisher BUNDLE_DONE stamps').to.equal('bb'.repeat(32));
             expect(receiver.rewards.filter(r => r.type === 'anchor_bundle').length,
@@ -2917,8 +2917,8 @@ describe('StateAnchorPublisher', function () {
             }));
             // Capture the network the archive is built for (arg 0 of _buildArchive).
             let capturedNetwork = null;
-            let origBuild = nd.pub._buildArchive.bind(nd.pub);
-            nd.pub._buildArchive = async (network, ...rest) => {
+            let origBuild = nd.pub.buildArchive.bind(nd.pub);
+            nd.pub.buildArchive = async (network, ...rest) => {
                 capturedNetwork = network;
                 return origBuild(network, ...rest);
             };
@@ -2994,7 +2994,7 @@ describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stabl
     }
     function capSnaps(pub, set) {
         pub._resolveCapabilitySet = async () => set.map(r => Object.assign({}, r));
-        return pub._buildArchive('regtest', 1, [], 100, [], [])
+        return pub.buildArchive('regtest', 1, [], 100, [], [])
             .then(a => JSON.parse(a.json).capability_snapshots
                 .map(s => s.signing_pubkey + '|' + s.source));
     }
@@ -3077,7 +3077,7 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
             state_root: 'd4'.repeat(32), state_root_version: 1,
             block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
         };
-        let rootless = StateAnchorPublisher.prototype._cpFromRow(row);
+        let rootless = StateAnchorPublisher.prototype.cpFromRow(row);
         expect(rootless).to.not.have.property('state_root');    // _cpFromRow drops the roots by design
         let rootBearing = Object.assign({}, rootless, {
             state_root: row.state_root, state_root_version: row.state_root_version,
@@ -3085,8 +3085,8 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
         });
         // The guard (via _rawCanonicalCheckpoint) still binds identity fields and
         // passes even when exactly one operand carries roots.
-        expect(StateCheckpointEngine._rawCanonicalCheckpoint(rootless))
-            .to.equal(StateCheckpointEngine._rawCanonicalCheckpoint(rootBearing));
+        expect(StateCheckpointEngine.rawCanonicalCheckpoint(rootless))
+            .to.equal(StateCheckpointEngine.rawCanonicalCheckpoint(rootBearing));
         // Whereas canonicalCheckpoint would DIFFER on the presence-gated suffix,
         // which is exactly why the guards must not use it.
         expect(StateCheckpointEngine.canonicalCheckpoint(rootless))
@@ -3111,7 +3111,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
     it('below the derive gate (inert mainnet placeholder) it writes NOTHING', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
         const { pub, queries, broadcast } = makePub();
-        await pub._recordRewardAttestation('BTC', 'mainnet', 'anchor_BTC', 5, 1000000, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        await pub.recordRewardAttestation('BTC', 'mainnet', 'anchor_BTC', 5, 1000000, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
         expect(queries.length).to.equal(0);
         expect(broadcast.length).to.equal(0);
     });
@@ -3120,7 +3120,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries, broadcast } = makePub();
         const pk = 'ab'.repeat(32);
-        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, pk, [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        await pub.recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, pk, [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
         const ins = queries.find(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
         expect(ins, 'INSERT IGNORE issued').to.exist;
         expect(ins.params[2]).to.equal('anchor_BTC');            // reward_type
@@ -3132,7 +3132,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
     it('uses the ARCHIVE frozen amount for an anchor_archive tuple', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makePub();
-        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_archive', 3, 0, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        await pub.recordRewardAttestation('BTC', 'regtest', 'anchor_archive', 3, 0, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
         const ins = queries.find(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
         expect(ins.params[6]).to.equal(arMod.ARCHIVE_REWARD_AMOUNT);
     });
@@ -3140,7 +3140,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
     it('writes nothing when the attestation sig list is empty', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makePub();
-        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, 'ab'.repeat(32), []);
+        await pub.recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, 'ab'.repeat(32), []);
         expect(queries.length).to.equal(0);
     });
 });
@@ -3202,14 +3202,14 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('below the derive gate it queues nothing (the table has no rows at all)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
         const { pub } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
     it('at/above the gate the publish path QUEUES instead of writing (mempool txid)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         expect(pub._deferredRewardAttest.size, 'entry queued').to.equal(1);
         expect(inserts(queries).length, 'nothing written at broadcast time').to.equal(0);
     });
@@ -3217,7 +3217,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('writes the row once the anchor is buried at the bound txid AND version', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries, broadcast } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => onChain();
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'confirmed anchor writes the attestation').to.equal(1);
@@ -3228,7 +3228,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('does NOT write while the anchor is still shallow (the mempool/reorg window)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => onChain({ confirmations: 3 });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'no reward for an unburied anchor').to.equal(0);
@@ -3238,7 +3238,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('does NOT write when the anchor is absent, i.e. the tx was evicted and never mined', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false, confirmations: 0 });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'evicted anchor mints nothing').to.equal(0);
@@ -3247,7 +3247,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('does NOT write when a DIFFERENT anchor confirmed for this checkpoint (txid unbound)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => onChain({ txid: 'cc'.repeat(32) });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length).to.equal(0);
@@ -3256,7 +3256,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('drops on a decided content rejection (a v1 archive head landed, not the attested v0 bundle)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => onChain({ version: 1 });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'an archive head cannot prove a bundle reward').to.equal(0);
@@ -3271,7 +3271,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         // survive to retry, exactly like 'rejected:txid' already does.
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._indexerCall = async () => onChain({ status: 'invalid: CHECKPOINT_SEQ (stale; replay of an older checkpoint)' });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'no reward while the status verdict stands').to.equal(0);
@@ -3287,7 +3287,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     it('expires the entry after the TTL rather than writing on a never-confirming anchor', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         pub._deferredRewardAttest.get([...pub._deferredRewardAttest.keys()][0]).at =
             Date.now() - (pub.announceRetryTtlMs + 1);
         pub._indexerCall = async () => onChain();
@@ -3300,11 +3300,11 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         const archive = () => entry({ anchorVersion: 1, rewardType: 'anchor_archive', roundReference: 42 });
-        pub._deferRewardAttestation(archive());
+        pub.deferRewardAttestation(archive());
         pub._indexerCall = async () => onChain({ version: 0 });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'a v0 checkpoint bundle cannot prove an archive reward').to.equal(0);
-        pub._deferRewardAttestation(archive());
+        pub.deferRewardAttestation(archive());
         pub._indexerCall = async () => onChain({ version: 1 });
         await pub._drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the v1 archive head does').to.equal(1);
@@ -3315,7 +3315,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         const { pub, queries } = makeRewardPub();
         pub.announceQueueMax = 3;
         for (let i = 0; i < 6; i++)
-            pub._deferRewardAttestation(entry({ roundReference: i, txid: (i + 10).toString(16).repeat(32) }));
+            pub.deferRewardAttestation(entry({ roundReference: i, txid: (i + 10).toString(16).repeat(32) }));
         expect(pub._deferredRewardAttest.size).to.equal(3);
         expect(inserts(queries).length).to.equal(0);
     });
@@ -3331,7 +3331,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
 // is a way a receiver must refuse to turn a wire message into a money row.
 describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
     const sinon = require('sinon');
-    const XANCREWARD = require('../../src/StateAnchorPublisher.js').XANCREWARD;
+    const XANCREWARD = require('../../src/anchor/publisher.js').XANCREWARD;
 
     const TXID = 'ab'.repeat(32);
 
@@ -3381,7 +3381,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
             pubkey: s.getPubkeyHex().toLowerCase(), sig: s.sign(canonical)
         }));
         d.sig_pubkey = sender.getPubkeyHex().toLowerCase();
-        d.sig        = sender.sign(pub._rewardFederationCanonical(d));
+        d.sig        = sender.sign(pub.rewardFederationCanonical(d));
         return d;
     }
 
@@ -3402,7 +3402,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries, sent } = makeReceiver([]);
         const me = pub.identity.getPubkeyHex().toLowerCase();
-        pub._deferRewardAttestation({
+        pub.deferRewardAttestation({
             chain: CP_ROW.chain, network: CP_ROW.network,
             blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
             txid: TXID, anchorVersion: 0,
@@ -3426,7 +3426,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeReceiver([]);
         const me = pub.identity.getPubkeyHex().toLowerCase();
-        pub._deferRewardAttestation({
+        pub.deferRewardAttestation({
             chain: CP_ROW.chain, network: CP_ROW.network,
             blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
             txid: TXID, anchorVersion: 0,
@@ -3446,7 +3446,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub, queries, sent } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         // A 2-member set needs both signatures: the relayer's and this receiver's own.
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
         expect(pub._deferredRewardAttest.size, 'queued behind its own mined-anchor proof').to.equal(1);
         expect(inserts(queries).length, 'nothing written on receipt alone').to.equal(0);
 
@@ -3460,7 +3460,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
         expect(pub._deferredRewardAttest.size, 'the quorum was valid, so it queued').to.equal(1);
         pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
         await pub._drainDeferredRewardAttest();
@@ -3471,7 +3471,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
         expect(queries.length).to.equal(0);
     });
@@ -3484,7 +3484,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         // non-member: a quorum the receiver's own oracle_publish set does not support.
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         const d = payloadFrom(pub, relayer, [outsider]);
-        await pub._handleRewardAttestation({ data: d });
+        await pub.handleRewardAttestation({ data: d });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
@@ -3492,7 +3492,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const outsider = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([]);                       // outsider is NOT in the set
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, outsider, [outsider]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, outsider, [outsider]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
@@ -3500,7 +3500,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
-        await pub._handleRewardAttestation({
+        await pub.handleRewardAttestation({
             data: payloadFrom(pub, relayer, [relayer], { publisher: 'cd'.repeat(32) })
         });
         expect(pub._deferredRewardAttest.size).to.equal(0);
@@ -3512,7 +3512,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         const d = payloadFrom(pub, relayer, [relayer]);
         d.round_reference = d.round_reference + 1;              // signed over the ORIGINAL tuple
-        await pub._handleRewardAttestation({ data: d });
+        await pub.handleRewardAttestation({ data: d });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
@@ -3521,7 +3521,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         for (const over of [{ doge_anchor_txid: 'nope' }, { anchor_version: 0 }, { reward_type: 'anchor_LTC' }]) {
-            await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
+            await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
             expect(pub._deferredRewardAttest.size, JSON.stringify(over)).to.equal(0);
         }
     });
@@ -3531,7 +3531,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         pub._resolveCapabilitySet = async () => [];
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
@@ -3547,7 +3547,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         for (const over of [{ anchor_version: 1 },                                  // bundle leg on an archive version
                             { reward_type: 'anchor_archive', anchor_version: 0 }]) {  // archive leg on the bundle version
-            await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
+            await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
             expect(pub._deferredRewardAttest.size, JSON.stringify(over)).to.equal(0);
         }
     });
@@ -3555,7 +3555,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
     it('ignores its own broadcast echoing back', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub } = makeReceiver([]);
-        await pub._handleRewardAttestation({ data: payloadFrom(pub, pub.identity, [pub.identity]) });
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, pub.identity, [pub.identity]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
@@ -3564,7 +3564,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const d = { chain: 'BTC', network: 'regtest', reward_type: 'anchor_bundle', round_reference: 100,
                     snapshot_block: 100, publisher: 'ab'.repeat(32), doge_anchor_txid: TXID,
                     anchor_version: 0, block_index: 494, checkpoint_seq: 7 };
-        expect(pub._rewardFederationCanonical(d)).to.equal(
+        expect(pub.rewardFederationCanonical(d)).to.equal(
             'XANCREWARD|BTC|regtest|anchor_bundle|100|100|' + 'ab'.repeat(32) + '|' + TXID + '|0|494|7');
     });
 });

@@ -13,10 +13,10 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const { positiveIntConfig } = require('../../src/lib/config_int.js');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
-const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus.js');
-const OracleConsensus = require('../../src/OracleConsensus.js');
-const PeerManager = require('../../src/PeerManager.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
+const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus.js');
+const OracleConsensus = require('../../src/oracle/consensus.js');
+const PeerManager = require('../../src/peers/manager.js');
 const { createMockHub } = require('../helpers/mockHub');
 
 // `parseInt(cfg) || DEFAULT` accepted a negative cap, and a negative
@@ -65,7 +65,7 @@ describe('ring caps reject a negative operator value', function () {
         expect(ac.nonOkPublishedMax).to.equal(40000);
 
         // The eviction the negative cap used to defeat: a just-added id survives.
-        ac._markFinalized('req-1');
+        ac.markFinalized('req-1');
         expect(ac.finalized.has('req-1')).to.be.true;
     });
 
@@ -88,7 +88,7 @@ describe('ring caps reject a negative operator value', function () {
 
         // A negative cap evicted the rid just marked, so _bufferEarlyMessage
         // parked the prior-attempt envelopes the mark exists to drop.
-        ac._markTornDown('rid-1');
+        ac.markTornDown('rid-1');
         expect(ac.tornDown.has('rid-1')).to.be.true;
     });
 
@@ -105,8 +105,8 @@ describe('ring caps reject a negative operator value', function () {
 
         // The behaviour a negative cap defeated: the envelope the inverted size gate
         // would have dropped is buffered, and a second distinct rid does not evict it.
-        ac._bufferEarlyMessage('rid-1', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-1' } });
-        ac._bufferEarlyMessage('rid-2', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-2' } });
+        ac.bufferEarlyMessage('rid-1', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-1' } });
+        ac.bufferEarlyMessage('rid-2', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-2' } });
         expect(ac.earlyMessages.get('rid-1'), 'rid-1 must survive the distinct-id eviction').to.have.lengthOf(1);
         expect(ac.earlyMessages.get('rid-2')).to.have.lengthOf(1);
     });
@@ -119,8 +119,8 @@ describe('ring caps reject a negative operator value', function () {
         expect(dex.earlyMessageMaxDistinctIds).to.equal(512);
         expect(dex.earlyMessageMaxBytes).to.equal(131072);
 
-        dex._bufferEarlyMessage('match-1', { type: 'XDEX_PROPOSE', data: { match_id: 'match-1' } });
-        dex._bufferEarlyMessage('match-2', { type: 'XDEX_PROPOSE', data: { match_id: 'match-2' } });
+        dex.bufferEarlyMessage('match-1', { type: 'XDEX_PROPOSE', data: { match_id: 'match-1' } });
+        dex.bufferEarlyMessage('match-2', { type: 'XDEX_PROPOSE', data: { match_id: 'match-2' } });
         expect(dex.earlyMessages.get('match-1'), 'match-1 must survive the distinct-id eviction').to.have.lengthOf(1);
         expect(dex.earlyMessages.get('match-2')).to.have.lengthOf(1);
     });
@@ -139,7 +139,7 @@ describe('ring caps reject a negative operator value', function () {
             let hub = createMockHub();
             let oc  = new OracleConsensus(hub, { getSubmissions: sinon.stub().returns(new Map()) });
             expect(oc.earlyMessageMaxRounds).to.equal(256);
-            oc._bufferEarlyMessage(1, { type: 'ORACLE_PREPARE', data: { round: 1 } });
+            oc.bufferEarlyMessage(1, { type: 'ORACLE_PREPARE', data: { round: 1 } });
             expect(oc.earlyMessages.get(1)).to.have.lengthOf(1);
         } finally {
             if (prior === undefined) delete process.env.ORACLE_EARLY_MSG_MAX_ROUNDS;
@@ -154,8 +154,8 @@ describe('ring caps reject a negative operator value', function () {
 
         // The eviction a negative cap defeated: two distinct ids both stay seen,
         // so a re-broadcast of either is still suppressed.
-        pm._addToDedup('msg-1');
-        pm._addToDedup('msg-2');
+        pm.addToDedup('msg-1');
+        pm.addToDedup('msg-2');
         expect(pm.seenIds.has('msg-1')).to.be.true;
         expect(pm.seenIds.has('msg-2')).to.be.true;
     });

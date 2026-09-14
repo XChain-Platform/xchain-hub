@@ -94,7 +94,7 @@ describe('Regression: validator setup/run fixes', function () {
     // -----------------------------------------------------------------
     describe('REG-VAL-003: capability qualification is fail-closed', function () {
         const XChainHub         = require('../../src/XChainHub');
-        const CapabilityRegistry = require('../../src/CapabilityRegistry');
+        const CapabilityRegistry = require('../../src/validators/capability_registry');
 
         // Build a stub hub that exposes exactly what refreshOwnQualification
         // touches, wired to the real registry + real decimal-compare methods.
@@ -105,9 +105,9 @@ describe('Regression: validator setup/run fixes', function () {
             const hub = {
                 identity: { getPubkeyHex: () => 'aa'.repeat(33) },
                 capabilityRegistry: registry,
-                _broadcastOwnCapabilityState: sinon.stub().resolves(),
-                _compareDecimal:    XChainHub.prototype._compareDecimal,
-                _parseDecimalParts: XChainHub.prototype._parseDecimalParts
+                broadcastOwnCapabilityState: sinon.stub().resolves(),
+                compareDecimal:    XChainHub.prototype.compareDecimal,
+                parseDecimalParts: XChainHub.prototype.parseDecimalParts
             };
             return { hub, setQual };
         }
@@ -175,7 +175,7 @@ describe('Regression: validator setup/run fixes', function () {
         it('throws immediately on every credential/privilege error code @regression-p0', function () {
             const db = new Database('localhost', 3306, 'hub_test', 'baduser', 'badpass');
             for (const code of FATAL) {
-                expect(() => db._failFastIfFatal({ code }, 'connecting'),
+                expect(() => db.failFastIfFatal({ code }, 'connecting'),
                     `${code} should be fatal`).to.throw(/Fatal DB error/);
             }
         });
@@ -183,7 +183,7 @@ describe('Regression: validator setup/run fixes', function () {
         it('does NOT throw on transient errors (keeps waiting) @regression-p0', function () {
             const db = new Database('localhost', 3306, 'hub_test', 'user', 'pass');
             for (const code of TRANSIENT) {
-                expect(() => db._failFastIfFatal(code ? { code } : null, 'connecting'),
+                expect(() => db.failFastIfFatal(code ? { code } : null, 'connecting'),
                     `${code} should be transient`).to.not.throw();
             }
         });

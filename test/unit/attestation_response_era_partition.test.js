@@ -39,8 +39,8 @@ const sinon   = require('sinon');
 const { expect } = require('chai');
 const EventEmitter = require('events');
 
-const AttestationPublisher      = require('../../src/AttestationPublisher');
-const AttestationResponseMirror = require('../../src/AttestationResponseMirror');
+const AttestationPublisher      = require('../../src/attestation/publisher');
+const AttestationResponseMirror = require('../../src/attestation/response_mirror');
 const { DB_METHODS }            = require('../helpers/mockHub.js');
 const activationMod = require('../../src/attest_response_mirror_activation.js');
 

@@ -28,8 +28,8 @@
 
 const sinon                = require('sinon');
 const { expect }           = require('chai');
-const AttestationConsensus = require('../../src/AttestationConsensus');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const AttestationConsensus = require('../../src/attestation/consensus');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { createMockHub }    = require('../helpers/mockHub');
 
 function mkIdentity() {
@@ -146,7 +146,7 @@ describe('AttestationConsensus: judge_model leader stalls when its responsible s
         consensus._handlePropose(proposeFrom(fC));
         consensus._handlePropose(proposeFrom(fD));
 
-        await consensus._maybeAdvanceFromProposals(RID);
+        await consensus.maybeAdvanceFromProposals(RID);
 
         // One proposal against a need of 3: the gate returns and no winner exists.
         // agree() is never reached, so no canonical body is ever broadcast and the
@@ -191,7 +191,7 @@ describe('AttestationConsensus: judge_model leader stalls when its responsible s
         let admitted = [...pending.proposals.keys()].sort();
         expect(admitted).to.deep.equal([pub(leader), pub(fB), pub(fC), pub(fD)].sort());
 
-        await consensus._maybeAdvanceFromProposals(RID);
+        await consensus.maybeAdvanceFromProposals(RID);
 
         // Past the threshold, the leader runs the judge and establishes a winner.
         expect(agreeSpy.called, 'agree() must run once the leader is over its threshold').to.equal(true);

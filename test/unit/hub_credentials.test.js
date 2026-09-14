@@ -25,7 +25,7 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
-const { resolveHubLlmAuth } = require('../../src/lib/hub-credentials');
+const { resolveHubLlmAuth } = require('../../src/lib/hub_credentials');
 
 function _tmpDir(){
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubcred-'));

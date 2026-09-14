@@ -19,7 +19,7 @@
 // original fresh-PSBT retry behavior (the live multi-chain conflict fix).
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 
 function mkPub(){
     const pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
@@ -45,7 +45,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
             if (calls < 3) throw new Error('no UTXOs available for Dpub1');
             return { txid: 'tx-ok' };
         };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(res.txid).to.equal('tx-ok');
         expect(calls).to.equal(3);
     });
@@ -54,7 +54,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         const pub = mkPub();
         let calls = 0;
         const broadcaster = async () => { calls++; return { txid: 'fresh' }; };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5,
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5,
             async () => ({ exists: true, txid: 'landed-earlier' }));
         expect(res.txid).to.equal('landed-earlier');
         expect(res.exists).to.equal(true);
@@ -65,7 +65,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         const pub = mkPub();
         let calls = 0, checks = 0;
         const broadcaster = async () => { calls++; throw new Error('definitive reject'); };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => {
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
             checks++;
             return checks >= 2 ? { exists: true, txid: 'peer-anchor' } : null;
         });
@@ -77,7 +77,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         const pub = mkPub();
         let calls = 0, checks = 0;
         const broadcaster = async () => { calls++; throw ambiguousErr(); };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => {
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
             checks++;
             return checks >= 2 ? { exists: true, txid: 'mined-late' } : null;
         });
@@ -90,7 +90,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         let calls = 0;
         const broadcaster = async () => { calls++; throw ambiguousErr('socket hang up'); };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(err.message).to.equal('socket hang up');
@@ -103,7 +103,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         const broadcaster = async () => { calls++; throw ambiguousErr(); };
         let err = null;
         try {
-            await pub._broadcastWithRetry(broadcaster, 'P', 5,
+            await pub.broadcastWithRetry(broadcaster, 'P', 5,
                 async () => { throw new Error('indexer unreachable'); });
         } catch (e) { err = e; }
         expect(err).to.be.an('error');
@@ -116,7 +116,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
         let calls = 0;
         const broadcaster = async () => { calls++; throw ambiguousErr(); };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(calls).to.equal(1);
@@ -130,7 +130,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
             if (calls < 4) throw new Error('Encoder RPC error: txn-mempool-conflict');
             return { txid: 'retried-ok' };
         };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => null);
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null);
         expect(res.txid).to.equal('retried-ok');
         expect(calls).to.equal(4);
     });
@@ -151,7 +151,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         const pub = mkPub();
         const est = pub.spendGuard.estSpendUsdCents;
         const broadcaster = async () => ({ txid: 'tx-ok' });
-        await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(spent(pub)).to.equal(est);
     });
 
@@ -160,7 +160,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         const est = pub.spendGuard.estSpendUsdCents;
         let checks = 0;
         const broadcaster = async () => { throw ambiguousErr(); };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => {
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
             checks++;
             return checks >= 2 ? { exists: true, txid: 'mined-late' } : null;
         });
@@ -173,7 +173,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         const est = pub.spendGuard.estSpendUsdCents;
         const broadcaster = async () => { throw ambiguousErr('socket hang up'); };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(spent(pub)).to.equal(est);
@@ -182,7 +182,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
     it('adopting an already-mined anchor before any send charges nothing', async function () {
         const pub = mkPub();
         const broadcaster = async () => ({ txid: 'fresh' });
-        await pub._broadcastWithRetry(broadcaster, 'P', 5,
+        await pub.broadcastWithRetry(broadcaster, 'P', 5,
             async () => ({ exists: true, txid: 'landed-earlier' }));
         expect(spent(pub)).to.equal(0);
     });
@@ -191,7 +191,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         const pub = mkPub();
         const broadcaster = async () => { throw new Error('Encoder RPC error: bad-txns'); };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 3, async () => null); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 3, async () => null); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(spent(pub)).to.equal(0);
@@ -203,7 +203,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         let calls = 0;
         const broadcaster = async () => { calls++; return { txid: 'nope' }; };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(err.spendBlocked).to.equal(true);
@@ -221,7 +221,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
         // The operator halt lands while the retry is sleeping.
         pub._sleep = async () => { pub.spendGuard.pause('operator halt'); };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(err.spendBlocked).to.equal(true);
@@ -245,7 +245,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
             return null;
         };
         let err = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5, existsCheck); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, existsCheck); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
         expect(err.anchorAmbiguousSend).to.equal(true);
@@ -259,31 +259,31 @@ describe('StateAnchorPublisher: _isAmbiguousSendError classification', function 
     const pub = mkPub();
 
     it('encoder RPC rejections are NOT ambiguous (the node answered, tx refused)', function () {
-        expect(pub._isAmbiguousSendError(new Error('Encoder RPC error: bad-txns'))).to.equal(false);
+        expect(pub.isAmbiguousSendError(new Error('Encoder RPC error: bad-txns'))).to.equal(false);
     });
 
     it('HTTP 4xx refusals are NOT ambiguous', function () {
         const e = new Error('Request failed with status code 401');
         e.response = { status: 401 };
-        expect(pub._isAmbiguousSendError(e)).to.equal(false);
+        expect(pub.isAmbiguousSendError(e)).to.equal(false);
     });
 
     it('never-connected transport errors are NOT ambiguous', function () {
         for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) {
             const e = new Error(code);
             e.code = code;
-            expect(pub._isAmbiguousSendError(e), code).to.equal(false);
+            expect(pub.isAmbiguousSendError(e), code).to.equal(false);
         }
     });
 
     it('timeouts, resets, and 5xx after the request went out ARE ambiguous', function () {
         const t = new Error('timeout of 30000ms exceeded'); t.code = 'ECONNABORTED';
-        expect(pub._isAmbiguousSendError(t)).to.equal(true);
+        expect(pub.isAmbiguousSendError(t)).to.equal(true);
         const r = new Error('socket hang up'); r.code = 'ECONNRESET';
-        expect(pub._isAmbiguousSendError(r)).to.equal(true);
+        expect(pub.isAmbiguousSendError(r)).to.equal(true);
         const s = new Error('Request failed with status code 502'); s.response = { status: 502 };
-        expect(pub._isAmbiguousSendError(s)).to.equal(true);
-        expect(pub._isAmbiguousSendError(new Error('mystery'))).to.equal(true);
+        expect(pub.isAmbiguousSendError(s)).to.equal(true);
+        expect(pub.isAmbiguousSendError(new Error('mystery'))).to.equal(true);
     });
 });
 
@@ -364,44 +364,44 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
 
     it('returns { exists, txid } for a mined non-invalid anchor at any depth', async function () {
         const pub = mkPubWithIndexer({ exists: true, txid: 'AB'.repeat(32), status: 'valid', confirmations: 1 });
-        const res = await pub._findExistingCheckpointAnchor(ROW);
+        const res = await pub.findExistingCheckpointAnchor(ROW);
         expect(res.exists).to.equal(true);
         expect(res.txid).to.equal('AB'.repeat(32));
     });
 
     it('returns exists with a null txid against a pre-upgrade indexer (adopt-but-do-not-stamp)', async function () {
         const pub = mkPubWithIndexer({ exists: true, status: 'valid' });
-        const res = await pub._findExistingCheckpointAnchor(ROW);
+        const res = await pub.findExistingCheckpointAnchor(ROW);
         expect(res.exists).to.equal(true);
         expect(res.txid).to.equal(null);
     });
 
     it('returns null when definitively absent', async function () {
         const pub = mkPubWithIndexer({ exists: false });
-        expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
+        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
     });
 
     it('treats a decoded-invalid row as absent', async function () {
         const pub = mkPubWithIndexer({ exists: true, txid: 'cc', status: 'invalid: bad sig' });
-        expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
+        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
     });
 
     it('throws when no DOGE indexer is wired (undetermined, never a false absent)', async function () {
         const pub = mkPub();
         pub.indexers = {};
         let err = null;
-        try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
+        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
         expect(err).to.be.an('error');
     });
 
     it('throws when the indexer is unreachable or answers with an error', async function () {
         let err = null;
-        try { await mkPubWithIndexer(new Error('ETIMEDOUT'))._findExistingCheckpointAnchor(ROW); }
+        try { await mkPubWithIndexer(new Error('ETIMEDOUT')).findExistingCheckpointAnchor(ROW); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
 
         err = null;
-        try { await mkPubWithIndexer({ error: 'indexer database not ready' })._findExistingCheckpointAnchor(ROW); }
+        try { await mkPubWithIndexer({ error: 'indexer database not ready' }).findExistingCheckpointAnchor(ROW); }
         catch (e) { err = e; }
         expect(err).to.be.an('error');
     });
@@ -427,7 +427,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
 
     it('does NOT adopt a v1 archive head as this checkpoint\'s anchor', async function () {
         const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
-        expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
+        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
         expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 0]);
     });
 
@@ -435,14 +435,14 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         const pub = mkPubWithVersionedIndexer(
             { 0: { exists: true, version: 0, status: 'valid', txid: 'ab'.repeat(32) } },
             { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
-        const res = await pub._findExistingCheckpointAnchor(ROW);
+        const res = await pub.findExistingCheckpointAnchor(ROW);
         expect(res.exists).to.equal(true);
         expect(res.txid, 'adopts the CHECKPOINT anchor, never the archive txid').to.equal('ab'.repeat(32));
     });
 
     it('keeps the single-call path when the top row is a checkpoint version', async function () {
         const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 0, status: 'valid', txid: 'cd'.repeat(32) });
-        const res = await pub._findExistingCheckpointAnchor(ROW);
+        const res = await pub.findExistingCheckpointAnchor(ROW);
         expect(res.txid).to.equal('cd'.repeat(32));
         expect(pub._asked).to.deep.equal([null]);
     });
@@ -456,7 +456,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
         pub._indexerCall = async () => head;
         let err = null;
-        try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
+        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
         expect(err).to.be.an('error');
     });
 
@@ -527,7 +527,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
             throw new Error('ETIMEDOUT');
         };
         let err = null;
-        try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
+        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
         expect(err).to.be.an('error');
     });
 });

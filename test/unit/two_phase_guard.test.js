@@ -34,11 +34,11 @@ const { assertSingleTxEncoding } = require('../../src/lib/two_phase_guard.js');
 
 // Every pipeline that builds a PSBT itself and hands it to the wallet hook.
 const CALL_SITES = [
-    'src/StateAnchorPublisher.js',
-    'src/AttestationPublisher.js',
-    'src/AttestationRelay.js',
-    'src/OraclePublisher.js',
-    'src/FullNodeChallengeRound.js'
+    'src/anchor/publisher.js',
+    'src/attestation/publisher.js',
+    'src/attestation/relay.js',
+    'src/oracle/publisher.js',
+    'src/consensus/full_node_challenge_round.js'
 ];
 
 describe('two_phase_guard', function () {
@@ -98,7 +98,8 @@ describe('two_phase_guard', function () {
         // without the check re-opens the stranded-funds path on that rail alone.
         for (const rel of CALL_SITES) {
             const src = fs.readFileSync(path.resolve(__dirname, '../../', rel), 'utf8');
-            assert.ok(/require\(['"]\.\/lib\/two_phase_guard\.js['"]\)/.test(src),
+            // A pipeline inside a feature directory reaches the guard through '../lib/'.
+            assert.ok(/require\(['"]\.\.?\/lib\/two_phase_guard\.js['"]\)/.test(src),
                 rel + ' does not require the shared two-phase guard');
             const guardAt = src.indexOf('assertSingleTxEncoding(');
             // The AWAITED call, not a comment or a hook-setter mention of the name.

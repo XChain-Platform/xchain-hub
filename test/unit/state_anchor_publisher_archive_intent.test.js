@@ -27,8 +27,8 @@
 // split between a definitive pre-send failure and an ambiguous send.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const BLOCK = 100;
@@ -113,16 +113,16 @@ function mkPub(db){
     pub.ambiguousPollAttempts = 1;
     pub.peerManager           = null;                     // skips the XANC_FINALIZED announce
     pub._getActiveOraclePublishPubkeys = async () => [identity.getPubkeyHex().toLowerCase()];
-    pub._recordReward         = () => {};
-    pub._runArchiveAttestationRound = async () => ({ met: false, sigs: [] });   // legacy v1, no quorum needed
+    pub.recordReward         = () => {};
+    pub.runArchiveAttestationRound = async () => ({ met: false, sigs: [] });   // legacy v1, no quorum needed
     return { pub: pub, identity: identity };
 }
 
 // A round shaped exactly like the one _startArchiveRound hands to _publishArchive,
 // single-member signing set (so the on-chain-validity gate short-circuits true).
 function mkRound(pub, identity, broadcastFn, batchSeq){
-    const cp        = pub._cpFromRow(CP_ROW);
-    const canonical = pub._archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
+    const cp        = pub.cpFromRow(CP_ROW);
+    const canonical = pub.archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
     return {
         cp: cp, batchSeq: batchSeq, crc: 'deadbeef', count: 1, canonical: canonical,
         b64: 'x', chunks: ['x'],
@@ -164,34 +164,34 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
                 live({ batch_seq: 2, intent_at: new Date(Date.now() - 5000) }),                           // in flight
                 live({ batch_seq: 9, network: 'mainnet' })                                                // other network
             ] });
-            const got = await mkPub(db).pub._getLiveArchiveIntent('regtest');
+            const got = await mkPub(db).pub.getLiveArchiveIntent('regtest');
             expect(got.batch_seq).to.equal(2);
             expect(sqlHits(db, 'FROM anchor_published_archives')[0].sql).to.contain('settled_at IS NULL');
         });
 
         it('settles only a marker whose broadcast actually returned', async function () {
             const db = mkDb();
-            await mkPub(db).pub._settleArchiveIntent('regtest', 7);
+            await mkPub(db).pub.settleArchiveIntent('regtest', 7);
             expect(sqlHits(db, 'UPDATE anchor_published_archives SET settled_at')[0].sql).to.contain('AND sent_at IS NOT NULL');
         });
 
         it('withdraws only an unconfirmed intent, never a confirmed marker', async function () {
             const db = mkDb();
-            await mkPub(db).pub._withdrawArchiveIntent('regtest', 7);
+            await mkPub(db).pub.withdrawArchiveIntent('regtest', 7);
             expect(sqlHits(db, 'DELETE FROM anchor_published_archives')[0].sql).to.contain('AND sent_at IS NULL');
         });
 
         it('never throws out of the post-send writes: the fee is already spent and the intent still holds', async function () {
             const { pub } = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
-            await pub._markArchiveSent('regtest', 7, 'tx-1');
-            await pub._settleArchiveIntent('regtest', 7);
-            await pub._withdrawArchiveIntent('regtest', 7);
+            await pub.markArchiveSent('regtest', 7, 'tx-1');
+            await pub.settleArchiveIntent('regtest', 7);
+            await pub.withdrawArchiveIntent('regtest', 7);
         });
 
         it('propagates a read failure so the caller fails closed', async function () {
             const { pub } = mkPub(mkDb({ failArchiveReads: true }));
             let threw = false;
-            try { await pub._getLiveArchiveIntent('regtest'); } catch(e){ threw = true; }
+            try { await pub.getLiveArchiveIntent('regtest'); } catch(e){ threw = true; }
             expect(threw).to.equal(true);
         });
     });

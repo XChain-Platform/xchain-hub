@@ -25,7 +25,7 @@ const {
     ATTEST_RESPONSE_FORWARD_S,
     ATTEST_RESPONSE_FORWARD_S_OVERRIDE,
     resolveAttestResponseForwardS
-} = require('../../src/lib/attest_response_timing.js');
+} = require('../../src/attestation/attest_response_timing.js');
 
 describe('attest_response_timing: ATTEST_RESPONSE_FORWARD_S and its regtest seam', function () {
 

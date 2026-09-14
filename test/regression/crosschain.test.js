@@ -13,8 +13,8 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const EventEmitter       = require('events');
-const CrossChainEngine   = require('../../src/CrossChainEngine');
-const SwapTracker        = require('../../src/SwapTracker');
+const CrossChainEngine   = require('../../src/cross_chain/engine');
+const SwapTracker        = require('../../src/cross_chain/swap_tracker');
 const { createMockHub }  = require('../helpers/mockHub');
 const { waitUntil }      = require('../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
@@ -195,7 +195,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 engine.chainPairValidators = new Map([['BTC-LTC', pairValidators]]);
                 engine.setValidatorSet(VALIDATORS_7);
 
-                let set = engine._getChainPairSet('BTC', 'LTC');
+                let set = engine.getChainPairSet('BTC', 'LTC');
                 expect(set).to.equal(pairValidators);
             });
 
@@ -203,7 +203,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 let pairValidators = [makeValidator(1)];
                 engine.chainPairValidators = new Map([['LTC-BTC', pairValidators]]);
 
-                let set = engine._getChainPairSet('BTC', 'LTC');
+                let set = engine.getChainPairSet('BTC', 'LTC');
                 expect(set).to.equal(pairValidators);
             });
 
@@ -211,7 +211,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 engine.setValidatorSet(VALIDATORS_3);
                 engine.chainPairValidators = new Map();
 
-                let set = engine._getChainPairSet('BTC', 'DOGE');
+                let set = engine.getChainPairSet('BTC', 'DOGE');
                 expect(set).to.equal(VALIDATORS_3);
             });
         });
@@ -332,7 +332,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 }]);
                 hub.db.doQuery.onSecondCall().resolves();
 
-                await st._onAttestationFinalized({
+                await st.onAttestationFinalized({
                     sourceChain: 'BTC',
                     sourceActionIndex: 42,
                     attestationId: 'BTC:42:LTC'
@@ -346,7 +346,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
 
             it('does nothing when no matching swap @regression-p0', async function () {
                 hub.db.doQuery.resolves([]);
-                await st._onAttestationFinalized({ sourceChain: 'BTC', sourceActionIndex: 42 });
+                await st.onAttestationFinalized({ sourceChain: 'BTC', sourceActionIndex: 42 });
                 expect(hub.db.doQuery.callCount).to.equal(1);
             });
 
@@ -354,7 +354,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 hub.db.doQuery.resolves([{
                     source_chain: 'BTC', source_action_index: 42, status: 'attested'
                 }]);
-                await st._onAttestationFinalized({ sourceChain: 'BTC', sourceActionIndex: 42 });
+                await st.onAttestationFinalized({ sourceChain: 'BTC', sourceActionIndex: 42 });
                 expect(hub.db.doQuery.callCount).to.equal(1);
             });
         });
@@ -404,12 +404,12 @@ describe('Regression: CrossChain & SwapTracker', function () {
         // Null safety
         describe('Null safety', function () {
             it('handles null attestation gracefully @regression-p2', async function () {
-                await st._onAttestationFinalized(null);
+                await st.onAttestationFinalized(null);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
             it('handles missing fields gracefully @regression-p2', async function () {
-                await st._onAttestationFinalized({ sourceChain: null, sourceActionIndex: null });
+                await st.onAttestationFinalized({ sourceChain: null, sourceActionIndex: null });
                 expect(hub.db.doQuery.called).to.be.false;
             });
         });

@@ -14,8 +14,8 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
-const PriceFetcher     = require('../../src/PriceFetcher');
+const OracleConsensus  = require('../../src/oracle/consensus');
+const PriceFetcher     = require('../../src/oracle/price_fetcher');
 const { createMockHub }       = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
@@ -136,7 +136,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate: historical band applies
         oc._lastFinalizedPrices = new Map([['BTC/USD', '0.11111111']]);
         // The value the clamp itself emits for a runaway aggregate on this last price.
-        let clamped = String(oc._clampToLastFinalized('BTC/USD', '999'));
+        let clamped = String(oc.clampToLastFinalized('BTC/USD', '999'));
         expect(clamped).to.equal('0.13888889');
 
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: clamped }]));

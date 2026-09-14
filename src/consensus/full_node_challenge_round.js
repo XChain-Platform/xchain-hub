@@ -1,0 +1,1022 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ **********************************************************************
+ *
+ * XChain Hub - Full-Node Challenge Round (verified-validator tier)
+ *
+ * Liveness engine that proves which validators run a real coin full node,
+ * not just a decoder/indexer DB mirror synced via xchain-sync. The verified set
+ * earns the full-node tranche of the oracle-round reward (see the indexer's
+ * price.js / NODEPROOF). A light mirror cannot run this engine to completion: it
+ * has no coin RPC, so it can neither answer the possession challenge nor verify
+ * a peer's answer.
+ *
+ * The challenge is DERIVED, not broadcast (see NODEPROOF.md):
+ *   For each epoch E (E % CHALLENGE_INTERVAL_BLOCKS == 0):
+ *     seed         = ledger_hash(E)              (indexer getblockhashes)
+ *     target       = E - CONFIRM_DEPTH           (buried/reorg-stable coin block)
+ *     challenge_id = SHA256(NETWORK:E:seed:target)
+ *     answer       = scriptPubKey(hex) of a seed-selected output in the target
+ *                    block, provably absent from a synced mirror.
+ *
+ * Round protocol (request/sign, mirrors StateCheckpointEngine):
+ *   1. XNODE_ANSWER:   every full_node claimant broadcasts a PUBKEY-BOUND digest
+ *                      of its computed answer: SHA256(challenge_id|pubkey|answer)
+ *                      (R2-FN2). The plaintext answer never rides the wire, so a
+ *                      light mirror cannot copy an honest claimant's answer and
+ *                      rebroadcast it as its own possession proof; a verifier
+ *                      recomputes each claimant's expected digest from its OWN
+ *                      node's answer, so no reveal phase is needed.
+ *   2. XNODE_SIGN_REQ: the elected leader proposes the PASS list (claimants
+ *                      whose digest matches the one derived from its own answer).
+ *   3. XNODE_SIGN:     each eligible verifier recomputes the answer from ITS
+ *                      OWN node, confirms every listed claimant, and signs.
+ *   4. On quorum, the leader broadcasts the on-chain NODEPROOF v0 verdict and
+ *      XNODE_DONE so peers stop. Pass rate tracked for reward-tier eligibility.
+ *
+ ********************************************************************/
+
+const crypto            = require('crypto');
+const fs                = require('fs');
+const path              = require('path');
+const axios             = require('axios');
+const ValidatorIdentity = require('../validators/identity.js');
+const EncoderClient      = require('../peers/encoder_client.js');
+const SpendGuard         = require('../lib/spend_guard.js');
+const { isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const eq                = require('../equivocation_header.js');
+const activation        = require('../lib/fullnode_activation.js');
+// Pinned coin registry: the single source for the consensus-relevant FULLNODE
+// parameters. See the constructor.
+const coins             = require('../coins/index.js');
+
+const XNODE_ANSWER   = 'XNODE_ANSWER';
+const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';
+const XNODE_SIGN     = 'XNODE_SIGN';
+const XNODE_DONE     = 'XNODE_DONE';
+
+// PASS-list byte comparator. The sorted list is joined into the signed verdict
+// preimage, so its order is consensus, and a bare .sort() is a total order here
+// only because every element happens to be lowercase 64-hex. Pin it the
+// way the other consensus-feeding sorts do (indexer sweep.js / price.js). Every
+// PASS sort on BOTH sides of the seam uses this one comparator; pinning one side
+// alone would make the pinned verifier diverge from a still-bare producer.
+const PASS_CMP = (a, b) => Buffer.compare(Buffer.from(String(a), 'utf8'),
+                                          Buffer.from(String(b), 'utf8'));
+
+// Throttle for the truncated-verifier-set alarm. _eligibleVerifiers runs once per
+// poll tick (30s by default), so an unthrottled warning would emit thousands of
+// times a day for one standing condition; an hour is loud enough to be seen and
+// quiet enough to stay readable. Same idiom as CapabilitySnapshot.getQuorum.
+const TRUNC_WARN_THROTTLE_MS = 3600000;
+
+// Coin ticker a signer hook was wired for, normalized the way signer-loader
+// normalizes its declarations so 'btc' and 'BTC' compare equal. Anything empty
+// becomes null: an untagged wiring is not a claim about a chain.
+const _chainTag = (coin) => (coin === undefined || coin === null || String(coin).trim() === '')
+    ? null : String(coin).trim().toUpperCase();
+
+class FullNodeChallengeRound {
+
+    constructor(hub){
+        this.hub        = hub;
+        let cfg         = hub.p2pConfig || {};
+        this.cfg        = cfg;
+        this.peerManager      = hub.peerManager;
+        this.identity         = hub.identity;
+        this.capabilitySnapshot = hub.capabilitySnapshot;
+
+        this.network       = hub.network || cfg.HUB_NETWORK || '';
+
+        // The CONSENSUS-relevant full-node params come from the PINNED coin
+        // registry, never from env or literals.
+        //
+        // These used to resolve `process.env.FULLNODE_* || cfg.FULLNODE.* || '<literal>'`.
+        // That read the env FIRST on every network, so on MAINNET an operator env var
+        // silently overrode a pinned consensus parameter, and CONSENSUS_CONFIG_PIN still
+        // verified clean because the pin covers the registry, not what this class
+        // actually used. Two hubs with different FULLNODE_CONFIRM_DEPTH would compute
+        // different possession answers and different PASS lists while both reported a
+        // matching pin. The literals were a third, unpinned source of the same values.
+        //
+        // coins.getCoinConfig() is the single source now. It already applies the
+        // regtest-only sidecar and env overrides internally (resolveFullnode), so
+        // regtest keeps its tunability through the DESCRIBED surface, while
+        // mainnet/testnet get the frozen pinned values with no env surface at all.
+        // FULLNODE is BTC-only: the tier is BTC-anchored.
+        // Fail closed on an unresolvable network, and say so in terms the operator can
+        // act on. getCoinConfig would throw "Unknown network: " here, which names
+        // neither the caller nor the fix. A hub that cannot name its network cannot
+        // resolve pinned consensus params, and running the round on literals is the
+        // exact hazard this refusal exists to close, so it refuses rather than falls back.
+        if(this.network !== 'mainnet' && this.network !== 'testnet' && this.network !== 'regtest')
+            throw new Error('FullNodeChallengeRound: cannot resolve the pinned FULLNODE params because ' +
+                'the hub network is ' + JSON.stringify(this.network) + ' (expected mainnet/testnet/regtest). ' +
+                'Set HUB_NETWORK, or leave the full-node challenge round disabled; it must not run on ' +
+                'unpinned defaults.');
+
+        const registry = coins.getCoinConfig('BTC', this.network).FULLNODE || {};
+        this.registryFullnode = registry;
+        this.interval      = parseInt(registry.CHALLENGE_INTERVAL_BLOCKS, 10);
+        this.confirmDepth  = parseInt(registry.CONFIRM_DEPTH, 10);
+        this.acceptWindow  = parseInt(registry.VERDICT_ACCEPT_WINDOW_BLOCKS, 10);
+        // Collection closes when the tip reaches epoch + closeDepth blocks, anchored
+        // to chain height (shared by all hubs), NOT each hub's local detection time,
+        // so the leader has every claimant's answer before it proposes the PASS list.
+        // Pinned in the registry for that reason (see BTC.js COLLECT_DEPTH_BLOCKS).
+        this.closeDepth    = parseInt(registry.COLLECT_DEPTH_BLOCKS, 10);
+
+        // Conformance assert: every consensus param must have resolved to a usable
+        // value FROM THE REGISTRY. A NaN here means the registry lost a key (or this
+        // hub is pointed at a network whose bundle lacks the block), and running on a
+        // NaN interval would silently disable challenge rounds rather than fail. Fail
+        // closed and name the key, so a registry regression surfaces at boot instead of
+        // as a quorum that mysteriously never forms.
+        for(const [key, value] of Object.entries({
+            CHALLENGE_INTERVAL_BLOCKS:    this.interval,
+            CONFIRM_DEPTH:                this.confirmDepth,
+            VERDICT_ACCEPT_WINDOW_BLOCKS: this.acceptWindow,
+            COLLECT_DEPTH_BLOCKS:         this.closeDepth,
+        })){
+            if(!Number.isFinite(value))
+                throw new Error('FullNodeChallengeRound: pinned FULLNODE.' + key + ' is missing or ' +
+                    'non-numeric in the coin registry for BTC/' + this.network + '. These are consensus ' +
+                    'inputs and have no env or literal fallback by design; fix the bundled ' +
+                    'coin registry rather than supplying the value out of band.');
+        }
+
+        let fn = cfg.FULLNODE || {};
+        // OPERATIONAL knobs only below this line: they affect this hub's local timing
+        // and participation, not what any hub computes, so they keep their env surface.
+        this.enabled       = String(process.env.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
+        this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
+        this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
+        // Genesis verifiers seed the eligible-verifier universe before any node is
+        // verified on-chain, so a key dropped here shrinks the quorum denominator: it is
+        // a consensus input and comes from the pinned registry with the rest.
+        // Malformed entries are dropped (the indexer's admission rule does the same,
+        // so keeping them would only fork this hub's view), but say so, or a
+        // typo'd activation looks identical to a correct one.
+        let rawGenesis     = Array.isArray(registry.GENESIS_VERIFIERS) ? registry.GENESIS_VERIFIERS : [];
+        this.genesis       = new Set(rawGenesis
+                                .filter(p => /^[0-9a-fA-F]{64}$/.test(String(p)))
+                                .map(p => String(p).toLowerCase()));
+        if(this.genesis.size !== rawGenesis.length)
+            console.warn('FullNodeChallengeRound: ignored ' + (rawGenesis.length - this.genesis.size) +
+                ' of ' + rawGenesis.length + ' GENESIS_VERIFIERS entries (not a 64-hex Ed25519 pubkey, ' +
+                'or a duplicate); using ' + this.genesis.size + '. The verifier quorum is computed over ' +
+                'the surviving set.');
+
+        // BTC indexer JSON-RPC (ledger-hash seed + tip); same env surface as
+        // StateCheckpointEngine / CrossChainDexEngine.
+        this.indexerUrl = process.env.BTC_INDEXER_URL     || cfg.BTC_INDEXER_URL     || '';
+        this.indexerKey = process.env.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
+
+        // BTC coin full-node RPC (compute the possession answer). Reuses the
+        // cross_chain capability's per-chain RPC config; a light validator simply
+        // has none, so it can't participate (exactly the property we want).
+        let cc = (cfg.cross_chain && cfg.cross_chain.chains && cfg.cross_chain.chains.BTC) || {};
+        this.coinRpcUrl = process.env.FULLNODE_BTC_RPC || (cfg.FULLNODE && cfg.FULLNODE.BTC_RPC) || cc.rpc || '';
+
+        // On-chain verdict broadcast: operator hook (preferred) or BTC encoder
+        // pipeline, mirroring AttestationPublisher / OraclePublisher.
+        let encUrl  = process.env.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
+        let encKey  = process.env.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
+        this.encoder      = encUrl ? new EncoderClient(encUrl, encKey) : null;
+        this.broadcastFn  = null;   // fn(wirePayload) -> Promise<{txid}>
+        this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
+        this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
+
+        // The rail a verdict settles on: built, funded and broadcast on BTC through the
+        // encoder and address above. src/lib/signer_loader.js reads this to decide
+        // whether the operator's one HUB_SIGNER_MODULE may be wired here; the historical
+        // module signs with the DOGE key, and wiring it here spent DOGE fees on payloads
+        // BTC then read as an invalid REQUEST_ID.
+        this.signingChain = 'BTC';
+        // Chain each hook was wired FOR, when the wiring site said (signer-loader does).
+        // null means an untagged direct wiring, which is trusted, as it was before the
+        // declaration existed.
+        this._signHookChain      = null;
+        this._broadcastHookChain = null;
+        this._chainMismatchWarned = false;
+
+        // Shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
+        // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and a
+        // per-capability runtime pause so an operator can halt verdict BTC spend at
+        // runtime; gated at _maybeFinalize before the leader broadcasts. Config reads
+        // env first (FULLNODE_* keys), then top-level p2pConfig, matching the sibling
+        // publishers (the nested cfg.FULLNODE block stays the source for FullNode's own
+        // knobs; the guard's knobs are the FULLNODE_*-prefixed ones).
+        this.spendGuard = new SpendGuard('FULLNODE', cfg, 'FullNodeChallengeRound');
+
+        // Durable spend audit for the fee-bearing verdict send. The other
+        // three hub effectors all leave a recoverable trace of a fee-bearing INTENT
+        // before the money moves (AttestationPublisher's fsync'd queue plus
+        // spend.jsonl, AttestationRelay's intent WAL, StateAnchorPublisher's
+        // anchor_txid IS NULL row); this path had only a post-success console.log, so
+        // a crash mid-flight left nothing but stdout retention to say a fee had been
+        // committed. Same JSONL-plus-fsync shape and path idiom as AttestationPublisher.
+        this.spendLogPath = process.env.FULLNODE_SPEND_LOG_PATH || cfg.FULLNODE_SPEND_LOG_PATH ||
+                            './data/fullnode-verdict.spend.jsonl';
+
+        this.rounds   = new Map();  // epoch -> round state
+        // Epochs whose verdict fee a PRIOR process already committed, recovered from
+        // the spend log at start(). The in-memory `rounds` map is empty after a
+        // restart, so it cannot answer that question.
+        this._committedEpochs = new Set();
+        this._timer   = null;
+        this._ticking = false;      // in-flight guard, see _tick()
+        this._truncWarnAt = 0;      // throttle for the truncated-set alarm, see _eligibleVerifiers()
+        this._handler = (env) => this._handleMessage(env);
+    }
+
+    setBroadcastHook(fn, chain){  this.broadcastFn  = fn; this._broadcastHookChain = _chainTag(chain); }
+    setEncoder(enc){              this.encoder      = enc; }
+    setWalletSignHook(fn, chain){ this.walletSignFn = fn; this._signHookChain      = _chainTag(chain); }
+
+    // Defence in depth behind signer-loader's chain gate: name any hook wired for
+    // another coin. The loader is the only production wiring path, but a hook set
+    // directly (a driver, a future wiring site, an operator patch) would otherwise
+    // sign a BTC verdict with a foreign key and pay that chain's fee for a payload
+    // BTC cannot read. Returns a reason string, or null when the wiring is sound.
+    signerChainMismatch(){
+        let wrong = [];
+        if(this._broadcastHookChain && this._broadcastHookChain !== this.signingChain)
+            wrong.push('broadcast hook wired for ' + this._broadcastHookChain);
+        if(this._signHookChain && this._signHookChain !== this.signingChain)
+            wrong.push('wallet-sign hook wired for ' + this._signHookChain);
+        if(!wrong.length) return null;
+        return 'FullNodeChallengeRound: REFUSING to publish a NODEPROOF verdict: it settles on ' +
+               this.signingChain + ' but the ' + wrong.join(' and ') + '. Nothing was built, funded or ' +
+               'signed. Configure a HUB_SIGNER_MODULE declaring chains: [\'' + this.signingChain +
+               '\'], or leave this round observe-only.';
+    }
+
+    async start(){
+        if(!this.enabled){
+            console.log('FullNodeChallengeRound: disabled');
+            return;
+        }
+        if(this.peerManager) this.peerManager.on('message', this._handler);
+        // Consume the spend log BEFORE the first tick, or the recovered epochs arrive
+        // too late to gate the round that tick reconstructs. Same reason
+        // the spend window is reloaded here and not lazily.
+        this.loadSpendLog();
+        this.spendGuard.persistTo();
+        let tick = async () => { try { await this._tick(); } catch(e){ console.warn('FullNodeChallengeRound tick:', e && e.message ? e.message : e); } };
+        this._timer = setInterval(tick, this.pollMs);
+        await tick();
+        console.log('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
+                    ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ', tier=' +
+                    activation.describeActivation(this.cfg.FULLNODE) + ', ' +
+                    this._committedEpochs.size + ' epoch(s) already spent per the spend log)');
+    }
+
+    async stop(){
+        if(this._timer) clearInterval(this._timer);
+        this._timer = null;
+        if(this.peerManager) this.peerManager.removeListener('message', this._handler);
+    }
+
+    async _indexerCall(method, params){
+        // Resolve the BTC indexer URL the same way the rest of the hub does
+        // (BTC_INDEXER_API_URL -> BTC_INDEXER_URL -> config), so a standard hub
+        // deployment that only sets BTC_INDEXER_API_URL still reaches the indexer.
+        // Fall back to the env/cfg value captured at construction.
+        let url = this.indexerUrl;
+        if(this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function'){
+            try { url = (await this.hub._resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
+        }
+        if(!url) throw new Error('no BTC indexer URL (set BTC_INDEXER_API_URL / BTC_INDEXER_URL)');
+        let headers = (this.hub && typeof this.hub.btcIndexerHeaders === 'function')
+            ? this.hub.btcIndexerHeaders()
+            : Object.assign({ 'Content-Type': 'application/json' }, this.indexerKey ? { 'x-api-key': this.indexerKey } : {});
+        let resp = await axios.post(url, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
+        if(resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
+        let result = resp.data ? resp.data.result : null;
+        // The indexer reports failures in-band as result.error (a 200 with an error
+        // object), not the top-level JSON-RPC error envelope; the rest of the hub
+        // (CapabilitySnapshot, AttestationRound) already gates on result.error. Surface
+        // it here too so a poll error reaches the caller's catch instead of being
+        // returned as a valid result and silently degrading the verifier set.
+        if(result && result.error) throw new Error('indexer in-band error: ' + JSON.stringify(result.error));
+        return result;
+    }
+
+    async coinCall(method, params){
+        if(!this.coinRpcUrl) throw new Error('no coin RPC');
+        let resp = await axios.post(this.coinRpcUrl, { jsonrpc: '1.0', id: 'fnproof', method, params: params || [] }, { timeout: 15000 });
+        if(resp.data && resp.data.error) throw new Error('coin RPC error: ' + JSON.stringify(resp.data.error));
+        return resp.data ? resp.data.result : null;
+    }
+
+    async _tick(){
+        if(this.interval <= 0) return;
+        // In-flight guard (house convention, mirrors StateCheckpointEngine._tick).
+        // A tick makes up to three sequential _indexerCall round trips at a 15s
+        // timeout each, against a 30s poll: under a slow indexer the next interval
+        // fires while this one is still awaiting. Two overlapping ticks would both
+        // pass the rounds.has(epoch) test below before either reached the
+        // rounds.set() inside _runEpoch (two more awaits later), starting one epoch
+        // twice: duplicate XNODE_ANSWER broadcasts and a second rounds.set that
+        // clobbers the first run's accumulated answers/signatures. The finally is
+        // load-bearing: a rejected indexer call must not wedge the flag forever.
+        if(this._ticking) return;
+        this._ticking = true;
+        try {
+            let tip = await this._indexerCall('getblockhashes', {});
+            let tipBlock = tip && tip.block_index != null ? Number(tip.block_index) : null;
+            if(tipBlock == null) return;
+
+            // Close (and eventually prune) open rounds by CHAIN HEIGHT: every hub closes
+            // a round at the same chain point (tip >= epoch + closeDepth), regardless of
+            // when it locally detected the epoch, so the leader has collected every
+            // claimant's answer (which were all broadcast within ~1 block of the epoch).
+            for(let [e, st] of this.rounds){
+                if(!st.finalized && tipBlock >= e + this.closeDepth){
+                    // Chain-based leader failover: rank 0 leads at the close point; each
+                    // further closeDepth of height with no verdict promotes the next rank.
+                    let rank = Math.floor((tipBlock - (e + this.closeDepth)) / Math.max(1, this.closeDepth));
+                    if(!st.closed || rank > st.leadRank){
+                        st.closed = true;
+                        st.leadRank = rank;
+                        this.closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+                    }
+                }
+                if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
+            }
+
+            // The most recent epoch boundary that is both buried enough for a stable
+            // target block and still inside the verdict-acceptance window.
+            let epoch = Math.floor(tipBlock / this.interval) * this.interval;
+            if(epoch < this.confirmDepth) return;                 // target would be < genesis
+            if((tipBlock - epoch) > this.acceptWindow) return;    // too late to land a verdict this epoch
+            if(this.rounds.has(epoch)) return;                    // already running/finalized
+            await this._runEpoch(epoch, tipBlock);
+        } finally {
+            this._ticking = false;
+        }
+    }
+
+    async _runEpoch(epoch, tipBlock){
+        let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
+        if(!bh || !bh.ledger_hash){ return; }
+        let seed   = String(bh.ledger_hash);
+        let target = epoch - this.confirmDepth;
+        let challengeId = crypto.createHash('sha256')
+            .update(String(this.network) + ':' + epoch + ':' + seed + ':' + target).digest('hex');
+
+        // Set<pubkey>: who may SIGN / who may be verified
+        let eligible  = await this._eligibleVerifiers(epoch);
+        // Unresolved eligible set (indexer RPC failure): ABSTAIN for this epoch
+        // rather than run on a per-hub-divergent member list. No round state is
+        // created, so this hub neither elects/claims leadership, signs, nor
+        // broadcasts a verdict; a later tick re-attempts once the indexer recovers
+        // (while still inside the verdict-accept window).
+        if(eligible === null){
+            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (eligible-verifier set unresolved; abstaining rather than running on a genesis-only subset)');
+            return;
+        }
+        let claimants = await this.claimantSet(epoch);
+        // Unresolved claimant set (capability-snapshot failure): ABSTAIN for this
+        // epoch alongside the eligible-set gate above, rather than lock an empty
+        // (full_node, epoch) universe that diverges from hubs whose snapshot resolved.
+        if(claimants === null){
+            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (claimant set unresolved; abstaining rather than locking an empty full_node set)');
+            return;
+        }
+        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+
+        let state = {
+            epoch, target, seed, challengeId,
+            eligible, claimants,
+            answers: new Map(),     // pubkey -> answer hex
+            sigs:    new Map(),     // pubkey -> sig hex (over the canonical PASS list)
+            passList: null,
+            myAnswer: null,
+            finalized: false,
+            closed: false,
+            leadRank: 0,
+            startedAt: Date.now(),
+            txid: null,
+        };
+        this.rounds.set(epoch, state);
+
+        // Compute our own answer if we can: a CLAIMANT (proving itself) or an
+        // eligible VERIFIER (needs the answer to lead a round and to confirm peers).
+        // Only a claimant BROADCASTS it as its own possession claim; a verifier that
+        // isn't also a claimant computes silently so it can still lead/verify. A
+        // light mirror has no coin RPC and stays silent on both counts.
+        let amClaimant = !!(myPubkey && claimants.has(myPubkey));
+        let amVerifier = !!(myPubkey && eligible.has(myPubkey));
+        if(myPubkey && this.coinRpcUrl && (amClaimant || amVerifier)){
+            try {
+                state.myAnswer = await this._computeAnswer(target, seed);
+                if(amClaimant){
+                    // R2-FN2: broadcast (and store) the pubkey-bound digest, never
+                    // the plaintext answer. `answers` holds digests for every
+                    // claimant including self, so the leader/verifier comparison
+                    // paths treat self and peers identically.
+                    let digest = this.answerDigest(challengeId, myPubkey, state.myAnswer);
+                    state.answers.set(myPubkey, digest);
+                    let sig = this.identity.sign(this.answerCanonical(challengeId, digest));
+                    this.peerManager && this.peerManager.broadcast(XNODE_ANSWER, {
+                        epoch, challengeId, answer_digest: digest, sig_pubkey: myPubkey, sig
+                    });
+                }
+            } catch(e){
+                console.warn('FullNodeChallengeRound: own answer failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+            }
+        }
+
+        console.log('FullNodeChallengeRound: epoch=' + epoch + ' challenge=' + challengeId.substring(0,16) +
+                    '... target=' + target + ' eligible=' + eligible.size + ' claimants=' + claimants.size +
+                    ' leader=' + (this._isLeader(state, myPubkey) ? 'me' : 'peer'));
+
+        // Collection closes from _tick once the tip reaches epoch + closeDepth
+        // (chain-anchored); the leader then proposes the PASS list and every node
+        // evaluates window-based pass-rate eligibility. No wall-clock timer: a hub that detects
+        // the epoch earlier must not close before peers (on a slightly later poll)
+        // have broadcast their answers.
+    }
+
+    async closeCollection(epoch){
+        let state = this.rounds.get(epoch);
+        if(!state) return;
+        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+
+        // The PASS proposal below only applies while the round is still live.
+        if(state.finalized) return;
+
+        // Leader proposes the PASS list: claimants whose pubkey-bound digest
+        // matches the digest derived from OUR OWN node's answer (R2-FN2).
+        if(this._isLeader(state, myPubkey) && state.myAnswer && !state.passList){
+            let pass = [];
+            for(let pk of state.claimants){
+                if(state.answers.get(pk) === this.answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
+            }
+            pass.sort(PASS_CMP);
+            state.passList = pass;
+            if(pass.length > 0){
+                // Self-sign, then request peer signatures.
+                let sig = this.identity.sign(this.verdictCanonical(state.challengeId, epoch, pass));
+                state.sigs.set(myPubkey, sig);
+                this.peerManager && this.peerManager.broadcast(XNODE_SIGN_REQ, {
+                    epoch, challengeId: state.challengeId, target: state.target, passList: pass,
+                    sig_pubkey: myPubkey
+                });
+                await this.maybeFinalize(epoch);
+            }
+        }
+    }
+
+    _handleMessage(env){
+        if(!env || !env.data) return;
+        switch(env.type){
+            case XNODE_ANSWER:   return this.onAnswer(env.data);
+            case XNODE_SIGN_REQ: return this.onSignReq(env.data);
+            case XNODE_SIGN:     return this.onSign(env.data);
+            case XNODE_DONE:     return this.onDone(env.data);
+        }
+    }
+
+    onAnswer(d){
+        let state = this.rounds.get(Number(d.epoch));
+        if(!state || state.finalized) return;
+        let pk = String(d.sig_pubkey || '').toLowerCase();
+        if(!pk || !state.claimants.has(pk)) return;            // only staked claimants count
+        if(!/^[0-9a-fA-F]{64}$/.test(pk)) return;
+        if(String(d.challengeId) !== state.challengeId) return;
+        // R2-FN2: the wire carries a pubkey-bound digest, not the answer. A
+        // 64-hex shape gate keeps junk out of the map; the digest itself is
+        // validated against this hub's own recomputation at compare time
+        // (_closeCollection / _onSignReq), so a copied digest from ANOTHER
+        // claimant can never match this sender's expected digest.
+        let digest = String(d.answer_digest || '').toLowerCase();
+        if(!/^[0-9a-f]{64}$/.test(digest)) return;
+        if(!ValidatorIdentity.verify(this.answerCanonical(state.challengeId, digest), String(d.sig || ''), pk)) return;
+        if(!state.answers.has(pk)) state.answers.set(pk, digest);
+    }
+
+    async onSignReq(d){
+        let state = this.rounds.get(Number(d.epoch));
+        if(!state || state.finalized) return;
+        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        if(!myPubkey || !state.eligible.has(myPubkey)) return;  // only eligible verifiers sign
+        if(String(d.challengeId) !== state.challengeId) return;
+        let leader = String(d.sig_pubkey || '').toLowerCase();
+        if(!state.eligible.has(leader)) return;
+
+        // Verify the sender is the currently-elected leader before locking the
+        // passList. An eligible non-leader that broadcasts XNODE_SIGN_REQ first
+        // could lock in a censoring pass list before the elected leader's proposal
+        // arrives. Buffer non-leader messages by ignoring them here; the true
+        // leader's SIGN_REQ will arrive and be accepted normally.
+        let electedLeader = this._electedLeader(state);
+        if(leader !== electedLeader) return;
+
+        let pass = Array.isArray(d.passList) ? d.passList.map(p => String(p).toLowerCase()) : [];
+        // We must INDEPENDENTLY confirm every listed claimant against our OWN node.
+        if(!this.coinRpcUrl) return;
+        if(state.myAnswer == null){
+            try { state.myAnswer = await this._computeAnswer(state.target, state.seed); }
+            catch(e){ return; }
+        }
+        let passSet = new Set(pass);
+        for(let pk of pass){
+            if(!state.claimants.has(pk)) return;                // outsider in the list
+            let a = state.answers.get(pk);
+            // R2-FN2: confirm the claimant's pubkey-bound digest against the one
+            // derived from OUR OWN node's answer. A digest copied from another
+            // claimant hashes over the wrong pubkey and never matches.
+            if(a === undefined || a !== this.answerDigest(state.challengeId, pk, state.myAnswer)) return; // can't confirm: refuse to sign
+        }
+        // Completeness (R2-FN3): the leader could silently DROP an honest claimant
+        // from the pass list (the loop above only validates listed entries, not
+        // omissions). Refuse to sign unless the list is a superset of every
+        // claimant we have INDEPENDENTLY confirmed correct against our own node,
+        // so a censoring leader cannot exclude an honest full node with our
+        // signature. (Answers still in flight are simply not yet in our set, so
+        // this never forces a premature refusal; the round re-signs as they land.)
+        for(let [pk, a] of state.answers){
+            if(state.claimants.has(pk) && a === this.answerDigest(state.challengeId, pk, state.myAnswer) && !passSet.has(pk)) return;
+        }
+        let sorted = pass.slice().sort(PASS_CMP);
+        let sig = this.identity.sign(this.verdictCanonical(state.challengeId, state.epoch, sorted));
+        if(!state.passList) state.passList = sorted;
+        state.sigs.set(myPubkey, sig);
+        this.peerManager && this.peerManager.broadcast(XNODE_SIGN, {
+            epoch: state.epoch, challengeId: state.challengeId, sig_pubkey: myPubkey, sig
+        });
+    }
+
+    async onSign(d){
+        let state = this.rounds.get(Number(d.epoch));
+        if(!state || state.finalized || !state.passList) return;
+        let pk = String(d.sig_pubkey || '').toLowerCase();
+        if(!pk || !state.eligible.has(pk)) return;
+        if(String(d.challengeId) !== state.challengeId) return;
+        let canonical = this.verdictCanonical(state.challengeId, state.epoch, state.passList.slice().sort(PASS_CMP));
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), pk)) return;
+        state.sigs.set(pk, String(d.sig));
+        await this.maybeFinalize(state.epoch);
+    }
+
+    onDone(d){
+        let state = this.rounds.get(Number(d.epoch));
+        if(!state) return;
+        state.finalized = true;
+        state.txid = d.txid || state.txid;
+    }
+
+    // The verdict spend log originally wrote the durable intent but nothing ever read
+    // it back, so the guard it was built for only worked inside one process lifetime. Fold the
+    // append-only log into the set of epochs whose fee is already committed, using the
+    // same sticky rules as AttestationRelay._loadWal: a terminal 'sent' or 'ambiguous'
+    // is committed and never cleared, a bare 'intent' counts as committed (fail closed
+    // toward NOT spending twice, since the tx may have reached the node), and only a
+    // 'failed' - the definitive pre-send failure where _maybeFinalize itself unlocks
+    // the round - clears a bare intent so a genuine retry still runs. Read-only: the
+    // log stays append-only and is never rewritten here.
+    //
+    // The fold is LAST-RECORD-WINS below the sticky 'sent', not first-record-wins: an
+    // epoch that failed definitively and then retried appends a SECOND intent, and
+    // that intent must re-arm the guard exactly like the first one. Keying the intent
+    // clause on 'no prior record' instead dropped it, so intent/failed/intent - retry,
+    // then crash after the node accepted - reloaded as uncommitted and re-broadcast,
+    // which is the very failure mode this durable guard exists to prevent.
+    loadSpendLog(){
+        let text;
+        try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
+        catch(e){ return; }   // absent on a first run
+        let outcome = new Map();
+        for(let line of text.split('\n')){
+            if(!line.trim()) continue;
+            let rec;
+            try { rec = JSON.parse(line); } catch(_){ continue; }   // a torn tail line
+            let epoch = Number(rec.epoch);
+            if(!Number.isFinite(epoch)) continue;
+            let prior = outcome.get(epoch);
+            if(rec.phase === 'sent' || rec.phase === 'ambiguous') outcome.set(epoch, 'sent');
+            else if(prior === 'sent') continue;                                    // terminal, never cleared
+            else if(rec.phase === 'failed') outcome.set(epoch, 'failed');          // clears a bare intent
+            else if(rec.phase === 'intent') outcome.set(epoch, 'intent');          // including a retry's
+        }
+        for(let [epoch, state] of outcome)
+            if(state === 'sent' || state === 'intent') this._committedEpochs.add(epoch);
+    }
+
+    async maybeFinalize(epoch){
+        let state = this.rounds.get(epoch);
+        if(!state || state.finalized || !state.passList) return;
+        // A prior process already committed this epoch's BTC fee. The epoch is
+        // recomputed deterministically from the tip, so a restart inside acceptWindow
+        // rebuilds the same round and can re-win leadership; without this the verdict
+        // goes out a second time. Claim the round rather than merely
+        // returning, so the reconstructed round stops re-entering every incoming sig.
+        if(this._committedEpochs.has(epoch)){
+            state.finalized = true;
+            console.warn('FullNodeChallengeRound: epoch ' + epoch + ' already carries a committed verdict spend ' +
+                         'in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
+            return;
+        }
+        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        if(!this._isLeader(state, myPubkey)) return;            // only the leader broadcasts
+        let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
+        if(state.sigs.size < quorum) return;
+
+        // Wrong-chain signer check FIRST, ahead of the spend guard's reservation and of
+        // anything the encoder builds: a mismatch is a standing configuration fact, not
+        // a transient send failure, so it must not consume this window's budget or
+        // claim the round. Warned once, then the round simply stays observe-only.
+        let chainMismatch = this.signerChainMismatch();
+        if(chainMismatch){
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            return;
+        }
+
+        // Shared SpendGuard gate on the PRIMARY (leader) verdict spend path.
+        // A runtime pause (per-capability) or an exhausted per-window spend ceiling
+        // DEFERS finalization (return without claiming the round) so a later tick
+        // retries once resumed/budget frees. Checked BEFORE the finalize lock so a
+        // paused publisher never claims-then-reverts, and never spends on the leader
+        // path (the enabled kill-switch only gated start(), not this send).
+        let g = this.spendGuard.check();
+        if(!g.ok){ console.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
+
+        // RESERVE on top of that check: _broadcastVerdict is AWAITED, and the pure
+        // predicate pair check()/record() leaves a window in which every epoch that
+        // crosses quorum inside it reads the same pre-send budget and all of them
+        // spend. The reservation consumes the budget in this synchronous turn, and it
+        // IS the recorded spend, so record() must never also run for it. check() stays
+        // above because reserve() takes no balance argument, so dropping it would
+        // silently retire the wallet floor. Same shape RollcallRound._publishPairs and
+        // lib/idempotent_broadcast.broadcastOnce use.
+        let spendToken = this.spendGuard.reserve();
+        if(!spendToken){
+            console.warn('FullNodeChallengeRound: ' + this.spendGuard.noteBlocked() +
+                         ' (epoch ' + epoch + '); deferring verdict broadcast');
+            return;
+        }
+
+        // Optimistic finalize lock: _maybeFinalize runs on EVERY incoming XNODE_SIGN
+        // (and from _closeCollection), so without claiming the round BEFORE the async
+        // broadcast, two sigs that cross quorum within the broadcast's await window both
+        // pass the `finalized` guard above and the leader emits the NODEPROOF verdict tx
+        // twice (wasted BTC fee; the second is a same-challenge replay). Claim the round
+        // now and revert on failure so a later sig/tick can still retry.
+        state.finalized = true;
+        let wire = this.buildVerdictWire(state);
+
+        // Durable intent record BEFORE the money moves, and the broadcast
+        // is GATED on it, matching the rule AttestationPublisher states at its own
+        // durable append: an unwritable audit path must not let a real BTC fee be
+        // spent with no recoverable trace. Failing here reverts the finalize lock, so
+        // this defers the verdict to a later tick rather than losing the round.
+        if(!this._recordSpend({ phase: 'intent', epoch, challengeId: state.challengeId,
+                                pass: state.passList.length, sigs: state.sigs.size, quorum })){
+            state.finalized = false;
+            // Nothing was broadcast, so the reservation goes back; keeping it would
+            // charge the window for a verdict this tick deliberately did not send.
+            this.spendGuard.release(spendToken);
+            console.error('FullNodeChallengeRound: spend-audit path unwritable at ' + this.spendLogPath +
+                          '; deferring the verdict broadcast for epoch ' + epoch +
+                          ' rather than spending a BTC fee with no durable record');
+            return;
+        }
+
+        try {
+            let res = await this.broadcastVerdict(wire);
+            this.spendGuard.commit(spendToken);   // the reservation IS the BTC fee charged
+            state.txid = res && res.txid ? res.txid : null;
+            // Mirror the reload rule in-process, so a spend is gated identically
+            // whether the log was read at start() or written this run.
+            this._committedEpochs.add(epoch);
+            // Name the rank this verdict was broadcast at, in the durable spend record
+            // and in the log line. A failover verdict (leadRank > 0, the ladder in
+            // _tick promoting the next rank after each closeDepth of height with no
+            // verdict) is otherwise byte-identical to a healthy rank-0 verdict in every
+            // observable signal, so a dead elected leader stays invisible while the
+            // ladder absorbs its rounds. Same marker StateAnchorPublisher carries at
+            // its own anchor publish.
+            let leadRank = Number(state.leadRank) || 0;
+            this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid, leadRank });
+            this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
+            console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
+                        ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : '') +
+                        (leadRank > 0
+                            ? ' [FAILOVER: broadcast at backup rank ' + leadRank + ' of ' + state.eligible.size +
+                              '; the rank-0 leader did not land a verdict for this epoch]'
+                            : ''));
+        } catch(e){
+            // Never blind-retry an AMBIGUOUS send. A timeout / reset / 5xx
+            // after the request left the wire may mean the BTC node accepted the
+            // verdict tx; reverting the finalize lock would let a later tick
+            // re-broadcast and double-spend the fee (same-challenge NODEPROOF replay).
+            // Keep the round claimed (no retry); an operator verifies on-chain, and a
+            // fresh epoch re-challenges if it truly never landed. Only a DEFINITIVE
+            // pre-send/reject failure unlocks for retry.
+            if(isAmbiguousSendError(e)){
+                // The whole point of the intent record: an ambiguous send may have cost
+                // a fee, and the round is deliberately left claimed. Say so on disk, so
+                // the operator reconciling on-chain has the challenge_id without stdout.
+                this._committedEpochs.add(epoch);   // a fee may have been paid
+                // COMMIT, not release: the round is left claimed precisely because the
+                // verdict may be on the wire, so its fee must be charged to the window.
+                // Releasing here is what let a later epoch spend an allowance this
+                // possibly-paid fee had already consumed.
+                this.spendGuard.commit(spendToken);
+                this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
+                                    error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
+                console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
+                             '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
+            } else {
+                // Definitive: nothing left this process, so the budget goes back and a
+                // later tick can retry inside the same window.
+                this.spendGuard.release(spendToken);
+                this._recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
+                                    error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
+                state.finalized = false;   // definitive failure; unlock so a later sig/tick retries
+                console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+            }
+        }
+    }
+
+    // Append one fsync'd spend-audit line. Returns true only on a
+    // confirmed durable write; the intent call SITES the gate on that result, the
+    // outcome calls are best-effort (the fee is already committed by then, so
+    // refusing to proceed would help nobody). Mirrors AttestationPublisher._recordSpend,
+    // including creating the directory lazily so a fresh hub does not need it
+    // provisioned ahead of its first verdict.
+    _recordSpend(entry){
+        let line = JSON.stringify({ ts: Date.now(), effector: 'FULLNODE_VERDICT', ...entry }) + '\n';
+        try {
+            fs.mkdirSync(path.dirname(this.spendLogPath), { recursive: true });
+            let fd = fs.openSync(this.spendLogPath, 'a');
+            try {
+                fs.writeSync(fd, line);
+                fs.fsyncSync(fd);
+            } finally {
+                fs.closeSync(fd);
+            }
+            return true;
+        } catch (e) {
+            console.error('FullNodeChallengeRound: failed to write spend-audit record to ' +
+                          this.spendLogPath + ':', e && e.message ? e.message : e);
+            return false;
+        }
+    }
+
+    // scriptPubKey (hex) of a seed-selected output in the buried target block.
+    async _computeAnswer(target, seed){
+        let blockHash = await this.coinCall('getblockhash', [Number(target)]);
+        let block     = await this.coinCall('getblock', [blockHash, 2]);
+        let txs = (block && block.tx) || [];
+        if(txs.length === 0) throw new Error('empty target block');
+        let txIndex = Number(BigInt('0x' + seed.slice(0, 16)) % BigInt(txs.length));
+        let tx = txs[txIndex];
+        let vouts = (tx && tx.vout) || [];
+        if(vouts.length === 0) throw new Error('selected tx has no outputs');
+        let voutIndex = Number(BigInt('0x' + seed.slice(16, 32)) % BigInt(vouts.length));
+        let spk = vouts[voutIndex] && vouts[voutIndex].scriptPubKey;
+        if(!spk || !spk.hex) throw new Error('no scriptPubKey at selected output');
+        return String(spk.hex).toLowerCase();
+    }
+
+    // Signed canonical for an XNODE_ANSWER broadcast. Since R2-FN2 the second
+    // field is the pubkey-bound answer DIGEST, never the plaintext answer.
+    answerCanonical(challengeId, answerDigest){
+        return 'XNODEANS|' + challengeId + '|' + String(answerDigest);
+    }
+
+    // R2-FN2: pubkey-bound possession digest. Binding the claimant's pubkey into
+    // the hash makes every claimant's expected wire value distinct for the same
+    // underlying answer, so knowledge of ANOTHER claimant's digest (public gossip)
+    // is useless without the answer preimage, which only a real full node can
+    // compute. Verifiers hold the preimage from their own node and recompute the
+    // expected digest per claimant, so no reveal phase is needed.
+    answerDigest(challengeId, pubkey, answer){
+        return crypto.createHash('sha256')
+            .update('XNODEANSV1|' + challengeId + '|' + String(pubkey).toLowerCase() + '|' + String(answer))
+            .digest('hex');
+    }
+
+    // CONSENSUS-CRITICAL: must byte-match the indexer's nodeproof.js canonical.
+    verdictCanonical(challengeId, epoch, sortedPassList){
+        let raw = challengeId + '|' + epoch + '|' + sortedPassList.join(',');
+        if(eq.isEquivHeaderActive(epoch, this.network))
+            raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.NODEPROOF, challengeId, 0, raw);
+        return raw;
+    }
+
+    // NODEPROOF|0|CHALLENGE_ID|EPOCH_HEIGHT|PASS_COUNT|PASS_PK...|SIG_COUNT|PK|SIG|...
+    buildVerdictWire(state){
+        let pass = state.passList.slice().sort(PASS_CMP);
+        let sigTokens = [];
+        for(let [pk, sig] of state.sigs.entries()) sigTokens.push(pk, sig);
+        let parts = ['NODEPROOF', '0', state.challengeId, String(state.epoch), String(pass.length)]
+            .concat(pass)
+            .concat([String(state.sigs.size)])
+            .concat(sigTokens);
+        return parts.join('|');
+    }
+
+    // Returns the pubkey of the currently elected leader for `state`: the
+    // verifier at the unlocked rank in the SHA256(challenge_id || pubkey) ordering.
+    // Used by _onSignReq to reject SIGN_REQ messages from non-leaders before
+    // locking the passList.
+    _electedLeader(state){
+        if(!state.eligible || state.eligible.size === 0) return null;
+        let ranked = Array.from(state.eligible).map(pk => ({
+            pk, h: crypto.createHash('sha256').update(state.challengeId).update(pk).digest('hex')
+        })).sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0));
+        let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
+        return ranked[unlockedRank] ? ranked[unlockedRank].pk : null;
+    }
+
+    // Elected leader = lowest SHA256(challenge_id || pubkey) among eligible
+    // verifiers, with a simple elapsed-time failover ladder (the next-ranked
+    // verifier takes over a collection window later if no verdict has landed).
+    _isLeader(state, myPubkey){
+        if(!myPubkey || !state.eligible.has(myPubkey)) return false;
+        let ranked = Array.from(state.eligible).map(pk => ({
+            pk, h: crypto.createHash('sha256').update(state.challengeId).update(pk).digest('hex')
+        })).sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0));
+        let myRank = ranked.findIndex(r => r.pk === myPubkey);
+        if(myRank < 0) return false;
+        // Rank 0 leads at the chain-anchored close; if no verdict lands, each further
+        // closeDepth of chain height promotes the next rank as a failover (chain-based
+        // so all hubs agree on who leads, escalated in _tick via state.leadRank).
+        let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
+        return myRank === unlockedRank;
+    }
+
+    // Eligible verifiers at the epoch block: verified full nodes (from the
+    // indexer) union configured genesis verifiers. Matches the indexer's acceptance
+    // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
+    //
+    // CONSENSUS-CRITICAL: the returned set is the domain of leader election
+    // (_electedLeader / _isLeader) and the 2/3+1 quorum denominator (_maybeFinalize).
+    // On an UNRESOLVED set (any indexer RPC failure: 401 / timeout / transport) this
+    // returns null so the caller ABSTAINS (skips the epoch), rather than degrading to
+    // the genesis-only subset. A per-hub, reachability-dependent fallback would split
+    // the federation's view of the member list across honest hubs (divergent leader /
+    // quorum -> duplicate or stalled on-chain NODEPROOF verdicts). This fails CLOSED,
+    // matching _claimantSet in this file and the StateAnchorPublisher / CrossChainEngine
+    // siblings; it trades liveness on a prolonged indexer outage for cross-hub safety.
+    // The legitimate genesis-only path (a genuinely genesis-only federation) is on the
+    // SUCCESS branch, where the indexer returns an empty validators list; only the
+    // error-degradation path changes.
+    async _eligibleVerifiers(epoch){
+        let set = new Set(this.genesis);
+        try {
+            let verified = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
+            // Alarm-and-proceed on a TRUNCATED verifier set. getfullnodeverifiers carries
+            // `truncated` precisely so a hub can say so (it is set when the indexer's read
+            // hit VALIDATOR_QUERY_LIMIT), and this set is the 2/3+1 quorum denominator and
+            // the leader-election domain: consumed silently, a cap lowers the quorum bar
+            // with no operator signal at all. We still proceed rather than abstain, because
+            // every indexer truncates identically at the same block, so the capped set
+            // stays cross-hub deterministic; refusing would halt the round the moment the
+            // verifier set outgrows the cap, which is the worse failure. Throttled, since
+            // this runs once per poll tick. Same shape as CapabilitySnapshot.getQuorum.
+            if (verified && verified.truncated === true){
+                let now = Date.now();
+                if (now - this._truncWarnAt > TRUNC_WARN_THROTTLE_MS){
+                    this._truncWarnAt = now;
+                    console.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
+                        'verified-full-node set at epoch ' + epoch + ' (' +
+                        ((verified.validators && verified.validators.length) || 0) + ' verifier(s) returned): it hit ' +
+                        'VALIDATOR_QUERY_LIMIT, so the eligible set is CAPPED below the true verifier universe and the ' +
+                        '2/3+1 quorum denominator is a floor, not the real N. The round still runs (every indexer ' +
+                        'truncates identically, so the capped set is cross-hub deterministic); raise the frozen ' +
+                        'VALIDATOR_QUERY_LIMIT consensus constant on the indexers (coordinated fleet upgrade).');
+                }
+            }
+            let list = (verified && verified.validators) || [];
+            for(let v of list){
+                let pk = String(v.pubkey || v).toLowerCase();
+                if(/^[0-9a-f]{64}$/.test(pk)) set.add(pk);
+            }
+        } catch(err){
+            let status = err && err.response && err.response.status;
+            if (status === 401)
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+            else
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+            return null;
+        }
+        return set;
+    }
+
+    // Claimant universe = validators holding the full_node capability at the
+    // epoch block (the block-boundary snapshot every hub locks identically).
+    //
+    // CONSENSUS-CRITICAL: mirrors _eligibleVerifiers. capabilitySnapshot.getSnapshot
+    // signals every UNRESOLVED state (transport error, 401/403, malformed shape,
+    // block-echo mismatch, unconfigured MIN_STAKE against a live registry) by
+    // returning null, never by throwing, so the catch below is a backstop, not the
+    // primary path. On an unresolved snapshot this returns null so the caller
+    // ABSTAINS (skips the epoch) rather than degrading to an EMPTY claimant set:
+    // an empty set would let two honest hubs lock different (full_node, epoch)
+    // universes (leader broadcasts no XNODE_SIGN_REQ / verifier rejects the
+    // legitimate list as outsiders), the exact divergence this lock exists to
+    // prevent. A legitimately empty snapshot is distinguished by a real validators
+    // array (_coerceValidators guarantees one on the SUCCESS branch) and still
+    // yields a real, empty Set. This fails CLOSED, trading liveness on a prolonged
+    // snapshot outage for cross-hub safety.
+    async claimantSet(epoch){
+        let set = new Set();
+        try {
+            let snap = await this.capabilitySnapshot.getSnapshot('full_node', epoch);
+            if(!snap || !Array.isArray(snap.validators)){
+                console.warn('FullNodeChallengeRound: _claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
+                return null;
+            }
+            for(let v of snap.validators){
+                let pk = String(v.pubkey || v).toLowerCase();
+                if(/^[0-9a-f]{64}$/.test(pk)) set.add(pk);
+            }
+        } catch(err){
+            let status = err && err.response && err.response.status;
+            if (status === 401)
+                console.warn('FullNodeChallengeRound: _claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
+            else
+                console.warn('FullNodeChallengeRound: _claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
+            return null;
+        }
+        return set;
+    }
+
+    async broadcastVerdict(wire){
+        // Second gate on the same fact, for every caller that does not come through
+        // _maybeFinalize. Refuse before the hook runs and before the encoder fetches a
+        // UTXO, so a wrong-chain wiring costs nothing.
+        let chainMismatch = this.signerChainMismatch();
+        if(chainMismatch){
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            throw new Error(chainMismatch);
+        }
+        if(this.broadcastFn) return await this.broadcastFn(wire);
+        if(this.encoder && this.walletSignFn && this.btcAddress){
+            // Same three-step encoder contract the sibling publishers use
+            // (AttestationPublisher / OraclePublisher / AttestationRelay /
+            // StateAnchorPublisher _defaultBroadcast): fetch UTXOs, then create_tx with
+            // {utxos, pubkey, data, change, encoding}. This path used to send
+            // {source, data}: `source` is not an encoder param at all (validateAll
+            // ignores it) and an absent pubkey is rejected up front with
+            // RangeError('pubkey is required') -> -32602, so the fallback threw before a
+            // PSBT was ever built and no NODEPROOF verdict could land on it.
+            let utxos = await this.encoder.getUtxos(this.btcAddress);
+            if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
+                throw new Error('no UTXOs available for ' + this.btcAddress);
+            let built = await this.encoder.createTx({
+                // Forwarded only while inside the encoder's caller-facing
+                // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+                // from its own uncapped fetch of this same address
+                // (lib/encoder_utxo_forward.js).
+                utxos:    forwardableUtxos(utxos, 'FullNodeChallengeRound'),
+                // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
+                // field, so it must be the base58check address, not the raw hex pubkey.
+                pubkey:   this.btcAddress,
+                data:     wire,
+                change:   this.btcAddress,
+                // A NODEPROOF verdict carries the pass list plus a pubkey+sig pair per
+                // co-signer, far past the 80-byte OP_RETURN limit.
+                encoding: 'P2SH'
+            });
+            // create_tx answers with `psbt` (plus `revealPsbt` for TAPROOT) and never
+            // psbtHex/hex, so the old alternates could only ever mask a missing PSBT by
+            // handing undefined to the wallet signer.
+            if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
+            // NODEPROOF verdict no indexer can decode and strand the carrier value
+            // (lib/two_phase_guard.js).
+            assertSingleTxEncoding(built, 'FullNodeChallengeRound');
+            let txHex = await this.walletSignFn(built.psbt);
+            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+            return await this.encoder.broadcastTx(txHex);
+        }
+        throw new Error('no broadcast pipeline (set broadcast hook, or encoder + wallet-sign + BTC_ADDRESS)');
+    }
+}
+
+module.exports = Object.assign(FullNodeChallengeRound, {
+    XNODE_ANSWER,
+    XNODE_SIGN_REQ,
+    XNODE_SIGN,
+    XNODE_DONE
+});

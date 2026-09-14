@@ -26,8 +26,8 @@
 // due (or is successfully led) leaves the meter clean.
 
 const { expect }            = require('chai');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
-const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
+const ValidatorIdentity     = require('../../src/validators/identity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const TIP = {

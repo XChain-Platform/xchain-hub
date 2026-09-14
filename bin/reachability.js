@@ -167,27 +167,29 @@ const DYNAMIC_EDGES = [
         why: 'the consensus-rules digest requires every SHARED_GATES module by computed path',
     },
     {
-        from: 'src/CrossChainBridgeEngine.js',
-        // loadActivation(name, predicate) requires './<name>.js' inside a try/catch
-        // that returns null, and the constructor calls it for three gates. Read out
+        from: 'src/cross_chain/bridge_engine.js',
+        // loadActivation(name, predicate) requires src/<name>.js from the engine's
+        // feature directory inside a try/catch that returns null, and the
+        // constructor calls it for three gates. Read out
         // of the call sites rather than restated, so a fourth gate added tomorrow
         // is an edge this tool already knows about. A missed move here is the
         // quietest failure in the repo: the engine idles and nothing throws.
         toList: () => {
-            const src = fs.readFileSync(path.join(REPO_ROOT, 'src/CrossChainBridgeEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(REPO_ROOT, 'src/cross_chain/bridge_engine.js'), 'utf8');
             const rows = Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g))
                 .map((m) => `src/${m[1]}.js`);
             if (!rows.length) {
-                throw new Error('src/CrossChainBridgeEngine.js declares no loadActivation call: the bridge edge is stale');
+                throw new Error('src/cross_chain/bridge_engine.js declares no loadActivation call: the bridge edge is stale');
             }
             return rows;
         },
         why: 'the cross-chain bridge engine requires each of its three activation gates by computed path',
     },
     {
-        from: 'src/ProviderRegistry.js',
-        // getModule requires './providers/<id>.js' where the id comes from a
-        // database row, so no literal in the repo names a provider module and both
+        from: 'src/validators/provider_registry.js',
+        // getModule requires src/providers/<id>.js from the registry's feature
+        // directory, where the id comes from a database row, so no literal in
+        // the repo names a provider module and both
         // of them read unreachable without this edge. A failed load returns null
         // and the provider is simply unavailable, which is the same silent shape
         // the two gates above have.

@@ -26,7 +26,7 @@
 
 module.exports = {
     // Inserts or updates a row in reorg_attestations.
-    // Moved here from src/ReorgHandler.js:643.
+    // Moved here from src/anchor/reorg_handler.js:643.
     async setReorgAttestation(reorgId, chain, reorgHeight, timestamp, affected_chains, validatorCount, proof) {
         return this.doQuery(`INSERT INTO reorg_attestations
                 (reorg_id, source_chain, reorg_height, reorg_timestamp, affected_chains,
@@ -36,7 +36,7 @@ module.exports = {
     },
 
     // Reads the newest reorg_attestations rows.
-    // Moved here from src/ReorgHandler.js:304, clamp included.
+    // Moved here from src/anchor/reorg_handler.js:304, clamp included.
     //
     // Server-side page cap, matching the other three HubOperationalCache-backed
     // RPC methods (CapabilityRegistry#listState, Governance#getProposals,

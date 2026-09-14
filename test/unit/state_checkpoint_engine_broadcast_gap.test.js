@@ -25,7 +25,7 @@
 
 const { expect }            = require('chai');
 const sinon                 = require('sinon');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = {

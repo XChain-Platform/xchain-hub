@@ -19,8 +19,8 @@
 // non-leader SIGN_REQ guard.
 
 const { expect }            = require('chai');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
-const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
+const ValidatorIdentity     = require('../../src/validators/identity');
 const { waitUntil }         = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
@@ -607,7 +607,7 @@ describe('StateCheckpointEngine', function () {
                 actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
                 checkpoint_seq: 999, snapshot_block: 300   // 999 != deriveCheckpointSeq(300)
             };
-            await nd.engine._handleFinalized({ data: { checkpoint: cp, signatures: [{ pubkey: nd.pubkey, sig: 'x' }] } });
+            await nd.engine.handleFinalized({ data: { checkpoint: cp, signatures: [{ pubkey: nd.pubkey, sig: 'x' }] } });
             expect(nd.db.checkpoints.length, 'malformed finalized seq not persisted').to.equal(0);
         });
 

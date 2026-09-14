@@ -24,7 +24,7 @@
 const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const PriceAggregator   = require('../../src/PriceAggregator');
+const PriceAggregator   = require('../../src/oracle/price_aggregator');
 const { createMockHub } = require('../helpers/mockHub');
 
 function makeValidator() {
@@ -214,9 +214,9 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
 
     it('_stampBatchLanding refuses a clock that is not a positive integer', async function () {
         let log = stubDb([]);
-        expect(await agg._stampBatchLanding(FIRST_ROUND, 0)).to.equal(0);
-        expect(await agg._stampBatchLanding(FIRST_ROUND, -1)).to.equal(0);
-        expect(await agg._stampBatchLanding(FIRST_ROUND, 'later')).to.equal(0);
+        expect(await agg.stampBatchLanding(FIRST_ROUND, 0)).to.equal(0);
+        expect(await agg.stampBatchLanding(FIRST_ROUND, -1)).to.equal(0);
+        expect(await agg.stampBatchLanding(FIRST_ROUND, 'later')).to.equal(0);
         expect(log.updates.length).to.equal(0);
     });
 });

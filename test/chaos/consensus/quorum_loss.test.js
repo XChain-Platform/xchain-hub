@@ -13,9 +13,9 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const crypto     = require('crypto');
-const Consensus       = require('../../../src/Consensus');
-const OracleConsensus = require('../../../src/OracleConsensus');
-const OracleRound     = require('../../../src/OracleRound');
+const Consensus       = require('../../../src/consensus/pbft');
+const OracleConsensus = require('../../../src/oracle/consensus');
+const OracleRound     = require('../../../src/oracle/round');
 const { createMockHub }    = require('../../helpers/mockHub');
 const { VALIDATORS_4, makeFederationSnapshot, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const { waitUntil }        = require('../../helpers/waitUntil');
@@ -203,7 +203,7 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         await con.start();
 
-        con._initiateViewChange(1);
+        con.initiateViewChange(1);
 
         expect(con.view).to.equal(1);
         expect(con.pendingViewChanges.has(1)).to.be.true;

@@ -13,7 +13,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const fc         = require('fast-check');
-const Governance = require('../../src/Governance');
+const Governance = require('../../src/validators/governance');
 const { createMockHub } = require('../helpers/mockHub');
 const gen               = require('./helpers/generators');
 
@@ -49,7 +49,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctIncrease) {
                     let proposed = current * (1 + pctIncrease);
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', String(current), String(proposed));
+                        gov.validateChangeBounds('SOME_PARAM', String(current), String(proposed));
                     }).to.not.throw();
                 }
             ), { numRuns: 200 });
@@ -64,7 +64,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctIncrease) {
                     let proposed = current * (1 + pctIncrease);
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', String(current), String(proposed));
+                        gov.validateChangeBounds('SOME_PARAM', String(current), String(proposed));
                     }).to.throw(/exceeds maximum/);
                 }
             ), { numRuns: 200 });
@@ -79,7 +79,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctDecrease) {
                     let proposed = current * (1 - pctDecrease);
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', String(current), String(proposed));
+                        gov.validateChangeBounds('SOME_PARAM', String(current), String(proposed));
                     }).to.not.throw();
                 }
             ), { numRuns: 200 });
@@ -94,7 +94,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctDecrease) {
                     let proposed = current * (1 - pctDecrease);
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', String(current), String(proposed));
+                        gov.validateChangeBounds('SOME_PARAM', String(current), String(proposed));
                     }).to.throw(/exceeds maximum/);
                 }
             ), { numRuns: 200 });
@@ -116,7 +116,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctIncrease) {
                     let proposed = current * (1 + pctIncrease);
                     expect(function () {
-                        gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', String(current), String(proposed));
+                        gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', String(current), String(proposed));
                     }).to.not.throw();
                 }
             ), { numRuns: 200 });
@@ -131,7 +131,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctIncrease) {
                     let proposed = current * (1 + pctIncrease);
                     expect(function () {
-                        gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', String(current), String(proposed));
+                        gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', String(current), String(proposed));
                     }).to.throw(/exceeds maximum/);
                 }
             ), { numRuns: 200 });
@@ -146,7 +146,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctDecrease) {
                     let proposed = current * (1 - pctDecrease);
                     expect(function () {
-                        gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', String(current), String(proposed));
+                        gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', String(current), String(proposed));
                     }).to.not.throw();
                 }
             ), { numRuns: 200 });
@@ -161,7 +161,7 @@ describe('Fuzz: Governance', function () {
                 function (current, pctDecrease) {
                     let proposed = current * (1 - pctDecrease);
                     expect(function () {
-                        gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', String(current), String(proposed));
+                        gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', String(current), String(proposed));
                     }).to.throw(/exceeds maximum/);
                 }
             ), { numRuns: 200 });
@@ -182,7 +182,7 @@ describe('Fuzz: Governance', function () {
                     .filter(function (s) { return isNaN(parseFloat(s)); }),
                 function (current, proposed) {
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', current, proposed);
+                        gov.validateChangeBounds('SOME_PARAM', current, proposed);
                     }).to.not.throw();
                 }
             ), { numRuns: 100 });
@@ -193,7 +193,7 @@ describe('Fuzz: Governance', function () {
                 fc.string({ maxLength: 20 }),
                 function (proposed) {
                     expect(function () {
-                        gov._validateChangeBounds('SOME_PARAM', '0', proposed);
+                        gov.validateChangeBounds('SOME_PARAM', '0', proposed);
                     }).to.not.throw();
                 }
             ), { numRuns: 100 });

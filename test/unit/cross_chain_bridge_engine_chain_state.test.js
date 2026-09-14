@@ -34,7 +34,7 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../src/CrossChainBridgeEngine.js');
+const CrossChainBridgeEngine = require('../../src/cross_chain/bridge_engine.js');
 const Database               = require('../../src/db');
 
 // A Database over a recording driver: every statement the engine issues is kept, so a test
@@ -276,9 +276,9 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(typeof engine.activation.token).to.equal('function');
             expect(typeof engine.activation.policy).to.equal('function');
             for(const block of [0, 1, 150, 1000000]){
-                expect(engine._gateActive('bridge', block), 'bridge at ' + block).to.equal(true);
-                expect(engine._gateActive('token',  block), 'token at '  + block).to.equal(true);
-                expect(engine._gateActive('policy', block), 'policy at ' + block).to.equal(true);
+                expect(engine.gateActive('bridge', block), 'bridge at ' + block).to.equal(true);
+                expect(engine.gateActive('token',  block), 'token at '  + block).to.equal(true);
+                expect(engine.gateActive('policy', block), 'policy at ' + block).to.equal(true);
             }
         });
 
@@ -287,9 +287,9 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
         // cannot move if the engine never polls.
         it('the same twins leave every family closed on mainnet', function(){
             const { engine } = makeEngine({ network: 'mainnet' });
-            expect(engine._gateActive('bridge', 1000000)).to.equal(false);
-            expect(engine._gateActive('token',  1000000)).to.equal(false);
-            expect(engine._gateActive('policy', 1000000)).to.equal(false);
+            expect(engine.gateActive('bridge', 1000000)).to.equal(false);
+            expect(engine.gateActive('token',  1000000)).to.equal(false);
+            expect(engine.gateActive('policy', 1000000)).to.equal(false);
         });
 
         // Armed gates plus a regtest config: the poll actually reaches the indexer.

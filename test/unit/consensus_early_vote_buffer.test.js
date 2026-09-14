@@ -26,7 +26,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/Consensus');
+const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
 
@@ -133,14 +133,14 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
 
         it('caps the votes held per seq', function () {
             for (let i = 0; i < 200; i++) {
-                consensus._bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+                consensus.bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             }
             expect(consensus.earlyVotes.get(SEQ).length).to.equal(64);
         });
 
         it('caps the number of distinct seqs and evicts the oldest first', function () {
             for (let s = 1; s <= 500; s++) {
-                consensus._bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest, s));
+                consensus.bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest, s));
             }
             expect(consensus.earlyVotes.size).to.equal(64);
             expect(consensus.earlyVotes.has(1)).to.be.false;     // evicted (FIFO)
@@ -149,15 +149,15 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
         });
 
         it('drops votes older than the round timeout', function () {
-            consensus._bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.earlyVotes.has(SEQ)).to.be.true;
-            consensus._pruneEarlyVotes(Date.now() + consensus.timeout + 1);
+            consensus.pruneEarlyVotes(Date.now() + consensus.timeout + 1);
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;
             expect(consensus.earlyVoteTtl.has(SEQ)).to.be.false;
         });
 
         it('is cleared when the engine stops', async function () {
-            consensus._bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             await consensus.stop();
             expect(consensus.earlyVotes.size).to.equal(0);
             expect(consensus.earlyVoteTtl.size).to.equal(0);
@@ -204,8 +204,8 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
         it('does not re-buffer a vote that finds the round already gone', function () {
             // A replay that still finds no proposal (the round expired) must not
             // land back in the buffer it was just drained from.
-            consensus._bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
-            consensus._replayEarlyVotes(SEQ);
+            consensus.bufferEarlyVote(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.replayEarlyVotes(SEQ);
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;
         });
     });

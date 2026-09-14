@@ -12,7 +12,7 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const Consensus      = require('../../src/Consensus');
+const Consensus      = require('../../src/consensus/pbft');
 const { createMockHub }     = require('../helpers/mockHub');
 const { waitUntil }         = require('../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
@@ -223,7 +223,7 @@ describe('Regression: Consensus (PBFT)', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
             consensus.view = 0;
 
-            consensus._initiateViewChange(5);
+            consensus.initiateViewChange(5);
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledOnce).to.be.true;
@@ -238,13 +238,13 @@ describe('Regression: Consensus (PBFT)', function () {
     describe('REG-CON-006: Sequence number persistence', function () {
         it('_loadSeq reads from DB @regression-p1', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
         it('_loadSeq defaults to 0 on empty result @regression-p1', async function () {
             hub.db.doQuery.resolves([]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
@@ -367,7 +367,7 @@ describe('Regression: Consensus (PBFT)', function () {
             let follower = new Consensus(createMockHub());
             follower.hub.capabilitySnapshot = buryingSnapshotFake();
             let { snapshot: followerSnapshot } =
-                await follower._lockSnapshot(data.btcBlockHeight);
+                await follower.lockSnapshot(data.btcBlockHeight);
             expect(followerSnapshot.blockIndex).to.equal(leaderBlock);
 
             clearTimeout(pending.timer);
@@ -379,7 +379,7 @@ describe('Regression: Consensus (PBFT)', function () {
         it('_lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
             hub.capabilitySnapshot = buryingSnapshotFake();
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-            let { snapshot, requestedBlockIndex } = await consensus._lockSnapshot();
+            let { snapshot, requestedBlockIndex } = await consensus.lockSnapshot();
             expect(requestedBlockIndex).to.equal(800000);
             expect(snapshot.blockIndex).to.equal(800000 - BUFFER);
         });

@@ -20,7 +20,7 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
@@ -150,7 +150,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         digest = oc._digest(ROUND, aggregated);
         oc._handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, digest));
 
-        oc._proposeRound(ROUND, subs, false, 1000, 1700000000, null, 2);
+        oc.proposeRound(ROUND, subs, false, 1000, 1700000000, null, 2);
 
         let pending = oc.pendingRounds.get(ROUND);
         expect(pending).to.exist;
@@ -163,7 +163,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         // The distinct-round count must stay capped and evict the oldest first.
         oc.earlyMessageMaxRounds = 8;
         for (let r = 0; r < 100; r++) {
-            oc._bufferEarlyMessage(r, voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'd' + r));
+            oc.bufferEarlyMessage(r, voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'd' + r));
         }
         expect(oc.earlyMessages.size).to.equal(8);
         // FIFO: only the newest 8 round keys survive (92..99); round 0 evicted.

@@ -18,7 +18,7 @@
 
 const { expect } = require('chai');
 
-const StakeShareWatcher = require('../../src/StakeShareWatcher.js');
+const StakeShareWatcher = require('../../src/validators/stake_share_watcher.js');
 const { LEVELS } = require('../../src/lib/stake_share_monitor.js');
 
 const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];
@@ -75,7 +75,7 @@ function makeHub(venue, opts) {
         capabilityRegistry: opts.noRegistry ? null : {
             getMinStake: () => opts.minStake === undefined ? '25000' : opts.minStake
         },
-        _btcIndexerHeaders: () => ({ 'Content-Type': 'application/json', 'x-api-key': 'k' }),
+        btcIndexerHeaders: () => ({ 'Content-Type': 'application/json', 'x-api-key': 'k' }),
         _resolveIndexerUrl: async (coin) => (opts.urls === undefined ? 'http://indexer/' + coin : opts.urls[coin] || null)
     };
 }

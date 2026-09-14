@@ -13,7 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const EventEmitter = require('events');
-const PeerManager  = require('../../../src/PeerManager');
+const PeerManager  = require('../../../src/peers/manager');
 const { createMockHub, DB_METHODS } = require('../../helpers/mockHub');
 
 describe('Boundary: P2P Layer', function () {
@@ -60,7 +60,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, 'not-json', null);
+            pm.handleInbound(mockWs, 'not-json', null);
             expect(emitted).to.be.false;
         });
 
@@ -69,7 +69,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, '{}', null);
+            pm.handleInbound(mockWs, '{}', null);
             expect(emitted).to.be.false;
         });
 
@@ -78,7 +78,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 'TEST', sender: 'ws://peer:10001', timestamp: Date.now()
             }), null);
             expect(emitted).to.be.false;
@@ -89,7 +89,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 'TEST', id: 'msg-1', timestamp: Date.now()
             }), null);
             expect(emitted).to.be.false;
@@ -100,7 +100,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 'TEST', id: 'msg-1', sender: 'ws://peer:10001',
                 timestamp: 'not-a-number'
             }), null);
@@ -112,7 +112,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 123, id: 'msg-1', sender: 'ws://peer:10001',
                 timestamp: Date.now()
             }), null);
@@ -131,7 +131,7 @@ describe('Boundary: P2P Layer', function () {
             pm.on('message', () => { emitted = true; });
 
             let mockWs = { _peerAddr: null, close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 'TEST', id: 'self-msg-1',
                 sender: 'ws://self:10001', // Same as validatorAddr
                 timestamp: Date.now(),
@@ -146,7 +146,7 @@ describe('Boundary: P2P Layer', function () {
 
         it('message from self on already-registered peer does not close', function () {
             let mockWs = { _peerAddr: 'ws://already-known:10001', close: sinon.stub() };
-            pm._handleInbound(mockWs, JSON.stringify({
+            pm.handleInbound(mockWs, JSON.stringify({
                 type: 'TEST', id: 'self-msg-2',
                 sender: 'ws://self:10001',
                 timestamp: Date.now(),
@@ -182,8 +182,8 @@ describe('Boundary: P2P Layer', function () {
                 data: {}
             });
 
-            pm._handleInbound(mockWs, envelope, 'ws://peer:10001');
-            pm._handleInbound(mockWs, envelope, 'ws://peer:10001');
+            pm.handleInbound(mockWs, envelope, 'ws://peer:10001');
+            pm.handleInbound(mockWs, envelope, 'ws://peer:10001');
 
             expect(emitCount).to.equal(1);
         });
@@ -211,7 +211,7 @@ describe('Boundary: P2P Layer', function () {
                 timestamp: Date.now(), data: {}
                 // No sig field
             };
-            expect(pm._verifySignature(envelope)).to.be.true;
+            expect(pm.verifySignature(envelope)).to.be.true;
         });
 
         it('unsigned message rejected when REQUIRE_SIGNATURES is true', function () {
@@ -220,7 +220,7 @@ describe('Boundary: P2P Layer', function () {
                 type: 'TEST', id: 'sig-2', sender: 'ws://peer:10001',
                 timestamp: Date.now(), data: {}
             };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
 
         it('unknown sender accepted when REQUIRE_SIGNATURES is false', function () {
@@ -229,7 +229,7 @@ describe('Boundary: P2P Layer', function () {
                 type: 'TEST', id: 'sig-3', sender: 'ws://unknown:10001',
                 timestamp: Date.now(), data: {}, sig: 'somesig'
             };
-            expect(pm._verifySignature(envelope)).to.be.true;
+            expect(pm.verifySignature(envelope)).to.be.true;
         });
 
         it('unknown sender rejected when REQUIRE_SIGNATURES is true', function () {
@@ -239,7 +239,7 @@ describe('Boundary: P2P Layer', function () {
                 type: 'TEST', id: 'sig-4', sender: 'ws://unknown:10001',
                 timestamp: Date.now(), data: {}, sig: 'somesig'
             };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
 
         it('no pubkey registry → accept (bootstrap mode)', function () {
@@ -248,7 +248,7 @@ describe('Boundary: P2P Layer', function () {
                 type: 'TEST', id: 'sig-5', sender: 'ws://peer:10001',
                 timestamp: Date.now(), data: {}, sig: 'anysig'
             };
-            expect(pm._verifySignature(envelope)).to.be.true;
+            expect(pm.verifySignature(envelope)).to.be.true;
         });
     });
 
@@ -259,7 +259,7 @@ describe('Boundary: P2P Layer', function () {
     describe('envelope building', function () {
 
         it('envelope has all required fields', function () {
-            let env = pm._buildEnvelope('TEST', { x: 1 });
+            let env = pm.buildEnvelope('TEST', { x: 1 });
             expect(env.type).to.equal('TEST');
             expect(env.id).to.be.a('string');
             expect(env.sender).to.equal('ws://self:10001');
@@ -268,7 +268,7 @@ describe('Boundary: P2P Layer', function () {
         });
 
         it('null data defaults to empty object', function () {
-            let env = pm._buildEnvelope('TEST', null);
+            let env = pm.buildEnvelope('TEST', null);
             expect(env.data).to.deep.equal({});
         });
 

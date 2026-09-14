@@ -19,7 +19,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { canonicalValidatorOrder } = require('../../src/validator_order.js');
+const { canonicalValidatorOrder } = require('../../src/rollcall/validator_order.js');
 
 const V = (pubkey, addr) => ({ pubkey: pubkey, addr: addr });
 

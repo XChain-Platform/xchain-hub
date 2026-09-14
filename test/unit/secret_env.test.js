@@ -5,7 +5,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = require('../../src/secret-env');
+const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = require('../../src/secret_env');
 
 describe('secret-env', function () {
 

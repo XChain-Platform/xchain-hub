@@ -22,7 +22,7 @@
 
 const { expect } = require('chai');
 const testDb     = require('../../helpers/testDb');
-const { buildOraclePricesSnapshotQuery } = require('../../../src/oraclePricesSnapshotQuery');
+const { buildOraclePricesSnapshotQuery } = require('../../../src/oracle/prices_snapshot_query');
 
 const NOW = 1800000000;
 

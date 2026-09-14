@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
   "mutate": [
-    "src/Consensus.js",
-    "src/OracleConsensus.js"
+    "src/consensus/pbft.js",
+    "src/oracle/consensus.js"
   ],
   "testRunner": "mocha",
   "mochaOptions": {

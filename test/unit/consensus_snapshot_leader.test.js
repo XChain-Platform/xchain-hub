@@ -26,7 +26,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/Consensus');
+const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_4, makeValidator, makeFederationSnapshot, fixturePubkeyForAddr } = require('../helpers/fixtures');
 
@@ -78,10 +78,10 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
         it('indexes sorted snapshot pubkeys by (seq + view) % N', function () {
             let members = memberSetOf(SNAPSHOT_SET);
-            expect(consensus._leaderAt(0, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey);
-            expect(consensus._leaderAt(1, 0, members).pubkey).to.equal(SNAPSHOT_SET[1].pubkey);
-            expect(consensus._leaderAt(0, 2, members).pubkey).to.equal(SNAPSHOT_SET[2].pubkey);
-            expect(consensus._leaderAt(4, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey); // wraps
+            expect(consensus.leaderAt(0, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey);
+            expect(consensus.leaderAt(1, 0, members).pubkey).to.equal(SNAPSHOT_SET[1].pubkey);
+            expect(consensus.leaderAt(0, 2, members).pubkey).to.equal(SNAPSHOT_SET[2].pubkey);
+            expect(consensus.leaderAt(4, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey); // wraps
         });
 
         it('is unaffected by live validatorSet drift when a snapshot exists', function () {
@@ -128,18 +128,18 @@ describe('Consensus: snapshot-pinned leader election', function () {
     describe('_isLeaderIdentity()', function () {
         it('matches on the verified pubkey when the addr binding differs', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://binding-b:10001', 'ab'.repeat(32))).to.be.true;
+            expect(consensus.isLeaderIdentity(leader, 'ws://binding-b:10001', 'ab'.repeat(32))).to.be.true;
         });
 
         it('matches on addr when the sender pubkey is unresolvable', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://binding-a:10001', null)).to.be.true;
+            expect(consensus.isLeaderIdentity(leader, 'ws://binding-a:10001', null)).to.be.true;
         });
 
         it('rejects a mismatch on both, and a null leader', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://other:10001', 'cd'.repeat(32))).to.be.false;
-            expect(consensus._isLeaderIdentity(null, 'ws://binding-a:10001', 'ab'.repeat(32))).to.be.false;
+            expect(consensus.isLeaderIdentity(leader, 'ws://other:10001', 'cd'.repeat(32))).to.be.false;
+            expect(consensus.isLeaderIdentity(null, 'ws://binding-a:10001', 'ab'.repeat(32))).to.be.false;
         });
     });
 
@@ -330,9 +330,9 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
         it('_initiateViewChange stashes the round population so the initiator keeps electing from it', function () {
             let members = memberSetOf(SNAPSHOT_SET);
-            consensus._initiateViewChange(SEQ, 2, false, [], members);
+            consensus.initiateViewChange(SEQ, 2, false, [], members);
             expect(consensus.viewChangeQuorums.get(SEQ).memberPubkeys).to.deep.equal(members);
-            expect(consensus._memberPubkeysForSeq(SEQ)).to.deep.equal(members);
+            expect(consensus.memberPubkeysForSeq(SEQ)).to.deep.equal(members);
         });
     });
 
@@ -374,7 +374,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
         // used exactly as before. Named here so the divergence window is a
         // recorded property rather than an omission.
         it('ACCEPTED RESIDUAL: with no round context it falls back to the live set', function () {
-            expect(consensus._memberPubkeysForSeq(SEQ)).to.equal(null);
+            expect(consensus.memberPubkeysForSeq(SEQ)).to.equal(null);
 
             consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the snapshot leader is NOT recognized here').to.equal(0);

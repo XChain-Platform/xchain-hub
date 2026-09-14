@@ -17,9 +17,9 @@
 // pollMs makes setInterval clamp to ~1ms and storm.
 
 const { expect } = require('chai');
-const { resolveCheckpointIntervalBlocks } = require('../../src/lib/checkpoint_cadence.js');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
-const StateAnchorPublisher  = require('../../src/StateAnchorPublisher.js');
+const { resolveCheckpointIntervalBlocks } = require('../../src/anchor/checkpoint_cadence.js');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
+const StateAnchorPublisher  = require('../../src/anchor/publisher.js');
 
 const KNOBS = ['CHECKPOINT_INTERVAL_BLOCKS', 'CHECKPOINT_POLL_MS',
                'CHECKPOINT_ROUND_TIMEOUT_MS', 'CHECKPOINT_CONFIRMATIONS'];

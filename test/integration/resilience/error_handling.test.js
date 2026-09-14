@@ -17,9 +17,9 @@ const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { waitUntil }  = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const Database       = require('../../../src/db');
-const Consensus      = require('../../../src/Consensus');
-const OracleConsensus = require('../../../src/OracleConsensus');
-const OracleRound    = require('../../../src/OracleRound');
+const Consensus      = require('../../../src/consensus/pbft');
+const OracleConsensus = require('../../../src/oracle/consensus');
+const OracleRound    = require('../../../src/oracle/round');
 const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
 // PBFT leader for the first proposal is set[(1 + view) % N], not index 0.

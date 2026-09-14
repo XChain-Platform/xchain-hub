@@ -20,7 +20,7 @@
 
 const assert = require('assert');
 
-const RollcallRound = require('../../src/RollcallRound.js');
+const RollcallRound = require('../../src/rollcall/round.js');
 const rca           = require('../../src/rollcall_activation.js');
 const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
 
@@ -147,14 +147,14 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
         const doc  = fs.readFileSync(path.join(__dirname, '..', '..', 'CONFIGURATION.md'), 'utf8');
         // Read the names out of the engine rather than restating them, so a rename
         // cannot pass by renaming the assertion with it.
-        const src  = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'RollcallRound.js'), 'utf8');
+        const src  = fs.readFileSync(path.join(__dirname, '../../src/rollcall/round.js'), 'utf8');
         const used = new Set();
         // Two read forms: the literal process.env.NAME, and the three publish
-        // tunables, which go through _resolveTunable('NAME', ...) and are therefore
+        // tunables, which go through resolveTunable('NAME', ...) and are therefore
         // invisible to a literal scan. Missing the second form is exactly how an
         // undocumented knob would ship.
         for (const re of [/process\.env\.(ROLLCALL_[A-Z_0-9]+)/g,
-                          /_resolveTunable\(\s*'(ROLLCALL_[A-Z_0-9]+)'/g]) {
+                          /resolveTunable\(\s*'(ROLLCALL_[A-Z_0-9]+)'/g]) {
             let m;
             while ((m = re.exec(src)) !== null) used.add(m[1]);
         }
@@ -164,7 +164,7 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
             assert.ok(used.has(knob), 'env-name extraction missed ' + knob);
         const missing = [...used].filter(name => !doc.includes(name)).sort();
         assert.deepStrictEqual(missing, [],
-            'ROLLCALL_ env vars read in src/RollcallRound.js but undocumented in CONFIGURATION.md: ' +
+            'ROLLCALL_ env vars read in src/rollcall/round.js but undocumented in CONFIGURATION.md: ' +
             missing.join(', '));
     });
 });
@@ -186,8 +186,8 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         eng.pollMs = 30000;
         eng.peerManager = null;
         eng._started = false;
-        eng._loadSignLog = () => { eng._started = true; };
-        eng._loadSpendLog = () => { eng._started = true; };
+        eng.loadSignLog = () => { eng._started = true; };
+        eng.loadSpendLog = () => { eng._started = true; };
         eng.spendGuard = { persistTo: () => { eng._started = true; } };
         eng._tick = async () => { eng._started = true; };
         // start() logs a summary line that reads both of these on the armed path.

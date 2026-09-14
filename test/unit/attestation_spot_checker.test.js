@@ -13,7 +13,7 @@
 const sinon                  = require('sinon');
 const { expect }             = require('chai');
 const EventEmitter           = require('events');
-const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 const { DB_METHODS }         = require('../helpers/mockHub.js');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -73,8 +73,8 @@ describe('AttestationSpotChecker', function () {
         it('initialises with empty queue and failures maps', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc._queueSize()).to.equal(0);
-            expect(sc._failuresFor('any')).to.deep.equal([]);
+            expect(sc.queueSize()).to.equal(0);
+            expect(sc.failuresFor('any')).to.deep.equal([]);
         });
 
         it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
@@ -118,14 +118,14 @@ describe('AttestationSpotChecker', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
             sc.register('', 'http_get', 'pattern');
-            expect(sc._queueSize()).to.equal(0);
+            expect(sc.queueSize()).to.equal(0);
         });
 
         it('ignores registration with no providerId', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
             sc.register('rid1', '', 'pattern');
-            expect(sc._queueSize()).to.equal(0);
+            expect(sc.queueSize()).to.equal(0);
         });
 
         it('drops the oldest entry when MAX_QUEUE_SIZE (1024) is exceeded', function () {
@@ -135,12 +135,12 @@ describe('AttestationSpotChecker', function () {
             for (let i = 0; i < 1024; i++) {
                 sc.register('rid' + i, 'http_get', 'p');
             }
-            expect(sc._queueSize()).to.equal(1024);
+            expect(sc.queueSize()).to.equal(1024);
             // rid0 is the first/oldest entry
             expect(sc.isSpotCheck('rid0')).to.be.true;
             // Adding one more evicts rid0
             sc.register('rid_new', 'http_get', 'p');
-            expect(sc._queueSize()).to.equal(1024);
+            expect(sc.queueSize()).to.equal(1024);
             expect(sc.isSpotCheck('rid0')).to.be.false;
             expect(sc.isSpotCheck('rid_new')).to.be.true;
         });
@@ -171,7 +171,7 @@ describe('AttestationSpotChecker', function () {
             sc.register('rid1', 'http_get', 'p');
             await sc.stop();
             expect(hub.attestationConsensus.listenerCount('request:finalized')).to.equal(0);
-            expect(sc._queueSize()).to.equal(0);
+            expect(sc.queueSize()).to.equal(0);
         });
 
         it('is safe to call stop() without start()', async function () {
@@ -190,7 +190,7 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
             // rid001 is NOT registered as a spot-check
             await sc.onRequestFinalized(makeFinalizedEvent());
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
         });
 
         it('does nothing when event has no requestId', async function () {
@@ -215,7 +215,7 @@ describe('AttestationSpotChecker', function () {
             // event has http_get
             await sc.onRequestFinalized(makeFinalizedEvent({ providerId: 'http_get' }));
             // No failures recorded (provider mismatch → inconclusive)
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
         });
 
         it('logs and returns when provider module has no agree()', async function () {
@@ -224,7 +224,7 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, reg);
             sc.register('rid001', 'http_get', 'expected');
             await sc.onRequestFinalized(makeFinalizedEvent());
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
         });
 
         it('logs and returns when provider registry returns null module', async function () {
@@ -233,7 +233,7 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, reg);
             sc.register('rid001', 'http_get', 'expected');
             await sc.onRequestFinalized(makeFinalizedEvent());
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
         });
 
         it('returns without recording failures when agree() returns truthy (pass)', async function () {
@@ -241,8 +241,8 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
             sc.register('rid001', 'http_get', 'expected');
             await sc.onRequestFinalized(makeFinalizedEvent());
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
-            expect(sc._failuresFor('pubkey2')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey2')).to.have.length(0);
         });
 
         it('records failures against all signers when agree() returns falsy (fail)', async function () {
@@ -250,8 +250,8 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
             sc.register('rid001', 'http_get', 'expected');
             await sc.onRequestFinalized(makeFinalizedEvent());
-            expect(sc._failuresFor('pubkey1')).to.have.length(1);
-            expect(sc._failuresFor('pubkey2')).to.have.length(1);
+            expect(sc.failuresFor('pubkey1')).to.have.length(1);
+            expect(sc.failuresFor('pubkey2')).to.have.length(1);
         });
 
         it('handles agree() throwing without propagating the error', async function () {
@@ -260,7 +260,7 @@ describe('AttestationSpotChecker', function () {
             let sc  = new AttestationSpotChecker(hub, reg);
             sc.register('rid001', 'http_get', 'expected');
             await sc.onRequestFinalized(makeFinalizedEvent()); // must not throw
-            expect(sc._failuresFor('pubkey1')).to.have.length(0);
+            expect(sc.failuresFor('pubkey1')).to.have.length(0);
         });
 
         it('handles string responseBody (wraps to Buffer)', async function () {
@@ -276,7 +276,7 @@ describe('AttestationSpotChecker', function () {
         it('calls slashDetector when failure count reaches threshold', async function () {
             let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '3' } });
             let slashStub = sinon.stub().resolves();
-            hub.slashDetector = { _recordSlashProposal: slashStub };
+            hub.slashDetector = { recordSlashProposal: slashStub };
             let sc = new AttestationSpotChecker(hub, makeProviderRegistry(false));
 
             // Fire 3 failures for pubkey1
@@ -296,7 +296,7 @@ describe('AttestationSpotChecker', function () {
         it('does NOT call slashDetector when failures are below threshold', async function () {
             let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '5' } });
             let slashStub = sinon.stub().resolves();
-            hub.slashDetector = { _recordSlashProposal: slashStub };
+            hub.slashDetector = { recordSlashProposal: slashStub };
             let sc = new AttestationSpotChecker(hub, makeProviderRegistry(false));
 
             for (let i = 1; i <= 2; i++) {
@@ -328,7 +328,7 @@ describe('AttestationSpotChecker', function () {
             await sc.onRequestFinalized(makeFinalizedEvent({ requestId: 'rid2', signatures: [{ pubkey: 'pk' }] }));
 
             // Only 1 failure in the window now (rid2)
-            let failures = sc._failuresFor('pk');
+            let failures = sc.failuresFor('pk');
             expect(failures).to.have.length(1);
         });
 
@@ -343,7 +343,7 @@ describe('AttestationSpotChecker', function () {
                 await sc.onRequestFinalized(makeFinalizedEvent({ requestId: rid, signatures: [{ pubkey: 'pka' }] }));
             }
 
-            expect(sc._failuresFor('pka').length).to.be.at.most(64);
+            expect(sc.failuresFor('pka').length).to.be.at.most(64);
         });
     });
 
@@ -353,16 +353,16 @@ describe('AttestationSpotChecker', function () {
         it('ignores calls with empty pubkey', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            sc._recordFailure('', 'rid1');
-            sc._recordFailure(null, 'rid2');
-            expect(sc._failuresFor('')).to.have.length(0);
+            sc.recordFailure('', 'rid1');
+            sc.recordFailure(null, 'rid2');
+            expect(sc.failuresFor('')).to.have.length(0);
         });
 
         it('normalises pubkey to lowercase', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            sc._recordFailure('PUBKEY123', 'rid1');
-            expect(sc._failuresFor('pubkey123')).to.have.length(1);
+            sc.recordFailure('PUBKEY123', 'rid1');
+            expect(sc.failuresFor('pubkey123')).to.have.length(1);
         });
     });
 
@@ -379,7 +379,7 @@ describe('AttestationSpotChecker', function () {
             // Allow async processing to settle
             await new Promise(r => setImmediate(r));
             // Failures recorded for both signers
-            expect(sc._failuresFor('pubkey1')).to.have.length(1);
+            expect(sc.failuresFor('pubkey1')).to.have.length(1);
         });
     });
 });
@@ -388,7 +388,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
 
     const sinon = require('sinon');
     const { expect } = require('chai');
-    const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+    const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 
     afterEach(function () { sinon.restore(); });
 
@@ -410,7 +410,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
             status:       'provider_error',
             signatures:   [{ pubkey: 'aa'.repeat(32), sig: '00'.repeat(64) }]
         });
-        expect(checker._failuresFor('aa'.repeat(32))).to.have.length(0);
+        expect(checker.failuresFor('aa'.repeat(32))).to.have.length(0);
         // Entry stays queued: the request is still pending on-chain and a
         // later ok round must still be judged.
         expect(checker.isSpotCheck(rid)).to.equal(true);
@@ -431,7 +431,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
             signatures:   [{ pubkey: 'bb'.repeat(32), sig: '00'.repeat(64) }]
         });
         // agree() stub returns null → judged non-equivalent → failure recorded.
-        expect(checker._failuresFor('bb'.repeat(32))).to.have.length(1);
+        expect(checker.failuresFor('bb'.repeat(32))).to.have.length(1);
         expect(checker.isSpotCheck(rid)).to.equal(false);
     });
 
@@ -463,7 +463,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
             status:       'ok',
             signatures:   [{ pubkey: 'cc'.repeat(32), sig: '00'.repeat(64) }]
         });
-        expect(checker._failuresFor('cc'.repeat(32))).to.have.length(0);
+        expect(checker.failuresFor('cc'.repeat(32))).to.have.length(0);
     });
 });
 
@@ -589,13 +589,13 @@ describe('AttestationSpotChecker: reorg-safe stats', function () {
         await sc.onRequestFinalized(okEvent('low',  100, ['dd'.repeat(32)]));
         await sc.onRequestFinalized(okEvent('high', 200, ['dd'.repeat(32)]));
         expect(db.rows).to.have.length(2);
-        expect(sc._failuresFor('dd'.repeat(32))).to.have.length(2);
+        expect(sc.failuresFor('dd'.repeat(32))).to.have.length(2);
 
         const removed = await sc.rollback(150);
         expect(removed).to.equal(1);                 // only the block-200 row
         expect(db.rows).to.have.length(1);
         expect(db.rows[0].block_index).to.equal(100);
-        expect(sc._failuresFor('dd'.repeat(32))).to.have.length(0);  // window cleared
+        expect(sc.failuresFor('dd'.repeat(32))).to.have.length(0);  // window cleared
     });
 
     it('persist is a no-op (no throw) when the hub has no DB', async function () {
@@ -609,11 +609,11 @@ describe('AttestationSpotChecker: reorg-safe stats', function () {
     it('rollback is a safe no-op (returns 0) with no DB but still clears the window', async function () {
         const hub = makeHub();
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
-        sc._recordFailure('ff'.repeat(32), 'x');
-        expect(sc._failuresFor('ff'.repeat(32))).to.have.length(1);
+        sc.recordFailure('ff'.repeat(32), 'x');
+        expect(sc.failuresFor('ff'.repeat(32))).to.have.length(1);
         const removed = await sc.rollback(10);
         expect(removed).to.equal(0);
-        expect(sc._failuresFor('ff'.repeat(32))).to.have.length(0);
+        expect(sc.failuresFor('ff'.repeat(32))).to.have.length(0);
     });
 
     it('start() wires reorg:confirmed to rollback and stop() unwires it', async function () {
@@ -739,21 +739,21 @@ describe('AttestationSpotChecker: injection scheduler', function () {
 
     it('_isTruthy accepts common truthy spellings only', function () {
         const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
-        ['1', 'true', 'TRUE', 'yes', 'on', true].forEach(v => expect(sc._isTruthy(v)).to.be.true);
-        ['0', 'false', '', 'off', undefined, null].forEach(v => expect(sc._isTruthy(v)).to.be.false);
+        ['1', 'true', 'TRUE', 'yes', 'on', true].forEach(v => expect(sc.isTruthy(v)).to.be.true);
+        ['0', 'false', '', 'off', undefined, null].forEach(v => expect(sc.isTruthy(v)).to.be.false);
     });
 
     it('parses a corpus from a JSON string and from an array, dropping malformed entries', function () {
         const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
-        const parsed = sc._parseCorpus(JSON.stringify([
+        const parsed = sc.parseCorpus(JSON.stringify([
             { provider_id: 'http_get', prompt: 'p', expected: 'x' },  // snake_case aliases
             { prompt: 'no provider' },                                // dropped
             { providerId: 'llm' },                                    // dropped (no prompt)
             'garbage'                                                 // dropped
         ]));
         expect(parsed).to.deep.equal([{ providerId: 'http_get', prompt: 'p', expectedPattern: 'x' }]);
-        expect(sc._parseCorpus('not json')).to.deep.equal([]);
-        expect(sc._parseCorpus(null)).to.deep.equal([]);
+        expect(sc.parseCorpus('not json')).to.deep.equal([]);
+        expect(sc.parseCorpus(null)).to.deep.equal([]);
     });
 
     it('scheduler stays idle when SPOT_CHECK_ENABLED is unset', async function () {
@@ -800,7 +800,7 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
             SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-        const n = await sc._schedulerTick();
+        const n = await sc.schedulerTick();
         expect(n).to.equal(2);
         expect(injector.callCount).to.equal(2);
         expect(sc.isSpotCheck('SYNTH1')).to.be.true;
@@ -815,9 +815,9 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
             SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });  // maxPerTick default 1
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-        await sc._schedulerTick();
-        await sc._schedulerTick();
-        await sc._schedulerTick();
+        await sc.schedulerTick();
+        await sc.schedulerTick();
+        await sc.schedulerTick();
         expect(injector.getCall(0).args[0].prompt).to.equal('q1');
         expect(injector.getCall(1).args[0].prompt).to.equal('q2');
         expect(injector.getCall(2).args[0].prompt).to.equal('q1');  // wrapped
@@ -830,7 +830,7 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
             SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-        const n = await sc._schedulerTick();     // must not throw
+        const n = await sc.schedulerTick();     // must not throw
         expect(n).to.equal(1);
         expect(sc.isSpotCheck('OK2')).to.be.true;
     });
@@ -840,9 +840,9 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
             SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-        const n = await sc._schedulerTick();
+        const n = await sc.schedulerTick();
         expect(n).to.equal(0);
-        expect(sc._queueSize()).to.equal(0);
+        expect(sc.queueSize()).to.equal(0);
     });
 
     it('skips the tick under queue backpressure (near capacity)', async function () {
@@ -851,7 +851,7 @@ describe('AttestationSpotChecker: injection scheduler', function () {
             SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
         const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
         for (let i = 0; i < 1000; i++) sc.register('q' + i, 'http_get', 'e');  // >= 90% of 1024
-        const n = await sc._schedulerTick();
+        const n = await sc.schedulerTick();
         expect(n).to.equal(0);
         expect(injector.called).to.be.false;
     });
@@ -888,9 +888,9 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('provider_paused', 1, false));
         sc.register('rp1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rp1', 700, ['aa'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
         expect(db.rows).to.have.length(0);                       // neutral while held
-        expect(sc._failuresFor('aa'.repeat(32))).to.have.length(0);
+        expect(sc.failuresFor('aa'.repeat(32))).to.have.length(0);
     });
 
     // A spent per-window spend budget heals when the window rolls, so it is held for
@@ -901,9 +901,9 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('budget_exhausted', 1, false));
         sc.register('rb1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rb1', 700, ['aa'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
         expect(db.rows).to.have.length(0);
-        expect(sc._failuresFor('aa'.repeat(32))).to.have.length(0);
+        expect(sc.failuresFor('aa'.repeat(32))).to.have.length(0);
     });
 
     it('scores the held spot-check once the provider resumes (the coverage that used to be lost)', async function () {
@@ -912,13 +912,13 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('provider_paused', 1, false));
         sc.register('rp2', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rp2', 701, ['bb'.repeat(32)]));
-        const scored = await sc._sweepReJudge();                 // provider is back
+        const scored = await sc.sweepReJudge();                 // provider is back
         expect(scored).to.equal(1);
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        expect(sc.pendingReJudgeSize()).to.equal(0);
         expect(db.rows).to.have.length(1);
         expect(db.rows[0].passed).to.equal(0);                   // judged wrong
         expect(db.rows[0].block_index).to.equal(701);            // the ORIGINAL request's block
-        expect(sc._failuresFor('bb'.repeat(32))).to.have.length(1);
+        expect(sc.failuresFor('bb'.repeat(32))).to.have.length(1);
     });
 
     it('holds a spot-check whose judge call threw, and scores a pass on the retry', async function () {
@@ -932,11 +932,11 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc = new AttestationSpotChecker(hub, registry);
         sc.register('rt1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rt1', 702, ['cc'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
-        await sc._sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        await sc.sweepReJudge();
         expect(db.rows).to.have.length(1);
         expect(db.rows[0].passed).to.equal(1);
-        expect(sc._failuresFor('cc'.repeat(32))).to.have.length(0);
+        expect(sc.failuresFor('cc'.repeat(32))).to.have.length(0);
     });
 
     it('does NOT hold a neutral verdict: a reason about the round itself can never change', async function () {
@@ -945,9 +945,9 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('meta_unrecognized', 1, false));
         sc.register('rn1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rn1', 703, ['dd'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        expect(sc.pendingReJudgeSize()).to.equal(0);
         expect(db.rows).to.have.length(0);
-        expect(sc._failuresFor('dd'.repeat(32))).to.have.length(0);
+        expect(sc.failuresFor('dd'.repeat(32))).to.have.length(0);
     });
 
     it('stops holding a record whose reason turns neutral on a later attempt', async function () {
@@ -961,9 +961,9 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc = new AttestationSpotChecker(hub, registry);
         sc.register('rn2', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rn2', 704, ['ee'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
-        await sc._sweepReJudge();
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        await sc.sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(0);
     });
 
     it('gives up after the attempt cap rather than holding a response body forever', async function () {
@@ -971,8 +971,8 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('provider_paused', Infinity, false));
         sc.register('rc1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rc1', 705, ['ff'.repeat(32)]));
-        for (let i = 0; i < 6; i++) await sc._sweepReJudge();
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        for (let i = 0; i < 6; i++) await sc.sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(0);
     });
 
     it('ages a held record out even when the sweep never reaches the attempt cap', async function () {
@@ -980,12 +980,12 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('provider_paused', Infinity, false));
         sc.register('ra1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('ra1', 706, ['ab'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
         // Age the held record past SPOT_CHECK_REJUDGE_MAX_AGE_MS directly rather than
         // sleeping through it: the sweep compares firstSeen, so this is the same fact.
         for (let rec of sc._pendingReJudge.values()) rec.firstSeen -= 50;
-        await sc._sweepReJudge();
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        await sc.sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(0);
     });
 
     it('a reorg purges held records above the reorg height so the sweep cannot score an orphaned round', async function () {
@@ -996,10 +996,10 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         sc.register('rr2', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rr1', 100, ['ac'.repeat(32)]));   // below the reorg
         await sc.onRequestFinalized(okEvent('rr2', 900, ['ad'.repeat(32)]));   // orphaned
-        expect(sc._pendingReJudgeSize()).to.equal(2);
+        expect(sc.pendingReJudgeSize()).to.equal(2);
         await sc.rollback(500);
-        expect(sc._pendingReJudgeSize()).to.equal(1);
-        await sc._sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        await sc.sweepReJudge();
         expect(db.rows.map(r => r.block_index)).to.deep.equal([100]);
     });
 
@@ -1010,7 +1010,7 @@ describe('AttestationSpotChecker: re-judge queue', function () {
             sc.register('rb' + i, 'http_get', 'expected');
             await sc.onRequestFinalized(okEvent('rb' + i, 800 + i, ['ae'.repeat(32)]));
         }
-        expect(sc._pendingReJudgeSize()).to.equal(256);
+        expect(sc.pendingReJudgeSize()).to.equal(256);
     });
 
     it('stop() releases the sweep timer and the held bodies', async function () {
@@ -1020,9 +1020,9 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         expect(sc._sweeper).to.not.equal(null);
         sc.register('rs1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rs1', 900, ['af'.repeat(32)]));
-        expect(sc._pendingReJudgeSize()).to.equal(1);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
         await sc.stop();
         expect(sc._sweeper).to.equal(null);
-        expect(sc._pendingReJudgeSize()).to.equal(0);
+        expect(sc.pendingReJudgeSize()).to.equal(0);
     });
 });

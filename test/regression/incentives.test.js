@@ -12,8 +12,8 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const RewardTracker  = require('../../src/RewardTracker');
-const SlashDetector  = require('../../src/SlashDetector');
+const RewardTracker  = require('../../src/anchor/reward_tracker');
+const SlashDetector  = require('../../src/validators/slash_detector');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
@@ -201,7 +201,7 @@ describe('Regression: Incentives & Slashing', function () {
                     { round: 2, timestamp: Date.now() - 500 }
                 ]);
 
-                sd._trackDeviation(VALIDATORS_3[0].pubkey, 3);
+                sd.trackDeviation(VALIDATORS_3[0].pubkey, 3);
 
                 expect(hub.db.doQuery.called).to.be.true;
                 let args = hub.db.doQuery.getCall(0).args;
@@ -213,7 +213,7 @@ describe('Regression: Incentives & Slashing', function () {
                     { round: 1, timestamp: Date.now() - 1000 }
                 ]);
 
-                sd._trackDeviation(VALIDATORS_3[0].pubkey, 2);
+                sd.trackDeviation(VALIDATORS_3[0].pubkey, 2);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
@@ -224,7 +224,7 @@ describe('Regression: Incentives & Slashing', function () {
                     { round: 2, timestamp: over24h }
                 ]);
 
-                sd._trackDeviation(VALIDATORS_3[0].pubkey, 3);
+                sd.trackDeviation(VALIDATORS_3[0].pubkey, 3);
                 expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1);
                 expect(hub.db.doQuery.called).to.be.false;
             });

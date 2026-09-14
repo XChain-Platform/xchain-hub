@@ -16,13 +16,13 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 
 describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', function () {
     let hub, oc, oracleRound;
     const ROUND = 5;
-    // Mirrors FINALIZE_RETRY_MAX_MS in src/OracleConsensus.js (module-private).
+    // Mirrors FINALIZE_RETRY_MAX_MS in src/oracle/consensus.js (module-private).
     const FINALIZE_RETRY_MAX_MS = 30000;
 
     function makePending() {
@@ -57,7 +57,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         let events = [];
         oc.on('round:finalized', e => events.push(e));
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(store.calledOnce).to.be.true;
         expect(oc.pendingRounds.has(ROUND)).to.be.false;   // state cleared only after success
@@ -74,7 +74,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         let events = [];
         oc.on('round:finalized', e => events.push(e));
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(store.callCount).to.be.greaterThan(1);      // retried, not one-and-done
         expect(oc.pendingRounds.has(ROUND)).to.be.true;    // NOT dropped
@@ -91,7 +91,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         oc.on('round:finalized', e => events.push(e));
 
         // First finalize cycle fails on every retry: round retained, finalized reset.
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
         expect(oc.pendingRounds.get(ROUND).finalized).to.be.false;
         expect(events).to.have.length(0);
@@ -100,7 +100,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         // finalized=true and re-drives the store. Emulate that re-entry directly.
         store.resolves();
         oc.pendingRounds.get(ROUND).finalized = true;
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(oc.pendingRounds.has(ROUND)).to.be.false;   // now cleared
         expect(oc.finalized.has(ROUND)).to.be.true;        // now durably finalized
@@ -121,7 +121,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         oc.on('round:finalized', e => events.push(e));
 
         // Drive the 3 bounded attempts (500ms + 1000ms of linear backoff between them).
-        let cycle = oc._finalizeCommittedRound(ROUND);
+        let cycle = oc.finalizeCommittedRound(ROUND);
         await clock.tickAsync(2000);
         await cycle;
 
@@ -153,7 +153,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         let events = [];
         oc.on('round:finalized', e => events.push(e));
 
-        let cycle = oc._finalizeCommittedRound(ROUND);
+        let cycle = oc.finalizeCommittedRound(ROUND);
         await clock.tickAsync(2000);
         await cycle;
 
@@ -172,7 +172,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         sinon.stub(oc, '_storeSnapshot').rejects(new Error('db down'));
         oc.pendingRounds.set(ROUND, makePending());
 
-        let cycle = oc._finalizeCommittedRound(ROUND);
+        let cycle = oc.finalizeCommittedRound(ROUND);
         await clock.tickAsync(2000);
         await cycle;
 
@@ -196,7 +196,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         let events = [];
         oc.on('round:finalized', e => events.push(e));
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(store.callCount).to.equal(2);
         expect(oc.pendingRounds.has(ROUND)).to.be.false;

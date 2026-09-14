@@ -34,9 +34,9 @@ function loadModule() {
         closeSync:     sinon.stub(),
         readFileSync:  sinon.stub().returns('')
     };
-    OraclePublisher = proxyquire('../../src/OraclePublisher', {
+    OraclePublisher = proxyquire('../../src/oracle/publisher', {
         fs: fsMock,
-        './EncoderClient': function () { return null; }
+        '../peers/encoder_client': function () { return null; }
     });
 }
 
@@ -106,7 +106,7 @@ describe('OraclePublisher last-published hydrate', function () {
 
         expect(pub.lastPublishedRound, 'a new process starts with empty markers').to.equal(null);
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         expect(pub.lastPublishedRound).to.equal(1207);
         expect(pub.lastPublishedTxid).to.equal('tx-1207');
@@ -118,7 +118,7 @@ describe('OraclePublisher last-published hydrate', function () {
         let db  = makeDb([sent(880), sent(913)]);
         let pub = new OraclePublisher(makeHub({ db: db }));
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         let s = pub.getStats();
         expect(s.lastPublishedRound, 'the rail gates on this field').to.equal(913);
@@ -130,7 +130,7 @@ describe('OraclePublisher last-published hydrate', function () {
         let db  = makeDb([]);
         let pub = new OraclePublisher(makeHub({ db: db }));
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         expect(pub.lastPublishedRound).to.equal(null);
         expect(pub.lastPublishedTxid).to.equal(null);
@@ -145,7 +145,7 @@ describe('OraclePublisher last-published hydrate', function () {
         let db  = makeDb([sent(500), intentOnly(501)]);
         let pub = new OraclePublisher(makeHub({ db: db }));
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         expect(pub.lastPublishedRound).to.equal(500);
         expect(pub._quarantinedRounds.has(501)).to.be.true;
@@ -157,12 +157,12 @@ describe('OraclePublisher last-published hydrate', function () {
         let db  = makeDb([sent(700)]);
         let pub = new OraclePublisher(makeHub({ db: db }));
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
         expect(pub.lastPublishedRound).to.equal(700);
 
         pub.lastPublishedRound = 900;
         pub.lastPublishedTxid  = 'tx-900';
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         expect(pub.lastPublishedRound).to.equal(900);
         expect(pub.lastPublishedTxid).to.equal('tx-900');
@@ -171,7 +171,7 @@ describe('OraclePublisher last-published hydrate', function () {
     it('is inert when no hub DB is wired', async function () {
         let pub = new OraclePublisher(makeHub());
 
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
 
         expect(pub.lastPublishedRound).to.equal(null);
         expect(pub.getStats().everPublished).to.equal(false);

@@ -38,7 +38,7 @@ const CLI_PACKAGE = '@anthropic-ai/claude-code';
 // The name claude-spawn.js falls back to when CLAUDE_BIN is unset. Read from the
 // module rather than restated, so a rename there fails this guard instead of
 // leaving it asserting a string the code no longer uses.
-const { CLAUDE_BIN } = require('../../src/lib/claude-spawn.js');
+const { CLAUDE_BIN } = require('../../src/lib/claude_spawn.js');
 
 describe('Dockerfile: the llm provider CLI is in the image', () => {
     let dockerfile;

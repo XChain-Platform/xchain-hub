@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect }       = require('chai');
-const PriceFetcher     = require('../../../src/PriceFetcher');
+const PriceFetcher     = require('../../../src/oracle/price_fetcher');
 const mockApi          = require('../../helpers/mockExternalApi');
 
 describe('Integration: Price Fetching (SC-1.x)', function () {

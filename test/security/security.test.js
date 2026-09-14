@@ -34,7 +34,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Signature enforcement', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('REQUIRE_SIGNATURES defaults to true when not specified', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
@@ -50,13 +50,13 @@ describe('Security Hardening', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true }, null);
             pm.validatorPubkeys = new Map();
             let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
 
         it('accepts unsigned messages when requireSigs is false', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);
             let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
-            expect(pm._verifySignature(envelope)).to.be.true;
+            expect(pm.verifySignature(envelope)).to.be.true;
         });
 
         it('rejects a signed message when validatorPubkeys is null (fail closed, not bootstrap-accept)', function () {
@@ -67,7 +67,7 @@ describe('Security Hardening', function () {
             pm.validatorPubkeys = null;
             let envelope = { type: 'PBFT_PRE_PREPARE', id: 'x1', sender: 'ws://attacker:9',
                              timestamp: Date.now(), sig: 'deadbeef', data: {} };
-            expect(pm._verifySignature(envelope)).to.be.false;
+            expect(pm.verifySignature(envelope)).to.be.false;
         });
     });
 
@@ -82,8 +82,8 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Sender<->key binding', function () {
-        const PeerManager       = require('../../src/PeerManager');
-        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+        const PeerManager       = require('../../src/peers/manager');
+        const ValidatorIdentity = require('../../src/validators/identity');
 
         const A = ValidatorIdentity.generate();
         const B = ValidatorIdentity.generate();
@@ -106,7 +106,7 @@ describe('Security Hardening', function () {
         }
 
         it('accepts a message whose sender matches the signing key', function () {
-            expect(makePm()._verifySignature(signedAs(addrA))).to.be.true;
+            expect(makePm().verifySignature(signedAs(addrA))).to.be.true;
         });
 
         it('rejects a message that names another validator addr but is signed by a different key', function () {
@@ -114,14 +114,14 @@ describe('Security Hardening', function () {
             // to be B. Membership passes and the signature is genuine, but the
             // sender it claims (B) is registered to a DIFFERENT key, so it must be
             // dropped. This is the quorum-forgery / median-poisoning primitive.
-            expect(makePm()._verifySignature(signedAs(addrB))).to.be.false;
+            expect(makePm().verifySignature(signedAs(addrB))).to.be.false;
         });
 
         it('rejects the forgery even when the effective signer set alone would admit the key', function () {
             let pm = makePm();
             // Registry still binds addrB -> B's key; effective set admits A's key.
             // The binding (registry) must win over bare membership.
-            expect(pm._verifySignature(signedAs(addrB))).to.be.false;
+            expect(pm.verifySignature(signedAs(addrB))).to.be.false;
         });
     });
 
@@ -131,7 +131,7 @@ describe('Security Hardening', function () {
 
     describe('XChainHub: Fail-closed validator registry', function () {
         const XChainHub   = require('../../src/XChainHub');
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('startP2P throws and never opens the P2P listener when the registry load fails', async function () {
             // Regression: a DB failure in _loadValidatorPubkeys previously left
@@ -157,15 +157,15 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Dedup cache bounds', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('evicts oldest entry when dedup cache reaches max', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_DEDUP_CACHE_MAX: '5' }, null);
             for (let i = 0; i < 5; i++) {
-                pm._addToDedup('id-' + i);
+                pm.addToDedup('id-' + i);
             }
             expect(pm.seenIds.size).to.equal(5);
-            pm._addToDedup('id-5');
+            pm.addToDedup('id-5');
             expect(pm.seenIds.size).to.equal(5);
             expect(pm.seenIds.has('id-0')).to.be.false;
             expect(pm.seenIds.has('id-5')).to.be.true;
@@ -177,7 +177,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Peer address validation', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('rejects peer addresses without port', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
@@ -207,7 +207,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Per-peer rate limiting', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('allows messages within rate limit', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_MSG_RATE_LIMIT: '10' }, null);
@@ -239,13 +239,13 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Invalid JSON logging', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('logs warning for invalid JSON instead of silent discard', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);
             let warnStub = sinon.stub(console, 'warn');
             let mockWs = { _peerAddr: null };
-            pm._handleInbound(mockWs, 'not-json{{{', null);
+            pm.handleInbound(mockWs, 'not-json{{{', null);
             expect(warnStub.calledWith(sinon.match('P2P: Invalid JSON'))).to.be.true;
         });
     });
@@ -255,7 +255,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus: Sequence monotonicity', function () {
-        const Consensus = require('../../src/Consensus');
+        const Consensus = require('../../src/consensus/pbft');
 
         let hub, pm, consensus;
 
@@ -320,7 +320,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus: Minimum quorum warning', function () {
-        const Consensus = require('../../src/Consensus');
+        const Consensus = require('../../src/consensus/pbft');
 
         it('refuses to propose (fail closed) when minValidators > 1 and no deterministic snapshot', async function () {
             // Hardened behavior (federation-split guard): a multi-hub federation with no
@@ -360,7 +360,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleConsensus: Minimum submissions', function () {
-        const OracleConsensus = require('../../src/OracleConsensus');
+        const OracleConsensus = require('../../src/oracle/consensus');
 
         let hub, pm, oracleRound, oc;
 
@@ -411,7 +411,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleConsensus: Price sanity bounds', function () {
-        const OracleConsensus = require('../../src/OracleConsensus');
+        const OracleConsensus = require('../../src/oracle/consensus');
 
         let oc;
 
@@ -453,7 +453,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('OracleRound: Submission validation', function () {
-        const OracleRound = require('../../src/OracleRound');
+        const OracleRound = require('../../src/oracle/round');
 
         let hub, oracleRound;
 
@@ -532,7 +532,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('CrossChainEngine: Chain validation', function () {
-        const CrossChainEngine = require('../../src/CrossChainEngine');
+        const CrossChainEngine = require('../../src/cross_chain/engine');
 
         let hub, pm, engine;
 
@@ -624,9 +624,9 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Consensus engines: sender-membership guard', function () {
-        const Consensus       = require('../../src/Consensus');
-        const OracleConsensus = require('../../src/OracleConsensus');
-        const CrossChainEngine = require('../../src/CrossChainEngine');
+        const Consensus       = require('../../src/consensus/pbft');
+        const OracleConsensus = require('../../src/oracle/consensus');
+        const CrossChainEngine = require('../../src/cross_chain/engine');
 
         // Populate the peer registry so the guard is active, then inject a
         // PREPARE from a sender that is NOT a registered validator and assert the
@@ -703,7 +703,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('ReorgHandler: Parameter validation', function () {
-        const ReorgHandler = require('../../src/ReorgHandler');
+        const ReorgHandler = require('../../src/anchor/reorg_handler');
 
         let hub, handler;
 
@@ -798,7 +798,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Governance: Voter authorization', function () {
-        const Governance = require('../../src/Governance');
+        const Governance = require('../../src/validators/governance');
 
         let hub, gov;
 
@@ -844,7 +844,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('Governance: Length limits', function () {
-        const Governance = require('../../src/Governance');
+        const Governance = require('../../src/validators/governance');
 
         let hub, gov;
 
@@ -890,7 +890,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('RewardTracker: Participant validation', function () {
-        const RewardTracker = require('../../src/RewardTracker');
+        const RewardTracker = require('../../src/anchor/reward_tracker');
 
         let hub, rt;
 
@@ -939,7 +939,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('SlashDetector: Input validation', function () {
-        const SlashDetector = require('../../src/SlashDetector');
+        const SlashDetector = require('../../src/validators/slash_detector');
 
         let hub, sd;
 
@@ -950,12 +950,12 @@ describe('Security Hardening', function () {
         });
 
         it('skips slash proposal for invalid pubkey format', async function () {
-            await sd._recordSlashProposal('invalid', 'price_deviation', 1, '{}');
+            await sd.recordSlashProposal('invalid', 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.callCount).to.equal(0);
         });
 
         it('records slash proposal for valid pubkey format', async function () {
-            await sd._recordSlashProposal('aa'.repeat(32), 'price_deviation', 1, '{}');
+            await sd.recordSlashProposal('aa'.repeat(32), 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.callCount).to.equal(1);
         });
 
@@ -967,7 +967,7 @@ describe('Security Hardening', function () {
                 deviations.push({ round: i, timestamp: Date.now() });
             }
             sd.recentDeviations.set(pubkey, deviations);
-            sd._trackDeviation(pubkey, 1002);
+            sd.trackDeviation(pubkey, 1002);
             expect(sd.recentDeviations.get(pubkey).length).to.be.at.most(1000);
         });
     });
@@ -1078,7 +1078,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PriceFetcher: Response validation', function () {
-        const PriceFetcher = require('../../src/PriceFetcher');
+        const PriceFetcher = require('../../src/oracle/price_fetcher');
 
         it('rejects prices >= 1e12 (upper bound) from CoinGecko', async function () {
             let pf = new PriceFetcher({ COINGECKO_API_KEY: '', PRICE_FETCH_TIMEOUT: 5000 });
@@ -1232,7 +1232,7 @@ describe('Security Hardening', function () {
                 getPriceSnapshots: sinon.stub().resolves([]),
                 // The with_watermark envelope carries the price-age bound the hub
                 // resolves for getprice; a fixed stand-in here, asserted below.
-                _oracleMaxAgeSeconds: sinon.stub().returns(900),
+                oracleMaxAgeSeconds: sinon.stub().returns(900),
                 getPrice: sinon.stub().resolves(null),
                 getFeeQuote: sinon.stub().resolves({}),
                 getOracle: sinon.stub().returns(null),

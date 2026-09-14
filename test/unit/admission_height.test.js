@@ -39,8 +39,8 @@ const act = require('../../src/mirror_admission_activation.js');
 const ERA_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
-    '../../src/CrossChainDexEngine.js',
-    '../../src/CrossChainBridgeEngine.js'
+    '../../src/cross_chain/dex_engine.js',
+    '../../src/cross_chain/bridge_engine.js'
 ];
 
 // The regtest producer activation the armed describes below use. A row at this height is an
@@ -64,8 +64,8 @@ function withAdmissionActivation(height){
         act:    require('../../src/mirror_admission_activation.js'),
         // _canonicalMatch reads nothing off `this`, so it is driven off the prototype rather
         // than through a constructed engine with a hub, a db and a consensus behind it.
-        DEX:    require('../../src/CrossChainDexEngine.js').prototype._canonicalMatch,
-        BRIDGE: require('../../src/CrossChainBridgeEngine.js').prototype._canonicalMatch,
+        DEX:    require('../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
+        BRIDGE: require('../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
         restore(){
             for(const [p, mod] of saved){
                 if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
@@ -416,14 +416,14 @@ describe('XChainHub._resolveAdmissionTip: the DECODER tip, ungated by lag', () =
         return {
             _resolveIndexerUrl:  async () => url,
             _admissionTipSeen:   new Map(),
-            _resolveAdmissionTip: XChainHub.prototype._resolveAdmissionTip,
-            _admissionTipFresh:   XChainHub.prototype._admissionTipFresh,
+            resolveAdmissionTip: XChainHub.prototype.resolveAdmissionTip,
+            admissionTipFresh:   XChainHub.prototype.admissionTipFresh,
         };
     }
 
     it('reads decoder_block and NOT the committed block_index', async () => {
         reply = { block_index: 1000, decoder_block: 1200, lag: 200 };
-        expect(await hubStub()._resolveAdmissionTip('BTC')).to.equal(1200);
+        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(1200);
     });
 
     it('accepts a tip whose lag is far past MAX_INDEXER_LAG_BLOCKS', async () => {
@@ -432,11 +432,11 @@ describe('XChainHub._resolveAdmissionTip: the DECODER tip, ungated by lag', () =
         // admission by height exists to serve. The committed-tip path keeps that gate;
         // this one must not have it.
         reply = { block_index: 1000, decoder_block: 9999, lag: 8999 };
-        expect(await hubStub()._resolveAdmissionTip('BTC')).to.equal(9999);
+        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(9999);
         // Same reading with MAX_INDEXER_LAG_BLOCKS explicitly set low.
         let prev = process.env.MAX_INDEXER_LAG_BLOCKS;
         process.env.MAX_INDEXER_LAG_BLOCKS = '5';
-        try { expect(await hubStub()._resolveAdmissionTip('BTC')).to.equal(9999); }
+        try { expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(9999); }
         finally { if(prev === undefined) delete process.env.MAX_INDEXER_LAG_BLOCKS; else process.env.MAX_INDEXER_LAG_BLOCKS = prev; }
     });
 
@@ -444,14 +444,14 @@ describe('XChainHub._resolveAdmissionTip: the DECODER tip, ungated by lag', () =
         // A v6 indexer, or one that has not decoded a block yet. Falling back to
         // block_index here would reintroduce the circularity the design removes.
         reply = { block_index: 1000, decoder_block: null, lag: null };
-        expect(await hubStub()._resolveAdmissionTip('BTC')).to.equal(null);
+        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(null);
         reply = { block_index: 1000 };
-        expect(await hubStub()._resolveAdmissionTip('BTC')).to.equal(null);
+        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(null);
     });
 
     it('refuses an unusable chain code without calling out', async () => {
         reply = { decoder_block: 5 };
-        expect(await hubStub()._resolveAdmissionTip('not a chain')).to.equal(null);
+        expect(await hubStub().resolveAdmissionTip('not a chain')).to.equal(null);
     });
 });
 
@@ -459,38 +459,38 @@ describe('XChainHub._admissionTipFresh: per chain, and a refusal is not a guess'
     const XChainHub = require('../../src/XChainHub.js');
 
     function hubStub(){
-        return { _admissionTipSeen: new Map(), _admissionTipFresh: XChainHub.prototype._admissionTipFresh };
+        return { _admissionTipSeen: new Map(), admissionTipFresh: XChainHub.prototype.admissionTipFresh };
     }
 
     it('takes a first sighting, and takes any height that has ADVANCED', () => {
         let h = hubStub();
-        expect(h._admissionTipFresh('BTC', 1000)).to.equal(true);
-        expect(h._admissionTipFresh('BTC', 1001)).to.equal(true);
+        expect(h.admissionTipFresh('BTC', 1000)).to.equal(true);
+        expect(h.admissionTipFresh('BTC', 1001)).to.equal(true);
     });
 
     it('refuses a tip that has not advanced past the chain\'s own stall window', () => {
         let h = hubStub();
-        expect(h._admissionTipFresh('DOGE', 500)).to.equal(true);
+        expect(h.admissionTipFresh('DOGE', 500)).to.equal(true);
         // Backdate the observation past DOGE's window (6 blocks of 60 s = 360 s) but
         // well inside BTC's (6 blocks of 600 s = 3600 s).
         h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 400 * 1000 });
-        expect(h._admissionTipFresh('DOGE', 500)).to.equal(false);
+        expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
 
         let b = hubStub();
-        expect(b._admissionTipFresh('BTC', 500)).to.equal(true);
+        expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
         b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 400 * 1000 });
         // THE POINT: the same 400 s of no movement is stale on DOGE and fresh on BTC.
         // A flat window would call one of these wrong.
-        expect(b._admissionTipFresh('BTC', 500)).to.equal(true);
+        expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
         b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 4000 * 1000 });
-        expect(b._admissionTipFresh('BTC', 500)).to.equal(false);
+        expect(b.admissionTipFresh('BTC', 500)).to.equal(false);
     });
 
     it('a frozen chain stays refused, and an advance clears it', () => {
         let h = hubStub();
         h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 4000 * 1000 });
-        expect(h._admissionTipFresh('DOGE', 500)).to.equal(false);
-        expect(h._admissionTipFresh('DOGE', 501)).to.equal(true);
+        expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
+        expect(h.admissionTipFresh('DOGE', 501)).to.equal(true);
     });
 });
 

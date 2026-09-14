@@ -15,8 +15,8 @@
 // reward that the next flush archived alone: one reward-only ANCHOR per hub restart.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const ar                   = require('../../src/anchor_reward_activation');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

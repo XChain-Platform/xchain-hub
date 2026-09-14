@@ -4,7 +4,7 @@
 // module to a single positive-integer export and nothing else.
 
 const assert = require('assert');
-const mod = require('../../src/hub-schema-version.js');
+const mod = require('../../src/hub_schema_version.js');
 
 describe('hub-schema-version', function () {
     it('exports exactly HUB_SCHEMA_VERSION', function () {
@@ -19,8 +19,8 @@ describe('hub-schema-version', function () {
     });
 
     it('is stable across re-require (frozen constant, no lazy init)', function () {
-        delete require.cache[require.resolve('../../src/hub-schema-version.js')];
-        const again = require('../../src/hub-schema-version.js');
+        delete require.cache[require.resolve('../../src/hub_schema_version.js')];
+        const again = require('../../src/hub_schema_version.js');
         assert.strictEqual(again.HUB_SCHEMA_VERSION, mod.HUB_SCHEMA_VERSION);
     });
 });

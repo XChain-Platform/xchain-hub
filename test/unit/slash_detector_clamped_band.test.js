@@ -17,8 +17,8 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const SlashDetector    = require('../../src/SlashDetector');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const SlashDetector    = require('../../src/validators/slash_detector');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
@@ -42,7 +42,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
     // Put the engine in the state _storeSnapshot leaves it in for `round`: the clamp
     // basis retained, the cache already moved on to the round just stored.
     function withClampBasis(round, pair, lastFinalized) {
-        oc._updateLastFinalizedPrices([{ coinPair: pair, price: lastFinalized }], round - 1);
+        oc.updateLastFinalizedPrices([{ coinPair: pair, price: lastFinalized }], round - 1);
         oc._clampReference = { round: round, prices: new Map(oc._lastFinalizedPrices) };
     }
 
@@ -97,7 +97,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
     });
 
     it('widens only the pair that clamped, not its neighbours in the same round', async function () {
-        oc._updateLastFinalizedPrices([
+        oc.updateLastFinalizedPrices([
             { coinPair: 'XCHAIN/USD', price: '1.00000000' },
             { coinPair: 'BTC/USD',    price: '100000.00000000' }
         ], 8);

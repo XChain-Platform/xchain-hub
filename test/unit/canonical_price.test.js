@@ -21,7 +21,7 @@
 const { expect }  = require('chai');
 const bcmath      = require('../../src/bcmath.js');
 const { canonicalPrice, isCanonicalPrice, PRICE_MAX_CHARS } =
-    require('../../src/lib/canonical_price.js');
+    require('../../src/oracle/canonical_price.js');
 
 describe('canonical_price', function () {
 

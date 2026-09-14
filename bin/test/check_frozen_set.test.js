@@ -53,7 +53,8 @@ function buildTree() {
         'module.exports = { SHARED_GATES };',
         '',
     ].join('\n'));
-    fs.writeFileSync(path.join(root, 'src', 'CrossChainBridgeEngine.js'), [
+    fs.mkdirSync(path.join(root, 'src', 'cross_chain'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'cross_chain', 'bridge_engine.js'), [
         "'use strict';",
         "const bridge = loadActivation('xchain_bridge_activation', 'isXchainBridgeActive');",
         '',

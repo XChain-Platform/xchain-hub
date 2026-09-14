@@ -31,8 +31,8 @@ describe('OracleRound', function () {
             ])
         };
 
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return mockPriceFetcher; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return mockPriceFetcher; }
         });
 
         hub = createMockHub({
@@ -82,7 +82,7 @@ describe('OracleRound', function () {
             // gate is shut puts a pair in a signed round that every peer rejects wholesale.
             expect(or.currentBtcNetwork).to.equal(undefined);
             or.currentRound = 100;
-            expect(or._xchainPriceGateOpen()).to.equal(false);
+            expect(or.xchainPriceGateOpen()).to.equal(false);
         });
 
         it('is CLOSED on a network this hub does not recognize', function () {
@@ -91,7 +91,7 @@ describe('OracleRound', function () {
             // all 36.
             or.currentBtcNetwork = 'signet';
             or.currentRound = 100;
-            expect(or._xchainPriceGateOpen()).to.equal(false);
+            expect(or.xchainPriceGateOpen()).to.equal(false);
         });
 
         it('is OPEN on every shipped network, mainnet included since the 2026-09-09 ruling', function () {
@@ -101,7 +101,7 @@ describe('OracleRound', function () {
             or.currentRound = 100;
             for (const net of ['mainnet', 'regtest', 'testnet']) {
                 or.currentBtcNetwork = net;
-                expect(or._xchainPriceGateOpen(), net).to.equal(true);
+                expect(or.xchainPriceGateOpen(), net).to.equal(true);
             }
         });
 
@@ -122,16 +122,16 @@ describe('OracleRound', function () {
                 // Round number x 1s interval, so the round whose START crosses the
                 // threshold is the one that opens the gate, regardless of when it is asked.
                 or.currentRound = 1789999999;
-                expect(or._xchainPriceGateOpen()).to.equal(false);
+                expect(or.xchainPriceGateOpen()).to.equal(false);
                 or.currentRound = 1790000000;
-                expect(or._xchainPriceGateOpen()).to.equal(true);
+                expect(or.xchainPriceGateOpen()).to.equal(true);
             } finally { delete XCHAIN_PRICE_ACTIVATION[NET]; }
         });
 
         it('is CLOSED when the round number is not yet a real round', function () {
             or.currentBtcNetwork = 'regtest';
             or.currentRound = null;
-            expect(or._xchainPriceGateOpen()).to.equal(false);
+            expect(or.xchainPriceGateOpen()).to.equal(false);
         });
     });
 
@@ -141,7 +141,7 @@ describe('OracleRound', function () {
 
     describe('formatXchainPriceMeta(): the derivation audit line', function () {
 
-        const { formatXchainPriceMeta } = require('../../src/OracleRound');
+        const { formatXchainPriceMeta } = require('../../src/oracle/round');
         const WINDOW = { fromBlockExclusive: 1925, toBlockInclusive: 2925 };
 
         it('records every input behind a derived print', function () {

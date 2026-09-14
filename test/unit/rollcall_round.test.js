@@ -26,8 +26,8 @@ const path         = require('path');
 const proxyquire   = require('proxyquire');
 const EventEmitter = require('events');
 
-const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher.js');
+const ValidatorIdentity    = require('../../src/validators/identity.js');
+const StateAnchorPublisher = require('../../src/anchor/publisher.js');
 const rca                  = require('../../src/rollcall_activation.js');
 const rga                  = require('../../src/rollcall_gates_activation.js');
 const { knownGateKeys }    = require('../../src/consensus_rules_digest.js');
@@ -54,7 +54,7 @@ let axiosStub, RollcallRound, tmpDir, savedEnv;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    RollcallRound = proxyquire('../../src/RollcallRound.js', { axios: axiosStub });
+    RollcallRound = proxyquire('../../src/rollcall/round.js', { axios: axiosStub });
 }
 
 // Indexer dispatcher: the BTC indexer answers getblockhashes (tip and per-block
@@ -113,7 +113,7 @@ function makeHub(o) {
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
         _resolveBtcIndexerUrl: async () => BTC_URL,
-        _btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
+        btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
     return hub;
@@ -304,7 +304,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[0]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 0, 'a restart must re-emit, not re-sign');
             const reEmitted = second.hub._pm.broadcast.getCalls()
@@ -322,7 +322,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[0]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
@@ -341,7 +341,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[1]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 1, 'a foreign line must not stand in for this hub\'s own signature');
             const own = second.hub._pm.broadcast.getCalls()
@@ -355,14 +355,14 @@ describe('RollcallRound', function () {
 
         it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
             const eng   = makeEngine({});
-            const mine  = eng._ownPubkey();
+            const mine  = eng.ownPubkey();
             const other = new ValidatorIdentity(SEEDS[1]).getPubkeyHex().toLowerCase();
             assert.ok(mine && mine !== other);
             fs.writeFileSync(process.env.ROLLCALL_SPEND_LOG_PATH,
                 JSON.stringify({ phase: 'sent', epoch: 30, kind: 'sweep', pubkey: other }) + '\n' +
                 JSON.stringify({ phase: 'sent', epoch: 60, kind: 'sweep' }) + '\n' +
                 JSON.stringify({ phase: 'sent', epoch: 90, kind: 'self',  pubkey: mine }) + '\n');
-            eng._loadSpendLog();
+            eng.loadSpendLog();
             assert.ok(!eng._committed.has('30'), 'another identity\'s spend is not this hub\'s commitment');
             assert.ok(eng._committed.has('60'), 'a record predating the pubkey field is this hub\'s own');
             assert.ok(eng._committed.has('90:self'));
@@ -843,7 +843,7 @@ describe('RollcallRound', function () {
             loadModule();
             wireRpc({ tip: 38 });
             const second = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            second._loadSpendLog();
+            second.loadSpendLog();
             await second._tick();
             assert.strictEqual(second.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
@@ -1324,7 +1324,7 @@ describe('RollcallRound', function () {
             wireRpc({ tip: 42 });
             const eng2 = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                     { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            eng2._gatesFor = () => 'a.B,'.repeat(3000);
+            eng2.gatesFor = () => 'a.B,'.repeat(3000);
             await eng2._tick();
             assert.strictEqual(eng2.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'an oversize GATES list must stop the publish, not ride out un-decodable');

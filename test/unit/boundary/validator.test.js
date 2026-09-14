@@ -18,17 +18,17 @@ const { DB_METHODS } = require('../../helpers/mockHub');
 let mockDb;
 const XChainHub = proxyquire('../../../src/XChainHub', {
     './db':                 function () { return mockDb; },
-    './PeerManager.js':     function () { return null; },
-    './Consensus.js':       function () {},
-    './ValidatorIdentity.js': function () {},
-    './OracleConsensus.js': function () {},
-    './OracleRound.js':     function () {},
-    './RewardTracker.js':   function () {},
-    './SlashDetector.js':   function () {},
-    './CrossChainEngine.js': function () {},
-    './ReorgHandler.js':    function () {},
-    './SwapTracker.js':     function () {},
-    './Governance.js':      function () {}
+    './peers/manager.js':     function () { return null; },
+    './consensus/pbft.js':       function () {},
+    './validators/identity.js': function () {},
+    './oracle/consensus.js': function () {},
+    './oracle/round.js':     function () {},
+    './anchor/reward_tracker.js':   function () {},
+    './validators/slash_detector.js':   function () {},
+    './cross_chain/engine.js': function () {},
+    './anchor/reorg_handler.js':    function () {},
+    './cross_chain/swap_tracker.js':     function () {},
+    './validators/governance.js':      function () {}
 });
 
 describe('Boundary: Validator Registration', function () {

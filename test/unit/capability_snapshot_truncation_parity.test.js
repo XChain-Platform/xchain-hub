@@ -24,14 +24,14 @@ const swq       = require('../../src/stake_weighted_quorum.js');
 const snapWrite = require('../../src/lib/capability_snapshot_write.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
-const OracleConsensus       = require('../../src/OracleConsensus.js');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
-const CrossChainDexEngine   = require('../../src/CrossChainDexEngine.js');
-const CrossChainCallEngine  = require('../../src/CrossChainCallEngine.js');
-const RetractionConsensus   = require('../../src/RetractionConsensus.js');
-const AttestationRelay      = require('../../src/AttestationRelay.js');
-const PriceAggregator       = require('../../src/PriceAggregator.js');
-const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.js');
+const OracleConsensus       = require('../../src/oracle/consensus.js');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
+const CrossChainDexEngine   = require('../../src/cross_chain/dex_engine.js');
+const CrossChainCallEngine  = require('../../src/cross_chain/call_engine.js');
+const RetractionConsensus   = require('../../src/consensus/retraction.js');
+const AttestationRelay      = require('../../src/attestation/relay.js');
+const PriceAggregator       = require('../../src/oracle/price_aggregator.js');
+const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
 
 // Count mode is only reachable BELOW a network's stake-weighted activation height, and
 // mainnet is the one network whose height is not 0. The premise is asserted, not assumed:
@@ -95,9 +95,9 @@ const WRITERS = [
     ['StateCheckpointEngine', StateCheckpointEngine, 'cross_chain', [BLOCK],
         cap => ({ capSnapshot: cap, network: NETWORK, _broadcastRowOrResync: async () => {} })],
     ['CrossChainDexEngine',   CrossChainDexEngine,   'cross_chain', [BLOCK, NETWORK],
-        cap => ({ capSnapshot: cap, broadcaster: null, _resolveBtcChainId: async () => null })],
+        cap => ({ capSnapshot: cap, broadcaster: null, resolveBtcChainId: async () => null })],
     ['CrossChainCallEngine',  CrossChainCallEngine,  'cross_chain', [BLOCK, NETWORK],
-        cap => ({ capSnapshot: cap, broadcaster: null, _resolveBtcChainId: async () => null })],
+        cap => ({ capSnapshot: cap, broadcaster: null, resolveBtcChainId: async () => null })],
     ['RetractionConsensus',   RetractionConsensus,   'cross_chain', [BLOCK],
         cap => ({ capSnapshot: cap, network: NETWORK, broadcaster: null })],
     ['AttestationRelay',      AttestationRelay,      'cross_chain', [BLOCK, NETWORK],
@@ -172,7 +172,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(true);
             const agg = Object.assign(Object.create(PriceAggregator.prototype),
                 { hub: { capabilitySnapshot: cap, network: NETWORK } });
-            const out = await agg._resolvePriceCapabilityValidators(BLOCK);
+            const out = await agg.resolvePriceCapabilityValidators(BLOCK);
 
             expect(out).to.be.an('array');
             expect(out.truncated).to.equal(true);   // the persist guard reads exactly this
@@ -182,7 +182,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(false);
             const agg = Object.assign(Object.create(PriceAggregator.prototype),
                 { hub: { capabilitySnapshot: cap, network: NETWORK } });
-            const out = await agg._resolvePriceCapabilityValidators(BLOCK);
+            const out = await agg.resolvePriceCapabilityValidators(BLOCK);
 
             expect(out).to.have.lengthOf(2);
             expect(out.truncated).to.equal(undefined);
@@ -192,7 +192,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(true);
             const pub = Object.assign(Object.create(AttestationBatchPublisher.prototype),
                 { hub: { capabilitySnapshot: cap }, network: NETWORK });
-            const out = await pub._resolveAttestationSet(BLOCK);
+            const out = await pub.resolveAttestationSet(BLOCK);
 
             expect(out).to.equal(null);            // null is this rail's fail-closed value
         });
@@ -201,7 +201,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(false);
             const pub = Object.assign(Object.create(AttestationBatchPublisher.prototype),
                 { hub: { capabilitySnapshot: cap }, network: NETWORK });
-            const out = await pub._resolveAttestationSet(BLOCK);
+            const out = await pub.resolveAttestationSet(BLOCK);
 
             expect(out).to.have.lengthOf(2);
         });

@@ -1,0 +1,965 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ **********************************************************************
+ *
+ * XChain Hub - Cross-Chain DEX Consensus (PBFT match finalization)
+ *
+ * Drives Byzantine-fault-tolerant agreement over a cross-chain match BEFORE it
+ * is written to cross_chain_matches and mirrored to indexers. The indexer's
+ * settlement pass (cross_settle) releases escrow only after verifying 2f+1
+ * `cross_chain` signatures over the canonical match; this engine produces those
+ * signatures through a 3-phase PBFT round (PROPOSE -> PREPARE -> COMMIT) with
+ * leader-failover (VIEW_CHANGE -> NEW_VIEW).
+ *
+ * Unlike attestation consensus (divergent provider bodies -> provider.agree()
+ * picks a winner), a cross-chain match is DETERMINISTIC: given the same confirmed
+ * order books at snapshot_block, every honest validator derives the identical
+ * canonical (engine._canonicalMatch). There is no winner to agree on: the
+ * round is independent re-derivation + signature collection:
+ *   - the match-designated leader broadcasts XDEX_MATCH_PROPOSE(row);
+ *   - each peer re-derives + validates the match against its OWN order book
+ *     (engine.validateProposedMatch) and only then signs the canonical;
+ *   - signatures gather to 2f+1 over a single canonical and finalize the match.
+ * A Byzantine leader cannot forge a settlement (honest peers sign only what they
+ * independently confirm) and equivocation fails (each peer signs its own derived
+ * canonical, so only the one true canonical reaches quorum).
+ *
+ * Structure mirrors AttestationConsensus.js (per-item rounds keyed by a
+ * deterministic id, signature collection, early-message buffer, finalize-emit)
+ * merged with Consensus.js's leader-failover (view-change keyed here by match_id).
+ *
+ * Single-node fallback: quorum 0 (N<=1, e.g. a single-operator regtest) collapses
+ * to immediate self-sign + finalize, identical to the pre-PBFT behavior.
+ *
+ ********************************************************************/
+
+const EventEmitter      = require('events');
+const ValidatorIdentity = require('../validators/identity.js');
+const swq               = require('../stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const ah                = require('../lib/admission_height.js');
+
+const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
+const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
+const XDEX_MATCH_COMMIT      = 'XDEX_MATCH_COMMIT';
+const XDEX_MATCH_VIEW_CHANGE = 'XDEX_MATCH_VIEW_CHANGE';
+const XDEX_MATCH_NEW_VIEW    = 'XDEX_MATCH_NEW_VIEW';
+const XDEX_MATCH_FINAL_SYNC  = 'XDEX_MATCH_FINAL_SYNC';
+
+const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per match round before view-change
+const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
+
+class CrossChainDexConsensus extends EventEmitter {
+
+    // engine: the CrossChainDexEngine. Used for _canonicalMatch (the signable
+    // payload, byte-identical to the indexer verifier), validateProposedMatch
+    // (independent re-derivation), and _persistCapabilitySnapshot (leader path).
+    //
+    // opts (optional) lets a second engine reuse this consensus over its own item
+    // type without sharing gossip traffic with DEX match rounds. The engine
+    // contract is unchanged (duck-typed _canonicalMatch / validateProposedMatch /
+    // _persistCapabilitySnapshot; rows carry snapshot_block + the id field):
+    //   opts.messageTypes: {PROPOSE, PREPARE, COMMIT, VIEW_CHANGE, NEW_VIEW}
+    //   opts.controlTags:  {vc, nv} signed-control payload tags
+    //   opts.idField:      row field that must equal the round id (default 'match_id')
+    constructor(engine, opts){
+        super();
+        opts = opts || {};
+        this.engine       = engine;
+        this.hub          = engine.hub;
+        this.peerManager  = engine.peerManager;
+        this.identity     = engine.identity;
+        this.capSnapshot  = engine.capSnapshot;
+        this.config       = (engine.hub && engine.hub.p2pConfig) || {};
+        this.types        = opts.messageTypes || {
+            PROPOSE: XDEX_MATCH_PROPOSE, PREPARE: XDEX_MATCH_PREPARE, COMMIT: XDEX_MATCH_COMMIT,
+            VIEW_CHANGE: XDEX_MATCH_VIEW_CHANGE, NEW_VIEW: XDEX_MATCH_NEW_VIEW,
+            FINAL_SYNC: XDEX_MATCH_FINAL_SYNC
+        };
+        // Engines configured before FINAL_SYNC existed get a derived type so
+        // straggler catch-up works without every caller updating its map.
+        if(!this.types.FINAL_SYNC) this.types.FINAL_SYNC = String(this.types.PROPOSE).replace(/PROPOSE$/, 'FINAL_SYNC');
+        this.controlTags  = opts.controlTags || { vc: 'XDEXVC', nv: 'XDEXNV' };
+        this.idField      = opts.idField || 'match_id';
+
+        this.pending = new Map();
+
+        // Finalized match ids (ring-buffer bounded, FIFO eviction; mirrors
+        // AttestationConsensus.finalized). Suppresses duplicate finalize/late COMMITs.
+        this.finalized       = new Set();
+        this._finalizedOrder = [];
+        this.finalizedMax    = positiveIntConfig(this.config.XDEX_FINALIZED_MAX, 10000, 'XDEX_FINALIZED_MAX');
+
+        // Finalized round payloads (row + quorum signatures), same eviction as
+        // `finalized`. Serves FINAL_SYNC catch-up: a straggler that missed a
+        // round (e.g. its local validation raced confirmation depth) keeps
+        // emitting VIEW_CHANGEs; peers that finalized ignore the round, so
+        // without state transfer the straggler's mirror NEVER gets the row.
+        this.finalizedRows   = new Map();
+
+        // Early-arrival buffer: a PROPOSE/PREPARE/COMMIT/VIEW_CHANGE can reach a
+        // peer before that peer's own _discoverAndMatch created the round. Buffer
+        // by match_id and drain in propose(). Bounded TTL prevents leaks if the
+        // round never starts locally. Map<match_id, Array<envelope>>.
+        this.earlyMessages    = new Map();
+        this.earlyMessageTtl  = new Map();
+        this.earlyMessageTtlMs    = 60 * 1000;
+        this.earlyMessageMaxPerId = 32;
+        // A-F5: early buffering happens BEFORE the round (and thus membership)
+        // exists, so an attacker could (a) flood arbitrary match_ids to grow the
+        // map without bound (only per-id was capped) and (b) buffer a PROPOSE
+        // carrying an unbounded `row` (this engine had no size gate at all). Cap
+        // both: a distinct-id ceiling with FIFO eviction, and a serialized-size
+        // gate on each buffered envelope.
+        // positiveIntConfig for the same reason the attestation half uses it: a negative
+        // is truthy, and a negative MAX_BYTES inverts the size gate so every pre-membership
+        // envelope is dropped rather than buffered, while a negative MAX_IDS evicts on
+        // every insert.
+        this.earlyMessageMaxDistinctIds = positiveIntConfig(this.config.XDEX_EARLY_MSG_MAX_IDS, 512,
+            'XDEX_EARLY_MSG_MAX_IDS');
+        this.earlyMessageMaxBytes       = positiveIntConfig(this.config.XDEX_EARLY_MSG_MAX_BYTES, 131072,
+            'XDEX_EARLY_MSG_MAX_BYTES');
+
+        this._messageHandler = null;
+        this.roundTimeoutMs  = parseInt(this.config.XDEX_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
+        // A round that keeps view-changing without ever finalizing (sustained
+        // message loss, e.g. P2P rate-limit drops during a burst of concurrent
+        // rounds) must not leak in `pending` forever: past this lifetime it is
+        // abandoned so the engine can re-propose a fresh round once the storm
+        // clears. Default = several view-change cycles.
+        this.roundMaxLifetimeMs = parseInt(this.config.XDEX_ROUND_MAX_LIFETIME_MS) || (this.roundTimeoutMs * 4);
+    }
+
+    async start(){
+        if(!this.peerManager){
+            console.log('CrossChainDexConsensus: no peer manager; single-node finalize only');
+            return;
+        }
+        this._messageHandler = (env) => this._handleMessage(env);
+        this.peerManager.on('message', this._messageHandler);
+        console.log('CrossChainDexConsensus: started');
+    }
+
+    async stop(){
+        if(this._messageHandler && this.peerManager){
+            this.peerManager.removeListener('message', this._messageHandler);
+            this._messageHandler = null;
+        }
+        for(let [, p] of this.pending){ if(p.timer) clearTimeout(p.timer); }
+        this.pending.clear();
+        this.earlyMessages.clear();
+        this.earlyMessageTtl.clear();
+    }
+
+    pruneEarlyMessages(now){
+        for(let [id, expiresAt] of this.earlyMessageTtl){
+            if(expiresAt <= now){ this.earlyMessages.delete(id); this.earlyMessageTtl.delete(id); }
+        }
+    }
+    bufferEarlyMessage(id, envelope){
+        let now = Date.now();
+        this.pruneEarlyMessages(now);
+        // Size gate (A-F5): drop an oversized pre-membership envelope rather than
+        // buffer it. A PROPOSE's `row` is the only large field and a legitimate
+        // one is far under this ceiling; this only rejects abuse.
+        let sz;
+        try { sz = JSON.stringify(envelope.data || '').length; }
+        catch(e){ return; }   // unserializable (cycle) -> never a real message
+        if(sz > this.earlyMessageMaxBytes) return;
+        let arr = this.earlyMessages.get(id);
+        if(!arr){
+            // Distinct-id ceiling (A-F5): evict the OLDEST buffered id (Map is
+            // insertion-ordered) before adding a new one so an attacker flooding
+            // fresh match_ids cannot grow the buffer without bound within the TTL.
+            if(this.earlyMessages.size >= this.earlyMessageMaxDistinctIds){
+                let oldest = this.earlyMessages.keys().next().value;
+                if(oldest !== undefined){ this.earlyMessages.delete(oldest); this.earlyMessageTtl.delete(oldest); }
+            }
+            arr = []; this.earlyMessages.set(id, arr);
+        }
+        if(arr.length >= this.earlyMessageMaxPerId) return;
+        arr.push(envelope);
+        this.earlyMessageTtl.set(id, now + this.earlyMessageTtlMs);
+    }
+    drainEarlyMessages(id){
+        let arr = this.earlyMessages.get(id);
+        if(!arr) return;
+        this.earlyMessages.delete(id);
+        this.earlyMessageTtl.delete(id);
+        for(let env of arr) this._handleMessage(env);
+    }
+
+    // Signed control message (VIEW_CHANGE / NEW_VIEW). Authenticated by pubkey +
+    // signature like the PROPOSE/PREPARE/COMMIT phases (NOT by envelope.sender,
+    // which the transport sets to a validator address while our snapshot set is
+    // pubkey-keyed). Binds tag+matchId+view so a vote can't be replayed elsewhere.
+    controlPayload(tag, rid, view){ return tag + '|' + rid + '|' + view; }
+    signControl(tag, rid, view){ return this.identity.sign(this.controlPayload(tag, rid, view)); }
+    verifyControl(tag, rid, view, pubkey, sig){
+        return ValidatorIdentity.verify(this.controlPayload(tag, rid, view), String(sig || ''), String(pubkey || '').toLowerCase());
+    }
+
+    // Phase-bound COMMIT vote payload (A-F6). The artifact signature
+    // (d.sig, over the plain canonical) is what indexers persist and verify, so
+    // it must stay phase-free; but on its own it made PREPARE and COMMIT votes
+    // interchangeable (a COMMIT literally re-sent the prepare sig), letting one
+    // Byzantine member replay everyone's PREPAREs as COMMITs and finalize a
+    // round no honest peer had committed. COMMIT now additionally carries
+    // commit_sig over this payload; a vote without it does not count. Prefixed
+    // with the engine's COMMIT type so an XCALL relay commit can never be
+    // replayed into an XDEX round (and vice versa).
+    commitPayload(canonical){ return this.types.COMMIT + '|PHASEV1|' + canonical; }
+
+    // Sort the snapshot validators by pubkey so every node agrees on ordering,
+    // then index by (matchIdInt + view) % N. Mirrors Consensus._getLeader.
+    _leaderFor(matchId, validators, view){
+        if(!validators || validators.length === 0) return null;
+        let sorted = validators.map(v => String(v.pubkey).toLowerCase()).sort();
+        let mInt   = parseInt(String(matchId).slice(0, 8), 16) || 0;
+        return sorted[(mInt + (view || 0)) % sorted.length];
+    }
+
+    // Every node runs this on discovery: the leader broadcasts PROPOSE; followers
+    // create the round (so they hold the failover timer + can validate the
+    // leader's PROPOSE). quorum 0 -> single-node immediate self-sign + finalize.
+    async propose(matchId, ctx){
+        let rid = String(matchId).toLowerCase();
+        if(this.finalized.has(rid) || this.pending.has(rid)) return;
+        if(!this.identity) throw new Error('no validator identity: cannot run cross-chain match consensus');
+
+        let row        = ctx.row;
+        let validators = (ctx.snapshot && Array.isArray(ctx.snapshot.validators)) ? ctx.snapshot.validators : [];
+        let snapCount  = validators.length;
+        // STAKE_WEIGHTED_QUORUM: at/above the activation snapshot_block, finalize on
+        // summed signer STAKE (>2/3 of S, source-deduped) rather than signer COUNT.
+        // Gated on the row's BTC snapshot_block + network so hub and every indexer
+        // flip on the same anchor. Below activation: byte-for-byte the count rule.
+        let weighted   = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
+
+        // Fail CLOSED on a TRUNCATED weighted snapshot (SWQ-TRUNC parity). At/above
+        // STAKE_WEIGHTED_QUORUM the tally is summed STAKE; a snapshot that overflowed the
+        // frozen VALIDATOR_QUERY_LIMIT has silently-dropped sources, so S is under-counted
+        // and the strict 2/3 bar could finalize a round a full snapshot would reject (the
+        // stake-eviction forge SWQ-TRUNC-1 closed on the consumer side). Every indexer
+        // consumer already fails closed on it (meetsStakeThreshold), so a round proposed
+        // here could ONLY mirror a row every indexer rejects. Refuse up front, release the
+        // engine's inflight slot (match:abandoned) so discovery retries once the set fits,
+        // and alarm the operator to raise the (frozen, coordinated) VALIDATOR_QUERY_LIMIT.
+        // The COUNT path (below activation) stays proceed-on-truncation: the cap is
+        // cross-hub deterministic there (CapabilitySnapshot.getQuorum), so quorum is
+        // consistent fleet-wide and refusing would needlessly halt.
+        if(weighted && validators && validators.truncated === true){
+            console.error('CrossChainDexConsensus: refusing round ' + rid.substring(0, 16) +
+                '... over a TRUNCATED weighted cross_chain snapshot (snapshot_block=' + row.snapshot_block +
+                '): the cross_chain set overflowed VALIDATOR_QUERY_LIMIT so summed stake S is under-counted and ' +
+                'no quorum can safely finalize; raise VALIDATOR_QUERY_LIMIT (coordinated fleet upgrade). Will retry when the set fits.');
+            this.emit('match:abandoned', { matchId: rid });
+            return;
+        }
+
+        let quorum     = bftQuorumOrSingle(snapCount, 0);   // majority-floored BFT quorum (0 = single-node self-sign)
+        let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
+        let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
+
+        let pending = {
+            matchId:      rid,
+            startedAt:    Date.now(),    // round birth; abandon if unfinalized past roundMaxLifetimeMs
+            row:          row,
+            canonical:    canonical,
+            // Carry source + weight so the weighted tally can dedupe by staking
+            // address (DELEGATE v0 is additive: one source, many keys, one vote).
+            validators:   validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) })),
+            quorum:       quorum,
+            weighted:     weighted,
+            view:         0,
+            myPubkey:     myPubkey,
+            prepares:     new Set(),
+            commits:      new Set(),
+            signatures:   new Map(),     // pubkey -> sig over canonical
+            viewChanges:  new Map(),     // view -> Set<pubkey>
+            finalized:    false,
+            _commitSent:  false,
+            timer:        null
+        };
+        this.pending.set(rid, pending);
+
+        // Single-operator / no-federation: persist the snapshot (so the indexer can
+        // verify), sign with our own identity, and finalize immediately. This is
+        // byte-for-byte the pre-PBFT behavior (there is no PROPOSE round to carry
+        // the persist). snapCount<=1 (quorum===0) is the single-operator fast path
+        // in BOTH modes: the sole validator's own stake is the whole snapshot, so
+        // it trivially satisfies 3·weight>2·S as well.
+        if(quorum === 0){
+            // quorum 0 arises from TWO very different snapshots, and only one is safe
+            // to finalize unilaterally: a genuine single-operator federation whose sole
+            // validator is THIS hub. An EMPTY snapshot (snapCount === 0, e.g. a bootstrap
+            // / mirror-lag read or seed-local disabled) ALSO yields quorum 0, but self-
+            // signing there writes a 1-sig match that peers holding a populated snapshot
+            // will never ratify: the order wedges permanently (match_id lands in
+            // `finalized`, never re-proposed) and this hub's committed ledger forks from
+            // the federation. Only the sole-self case may fast-path; otherwise abort the
+            // round and let discovery re-propose once the snapshot populates.
+            let soleSelf = snapCount === 1 && String(validators[0].pubkey).toLowerCase() === myPubkey;
+            if(!soleSelf){
+                this.pending.delete(rid);
+                console.warn('CrossChainDexConsensus: refusing to finalize match ' + rid +
+                    ' with quorum 0 over a ' + (snapCount === 0 ? 'EMPTY' : 'non-self single-validator') +
+                    ' cross_chain snapshot (snapshot_block=' + row.snapshot_block +
+                    '); will retry when the snapshot populates');
+                // Release the engine's inflight slot so discovery re-proposes once the
+                // snapshot populates. Without this the engine (which added round_id to
+                // _inflight before calling propose) never re-attempts the call/match on
+                // THIS hub, wedging its participation even as leader.
+                this.emit('match:abandoned', { matchId: rid });
+                return;
+            }
+            try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
+            catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+            let sig = this.identity.sign(canonical);
+            pending.signatures.set(myPubkey, sig);
+            this.finalize(rid);
+            return;
+        }
+
+        pending.timer = this.armTimer(rid);
+
+        // If we are the round leader, persist the capability snapshot (so indexers
+        // can verify) and broadcast PROPOSE. Followers just wait (+ hold the timer).
+        let leader = this._leaderFor(rid, pending.validators, pending.view);
+        if(leader === myPubkey){
+            await this.broadcastPropose(pending);
+        }
+
+        this.drainEarlyMessages(rid);
+    }
+
+    armTimer(rid){
+        let t = setTimeout(() => this.onRoundTimeout(rid), this.roundTimeoutMs);
+        if(t.unref) t.unref();                          // housekeeping timer; never pin process liveness
+        return t;
+    }
+
+    // Round timeout: rotate the leader (view-change) UNLESS the round has churned
+    // past its max lifetime without finalizing, in which case abandon it so the
+    // engine re-proposes a fresh round. View-change only helps a faulty leader; it
+    // cannot recover a round whose PREPARE/COMMIT traffic is being dropped (e.g. a
+    // peer over the P2P rate limit during a burst). Re-propose IS idempotent
+    // (synthetic TX_HASH dedup) and by abandon time the burst that starved the
+    // round has passed, so the retry finalizes cleanly. Without this, such a round
+    // leaks in `pending` forever (propose() no-ops on a still-pending id) and the
+    // call/match wedges permanently until a process restart.
+    onRoundTimeout(rid){
+        let p = this.pending.get(rid);
+        if(!p || p.finalized) return;
+        if((Date.now() - p.startedAt) > this.roundMaxLifetimeMs){
+            if(p.timer) clearTimeout(p.timer);
+            this.pending.delete(rid);
+            console.warn('CrossChainDexConsensus: abandoned stale round ' + rid.substring(0, 16) +
+                         '... after ' + Math.round((Date.now() - p.startedAt) / 1000) + 's unfinalized; engine will re-propose');
+            this.emit('match:abandoned', { matchId: rid });
+            return;
+        }
+        this.initiateViewChange(rid);
+    }
+
+    // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
+    async broadcastPropose(pending){
+        try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
+        catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+        let mySig = this.identity.sign(pending.canonical);
+        pending.signatures.set(pending.myPubkey, mySig);
+        pending.prepares.add(pending.myPubkey);
+        if(this.peerManager){
+            this.peerManager.broadcast(this.types.PROPOSE, {
+                matchId: pending.matchId, view: pending.view, row: pending.row,
+                sig_pubkey: pending.myPubkey, sig: mySig
+            });
+        }
+    }
+
+    _handleMessage(envelope){
+        if(!envelope || !envelope.data) return;
+        switch(envelope.type){
+            case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => console.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
+            case this.types.PREPARE:     this._handlePrepare(envelope);    break;
+            case this.types.COMMIT:      this._handleCommit(envelope);     break;
+            case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
+            case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
+            case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => console.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
+        }
+    }
+
+    // Re-resolve the round's membership, quorum and activation mode at the snapshot a
+    // newly offered row DECLARES, so a vote is never counted against a set the row did
+    // not name. Returns null when the row declares the snapshot the round already holds
+    // (nothing to rebind), the new binding when it resolved, and false when the caller
+    // must refuse the row. Refusal is the fail-closed side of every ambiguity here: an
+    // unresolvable, empty, single-validator or truncated-weighted set cannot be measured
+    // the way the indexer consumers measure it, and finalizing under the round's stale
+    // set would publish a row those consumers retire.
+    async rebindSnapshot(pending, row){
+        let sameBlock   = String(row.snapshot_block) === String(pending.row.snapshot_block);
+        let sameNetwork = String(row.network || '')  === String(pending.row.network || '');
+        if(sameBlock && sameNetwork) return null;
+        if(typeof this.engine._resolveCapabilityValidators !== 'function'){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ' because this engine cannot re-resolve the cross_chain set');
+            return false;
+        }
+        let raw = null;
+        try { raw = await this.engine._resolveCapabilityValidators('cross_chain', Number(row.snapshot_block), row.network); }
+        catch(e){ raw = null; }
+        if(!Array.isArray(raw) || raw.length === 0){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ': the cross_chain set there resolved empty');
+            return false;
+        }
+        let weighted = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
+        // Same SWQ-TRUNC parity propose() enforces: a truncated weighted snapshot
+        // under-counts S, so the strict two-thirds bar could pass a round the full set
+        // rejects. The count path stays proceed-on-truncation there, and does here too.
+        if(weighted && raw.truncated === true){
+            console.error('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ' over a TRUNCATED weighted cross_chain snapshot; raise VALIDATOR_QUERY_LIMIT');
+            return false;
+        }
+        let validators = raw.map(v => ({
+            pubkey: String(v.pubkey).toLowerCase(),
+            source: String(v.source != null ? v.source : ''),
+            weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'))
+        }));
+        let quorum = bftQuorumOrSingle(validators.length, 0);
+        // quorum 0 is the single-operator fast path propose() takes at round OPEN, over
+        // a snapshot this hub read for itself. Mid-round it would mean adopting a
+        // stranger's row and then ratifying it alone, so it is refused here.
+        if(quorum === 0){
+            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+                ': the declared snapshot collapses to a single-validator quorum mid-round');
+            return false;
+        }
+        return { validators, quorum, weighted };
+    }
+
+    // Does the proposed row's admission map hold against THIS hub's own chain tips?
+    //
+    // True for an engine that declares no admission scope, and for a row below the
+    // activation (admissionScope answers null), because those rows bind by the legacy
+    // effective_time rule and carry no map to bound.
+    //
+    // Every other answer is fail-closed, including the ones caused by our own side: a
+    // scope that throws, a map we cannot read, a tip we cannot resolve. A follower that
+    // adopted an unchecked height would be signing the proposer's own claim back to it.
+    async admissionBoundHolds(row, rid){
+        if(typeof this.engine.admissionScope !== 'function') return true;
+        let scope;
+        try { scope = this.engine.admissionScope(row); }
+        catch(e){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... has no usable admission scope (' + (e && e.message) + '); not signing');
+            return false;
+        }
+        if(scope === null || scope === undefined) return true;
+
+        let map;
+        try { map = ah.rowAdmitBlocks(row); }
+        catch(e){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... carries an unusable admission map (' + (e && e.message) + '); not signing');
+            return false;
+        }
+        let v;
+        try { v = await ah.checkAdmitBlocksAgainstHub(this.hub, scope.readSet, map); }
+        catch(e){ v = { ok: false, chain: null, reason: 'admission bound check threw: ' + (e && e.message) }; }
+        if(!v.ok){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+                '... failed the ' + String(scope.table) + ' admission bound; not signing: ' + v.reason);
+            return false;
+        }
+        return true;
+    }
+
+    async _handlePropose(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+
+        let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
+        let view = Number(d.view) || 0;
+        if(view < pending.view) return;                                   // stale leader
+
+        // Sender must be the designated leader for the claimed (matchId, view).
+        if(senderPubkey !== this._leaderFor(rid, pending.validators, view)) return;
+        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+
+        // The proposed row must hash to this round's id.
+        let row = d.row;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
+        let canonical = this.engine._canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
+
+        // Verify the leader's signature over THEIR canonical.
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
+
+        // INDEPENDENT confirmation: re-derive + validate against our own view of
+        // the underlying data. This (not byte-equality with our locally pre-built
+        // row) is the gate against a Byzantine leader.
+        let ok = false;
+        try { ok = await this.engine.validateProposedMatch(row); }
+        catch(e){ ok = false; }
+        if(!ok){
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
+            return;
+        }
+
+        // The per-chain follower bound on the row's ADMISSION MAP (C38, BF6), applied here
+        // because this is the one PROPOSE handler every engine on this consensus shares.
+        // An engine opts in by answering admissionScope(row) with the row's table and read
+        // set; one that does not is on the legacy effective_time rule and is unchanged.
+        //
+        // Deliberately a SECOND application for CrossChainCallEngine, which also holds the
+        // bound inside its own validateProposedMatch. The engine gate binds every caller of
+        // validateProposedMatch (its own tests, the e2e legs, any future caller) and this
+        // one binds every engine on the shared path, so neither can be removed by work on
+        // the other. The cost is one getlatestblock per reading chain on a path that
+        // already makes at least two indexer round trips per proposal.
+        if(!(await this.admissionBoundHolds(row, rid))) return;
+
+        let adopted = false;
+        if(canonical !== pending.canonical){
+            // Leader-choice fields (effective_time = the leader's clock second,
+            // snapshot_block = the leader's chain-tip view) legitimately differ
+            // from the row WE pre-built at discovery, so byte-equality here
+            // deadlocked every round whose hubs polled in different seconds.
+            // The leader's row passed independent validation above; adopt it as
+            // the round canonical, unless we already committed to another VALUE.
+            // A canonical that differs only because the view advanced (OUR row
+            // at the leader's view == the leader's canonical) is value-identical:
+            // with the EQUIV header active every view change moves the canonical
+            // bytes, and refusing post-commit adoption of the same value would
+            // deadlock every commit-phase node out of the new view, starving
+            // failover quorum (H-8). PBFT forbids committing to a different
+            // value, not re-voting the same value under a new view.
+            let sameValueNewView = (this.engine._canonicalMatch(pending.row, view) === canonical);
+            if(pending._commitSent && !sameValueNewView) return;
+            // The MEMBERSHIP travels with the row. snapshot_block is a leader-choice
+            // field, and the XCALL rail accepts a leader block within its confirmation
+            // window of the local tip, so the adopted row can declare a different
+            // snapshot than the one this round opened over. Every consumer re-derives
+            // the set at the row's DECLARED snapshot_block and measures the signatures
+            // against THAT (xchain-indexer actions/xcall.js, recovery.js), so tallying
+            // against the pre-adoption set can clear a threshold the declared snapshot
+            // never authorised: across a stake activation or a membership change, four
+            // signatures out of the old set finalize a row the new seven-member set
+            // needs five for. Rebind before a single vote is counted, and fail CLOSED
+            // (leave the round to its timer and view change) when the set cannot be
+            // resolved, rather than counting votes under a set nobody will accept.
+            let rebound = await this.rebindSnapshot(pending, row);
+            if(rebound === false) return;
+            // The resolve above is a real await, so re-check the round is still the one
+            // we started on before mutating it.
+            if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return;
+            // The proposing leader has to be a member of the set the row declares. Its
+            // signature is one of the ones the indexer will measure, and a signature
+            // from outside the declared set is discarded there.
+            if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)) return;
+            pending.row       = row;
+            pending.canonical = canonical;
+            if(rebound){
+                pending.validators = rebound.validators;
+                pending.quorum     = rebound.quorum;
+                pending.weighted   = rebound.weighted;
+            }
+            pending.signatures.clear();   // any collected sigs were over the old canonical
+            pending.prepares.clear();
+            pending.commits.clear();
+            pending._commitSent = false;
+            adopted = true;
+            console.log('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
+        }
+
+        if(view > pending.view) pending.view = view;
+        pending.signatures.set(senderPubkey, String(d.sig));             // leader's sig
+        pending.prepares.add(senderPubkey);
+
+        // Our own signature + PREPARE broadcast.
+        if(!pending.signatures.has(pending.myPubkey)){
+            let mySig = this.identity.sign(canonical);
+            pending.signatures.set(pending.myPubkey, mySig);
+            pending.prepares.add(pending.myPubkey);
+            if(this.peerManager){
+                this.peerManager.broadcast(this.types.PREPARE, {
+                    matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig
+                });
+            }
+        }
+        this.checkPrepareQuorum(rid);
+
+        // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
+        // verification against our stale canonical and were buffered; replay them
+        // now that the round canonical matches what they signed.
+        if(adopted) this.drainEarlyMessages(rid);
+    }
+
+    _handlePrepare(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+
+        let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
+        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+        if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
+            // A vote only counts with a verifying signature over the round
+            // canonical. A mismatch usually means this vote raced ahead of the
+            // leader's PROPOSE (we still hold our pre-built canonical); buffer
+            // it for replay after adoption rather than losing it.
+            this.bufferEarlyMessage(rid, envelope);
+            return;
+        }
+        pending.signatures.set(senderPubkey, String(d.sig));
+        pending.prepares.add(senderPubkey);
+        this.checkPrepareQuorum(rid);
+    }
+
+    // Quorum test for a collected vote set (prepares or commits). Stake-weighted
+    // (source-deduped 3·Sigma>2·S) at/above activation; signer COUNT (>=2f+1) below it.
+    meetsQuorum(pending, voteSet){
+        if(pending.weighted)
+            return swq.meetsStakeThreshold(pending.validators, voteSet);
+        return voteSet.size >= pending.quorum;
+    }
+
+    checkPrepareQuorum(rid){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized || pending._commitSent) return;
+        if(!this.meetsQuorum(pending, pending.prepares)) return;
+        pending._commitSent = true;
+        pending.commits.add(pending.myPubkey);
+        let mySig = pending.signatures.get(pending.myPubkey) || null;
+        if(this.peerManager){
+            this.peerManager.broadcast(this.types.COMMIT, {
+                matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig,
+                // Phase-bound vote signature; see _commitPayload.
+                commit_sig: this.identity.sign(this.commitPayload(pending.canonical))
+            });
+        }
+        this.checkCommitQuorum(rid);
+    }
+
+    _handleCommit(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+
+        let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
+        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+        if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
+            // Unverified commits must NOT count toward quorum: counting them let a
+            // node whose canonical diverged "finalize" with zero collected
+            // signatures and persist an unverifiable mirror row. Buffer for
+            // replay in case the leader's PROPOSE (and adoption) is still racing.
+            this.bufferEarlyMessage(rid, envelope);
+            return;
+        }
+        // The artifact signature verified above proves the peer signed the
+        // canonical (prepare-tier evidence); the phase-bound commit_sig proves
+        // it actually reached COMMIT for this round. Without it a replayed
+        // PREPARE would count as a commit vote (A-F6). Collect the
+        // artifact sig either way (it is genuine and indexer-verifiable), but
+        // only tally the commit with a verifying commit_sig.
+        pending.signatures.set(senderPubkey, String(d.sig));
+        if(!d.commit_sig || !ValidatorIdentity.verify(this.commitPayload(pending.canonical), String(d.commit_sig), senderPubkey)){
+            console.warn('CrossChainDexConsensus: COMMIT without verifying phase-bound commit_sig from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (vote not counted; a peer running older code, or a replayed PREPARE)');
+            return;
+        }
+        pending.commits.add(senderPubkey);
+        this.checkCommitQuorum(rid);
+    }
+
+    checkCommitQuorum(rid){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;
+        if(!this.meetsQuorum(pending, pending.commits)) return;
+        this.finalize(rid);
+    }
+
+    finalize(rid){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;
+        pending.finalized = true;
+
+        let sigs = [];
+        for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
+
+        this.markFinalized(rid, pending.row, sigs, pending.view);
+        if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
+
+        console.log('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
+                    pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' + sigs.length + ' sigs)');
+        // `view` = the PBFT view this round finalized at (incremented per view-change).
+        // Persisted as finalizing_view so the indexer rebuilds the exact EQUIV canonical
+        // (WI-2 bump 2); below the EQUIV flag-day it is stored but unused.
+        this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs, view: pending.view });
+
+        let cleanup = setTimeout(() => this.pending.delete(rid), PENDING_EVICT_MS);
+        if(cleanup.unref) cleanup.unref();             // housekeeping timer; never pin process liveness
+    }
+
+    // Reorg support (deepdive M-13): drop a round id from the finalized ring so a
+    // re-confirmed action can run a FRESH round for it. Once a round finalizes its
+    // id sits in `finalized` (ring-buffer bounded) and propose() no-ops on it, which
+    // is correct steady-state dedup but permanently wrong after a reorg RETRACTS the
+    // row and the underlying action later re-confirms: the deterministic round can
+    // never re-finalize and the call/match stays stranded in 'retracted'. Retraction
+    // paths call this so the next propose() runs. Also evicts any live pending round
+    // (and its cached FINAL_SYNC payload) so a round still in flight at retraction
+    // time cannot finalize afterward and resurrect the just-retracted row. Exactly-once
+    // still holds: the DB row keyed on (call_id/match_id, phase) is the single slot
+    // indexers act on, and re-finalization overwrites it (ON DUPLICATE KEY UPDATE),
+    // so at most one live row exists per confirmed action.
+    forgetFinalized(rid){
+        rid = String(rid).toLowerCase();
+        let had = this.finalized.delete(rid);
+        this.finalizedRows.delete(rid);
+        if(had){
+            let i = this._finalizedOrder.indexOf(rid);
+            if(i >= 0) this._finalizedOrder.splice(i, 1);
+        }
+        let p = this.pending.get(rid);
+        if(p){
+            if(p.timer) clearTimeout(p.timer);
+            this.pending.delete(rid);
+        }
+        return had;
+    }
+
+    markFinalized(rid, row, signatures, view){
+        if(this.finalized.has(rid)) return;
+        this.finalized.add(rid);
+        // Store the finalizing view too: FINAL_SYNC state-transfer must tell a straggler
+        // which view the quorum signatures were taken at, so it rebuilds the exact EQUIV canonical.
+        if(row) this.finalizedRows.set(rid, { row: row, signatures: signatures || [], view: view || 0 });
+        this._finalizedOrder.push(rid);
+        if(this._finalizedOrder.length > this.finalizedMax){
+            let oldest = this._finalizedOrder.shift();
+            this.finalized.delete(oldest);
+            this.finalizedRows.delete(oldest);
+        }
+    }
+
+    initiateViewChange(rid){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;
+        pending.view++;
+        let view = pending.view;
+        if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
+        pending.viewChanges.get(view).add(pending.myPubkey);
+        if(this.peerManager) this.peerManager.broadcast(this.types.VIEW_CHANGE, {
+            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.vc, rid, view)
+        });
+        if(pending.timer) clearTimeout(pending.timer);
+        pending.timer = this.armTimer(rid);
+        this.maybeAssumeLeadership(rid, view);
+    }
+
+    _handleViewChange(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid) return;
+        if(this.finalized.has(rid)){
+            // A VIEW_CHANGE for a round we finalized means the voter is a
+            // straggler stuck in failover purgatory. The round can never
+            // re-reach quorum (everyone else moved on), so answer with the
+            // finalized row + its quorum signatures (state transfer).
+            let fin = this.finalizedRows.get(rid);
+            if(fin && this.peerManager){
+                this.peerManager.broadcast(this.types.FINAL_SYNC, {
+                    matchId: rid, row: fin.row, signatures: fin.signatures, view: fin.view
+                });
+            }
+            return;
+        }
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+        let view = Number(d.view);
+        if(!Number.isFinite(view)) return;
+        let voter = String(d.sig_pubkey || '').toLowerCase();
+        if(!pending.validators.some(v => v.pubkey === voter)) return;     // not a validator
+        if(!this.verifyControl(this.controlTags.vc, rid, view, voter, d.sig)) return; // unauthenticated vote
+        if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
+        pending.viewChanges.get(view).add(voter);
+        this.maybeAssumeLeadership(rid, view);
+    }
+
+    // On 2f+1 view-change votes for `view`, the rotated leader announces NEW_VIEW
+    // and re-proposes so the round can make progress under a fresh leader.
+    maybeAssumeLeadership(rid, view){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;
+        let votes = pending.viewChanges.get(view);
+        if(!votes || !this.meetsQuorum(pending, votes)) return;
+        if(view > pending.view) pending.view = view;
+        let newLeader = this._leaderFor(rid, pending.validators, view);
+        if(newLeader === pending.myPubkey){
+            // Rebuild the round canonical for the NEW view before signing (H-8):
+            // once the EQUIV header is active the view is folded into the
+            // canonical, so re-signing the view-0 bytes under a new-view PROPOSE
+            // fails every follower's verification (they recompute at d.view) and
+            // failover can never make progress. Votes collected so far covered
+            // the OLD canonical, so they are dropped with it; below the EQUIV
+            // flag-day the rebuild is byte-identical and this is a no-op that
+            // preserves collected votes.
+            let canonical = this.engine._canonicalMatch(pending.row, pending.view);
+            if(canonical !== pending.canonical){
+                pending.canonical = canonical;
+                pending.signatures.clear();
+                pending.prepares.clear();
+                pending.commits.clear();
+                pending._commitSent = false;
+            }
+            if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
+                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.nv, rid, view)
+            });
+            this.broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
+        }
+    }
+
+    // FINAL_SYNC (straggler catch-up): a peer answered our VIEW_CHANGE for a
+    // round the federation already finalized. The quorum signatures over the
+    // canonical ARE the proof (the same proof the indexers verify), so a
+    // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
+    //
+    // Deliberately NOT bound by the admission map (that guard lives at
+    // _handlePropose via _admissionBoundHolds, refusing a PROPOSER that invents
+    // a height). Here the row already carries 2f+1 signatures, so refusing it
+    // finalizes nothing, it only strands THIS hub outside the federation until
+    // an operator intervenes; there is no proposer left to bound.
+    async handleFinalSync(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;                          // only rescues a live stuck round
+
+        let row = d.row;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
+        let syncView  = Number(d.view) || 0;                                    // the view the offered proof was signed at
+        let canonical = this.engine._canonicalMatch(row, syncView);   // sigs were taken at the finalizing view
+
+        // The proof is measured against the set the OFFERED row declares, not the one
+        // this stuck round happens to hold. Same reason as the PROPOSE adoption above:
+        // the offered row can name a different snapshot_block, and a proof that clears
+        // the local round's threshold can sit under the threshold its own declared
+        // snapshot sets. An unresolvable declared set refuses the sync outright and
+        // leaves the round to its timer, rather than ratifying an unmeasurable proof.
+        let rebound = await this.rebindSnapshot(pending, row);
+        if(rebound === false) return;
+        // A rebind is a real await, so re-check the round before measuring anything.
+        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return;
+        let setValidators = rebound ? rebound.validators : pending.validators;
+        let setQuorum     = rebound ? rebound.quorum     : pending.quorum;
+        let setWeighted   = rebound ? rebound.weighted   : pending.weighted;
+
+        let offered = Array.isArray(d.signatures) ? d.signatures : [];
+        let verified = new Map();
+        for(let s of offered){
+            if(!s || !s.pubkey || !s.sig) continue;
+            let pk = String(s.pubkey).toLowerCase();
+            if(!setValidators.some(v => v.pubkey === pk)) continue;
+            if(!ValidatorIdentity.verify(canonical, String(s.sig), pk)) continue;
+            verified.set(pk, String(s.sig));
+        }
+        // The offered signatures must themselves clear the declared snapshot's quorum
+        // (weighted at/above activation, else >=2f+1). A forged sync would need a real
+        // quorum of the set the row names.
+        let proofOk = setWeighted
+            ? swq.meetsStakeThreshold(setValidators, verified.keys())
+            : (verified.size >= Math.max(setQuorum, 1));
+        if(!proofOk) return;                                               // not a quorum proof; ignore
+
+        pending.row        = row;
+        pending.canonical  = canonical;
+        pending.signatures = verified;
+        // Keep the round's binding with the row it adopted, so anything that reads the
+        // set after this (leader election on a later message, the finalize emit) sees
+        // the snapshot the published row declares.
+        if(rebound){
+            pending.validators = rebound.validators;
+            pending.quorum     = rebound.quorum;
+            pending.weighted   = rebound.weighted;
+        }
+        // Finalize under the view the proof VERIFIED at, never our local one. _finalize
+        // emits pending.view and _markFinalized caches it for the next straggler, so a
+        // node that had already rotated would otherwise publish these signatures under a
+        // view whose EQUIV canonical none of them cover (persisted as finalizing_view,
+        // mirrored, and folded into the anchor archive). Lowering the view is safe and
+        // deliberate: _finalize sets pending.finalized, and _handleViewChange /
+        // _handleNewView both short-circuit on a finalized round, so the monotonic-view
+        // guard is never consulted for this round again. Taking the higher view is the bug.
+        pending.view       = syncView;
+        console.log('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
+        this.finalize(rid);
+    }
+
+    _handleNewView(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+        let view = Number(d.view);
+        if(!Number.isFinite(view) || view <= pending.view) return;        // monotonic: never rewind
+        let announcer = String(d.sig_pubkey || '').toLowerCase();
+        // Announcer must be the designated leader for the CLAIMED view, and prove it
+        // with a valid signature (mirrors Consensus._handleNewView's leader-identity
+        // guard: a Byzantine node can only announce views in which it is the leader).
+        let expected = this._leaderFor(rid, pending.validators, view);
+        if(!expected || announcer !== expected) {
+            console.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
+            return;
+        }
+        if(!this.verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
+        // Quorum gate (A-F3): a valid leader signature over NEW_VIEW is NOT proof
+        // that a real view-change quorum occurred. Without this, a Byzantine node
+        // that is the deterministic leader for some future view can unilaterally
+        // drag every honest hub's `pending.view` forward with no 2f+1 VIEW_CHANGE
+        // votes behind it (griefing / forced-failover). Require this hub to have
+        // independently collected a view-change quorum for `view` (the same votes
+        // _maybeAssumeLeadership counts) before advancing. If the votes have not
+        // arrived yet we simply do not advance here; an honest advance still
+        // happens via _maybeAssumeLeadership as the VIEW_CHANGE votes land, and
+        // the round's own timeout re-triggers view-change otherwise, so liveness
+        // is preserved and bounded.
+        let votes = pending.viewChanges.get(view);
+        if(!votes || !this.meetsQuorum(pending, votes)){
+            console.warn('CrossChainDexConsensus: deferring NEW_VIEW for view ' + view + ' (no local view-change quorum yet)');
+            return;
+        }
+        pending.view = view;
+    }
+}
+
+module.exports = Object.assign(CrossChainDexConsensus, {
+    XDEX_MATCH_PROPOSE,
+    XDEX_MATCH_PREPARE,
+    XDEX_MATCH_COMMIT,
+    XDEX_MATCH_VIEW_CHANGE,
+    XDEX_MATCH_NEW_VIEW,
+    XDEX_MATCH_FINAL_SYNC
+});

@@ -26,8 +26,8 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const band            = require('../../src/lib/oracle_round_band');
-const PriceAggregator = require('../../src/PriceAggregator');
+const band            = require('../../src/oracle/oracle_round_band');
+const PriceAggregator = require('../../src/oracle/price_aggregator');
 const { createMockHub } = require('../helpers/mockHub');
 
 // The value that started this item, and one of its siblings.
@@ -227,8 +227,8 @@ describe('OracleRound diagnostics band report', function () {
     let hub, or;
 
     beforeEach(function () {
-        let OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
+        let OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
         });
         hub = createMockHub({
             p2pConfig: {
@@ -293,7 +293,7 @@ describe('OracleRound diagnostics band report', function () {
         await or.getSubmissionsInfo();
         let call = hub.db.doQuery.getCalls().find(c => /round_number > \?/.test(c.args[0]));
         expect(call, 'band query issued').to.exist;
-        expect(call.args[1][0]).to.equal(51688 + require('../../src/lib/oracle_round_band').DEFAULT_FUTURE_ROUND_TOLERANCE);
+        expect(call.args[1][0]).to.equal(51688 + require('../../src/oracle/oracle_round_band').DEFAULT_FUTURE_ROUND_TOLERANCE);
     });
 
     it('reports a clean table as clean', async function () {

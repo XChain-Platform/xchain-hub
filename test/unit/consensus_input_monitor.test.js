@@ -21,7 +21,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
 const { ConsensusInputMonitor, REASONS, classifyFetchError } =
-    require('../../src/lib/consensus_input_monitor.js');
+    require('../../src/validators/consensus_input_monitor.js');
 
 describe('ConsensusInputMonitor', function () {
 
@@ -194,7 +194,7 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/CapabilitySnapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
         // Silence the loud operator lines; the assertions read the monitor.
         sinon.stub(console, 'error');
     });
@@ -206,7 +206,7 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
         return {
             capabilityRegistry: opts.registry || null,
             _resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
-            _btcIndexerHeaders: () => ({})
+            btcIndexerHeaders: () => ({})
         };
     }
 

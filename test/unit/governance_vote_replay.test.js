@@ -34,8 +34,8 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Governance   = require('../../src/Governance');
-const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const Governance   = require('../../src/validators/governance');
+const ValidatorIdentity = require('../../src/validators/identity');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3 }  = require('../helpers/fixtures');
 
@@ -195,7 +195,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
     it('_ingestResultVotes skips evidence with no seq rather than defaulting it', async function () {
         let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
         let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
-        await gov._ingestResultVotes(PROPOSAL,
+        await gov.ingestResultVotes(PROPOSAL,
             [{ voterPubkey: kp.pubkeyHex, vote: 'approve', signature: sig }], electorate);
         expect(upsertCalls().length, 'a leader cannot launder a seq-less vote back in').to.equal(0);
     });
@@ -203,7 +203,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
     it('_ingestResultVotes accepts seq-stamped evidence', async function () {
         let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
         let sig = idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 2000));
-        await gov._ingestResultVotes(PROPOSAL,
+        await gov.ingestResultVotes(PROPOSAL,
             [{ voterPubkey: kp.pubkeyHex, vote: 'approve', signature: sig, seq: 2000 }], electorate);
         let calls = upsertCalls();
         expect(calls.length).to.equal(1);

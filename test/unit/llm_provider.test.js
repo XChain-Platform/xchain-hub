@@ -83,8 +83,8 @@ function _withEnv(extra, fn){
 // state is fresh. cache-bust the dependency chain too.
 function _reloadProvider(){
     delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
-    delete require.cache[require.resolve('../../src/lib/claude-spawn.js')];
+    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
+    delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
     return require('../../src/providers/llm.js');
 }
 
@@ -235,17 +235,17 @@ describe('llm provider, anthropic sampling-parameter gate (#4464)', function () 
         const llm = _reloadProvider();
         for (const id of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
                           'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5'])
-            expect(llm._anthropicRejectsSampling(id), id).to.equal(true);
-        expect(llm._anthropicRejectsSampling('claude-opus-4-7-20260101')).to.equal(true);
+            expect(llm.anthropicRejectsSampling(id), id).to.equal(true);
+        expect(llm.anthropicRejectsSampling('claude-opus-4-7-20260101')).to.equal(true);
     });
 
     it('leaves every other Anthropic id on the explicit-temperature path', function () {
         const llm = _reloadProvider();
         for (const id of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5',
                           'claude-future-not-yet-listed', '', undefined])
-            expect(llm._anthropicRejectsSampling(id), String(id)).to.equal(false);
+            expect(llm.anthropicRejectsSampling(id), String(id)).to.equal(false);
         // Prefix-only ids must not match by substring: 4-6 is not 4-7's family.
-        expect(llm._anthropicRejectsSampling('claude-opus-4-70')).to.equal(false);
+        expect(llm.anthropicRejectsSampling('claude-opus-4-70')).to.equal(false);
     });
 
     it('omits temperature for the default claude-opus-4-7 fallback', async function () {
@@ -379,7 +379,7 @@ describe('llm provider, _setConfig', function () {
         // The knob this warning was built for is gone from the shipped defaults, so a
         // fresh hub no longer advertises a governance value the runtime cannot read.
         it('no longer ships judge_equivalence_threshold in the llm provider defaults', function () {
-            const { DEFAULTS } = require('../../src/ProviderRegistry');
+            const { DEFAULTS } = require('../../src/validators/provider_registry');
             let ac = DEFAULTS && DEFAULTS.llm && DEFAULTS.llm.additional_config;
             expect(ac).to.be.an('object');
             expect(ac).to.not.have.property('judge_equivalence_threshold');
@@ -630,7 +630,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     afterEach(function () {
         sinon.restore();
         // Restore any patched cache entry
-        const spawnKey = require.resolve('../../src/lib/claude-spawn.js');
+        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
         if (savedCacheEntry !== undefined) {
             require.cache[spawnKey] = savedCacheEntry;
             savedCacheEntry = undefined;
@@ -642,7 +642,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     // Inject a fake claude-spawn module into the cache, reload llm.js so its
     // destructured binding picks up our stub, then restore after the test.
     function reloadWithSpawnStub(spawnResolveValue) {
-        const spawnKey = require.resolve('../../src/lib/claude-spawn.js');
+        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
         savedCacheEntry = require.cache[spawnKey];
 
         const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
@@ -654,7 +654,7 @@ describe('llm provider, fetch via claude_spawn', function () {
 
         // Now reload llm.js; its `const { runClaudePrint }` will pick up our stub
         delete require.cache[require.resolve('../../src/providers/llm.js')];
-        delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
+        delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
         const llm = require('../../src/providers/llm.js');
         return { llm, stub: fakeRunClaudePrint };
     }
@@ -1058,17 +1058,17 @@ describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
         delete process.env.LLM_MAX_BUDGET_USD;
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
-        expect(llm._resolveMaxBudgetUsd()).to.equal(1.25);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(1.25);
         // clearing the governance value no longer means "no ceiling".
         llm._setConfig({ additional_config: { max_budget_usd: 0 } });
-        expect(llm._resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
     });
 
     it('LLM_MAX_BUDGET_USD env overrides the governance budget', function () {
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
         process.env.LLM_MAX_BUDGET_USD = '0.10';
-        expect(llm._resolveMaxBudgetUsd()).to.equal(0.10);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(0.10);
     });
 });
 
@@ -1741,7 +1741,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
     afterEach(function () {
         sinon.restore();
-        const credsKey = require.resolve('../../src/lib/hub-credentials.js');
+        const credsKey = require.resolve('../../src/lib/hub_credentials.js');
         if (savedCredsCacheEntry !== undefined) {
             require.cache[credsKey] = savedCredsCacheEntry;
             savedCredsCacheEntry = undefined;
@@ -1751,7 +1751,7 @@ describe('llm provider, auth credential fallback chain', function () {
     });
 
     function reloadWithAuthStub(authResult) {
-        const credsKey = require.resolve('../../src/lib/hub-credentials.js');
+        const credsKey = require.resolve('../../src/lib/hub_credentials.js');
         savedCredsCacheEntry = require.cache[credsKey];
 
         const fakeResolve = sinon.stub().returns(authResult);
@@ -1771,7 +1771,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
         // Reload llm.js so it picks up our fake hub-credentials
         delete require.cache[require.resolve('../../src/providers/llm.js')];
-        delete require.cache[require.resolve('../../src/lib/claude-spawn.js')];
+        delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
         const llm = require('../../src/providers/llm.js');
         return { llm, stub: fakeResolve };
     }
@@ -2631,8 +2631,8 @@ describe('llm provider, multi-vendor healthCheck', function () {
 describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () {
 
     function freshCreds() {
-        delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
-        return require('../../src/lib/hub-credentials.js');
+        delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
+        return require('../../src/lib/hub_credentials.js');
     }
 
     it('resolves HUB_OPENAI_API_KEY ahead of OPENAI_API_KEY', function () {

@@ -12,7 +12,7 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const ReorgHandler   = require('../../src/ReorgHandler');
+const ReorgHandler   = require('../../src/anchor/reorg_handler');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4 } = require('../helpers/fixtures');
 const { waitUntil }  = require('../helpers/waitUntil');
@@ -134,17 +134,17 @@ describe('ReorgHandler', function () {
 
     describe('_hashesWellFormed()', function () {
         it('accepts two distinct 64-hex hashes', function () {
-            expect(rh._hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
+            expect(rh.hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
         });
 
         it('rejects identical hashes (not a reorg)', function () {
-            expect(rh._hashesWellFormed(OLD_HASH, OLD_HASH)).to.be.false;
+            expect(rh.hashesWellFormed(OLD_HASH, OLD_HASH)).to.be.false;
         });
 
         it('rejects non-hex / wrong-length / missing values', function () {
-            expect(rh._hashesWellFormed('xyz', NEW_HASH)).to.be.false;
-            expect(rh._hashesWellFormed(OLD_HASH, 'b'.repeat(63))).to.be.false;
-            expect(rh._hashesWellFormed(undefined, NEW_HASH)).to.be.false;
+            expect(rh.hashesWellFormed('xyz', NEW_HASH)).to.be.false;
+            expect(rh.hashesWellFormed(OLD_HASH, 'b'.repeat(63))).to.be.false;
+            expect(rh.hashesWellFormed(undefined, NEW_HASH)).to.be.false;
         });
     });
 
@@ -364,7 +364,7 @@ describe('ReorgHandler', function () {
             // Drive the round to commit quorum and confirm the executed bound.
             pending.commits.add(VALIDATORS_3[1].addr);
             pending.commits.add(VALIDATORS_3[2].addr);
-            rh._checkCommitQuorum(reorgId);
+            rh.checkCommitQuorum(reorgId);
             await new Promise(r => setImmediate(r));
             expect(hub.db.doQuery.getCall(0).args[1][1], 'quorum rollback bound = block_time')
                 .to.equal(blockTime);
@@ -501,10 +501,10 @@ describe('ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            rh._checkPrepareQuorum(reorgId);
+            rh.checkPrepareQuorum(reorgId);
             expect(pm.broadcast.called, 'no COMMIT broadcast for an unverified round').to.be.false;
 
-            rh._checkCommitQuorum(reorgId);
+            rh.checkCommitQuorum(reorgId);
             // _checkCommitQuorum refuses an unverified round inline, so the refusal is
             // already decided by the time it returns.
             expect(hub.db.doQuery.called, 'no rollback for an unverified round').to.be.false;
@@ -1132,7 +1132,7 @@ describe('ReorgHandler', function () {
                 prepares: new Set(['a', 'b']), commits: new Set(['a', 'b']),
                 finalized: false, timer: null, quorum: 2, digest: 'd', selfVerified: true
             });
-            rh._checkCommitQuorum('BTC:5:1');
+            rh.checkCommitQuorum('BTC:5:1');
             await waitUntil(() => rh.pendingReorgs.has('BTC:5:1') === false, { label: 'the failed rollback to clear the pending reorg' });
             expect(rh.pendingReorgs.has('BTC:5:1')).to.be.false;
         });

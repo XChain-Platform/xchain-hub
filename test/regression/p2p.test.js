@@ -12,8 +12,8 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ValidatorIdentity  = require('../../src/ValidatorIdentity');
-const PeerManager        = require('../../src/PeerManager');
+const ValidatorIdentity  = require('../../src/validators/identity');
+const PeerManager        = require('../../src/peers/manager');
 const { DB_METHODS }     = require('../helpers/mockHub');
 
 describe('Regression: P2P & ValidatorIdentity', function () {
@@ -174,7 +174,7 @@ describe('Regression: P2P & ValidatorIdentity', function () {
             });
 
             it('envelope has required fields @regression-p1', function () {
-                let env = pm._buildEnvelope('TEST', { foo: 'bar' });
+                let env = pm.buildEnvelope('TEST', { foo: 'bar' });
                 expect(env).to.have.property('id');
                 expect(env).to.have.property('timestamp');
                 expect(env.type).to.equal('TEST');
@@ -182,8 +182,8 @@ describe('Regression: P2P & ValidatorIdentity', function () {
             });
 
             it('generates unique IDs @regression-p1', function () {
-                let a = pm._buildEnvelope('T', {});
-                let b = pm._buildEnvelope('T', {});
+                let a = pm.buildEnvelope('T', {});
+                let b = pm.buildEnvelope('T', {});
                 expect(a.id).to.not.equal(b.id);
             });
         });
@@ -208,8 +208,8 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 };
                 let raw = JSON.stringify(env);
 
-                pm._handleInbound(mockWs, raw, 'ws://peer:10001');
-                pm._handleInbound(mockWs, raw, 'ws://peer:10001');
+                pm.handleInbound(mockWs, raw, 'ws://peer:10001');
+                pm.handleInbound(mockWs, raw, 'ws://peer:10001');
                 expect(emitted).to.equal(1);
             });
         });
@@ -227,7 +227,7 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 };
                 env.sig = identity.signEnvelope(env);
 
-                expect(pm._verifySignature(env)).to.be.true;
+                expect(pm.verifySignature(env)).to.be.true;
             });
 
             it('invalid signature rejected when REQUIRE_SIGNATURES=true @regression-p0', function () {
@@ -239,7 +239,7 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                     timestamp: Date.now(), data: {}, sig: 'aa'.repeat(64)
                 };
 
-                expect(pm._verifySignature(env)).to.be.false;
+                expect(pm.verifySignature(env)).to.be.false;
             });
 
             it('no sig required when REQUIRE_SIGNATURES=false @regression-p0', function () {
@@ -248,7 +248,7 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                     id: 'msg-1', type: 'TEST', sender: 'ws://peer:10001',
                     timestamp: Date.now(), data: {}
                 };
-                expect(pm._verifySignature(env)).to.be.true;
+                expect(pm.verifySignature(env)).to.be.true;
             });
         });
 
@@ -258,13 +258,13 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 let identity = new ValidatorIdentity(keypair.privkeyHex);
                 pm.setIdentity(identity);
 
-                let env = pm._buildEnvelope('TEST', { x: 1 });
+                let env = pm.buildEnvelope('TEST', { x: 1 });
                 expect(env.sig).to.be.a('string');
                 expect(env.sig.length).to.equal(128);
             });
 
             it('no sig when identity not set @regression-p1', function () {
-                let env = pm._buildEnvelope('TEST', {});
+                let env = pm.buildEnvelope('TEST', {});
                 expect(env.sig).to.be.undefined;
             });
         });
@@ -274,12 +274,12 @@ describe('Regression: P2P & ValidatorIdentity', function () {
             it('does not crash on non-JSON message @regression-p2', function () {
                 let emitted = 0;
                 pm.on('message', () => emitted++);
-                expect(() => pm._handleInbound(null, 'not json', 'ws://peer:10001')).to.not.throw();
+                expect(() => pm.handleInbound(null, 'not json', 'ws://peer:10001')).to.not.throw();
                 expect(emitted).to.equal(0);
             });
 
             it('does not crash on empty string @regression-p2', function () {
-                expect(() => pm._handleInbound(null, '', 'ws://peer:10001')).to.not.throw();
+                expect(() => pm.handleInbound(null, '', 'ws://peer:10001')).to.not.throw();
             });
         });
 

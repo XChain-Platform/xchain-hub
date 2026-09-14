@@ -268,7 +268,7 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
             columns: [...NARROW, 'source', 'id'],
             indexes: { uq_cap_snap_widening: [...NARROW, 'source'] }
         });
-        await db._assertUniqueKeyStillEnforced(catalogue.conn, 'capability_snapshots',
+        await db.assertUniqueKeyStillEnforced(catalogue.conn, 'capability_snapshots',
             'uq_cap_snap', 'uq_cap_snap_widening', 'ALTER TABLE capability_snapshots ADD UNIQUE KEY uq_cap_snap ' + WIDE);
         const warned = console.error.getCalls().map(c => String(c.args[0])).join('\n');
         expect(warned).to.match(/uq_cap_snap_widening/);
@@ -284,7 +284,7 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         });
         let thrown = null;
         try {
-            await db._assertUniqueKeyStillEnforced(catalogue.conn, 'capability_snapshots',
+            await db.assertUniqueKeyStillEnforced(catalogue.conn, 'capability_snapshots',
                 'uq_cap_snap', 'uq_cap_snap_widening', 'ALTER TABLE t ADD UNIQUE KEY uq_cap_snap ' + WIDE);
         } catch (e) { thrown = e; }
         expect(thrown).to.be.an('error');

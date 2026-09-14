@@ -12,7 +12,7 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const OracleConsensus = require('../../../src/OracleConsensus');
+const OracleConsensus = require('../../../src/oracle/consensus');
 const { createMockHub }      = require('../../helpers/mockHub');
 const { buildSubmissions }   = require('../../helpers/fixtures');
 

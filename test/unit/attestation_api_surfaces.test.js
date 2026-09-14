@@ -24,7 +24,7 @@ const sinon         = require('sinon');
 const { expect }    = require('chai');
 const proxyquire    = require('proxyquire').noPreserveCache();
 const { waitUntil }  = require('../helpers/waitUntil');
-const AttestationRound = require('../../src/AttestationRound');
+const AttestationRound = require('../../src/attestation/round');
 
 // Cold require of the whole hub tree on the first boot can exceed mocha's
 // 2s default on a loaded box (see attestRelayHealth.test.js).
@@ -53,7 +53,7 @@ describe('attestation API surfaces (p2pConfig knobs + responsible-set read)', fu
             getAttestationRound: () => null,
             getProviderRegistry: () => null,
             _resolveBtcIndexerUrl: async () => null,
-            _btcIndexerHeaders: () => ({}),
+            btcIndexerHeaders: () => ({}),
             start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
             startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
             startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},

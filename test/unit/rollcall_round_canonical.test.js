@@ -27,8 +27,8 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const RollcallRound     = require('../../src/RollcallRound.js');
-const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
+const RollcallRound     = require('../../src/rollcall/round.js');
+const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
                               'protocol', 'test-vectors', 'rollcall_canonical.json');
@@ -138,7 +138,7 @@ describe('RollcallRound canonical + wire conformance', function () {
             for (let i = 6; i < fields.length; i += 2) pairs.push(byKey[fields[i]]);
             assert.strictEqual(pairs.length, w.sig_count, w.name + ': pair recovery');
 
-            const wire = eng._buildWire(V.canonical.epoch_height, V.canonical.ledger_hash,
+            const wire = eng.buildWire(V.canonical.epoch_height, V.canonical.ledger_hash,
                                         w.publisher, pairs);
             assert.strictEqual(wire, w.expected, w.name);
             assert.strictEqual(Buffer.byteLength(wire, 'utf8'), w.bytes, w.name + ': byte count');
@@ -150,7 +150,7 @@ describe('RollcallRound canonical + wire conformance', function () {
         const pairs = V.signers.map(s => ({ pubkey: s.pubkey, sig: s.sig }));
         // A publisher that signed nothing: the reward attaches to the key, and the
         // wire must still carry exactly the pairs it collected.
-        const wire   = eng._buildWire(30, V.canonical.ledger_hash, 'e'.repeat(64), pairs);
+        const wire   = eng.buildWire(30, V.canonical.ledger_hash, 'e'.repeat(64), pairs);
         const fields = wire.split('|');
         assert.strictEqual(fields[4], 'e'.repeat(64), 'PUBLISHER field');
         assert.strictEqual(Number(fields[5]), pairs.length, 'SIG_COUNT');
@@ -162,7 +162,7 @@ describe('RollcallRound canonical + wire conformance', function () {
 
     it('lowercases every hex field on the wire (the action name stays upper)', function () {
         const eng  = builder('regtest');
-        const wire = eng._buildWire(30, V.canonical.ledger_hash.toUpperCase(), 'A'.repeat(64),
+        const wire = eng.buildWire(30, V.canonical.ledger_hash.toUpperCase(), 'A'.repeat(64),
                                     [{ pubkey: 'B'.repeat(64), sig: 'C'.repeat(128) }]);
         const fields = wire.split('|');
         assert.strictEqual(fields[0], 'ROLLCALL', 'the action name is the decoder allowlist key');
@@ -203,7 +203,7 @@ describe('RollcallRound canonical + wire conformance', function () {
         // The commitment is sha256 of the field EXACTLY as carried, and the vector
         // states it separately so a helper that hashed a normalised list would fail
         // here rather than at an eviction a year later.
-        const rc = require('../../src/rollcall_canonical.js');
+        const rc = require('../../src/rollcall/rollcall_canonical.js');
         assert.strictEqual(rc.gatesHash(V1.gates), V1.gates_hash);
         assert.ok(V1.expected.endsWith('|' + V1.gates_hash));
         assert.strictEqual(Buffer.byteLength(V1.gates, 'utf8'), V1.gates_bytes);
@@ -265,7 +265,7 @@ describe('RollcallRound canonical + wire conformance', function () {
             for (let i = 7; i < fields.length; i += 2) pairs.push(byKey[fields[i]]);
             assert.strictEqual(pairs.length, w.sig_count, w.name + ': pair recovery');
 
-            const wire = eng._buildWire(V1.epoch_height, V1.ledger_hash, w.publisher, pairs, w.gates);
+            const wire = eng.buildWire(V1.epoch_height, V1.ledger_hash, w.publisher, pairs, w.gates);
             assert.strictEqual(wire, w.expected, w.name);
             assert.strictEqual(Buffer.byteLength(wire, 'utf8'), w.bytes, w.name + ': byte count');
         }
@@ -308,8 +308,8 @@ describe('RollcallRound canonical + wire conformance', function () {
             pubkey: i.toString(16).padStart(64, '0'), sig: i.toString(16).padStart(128, '0')
         }));
         // A 7-digit epoch is the widest header the cap was derived against.
-        const at   = eng._buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), mk(cap), gates);
-        const over = eng._buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), mk(cap + 1), gates);
+        const at   = eng.buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), mk(cap), gates);
+        const over = eng.buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), mk(cap + 1), gates);
         assert.ok(Buffer.byteLength(at, 'utf8') <= V.size_budget.max_data_bytes,
             'a full v1 action is ' + Buffer.byteLength(at, 'utf8') + ' bytes, past the ' +
             V.size_budget.max_data_bytes + '-byte ceiling; the decoder DROPS an oversize action silently');
@@ -323,12 +323,12 @@ describe('RollcallRound canonical + wire conformance', function () {
             pubkey: i.toString(16).padStart(64, '0'), sig: i.toString(16).padStart(128, '0')
         }));
         // A 7-digit epoch is the header the size budget was measured against.
-        const wire = eng._buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), pairs);
+        const wire = eng.buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64), pairs);
         assert.ok(Buffer.byteLength(wire, 'utf8') <= V.size_budget.max_data_bytes,
             'a full action is ' + Buffer.byteLength(wire, 'utf8') + ' bytes, past the ' +
             V.size_budget.max_data_bytes + '-byte ceiling; the decoder DROPS an oversize action silently');
         // And 42 would not fit, so the bound is the real one and not slack.
-        const over = eng._buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64),
+        const over = eng.buildWire(1008000, V.canonical.ledger_hash, 'a'.repeat(64),
                                     pairs.concat([{ pubkey: 'f'.repeat(64), sig: 'f'.repeat(128) }]));
         assert.ok(Buffer.byteLength(over, 'utf8') > V.size_budget.max_data_bytes,
             'MAX_PAIRS_PER_ACTION is below the real ceiling; the split is costing fees for nothing');

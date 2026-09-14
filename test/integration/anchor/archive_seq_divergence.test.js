@@ -38,8 +38,8 @@
 const { expect }            = require('chai');
 const os                    = require('os');
 const path                  = require('path');
-const StateAnchorPublisher  = require('../../../src/StateAnchorPublisher');
-const ValidatorIdentity     = require('../../../src/ValidatorIdentity');
+const StateAnchorPublisher  = require('../../../src/anchor/publisher');
+const ValidatorIdentity     = require('../../../src/validators/identity');
 const eq                    = require('../../../src/equivocation_header.js');
 const ccr                   = require('../../../src/cross_chain_royalty_activation.js');
 const arMod                 = require('../../../src/anchor_reward_activation.js');
@@ -206,7 +206,7 @@ async function keyAt(nd){
     let rows = await nd.db.doQuery(
         "SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1",
         [NETWORK]);
-    return nd.pub._archiveElectionKey(nd.pub._cpFromRow(rows[0]), await nd.pub._getNextBatchSeq());
+    return nd.pub._archiveElectionKey(nd.pub.cpFromRow(rows[0]), await nd.pub._getNextBatchSeq());
 }
 async function orderAt(nd, bus){
     return StateAnchorPublisher.hashOrder(await keyAt(nd), bus.nodes.map(n => n.pubkey));
@@ -365,7 +365,7 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
 
         let fin = leader.sent.find(m => m.type === 'XANC_FINALIZED');
         expect(fin, 'round one announced a FINALIZED').to.not.equal(undefined);
-        await laggy.pub._handleFinalized({ type: 'XANC_FINALIZED', sender: leader.pubkey, data: fin.data });
+        await laggy.pub.handleFinalized({ type: 'XANC_FINALIZED', sender: leader.pubkey, data: fin.data });
 
         expect(laggy.pub._observedConsumedBatchSeq, 'batch 0 learned as consumed').to.equal(0);
         expect(laggy.db.matches[0].batch_seq, 'and the missed back-fill actually landed').to.equal(0);

@@ -14,7 +14,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const ReorgHandler = require('../../src/ReorgHandler');
+const ReorgHandler = require('../../src/anchor/reorg_handler');
 const { createMockHub } = require('../helpers/mockHub');
 
 describe('ReorgHandler price-snapshot dispute unit (stress-sweep 2026-07-08)', function () {

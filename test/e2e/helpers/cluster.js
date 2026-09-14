@@ -15,7 +15,7 @@ const helmet            = require('helmet');
 const cors              = require('cors');
 const jsonRouter        = require('express-json-rpc-router');
 const XChainHub         = require('../../../src/XChainHub');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const ValidatorIdentity = require('../../../src/validators/identity');
 const testDb            = require('../../helpers/testDb');
 
 const DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';

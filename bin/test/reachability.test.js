@@ -113,7 +113,7 @@ describe('bin/reachability.js', function () {
         });
 
         it('resolves all three bridge gates out of the engine itself', () => {
-            const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/CrossChainBridgeEngine.js');
+            const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/cross_chain/bridge_engine.js');
             assert.ok(edge, 'the bridge edge must be declared');
             const targets = edge.toList();
             assert.deepStrictEqual(targets.slice().sort(), [
@@ -133,14 +133,14 @@ describe('bin/reachability.js', function () {
             const targets = withFixture({
                 'src/db/index.js': [
                     "const mariadb = require('mariadb');",
-                    "const ark = require('../anchor_reward_key.js');",
+                    "const ark = require('../anchor/anchor_reward_key.js');",
                     "const MIXINS = [require('./anchor.js'), require('./configs.js')];",
                     'module.exports = MIXINS;',
                 ].join('\n'),
                 'src/db/anchor.js': 'module.exports = {};\n',
                 'src/db/configs.js': 'module.exports = {};\n',
                 'src/db/orphan.js': 'module.exports = {};\n',
-                'src/anchor_reward_key.js': 'module.exports = {};\n',
+                'src/anchor/anchor_reward_key.js': 'module.exports = {};\n',
             }, () => edgeFrom('src/db/index.js').toList());
 
             assert.deepStrictEqual(targets, ['src/db/anchor.js', 'src/db/configs.js'],
@@ -176,10 +176,10 @@ describe('bin/reachability.js', function () {
             const noMixins = withFixture({
                 'src/db/index.js': [
                     "const mariadb = require('mariadb');",
-                    "const ark = require('../anchor_reward_key.js');",
+                    "const ark = require('../anchor/anchor_reward_key.js');",
                     'module.exports = class Database {};',
                 ].join('\n'),
-                'src/anchor_reward_key.js': 'module.exports = {};\n',
+                'src/anchor/anchor_reward_key.js': 'module.exports = {};\n',
             }, () => edgeFrom('src/db/index.js').toList());
             assert.deepStrictEqual(noMixins, [], 'a db home with no mixins is zero edges');
 
@@ -234,8 +234,8 @@ describe('bin/reachability.js', function () {
 
         it('resolves an extensionless relative require', () => {
             assert.strictEqual(
-                reach.resolveRequire('src/api.js', './hub-schema-version'),
-                'src/hub-schema-version.js',
+                reach.resolveRequire('src/api.js', './hub_schema_version'),
+                'src/hub_schema_version.js',
             );
             assert.strictEqual(reach.resolveRequire('src/api.js', 'crypto'), null,
                 'a bare package specifier is not a repo-local edge');

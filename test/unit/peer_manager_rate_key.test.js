@@ -16,7 +16,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const PeerManager = require('../../src/PeerManager');
+const PeerManager = require('../../src/peers/manager');
 
 function makePm() {
     let config = {
@@ -48,7 +48,7 @@ describe('PeerManager rate-limit keying (stress-sweep 2026-07-08)', function () 
                 sig: 'deadbeef',
                 sig_pubkey: 'aa'.repeat(32)
             };
-            pm._handleInbound(ws, JSON.stringify(env), null);
+            pm.handleInbound(ws, JSON.stringify(env), null);
         }
 
         // A single bucket keyed on the remote IP, not five sender-keyed buckets.

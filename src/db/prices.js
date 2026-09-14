@@ -87,19 +87,19 @@ module.exports = {
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleConsensus.js:374.
+    // Moved here from src/oracle/consensus.js:374.
     async findLatestPriceSnapshotPerPair() {
         return this.doQuery(`SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number FROM price_snapshots p JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots       WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m   ON p.coin_pair = m.coin_pair AND p.round_number = m.mx WHERE p.status = 'finalized' AND p.price IS NOT NULL`);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleRound.js:506.
+    // Moved here from src/oracle/round.js:506.
     async findPriceSnapshotRoundsAfter(max) {
         return this.doQuery('SELECT DISTINCT round_number FROM price_snapshots WHERE round_number > ? ORDER BY round_number DESC LIMIT 50', [max]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleRound.js:459.
+    // Moved here from src/oracle/round.js:459.
     async findPriceSnapshotRoundsSkippedWithNoFinalized() {
         return this.doQuery(`SELECT DISTINCT s.round_number FROM price_snapshots s
                  WHERE s.status = 'skipped' AND NOT EXISTS (
@@ -121,37 +121,37 @@ module.exports = {
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleBatchSigner.js:560, src/OraclePublisher.js:2327.
+    // Moved here from src/oracle/batch_signer.js:560, src/oracle/publisher.js:2327.
     async findPriceSnapshotsByRoundNumber(firstRound, lastRound, status) {
         return this.doQuery('SELECT round_number, coin_pair, price, reference_block, block_timestamp, LEFT(consensus_proof, 8) AS proof_head, admit_block_btc, admit_block_ltc, admit_block_doge FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ORDER BY round_number ASC, coin_pair ASC', [firstRound, lastRound, status]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/PriceAggregator.js:791.
+    // Moved here from src/oracle/price_aggregator.js:791.
     async findPriceSnapshotsByRoundNumberAndBatchBlockTime(round, landed) {
         return this.doQuery('SELECT round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index, push_generation, batch_block_time, created_at FROM price_snapshots WHERE round_number = ? AND batch_block_time = ?', [round, landed]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OraclePublisher.js:1479.
+    // Moved here from src/oracle/publisher.js:1479.
     async findPriceSnapshotsByRoundNumberAndConsensusProof(first, last) {
         return this.doQuery(`SELECT DISTINCT round_number, consensus_proof FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND consensus_proof LIKE '{"batch":%'`, [first, last]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OraclePublisher.js:2419.
+    // Moved here from src/oracle/publisher.js:2419.
     async findPriceSnapshotsByRoundNumberAndStatus(first, last, status) {
         return this.doQuery('SELECT DISTINCT round_number, block_timestamp FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ?', [first, last, status]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleConsensus.js:2345, src/OracleConsensus.js:2495.
+    // Moved here from src/oracle/consensus.js:2345, src/oracle/consensus.js:2495.
     async findPriceSnapshotsForRound(round) {
         return this.doQuery('SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
     },
 
     // Reads rows from price_snapshots.
-    // Moved here from src/OracleRound.js:476.
+    // Moved here from src/oracle/round.js:476.
     async findPriceSnapshotsSkippedWithFinalizedRound() {
         return this.doQuery(`SELECT s.round_number, s.coin_pair FROM price_snapshots s
                  WHERE s.status = 'skipped' AND EXISTS (
@@ -161,19 +161,19 @@ module.exports = {
     },
 
     // Reads one row from price_snapshots.
-    // Moved here from src/PriceAggregator.js:526, src/PriceAggregator.js:1131.
+    // Moved here from src/oracle/price_aggregator.js:526, src/oracle/price_aggregator.js:1131.
     async getPriceSnapshotByRoundNumber(round) {
         return this.doQuery(`SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1`, [round]);
     },
 
     // Reads one row from price_snapshots.
-    // Moved here from src/OracleRound.js:322.
+    // Moved here from src/oracle/round.js:322.
     async getPriceSnapshotByStatus() {
         return this.doQuery(`SELECT round_number, UNIX_TIMESTAMP(created_at) * 1000 AS ms FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC LIMIT 1`);
     },
 
     // Reads one row from price_snapshots.
-    // Moved here from src/OracleRound.js:337.
+    // Moved here from src/oracle/round.js:337.
     async getPriceSnapshotsCountUnfinalizedAfterRound(lastFinalizedRound) {
         return this.doQuery(`SELECT COUNT(DISTINCT round_number) AS skipped FROM price_snapshots WHERE round_number > ? AND status <> 'finalized'`, [lastFinalizedRound]);
     },
@@ -185,7 +185,7 @@ module.exports = {
     },
 
     // Reads one row from price_snapshots.
-    // Moved here from src/HubDbBroadcaster.js:632.
+    // Moved here from src/peers/hub_db_broadcaster.js:632.
     async getPriceSnapshotsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM price_snapshots');
     },
@@ -197,25 +197,25 @@ module.exports = {
     },
 
     // Probes for a matching row in price_snapshots.
-    // Moved here from src/OraclePublisher.js:1688.
+    // Moved here from src/oracle/publisher.js:1688.
     async hasPriceSnapshotsByConsensusProof() {
         return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE '{"batch":%' LIMIT 1`);
     },
 
     // Probes for a matching row in price_snapshots.
-    // Moved here from src/OraclePublisher.js:1669.
+    // Moved here from src/oracle/publisher.js:1669.
     async hasPriceSnapshotsByRoundNumber(first, last) {
         return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND consensus_proof LIKE '{"batch":%' LIMIT 1`, [first, last]);
     },
 
     // Updates price_snapshots.
-    // Moved here from src/ReorgHandler.js:637.
+    // Moved here from src/anchor/reorg_handler.js:637.
     async updatePriceSnapshotByBlockTimestamp(bound) {
         return this.doQuery(`UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'`, [bound]);
     },
 
     // Updates price_snapshots.
-    // Moved here from src/PriceAggregator.js:782.
+    // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
     },
@@ -240,7 +240,7 @@ module.exports = {
     },
 
     // Latest FINALIZED price for a pair strictly BELOW a round number.
-    // Moved here from src/XchainPriceSource.js:86 (it was LAST_FINALIZED_SQL there).
+    // Moved here from src/oracle/xchain_price_source.js:86 (it was LAST_FINALIZED_SQL there).
     //
     // Strictly below, and keyed on the round rather than "the newest row I have", because
     // §4 requires the winsorization anchor to be consensus-derived: rounds finalize
@@ -257,7 +257,7 @@ module.exports = {
 
     // A set of rounds' finalized v0-proofed rows, for restoring a retracted batch window
     // to the publisher's buffer.
-    // Moved here from src/OraclePublisher.js:1917.
+    // Moved here from src/oracle/publisher.js:1917.
     //
     // Only v0-proofed rows qualify: a batch-sourced row's consensus_proof is the
     // {"batch":...} object and its reference_block is the landing height, not the round's
@@ -274,7 +274,7 @@ module.exports = {
     },
 
     // Writes one consensus-finalized round, every pair, in ONE multi-row INSERT.
-    // Moved here from src/OracleConsensus.js:2269.
+    // Moved here from src/oracle/consensus.js:2269.
     //
     // One statement so the round lands atomically: a per-pair loop let a getfeequote /
     // getpricesnapshots reader observe a torn round (some pairs from round N, others from
@@ -302,8 +302,8 @@ module.exports = {
     },
 
     // Writes a 'skipped' marker row for each of a round's pairs, in ONE multi-row INSERT.
-    // Moved here from src/OracleConsensus.js:2469 (_storeSkippedRound), and also serving the
-    // per-pair skip markers at src/OracleConsensus.js:2302, which issued the same statement
+    // Moved here from src/oracle/consensus.js:2469 (_storeSkippedRound), and also serving the
+    // per-pair skip markers at src/oracle/consensus.js:2302, which issued the same statement
     // with only its indentation differing.
     //
     // The upsert only refreshes a row that is still 'skipped': a pair that already finalized
@@ -324,7 +324,7 @@ module.exports = {
     },
 
     // Writes one externally pushed PRICE v0 round, every pair, in ONE multi-row INSERT.
-    // Moved here from src/PriceAggregator.js:722.
+    // Moved here from src/oracle/price_aggregator.js:722.
     //
     // Upsert, not a plain INSERT: a 'skipped' placeholder row may already occupy this
     // (round_number, coin_pair) key, and it is overwritten with the real finalized data; for
@@ -361,7 +361,7 @@ module.exports = {
     },
 
     // Writes one round of a landed PRICE batch, every pair, in ONE multi-row INSERT.
-    // Moved here from src/PriceAggregator.js:1183.
+    // Moved here from src/oracle/price_aggregator.js:1183.
     //
     // One statement PER ROUND, not one for the whole batch: the unit that must never be
     // observed torn is the round. batch_block_time only ever moves EARLIER (or fills a 0), so
@@ -398,7 +398,7 @@ module.exports = {
     },
 
     // The rounds a retracted PRICE batch carried on a rolled-back source chain.
-    // Moved here from src/PriceAggregator.js:1568.
+    // Moved here from src/oracle/price_aggregator.js:1568.
     //
     // Read BEFORE the retraction delete, because afterwards there is nothing left to read them
     // off. Batch-sourced rows are the ones whose consensus_proof is the {"batch":...} object; a
@@ -418,7 +418,7 @@ module.exports = {
     },
 
     // Deletes a rolled-back source chain's PRICE v0 round rows, for a reorg retraction.
-    // Moved here from src/PriceAggregator.js:1607.
+    // Moved here from src/oracle/price_aggregator.js:1607.
     //
     // price_snapshots tracks the round action via source_action_index. `bounded` closes the
     // range at `to` so a row re-published inside the original open-ended range survives a

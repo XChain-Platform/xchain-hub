@@ -40,8 +40,8 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
-const SlashDetector    = require('../../src/SlashDetector');
-const SlashGovernance  = require('../../src/SlashGovernance');
+const SlashDetector    = require('../../src/validators/slash_detector');
+const SlashGovernance  = require('../../src/validators/slash_governance');
 const { createMockHub } = require('../helpers/mockHub');
 const { waitUntil }     = require('../helpers/waitUntil');
 

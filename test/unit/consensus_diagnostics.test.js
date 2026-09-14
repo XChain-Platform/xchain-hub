@@ -17,10 +17,10 @@
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const OracleConsensus   = require('../../src/OracleConsensus');
+const OracleConsensus   = require('../../src/oracle/consensus');
 const { createMockHub } = require('../helpers/mockHub');
 const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
-const diagnostics       = require('../../src/consensusDiagnostics');
+const diagnostics       = require('../../src/consensus/diagnostics');
 const observability     = require('../../src/observability');
 
 describe('consensus diagnostics: silent PBFT drops become records (AT2)', function () {
@@ -62,7 +62,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
 
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -88,7 +88,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         oc.stop();
         sinon.restore();
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('records a PREPARE whose digest disagrees with the pending round', async function () {
@@ -129,7 +129,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
 
         // A round that assembles drains its buffer, so anything still parked at
         // expiry is a vote that was silently lost.
-        oc._pruneEarlyMessages(Date.now() + oc.earlyMessageTtlMs + 1);
+        oc.pruneEarlyMessages(Date.now() + oc.earlyMessageTtlMs + 1);
 
         expect(drops('early_ttl')).to.have.lengthOf(1);
         expect(drops('early_ttl')[0]).to.include('count=1');
@@ -156,7 +156,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', digest));        // unknown_sender
         oc.earlyMessages.set(999, [voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest)]);
         oc.earlyMessageTtl.set(999, Date.now() - 1);
-        oc._pruneEarlyMessages(Date.now());                                                  // early_ttl
+        oc.pruneEarlyMessages(Date.now());                                                  // early_ttl
 
         const reasons = new Set(drops().map(l => (l.match(/reason=(\w+)/) || [])[1]));
         expect([...reasons].sort()).to.deep.equal(['digest_mismatch', 'early_ttl', 'unknown_sender']);
@@ -172,7 +172,7 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
 
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -181,7 +181,7 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
     });
     afterEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('throttles a flood from one IP to one line while still counting every drop', function () {
@@ -250,7 +250,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     let sink;
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -259,7 +259,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     });
     afterEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('records every stalled tick, not one in sixty', function () {
@@ -267,14 +267,14 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         // flood an operator's tail. The record must NOT share that throttle: a
         // collector counting stalled ticks needs every one, and dropping 59 of
         // every 60 makes a worsening cadence read as a steady one.
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();   // throttle CLOSED
         engine._cadenceStallLogMs = 600000;
         engine.chains = ['BTC', 'LTC', 'DOGE'];
 
-        for (let i = 0; i < 5; i++) engine._noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
+        for (let i = 0; i < 5; i++) engine.noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
 
         const records = sink.lines.filter((l) => l.includes('CHECKPOINT_STALLED'));
         expect(records).to.have.lengthOf(5);
@@ -284,13 +284,13 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     });
 
     it('carries the block it could not lead, and says unknown rather than dropping the field', function () {
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();
         engine._cadenceStallLogMs = 600000;
 
-        engine._noteCadenceStall(null, 'no snapshot rows');
+        engine.noteCadenceStall(null, 'no snapshot rows');
         const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
         expect(rec).to.include('reason="no snapshot rows"');
         expect(rec).to.not.include('block=');
@@ -300,14 +300,14 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     it('names the round chains it actually runs, never a hardcoded BTC', function () {
         // The emission read `this.coin`, a property this class never assigns, so the
         // `|| 'BTC'` fallback fired every time and an LTC/DOGE hub's stall read as BTC.
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();
         engine._cadenceStallLogMs = 600000;
         engine.chains = ['LTC', 'DOGE'];
 
-        engine._noteCadenceStall(4855000, 'no validator identity (cannot sign checkpoints)');
+        engine.noteCadenceStall(4855000, 'no validator identity (cannot sign checkpoints)');
 
         const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
         expect(rec).to.include('chains=LTC/DOGE');

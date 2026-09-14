@@ -36,10 +36,10 @@ const KEY_STRANGER = 'cc'.repeat(32);   // in neither
 // The four engines whose quorum denominator comes from chain state and whose
 // admission therefore had to follow it.
 const CHAIN_KEYED = [
-    { name: 'Consensus',        cls: require('../../src/Consensus'),        method: '_isKnownSender' },
-    { name: 'OracleConsensus',  cls: require('../../src/OracleConsensus'),  method: '_isKnownSender' },
-    { name: 'CrossChainEngine', cls: require('../../src/CrossChainEngine'), method: '_isKnownSender' },
-    { name: 'OracleRound',      cls: require('../../src/OracleRound'),      method: '_isRegisteredSender' },
+    { name: 'Consensus',        cls: require('../../src/consensus/pbft'),        method: '_isKnownSender' },
+    { name: 'OracleConsensus',  cls: require('../../src/oracle/consensus'),  method: '_isKnownSender' },
+    { name: 'CrossChainEngine', cls: require('../../src/cross_chain/engine'), method: '_isKnownSender' },
+    { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: '_isRegisteredSender' },
 ];
 
 // Governance and ReorgHandler deliberately do NOT appear above. Both derive their
@@ -48,8 +48,8 @@ const CHAIN_KEYED = [
 // chain-denominator/registry-numerator mismatch this change fixes, and neither should
 // start admitting on chain state alone. They keep the registry-keyed predicate.
 const REGISTRY_KEYED = [
-    { name: 'Governance',   cls: require('../../src/Governance'),   method: '_isKnownSender' },
-    { name: 'ReorgHandler', cls: require('../../src/ReorgHandler'), method: '_isKnownSender' },
+    { name: 'Governance',   cls: require('../../src/validators/governance'),   method: '_isKnownSender' },
+    { name: 'ReorgHandler', cls: require('../../src/anchor/reorg_handler'), method: '_isKnownSender' },
 ];
 
 function call(cls, method, peerManager, arg) {
@@ -188,8 +188,8 @@ describe('vote admission follows the chain-effective signer set', function () {
 });
 
 describe('one key is one vote (count-mode forgery bound)', function () {
-    const OracleConsensus  = require('../../src/OracleConsensus');
-    const CrossChainEngine = require('../../src/CrossChainEngine');
+    const OracleConsensus  = require('../../src/oracle/consensus');
+    const CrossChainEngine = require('../../src/cross_chain/engine');
 
     // A tally that keyed on envelope.sender could be inflated to a full quorum by
     // one authorized key naming N different senders. Keyed on the proven key, those
@@ -202,7 +202,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
             const votes = new Set();
             const self = { };
             for (let i = 0; i < 7; i++) {
-                cls.prototype._addVote.call(self, votes, env(KEY_CHAIN, 'forged-addr-' + i));
+                cls.prototype.addVote.call(self, votes, env(KEY_CHAIN, 'forged-addr-' + i));
             }
             expect(votes.size, 'one signing key, one vote').to.equal(1);
             expect([...votes]).to.deep.equal([KEY_CHAIN]);
@@ -211,15 +211,15 @@ describe('one key is one vote (count-mode forgery bound)', function () {
         it(name + ': distinct keys each count once', function () {
             const votes = new Set();
             const self = { };
-            cls.prototype._addVote.call(self, votes, env(KEY_CHAIN, 'a'));
-            cls.prototype._addVote.call(self, votes, env(KEY_REGISTRY, 'b'));
+            cls.prototype.addVote.call(self, votes, env(KEY_CHAIN, 'a'));
+            cls.prototype.addVote.call(self, votes, env(KEY_REGISTRY, 'b'));
             expect(votes.size).to.equal(2);
         });
 
         it(name + ': an envelope with no proven key adds nothing', function () {
             const votes = new Set();
             const self = { };
-            cls.prototype._addVote.call(self, votes, env(undefined, 'a'));
+            cls.prototype.addVote.call(self, votes, env(undefined, 'a'));
             expect(votes.size).to.equal(0);
         });
     }
@@ -229,19 +229,19 @@ describe('one key is one vote (count-mode forgery bound)', function () {
         const pending = { memberPubkeys: new Set([KEY_CHAIN, KEY_REGISTRY]) };
         // KEY_STRANGER voted but is not in the round's qualified snapshot set.
         const votes = new Set([KEY_CHAIN, KEY_REGISTRY, KEY_STRANGER]);
-        expect(self._countDistinctMembers(pending, votes)).to.equal(2);
+        expect(self.countDistinctMembers(pending, votes)).to.equal(2);
     });
 
     it('CrossChainEngine tallies distinct member keys against the locked snapshot', function () {
         const self = Object.create(CrossChainEngine.prototype);
         const pending = { memberPubkeys: new Set([KEY_CHAIN]) };
         const votes = new Set([KEY_CHAIN, KEY_STRANGER]);
-        expect(self._countedVotes(pending, votes)).to.equal(1);
+        expect(self.countedVotes(pending, votes)).to.equal(1);
     });
 });
 
 describe('Consensus._quorumMet counts signing keys', function () {
-    const Consensus = require('../../src/Consensus');
+    const Consensus = require('../../src/consensus/pbft');
 
     it('counts the KEY set, not the addr set, when keys are present', function () {
         const self = Object.create(Consensus.prototype);
@@ -249,7 +249,7 @@ describe('Consensus._quorumMet counts signing keys', function () {
         // One key that forged three sender addrs: three addrs, one key. Must NOT pass.
         const addrs = new Set(['a', 'b', 'c']);
         const keys  = new Set([KEY_CHAIN]);
-        expect(self._quorumMet(ctx, addrs, keys)).to.equal(false);
+        expect(self.quorumMet(ctx, addrs, keys)).to.equal(false);
     });
 
     it('passes once enough DISTINCT keys have voted', function () {
@@ -257,13 +257,13 @@ describe('Consensus._quorumMet counts signing keys', function () {
         const ctx = { weighted: false, quorum: 3 };
         const addrs = new Set(['a']);
         const keys  = new Set([KEY_CHAIN, KEY_REGISTRY, KEY_STRANGER]);
-        expect(self._quorumMet(ctx, addrs, keys)).to.equal(true);
+        expect(self.quorumMet(ctx, addrs, keys)).to.equal(true);
     });
 
     it('falls back to the addr set only when no key voted (pre-bootstrap)', function () {
         const self = Object.create(Consensus.prototype);
         const ctx = { weighted: false, quorum: 2 };
-        expect(self._quorumMet(ctx, new Set(['a', 'b']), new Set())).to.equal(true);
-        expect(self._quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(true);
+        expect(self.quorumMet(ctx, new Set(['a', 'b']), new Set())).to.equal(true);
+        expect(self.quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(true);
     });
 });

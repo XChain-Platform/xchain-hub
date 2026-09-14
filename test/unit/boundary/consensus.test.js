@@ -12,7 +12,7 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Consensus    = require('../../../src/Consensus');
+const Consensus    = require('../../../src/consensus/pbft');
 const { createMockHub }   = require('../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator,
         makeFederationSnapshot } = require('../../helpers/fixtures');
@@ -108,25 +108,25 @@ describe('Boundary: Consensus (PBFT)', function () {
 
         it('_loadSeq parses integer from DB string', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
         it('_loadSeq defaults to 0 on empty result', async function () {
             hub.db.doQuery.resolves([]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
         it('_loadSeq defaults to 0 on non-numeric value', async function () {
             hub.db.doQuery.resolves([{ value: 'not-a-number' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
         it('_loadSeq handles very large sequence number', async function () {
             hub.db.doQuery.resolves([{ value: '9007199254740991' }]); // MAX_SAFE_INTEGER
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(Number.MAX_SAFE_INTEGER);
         });
 
@@ -136,7 +136,7 @@ describe('Boundary: Consensus (PBFT)', function () {
             // sibling _saveSeq.
             hub.db.doQuery.rejects(new Error('DB down'));
             let threw = null;
-            try { await consensus._loadSeq(); } catch (e) { threw = e; }
+            try { await consensus.loadSeq(); } catch (e) { threw = e; }
             expect(threw, 'a DB read fault must propagate out of _loadSeq').to.not.equal(null);
             expect(threw.message).to.equal('DB down');
         });
@@ -287,7 +287,7 @@ describe('Boundary: Consensus (PBFT)', function () {
 
         it('rapid view increments produce valid leaders', function () {
             for (let i = 0; i < 20; i++) {
-                consensus._initiateViewChange(1);
+                consensus.initiateViewChange(1);
             }
             expect(consensus.view).to.equal(20);
             let leader = consensus._getLeader(1);

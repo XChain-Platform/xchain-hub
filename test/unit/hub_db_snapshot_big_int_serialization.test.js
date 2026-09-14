@@ -98,7 +98,7 @@ describe('hub-db snapshot routes: BIGINT serialization matches the WS path', fun
             startAttestation: sinon.stub().resolves(),
             startCapabilities: sinon.stub().resolves(),
             getPriceSnapshots: sinon.stub().resolves([]),
-            _oracleMaxAgeSeconds: sinon.stub().returns(900),
+            oracleMaxAgeSeconds: sinon.stub().returns(900),
             getPrice: sinon.stub().resolves(null),
             getFeeQuote: sinon.stub().resolves({}),
             getOracle: sinon.stub().returns(null),
@@ -177,7 +177,7 @@ describe('hub-db snapshot routes: BIGINT serialization matches the WS path', fun
             // The real WS broadcaster, undoubled: proxyquire only replaces `ws`
             // (never loaded, just needs its OPEN constant) so bigIntReplacer
             // itself is the actual production module-private function.
-            let HubDbBroadcaster = proxyquire('../../src/HubDbBroadcaster', { ws: { OPEN: 1 } });
+            let HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster', { ws: { OPEN: 1 } });
             let broadcaster = new HubDbBroadcaster({}, { ...DB_METHODS, doQuery: async () => [] });
             let ws = { readyState: 1, bufferedAmount: 0, _hubBuffered: 0, send: sinon.stub(), close: sinon.stub(), on: sinon.stub() };
             await broadcaster.addSubscriber(ws);
@@ -206,7 +206,7 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
     // The fault these routes were fixed for is the two feeds disagreeing about a BIGINT.
     // A duplicated one-line replacer would let them drift apart again silently, so the
     // identity is asserted structurally: same function object, not merely same behaviour.
-    const HubDbBroadcaster = require('../../src/HubDbBroadcaster');
+    const HubDbBroadcaster = require('../../src/peers/hub_db_broadcaster');
 
     it('exports the replacer the broadcaster signs its frames with', function () {
         expect(typeof HubDbBroadcaster.bigIntReplacer).to.equal('function');

@@ -16,7 +16,7 @@ const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { waitUntil }  = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
-const Consensus      = require('../../../src/Consensus');
+const Consensus      = require('../../../src/consensus/pbft');
 const { createIntegrationHub } = require('../../helpers/integrationHub');
 
 // applyConfig must write through to the real DB (the assertions read the rows

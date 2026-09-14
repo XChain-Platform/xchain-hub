@@ -13,7 +13,7 @@
 const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const swq              = require('../../src/stake_weighted_quorum.js');
 const { createMockHub }       = require('../helpers/mockHub');
 const { waitUntil }           = require('../helpers/waitUntil');
@@ -293,19 +293,19 @@ describe('OracleConsensus', function () {
         });
 
         it('within the +/-25% band: aggregate passes through unchanged', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([110000, 110000, 110000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('110000.00000000');
         });
 
         it('exactly on the +25% boundary: not clamped', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([125000, 125000, 125000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('125000.00000000');
         });
 
         it('upward fat-tail spike: clamped to last * 1.25', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             // Every source agrees on the spike (survives trim and median), so only
             // the clamp bounds it.
             let subs = submissionsForPair([500000, 500000, 500000]);
@@ -313,30 +313,30 @@ describe('OracleConsensus', function () {
         });
 
         it('downward fat-tail crash: clamped to last * 0.75', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([10000, 10000, 10000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('75000.00000000');
         });
 
         it('sustained genuine move walks to the new level over successive rounds', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([200000, 200000, 200000]);
             let r1 = oc._aggregate(subs, 'BTC/USD');
             expect(r1).to.equal('125000.00000000');
             // Round 1 finalizes at the clamped value; round 2 clamps from there.
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r1 }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r1 }]);
             let r2 = oc._aggregate(subs, 'BTC/USD');
             expect(r2).to.equal('156250.00000000');
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r2 }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r2 }]);
             let r3 = oc._aggregate(subs, 'BTC/USD');
             expect(r3).to.equal('195312.50000000');
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r3 }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r3 }]);
             // Fourth round reaches the true level (200000 < 195312.5 * 1.25).
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('200000.00000000');
         });
 
         it('clamp is per-pair: an unrelated pair with history does not clamp BTC/USD', function () {
-            oc._updateLastFinalizedPrices([{ coinPair: 'LTC/USD', price: '100.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'LTC/USD', price: '100.00000000' }]);
             let subs = submissionsForPair([500000, 500000, 500000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('500000.00000000');
         });
@@ -367,21 +367,21 @@ describe('OracleConsensus', function () {
             // XCHAIN trades in a market thin by construction pre-launch, so the generic
             // clamp is the wrong size for it: 25%/round compounds to roughly 10x in 80
             // minutes at the default cadence.
-            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
             expect(oc._aggregate(subsFor('XCHAIN/USD', [10, 10, 10]), 'XCHAIN/USD')).to.equal('2.20000000');
         });
 
         it('bounds the DOWN direction identically: fee-cheapening is the other attack', function () {
             // §5 is explicit that the incentive is bidirectional - a lower XCHAIN/USD
             // makes native-coin fees cheaper for whoever pushed it there.
-            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
             expect(oc._aggregate(subsFor('XCHAIN/USD', [0.01, 0.01, 0.01]), 'XCHAIN/USD')).to.equal('1.80000000');
         });
 
         it('leaves every other pair on the global bound', function () {
             // The override must not leak: BTC/USD tracks a deep external market and a
             // 10% cap would suppress genuine moves it should follow.
-            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             expect(oc._aggregate(subsFor('BTC/USD', [500000, 500000, 500000]), 'BTC/USD')).to.equal('125000.00000000');
         });
 
@@ -389,11 +389,11 @@ describe('OracleConsensus', function () {
             // §7: an attacker who wash-trades exactly the volume threshold still cannot
             // set the first market print - it walks from the bootstrap at the clamp rate
             // like any other move, which is what buys the operator time to notice.
-            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
             let subs = subsFor('XCHAIN/USD', [100, 100, 100]);
             let r1 = oc._aggregate(subs, 'XCHAIN/USD');
             expect(r1).to.equal('2.20000000');
-            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: r1 }]);
+            oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: r1 }]);
             expect(oc._aggregate(subs, 'XCHAIN/USD')).to.equal('2.42000000');
         });
 
@@ -688,23 +688,23 @@ describe('OracleConsensus', function () {
 
         it('false for a null snapshot (indexer-unreachable degradation path)', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._isEmptyFederationSnapshot(null)).to.be.false;
+            expect(oc.isEmptyFederationSnapshot(null)).to.be.false;
         });
 
         it('true for an empty snapshot when federated (>= 2 registered validators)', function () {
             oc.setValidatorSet(VALIDATORS_3);   // _getQuorum() = 2
-            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
+            expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
         });
 
         it('false for an empty snapshot when single-node (no validators, no peers)', function () {
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);       // _getQuorum() = 0
-            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
+            expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
         });
 
         it('false for a non-empty snapshot even when federated', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._isEmptyFederationSnapshot({ validators: [{ pubkey: 'aa' }], count: 1 })).to.be.false;
+            expect(oc.isEmptyFederationSnapshot({ validators: [{ pubkey: 'aa' }], count: 1 })).to.be.false;
         });
     });
 
@@ -737,8 +737,8 @@ describe('OracleConsensus', function () {
 
         it('count mode: vote-set size vs the round\'s locked quorum', function () {
             let pending = { weighted: false, quorum: 3, signatures: new Map() };
-            expect(oc._quorumMet(pending, new Set(['a', 'b']))).to.equal(false);
-            expect(oc._quorumMet(pending, new Set(['a', 'b', 'c']))).to.equal(true);
+            expect(oc.quorumMet(pending, new Set(['a', 'b']))).to.equal(false);
+            expect(oc.quorumMet(pending, new Set(['a', 'b', 'c']))).to.equal(true);
         });
 
         it('weighted mode: tallies SIGNER STAKE from the signatures map, ignoring the address vote set', function () {
@@ -755,13 +755,13 @@ describe('OracleConsensus', function () {
             // Even a full address vote set cannot finalize.
             let sybilPending = { weighted: true, validators, quorum: 0,
                 signatures: new Map(sybils.map(pk => [pk, 'sig'])) };
-            expect(oc._quorumMet(sybilPending, new Set(sybils))).to.equal(false);
+            expect(oc.quorumMet(sybilPending, new Set(sybils))).to.equal(false);
 
             // The whale alone clears it, despite an EMPTY address vote set, proving
             // the tally is over signer stake, not the prepares/commits sets.
             let whalePending = { weighted: true, validators, quorum: 0,
                 signatures: new Map([['a'.repeat(64), 'sig']]) };
-            expect(oc._quorumMet(whalePending, new Set())).to.equal(true);
+            expect(oc.quorumMet(whalePending, new Set())).to.equal(true);
         });
     });
 
@@ -1192,7 +1192,7 @@ describe('OracleConsensus', function () {
             ];
             let subs = buildSubmissions(entries);
 
-            oc._proposeRound(7, subs, true, 100, 1700000000, null, 3);
+            oc.proposeRound(7, subs, true, 100, 1700000000, null, 3);
 
             let [type, data] = pm.broadcast.getCall(0).args;
             expect(type).to.equal('ORACLE_PROPOSE');
@@ -1575,7 +1575,7 @@ describe('OracleConsensus', function () {
 
         it('_proposeRound stores a skipped round when aggregation yields no prices', function () {
             let store = sinon.stub(oc, '_storeSkippedRound').resolves();
-            oc._proposeRound(5, new Map(), false, 800000, 1700000000, null, 1);
+            oc.proposeRound(5, new Map(), false, 800000, 1700000000, null, 1);
             expect(store.calledOnce).to.be.true;
             expect(store.getCall(0).args[3]).to.include('aggregation');
         });
@@ -1588,7 +1588,7 @@ describe('OracleConsensus', function () {
             let subs = buildSubmissions([
                 { sender: VALIDATORS_4[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
-            oc._proposeRound(7, subs, false, 800000, 1700000000, null, 3); // quorum 3 → stays pending
+            oc.proposeRound(7, subs, false, 800000, 1700000000, null, 3); // quorum 3 → stays pending
             expect(oc.pendingRounds.has(7)).to.be.true;
             clock.tick(1001);
             expect(oc.pendingRounds.has(7)).to.be.false;
@@ -1605,7 +1605,7 @@ describe('OracleConsensus', function () {
                 { sender: VALIDATORS_4[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
             expect(oc._roundTimeouts).to.equal(0); // constructor-initialized
-            oc._proposeRound(8, subs, false, 800000, 1700000000, null, 3);
+            oc.proposeRound(8, subs, false, 800000, 1700000000, null, 3);
             clock.tick(1001);
             expect(oc._roundTimeouts).to.equal(1);
             // Symmetric COUNTING only: a leader timeout must not mark the round
@@ -1623,7 +1623,7 @@ describe('OracleConsensus', function () {
             let subs = buildSubmissions([
                 { sender: VALIDATORS_4[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
-            oc._proposeRound(9, subs, false, 800000, 1700000000, null, 3);
+            oc.proposeRound(9, subs, false, 800000, 1700000000, null, 3);
             oc.pendingRounds.get(9).finalized = true;
             clock.tick(1001);
             expect(oc._roundTimeouts).to.equal(0);
@@ -1636,7 +1636,7 @@ describe('OracleConsensus', function () {
     // -----------------------------------------------------------------
 
     describe('PRICE v0 signature helpers', function () {
-        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+        const ValidatorIdentity = require('../../src/validators/identity');
 
         it('_buildPriceV0Payload sorts pairs canonically', function () {
             let payload = oc._buildPriceV0Payload(5, 1700000000, [
@@ -1667,11 +1667,11 @@ describe('OracleConsensus', function () {
         });
 
         it('_verifyAndStoreSig rejects missing args / duplicate / round-less pending', function () {
-            expect(oc._verifyAndStoreSig(null, 'pk', 'sig')).to.be.false;
-            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map() }, null, 'sig')).to.be.false;
-            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map() }, 'pk', null)).to.be.false;
-            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map([['pk', 'x']]) }, 'pk', 'sig')).to.be.false;
-            expect(oc._verifyAndStoreSig({ signatures: new Map() }, 'pk', 'sig')).to.be.false; // no round
+            expect(oc.verifyAndStoreSig(null, 'pk', 'sig')).to.be.false;
+            expect(oc.verifyAndStoreSig({ round: 1, signatures: new Map() }, null, 'sig')).to.be.false;
+            expect(oc.verifyAndStoreSig({ round: 1, signatures: new Map() }, 'pk', null)).to.be.false;
+            expect(oc.verifyAndStoreSig({ round: 1, signatures: new Map([['pk', 'x']]) }, 'pk', 'sig')).to.be.false;
+            expect(oc.verifyAndStoreSig({ signatures: new Map() }, 'pk', 'sig')).to.be.false; // no round
         });
 
         it('_verifyAndStoreSig stores a valid signature and rejects an invalid one', function () {
@@ -1683,11 +1683,11 @@ describe('OracleConsensus', function () {
             let sig = id.sign(payload);
 
             let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
-            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.true;
+            expect(oc.verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.true;
             expect(pending.signatures.has(id.getPubkeyHex())).to.be.true;
 
             let pending2 = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
-            expect(oc._verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
+            expect(oc.verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
         });
 
         it('_verifyAndStoreSig keys the map on lowercase hex, so a mixed-case repeat dedupes (item 5334)', function () {
@@ -1698,11 +1698,11 @@ describe('OracleConsensus', function () {
             let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
 
             // Uppercase hex verifies (hex decode is case-insensitive) and lands lowercase.
-            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex().toUpperCase(), sig)).to.be.true;
+            expect(oc.verifyAndStoreSig(pending, id.getPubkeyHex().toUpperCase(), sig)).to.be.true;
             expect([...pending.signatures.keys()]).to.deep.equal([id.getPubkeyHex()]);
 
             // The same key in the other casing is a duplicate, not a second sigsArray entry.
-            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.false;
+            expect(oc.verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.false;
             expect(pending.signatures.size).to.equal(1);
         });
     });
@@ -1716,7 +1716,7 @@ describe('OracleConsensus', function () {
             oc.finalizationTimeout = 1000;
             oc.leaderTimeout = 1000; // ttl = 1000*2 + 1000 = 3000
             oc.roundReadyAt.set(99, Date.now() - 10000); // stale
-            oc._markRoundReady(5);
+            oc.markRoundReady(5);
             expect(oc.roundReadyAt.has(99)).to.be.false;
             expect(oc.roundReadyAt.has(5)).to.be.true;
         });
@@ -1724,7 +1724,7 @@ describe('OracleConsensus', function () {
         it('_clearRoundTracking drops the round-ready entry and clears any leader timer', function () {
             oc.roundReadyAt.set(5, Date.now());
             oc.leaderTimers.set(5, setTimeout(() => {}, 60000));
-            oc._clearRoundTracking(5);
+            oc.clearRoundTracking(5);
             expect(oc.roundReadyAt.has(5)).to.be.false;
             expect(oc.leaderTimers.has(5)).to.be.false;
         });
@@ -1737,7 +1737,7 @@ describe('OracleConsensus', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest rounds first', function () {
             oc.finalizedMax = 4;
-            for (let r = 1; r <= 20; r++) oc._markFinalized(r);
+            for (let r = 1; r <= 20; r++) oc.markFinalized(r);
             expect(oc.finalized.size).to.equal(4);
             expect(oc.finalized.has(1)).to.be.false;
             expect(oc.finalized.has(16)).to.be.false;
@@ -1747,8 +1747,8 @@ describe('OracleConsensus', function () {
 
         it('is idempotent for a repeated round', function () {
             oc.finalizedMax = 3;
-            oc._markFinalized(9);
-            oc._markFinalized(9);
+            oc.markFinalized(9);
+            oc.markFinalized(9);
             expect(oc.finalized.size).to.equal(1);
             expect(oc._finalizedOrder).to.deep.equal([9]);
         });

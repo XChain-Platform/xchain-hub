@@ -31,7 +31,7 @@
  */
 
 const assert = require('assert');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 
 // The aggregation/serialization methods don't touch the DB, peers, or identity,
 // so we exercise them on a bare prototype instance.

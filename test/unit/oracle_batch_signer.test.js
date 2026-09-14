@@ -24,9 +24,9 @@
 // identities, an in-memory bus, an in-memory price_snapshots table per node.
 
 const { expect }        = require('chai');
-const OracleBatchSigner = require('../../src/OracleBatchSigner');
-const OracleConsensus   = require('../../src/OracleConsensus');
-const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const OracleBatchSigner = require('../../src/oracle/batch_signer');
+const OracleConsensus   = require('../../src/oracle/consensus');
+const ValidatorIdentity = require('../../src/validators/identity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // The REAL canonical builder, taken off the class rather than reimplemented.
@@ -549,7 +549,7 @@ describe('OracleBatchSigner (XPRICEB batch-signing round)', function () {
         it('bounds the memo, evicting the oldest windows first', function () {
             let mesh   = buildMesh(1);
             let signer = mesh.nodes[0].signer;
-            for (let w = 0; w < 300; w++) signer._noteCoSigned(w * 6, w * 6 + 5);
+            for (let w = 0; w < 300; w++) signer.noteCoSigned(w * 6, w * 6 + 5);
             mesh.stop();
 
             expect(signer.getStats().batchWindowsCoSigned).to.equal(256);

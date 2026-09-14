@@ -37,8 +37,8 @@ const proxyquireNoCache = require('proxyquire').noPreserveCache();
 const { waitUntil } = require('../helpers/waitUntil');
 
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
-const CrossChainDexEngine  = require('../../src/CrossChainDexEngine.js');
-const CrossChainCallEngine = require('../../src/CrossChainCallEngine.js');
+const CrossChainDexEngine  = require('../../src/cross_chain/dex_engine.js');
+const CrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A plausible regtest block-1 hash (lowercase 64 hex) and a foreign one.
@@ -462,7 +462,7 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
                 getChainTip: sinon.stub().resolves(chainId === null ? null : { blockHeight: 131, blockTime: 1, chainId: chainId })
             };
             eng._persistCapabilitySnapshot = sinon.stub().resolves(1);
-            eng._mirrorCallRow = sinon.stub().resolves();
+            eng.mirrorCallRow = sinon.stub().resolves();
             eng._inflight = new Map();
             eng.emit = sinon.stub();
             return eng;
@@ -478,7 +478,7 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
         it('stamps the identity and re-stamps it on the ON DUPLICATE KEY UPDATE path', async function () {
             const eng = engineWith(LOCAL_ID);
             sinon.stub(console, 'log');
-            await eng._writeFinalizedRow({ row: callRow(), signatures: [] });
+            await eng.writeFinalizedRow({ row: callRow(), signatures: [] });
             const call = eng.db.doQuery.getCalls().find(c => /INSERT INTO cross_chain_calls/.test(String(c.args[0])));
             expect(call, 'no INSERT was issued').to.not.equal(undefined);
             const sql  = String(call.args[0]);
@@ -494,7 +494,7 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
         it('stamps NULL when the hub has not been told its chain', async function () {
             const eng = engineWith(null);
             sinon.stub(console, 'log');
-            await eng._writeFinalizedRow({ row: callRow(), signatures: [] });
+            await eng.writeFinalizedRow({ row: callRow(), signatures: [] });
             const call = eng.db.doQuery.getCalls().find(c => /INSERT INTO cross_chain_calls/.test(String(c.args[0])));
             const cols = String(call.args[0]).match(/\(([^)]*)\) VALUES/)[1].split(',').map(s => s.trim());
             expect(call.args[1][cols.indexOf('btc_chain_id')]).to.equal(null);

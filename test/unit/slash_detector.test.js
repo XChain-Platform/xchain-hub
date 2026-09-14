@@ -12,7 +12,7 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const SlashDetector  = require('../../src/SlashDetector');
+const SlashDetector  = require('../../src/validators/slash_detector');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
@@ -259,7 +259,7 @@ describe('SlashDetector', function () {
             ]);
 
             // Third deviation via _trackDeviation
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3);
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 3);
 
             // Should have recorded a repeated_deviation proposal
             expect(hub.db.doQuery.called).to.be.true;
@@ -272,7 +272,7 @@ describe('SlashDetector', function () {
                 { round: 1, timestamp: Date.now() - 1000 }
             ]);
 
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 2);
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 2);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -283,7 +283,7 @@ describe('SlashDetector', function () {
                 { round: 2, timestamp: over24h }
             ]);
 
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3);
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 3);
             // After pruning, only 1 deviation (the new one) → no proposal
             expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1);
             expect(hub.db.doQuery.called).to.be.false;
@@ -295,11 +295,11 @@ describe('SlashDetector', function () {
                 { round: 2, timestamp: Date.now() - 500 }
             ]);
 
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3); // crossing → fires
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 3); // crossing → fires
             expect(hub.db.doQuery.callCount).to.equal(1);
 
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 4); // still ≥3 → latched, no re-fire
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 5);
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 4); // still ≥3 → latched, no re-fire
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 5);
             expect(hub.db.doQuery.callCount).to.equal(1);
         });
 
@@ -308,7 +308,7 @@ describe('SlashDetector', function () {
                 { round: 1, timestamp: Date.now() - 1000 },
                 { round: 2, timestamp: Date.now() - 500 }
             ]);
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3); // fires, latch set
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 3); // fires, latch set
             expect(hub.db.doQuery.callCount).to.equal(1);
 
             // Window ages out; replace with stale entries, next track prunes to 1
@@ -317,13 +317,13 @@ describe('SlashDetector', function () {
                 { round: 3, timestamp: over24h },
                 { round: 4, timestamp: over24h }
             ]);
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 10); // count 1 → latch re-arms
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 10); // count 1 → latch re-arms
             expect(hub.db.doQuery.callCount).to.equal(1);
 
             sd.recentDeviations.get(VALIDATORS_3[0].pubkey).push(
                 { round: 11, timestamp: Date.now() }
             );
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 12); // count 3 again → fires again
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 12); // count 3 again → fires again
             expect(hub.db.doQuery.callCount).to.equal(2);
         });
     });
@@ -605,7 +605,7 @@ describe('SlashDetector', function () {
             for (let i = 0; i < 1000; i++) arr.push({ round: i, timestamp: now - 1 });
             sd.recentDeviations.set(VALIDATORS_3[0].pubkey, arr);
             // One more pushes to 1001 → sliced back to the 1000 most recent.
-            sd._trackDeviation(VALIDATORS_3[0].pubkey, 1001);
+            sd.trackDeviation(VALIDATORS_3[0].pubkey, 1001);
             expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1000);
         });
     });
@@ -616,7 +616,7 @@ describe('SlashDetector', function () {
 
     describe('_recordSlashProposal()', function () {
         it('skips a slash proposal when the pubkey is malformed', async function () {
-            await sd._recordSlashProposal('not-a-valid-pubkey', 'price_deviation', 1, '{}');
+            await sd.recordSlashProposal('not-a-valid-pubkey', 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.called).to.be.false;
         });
     });

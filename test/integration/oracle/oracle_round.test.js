@@ -18,10 +18,10 @@ const mockApi        = require('../../helpers/mockExternalApi');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
-const OracleRound    = require('../../../src/OracleRound');
-const OracleConsensus = require('../../../src/OracleConsensus');
-const RewardTracker  = require('../../../src/RewardTracker');
-const SlashDetector  = require('../../../src/SlashDetector');
+const OracleRound    = require('../../../src/oracle/round');
+const OracleConsensus = require('../../../src/oracle/consensus');
+const RewardTracker  = require('../../../src/anchor/reward_tracker');
+const SlashDetector  = require('../../../src/validators/slash_detector');
 const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
 describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {

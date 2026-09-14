@@ -26,7 +26,7 @@
 
 module.exports = {
     // Deletes from validator_rewards.
-    // Moved here from src/RewardTracker.js:212.
+    // Moved here from src/anchor/reward_tracker.js:212.
     async deleteValidatorReward(roundNumber, rewardType, qualifier) {
         return this.doQuery('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
     },
@@ -44,13 +44,13 @@ module.exports = {
     },
 
     // Reads rows from validator_rewards.
-    // Moved here from src/StateAnchorPublisher.js:3723.
+    // Moved here from src/anchor/publisher.js:3723.
     async findValidatorRewardsByRewardType(reward_type, round_number, round_qualifier) {
         return this.doQuery('SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND round_qualifier = ?', [reward_type, round_number, round_qualifier]);
     },
 
     // Reads rows from validator_rewards.
-    // Moved here from src/RewardTracker.js:195.
+    // Moved here from src/anchor/reward_tracker.js:195.
     async findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier) {
         return this.doQuery('SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ?', [roundNumber, rewardType, qualifier]);
     },
@@ -82,7 +82,7 @@ module.exports = {
     },
 
     // Updates validators.
-    // Moved here from src/SlashGovernance.js:231.
+    // Moved here from src/validators/slash_governance.js:231.
     async updateValidatorBySigningPubkey(signing_pubkey) {
         return this.doQuery(`UPDATE validators SET status = 'suspended', updated_at = NOW() WHERE signing_pubkey = ? AND status = 'active'`, [signing_pubkey]);
     },
@@ -95,7 +95,7 @@ module.exports = {
     // The SQL is what moved here; the connection lifecycle stayed at the call site.
 
     // Inserts or updates a row in validator_capabilities.
-    // Moved here from src/CapabilityRegistry.js:227.
+    // Moved here from src/validators/capability_registry.js:227.
     async setValidatorCapabilityQualification(conn, signingPubkey, capability, qualified, qualifiedAtBlock) {
         return conn.query(`INSERT INTO validator_capabilities
                     (signing_pubkey, capability, qualified, qualified_at_block)
@@ -107,7 +107,7 @@ module.exports = {
     },
 
     // Inserts or updates a row in validator_capabilities.
-    // Moved here from src/CapabilityRegistry.js:246.
+    // Moved here from src/validators/capability_registry.js:246.
     async setValidatorCapabilitySelfTestResult(conn, signingPubkey, capability, selfTestOk, selfTestMsg) {
         return conn.query(`INSERT INTO validator_capabilities
                     (signing_pubkey, capability, self_test_ok, self_test_at, self_test_msg)
@@ -120,7 +120,7 @@ module.exports = {
     },
 
     // Inserts or updates a row in validator_capabilities.
-    // Moved here from src/CapabilityRegistry.js:266.
+    // Moved here from src/validators/capability_registry.js:266.
     async setValidatorCapabilityEnabled(conn, signingPubkey, capability, enabled) {
         return conn.query(`INSERT INTO validator_capabilities
                     (signing_pubkey, capability, enabled)
@@ -132,7 +132,7 @@ module.exports = {
 
     // Reads one row from validator_capabilities: the three activation flags for
     // one (pubkey, capability) pair.
-    // Moved here from src/CapabilityRegistry.js:287.
+    // Moved here from src/validators/capability_registry.js:287.
     async getValidatorCapabilityActivationFlags(conn, signingPubkey, capability) {
         return conn.query(`SELECT qualified, self_test_ok, enabled
                  FROM validator_capabilities
@@ -142,7 +142,7 @@ module.exports = {
     },
 
     // Reads rows from validator_capabilities: every pubkey fully active for one capability.
-    // Moved here from src/CapabilityRegistry.js:305.
+    // Moved here from src/validators/capability_registry.js:305.
     async findActiveValidatorPubkeysByCapability(conn, capability) {
         return conn.query(`SELECT signing_pubkey
                  FROM validator_capabilities
@@ -152,7 +152,7 @@ module.exports = {
 
     // Reads one row from validator_capabilities: how many pubkeys are fully active
     // for one capability.
-    // Moved here from src/CapabilityRegistry.js:327.
+    // Moved here from src/validators/capability_registry.js:327.
     async getActiveValidatorCountByCapability(conn, capability) {
         return conn.query(`SELECT COUNT(*) AS cnt
                  FROM validator_capabilities
@@ -162,7 +162,7 @@ module.exports = {
 
     // Reads one row from validator_capabilities: the full flag set for one
     // (pubkey, capability) pair.
-    // Moved here from src/CapabilityRegistry.js:342.
+    // Moved here from src/validators/capability_registry.js:342.
     async getValidatorCapabilityState(conn, signingPubkey, capability) {
         return conn.query(`SELECT signing_pubkey, capability, qualified, self_test_ok, enabled,
                         self_test_at, self_test_msg, qualified_at_block
@@ -176,7 +176,7 @@ module.exports = {
     // and/or one capability. The WHERE clauses are built from which filters the
     // caller passed; the limit is parsed and clamped to 1..500 before it reaches
     // the statement, so the interpolated LIMIT can never carry caller text.
-    // Moved here from src/CapabilityRegistry.js:361.
+    // Moved here from src/validators/capability_registry.js:361.
     async findValidatorCapabilityStates(conn, { signingPubkey, capability, limit } = {}) {
         let query = `SELECT id, signing_pubkey, capability, qualified, self_test_ok,
                             enabled, qualified_at_block, updated_at
@@ -198,7 +198,7 @@ module.exports = {
     },
 
     // Reads rows from validator_capabilities: every capability row for one pubkey.
-    // Moved here from src/CapabilityRegistry.js:389.
+    // Moved here from src/validators/capability_registry.js:389.
     async findValidatorCapabilitiesByPubkey(conn, signingPubkey) {
         return conn.query(`SELECT capability, qualified, self_test_ok, enabled, self_test_at, self_test_msg
                  FROM validator_capabilities
@@ -209,7 +209,7 @@ module.exports = {
     // Inserts a row into validator_rewards for one oracle round.
     // INSERT IGNORE relies on the UNIQUE KEY (validator_pubkey, round_number, reward_type)
     // so concurrent writes from multiple hubs collapse to one row per (validator, round).
-    // Moved here from src/RewardTracker.js:80.
+    // Moved here from src/anchor/reward_tracker.js:80.
     async createValidatorRoundReward(validatorPubkey, roundNumber, amount) {
         return this.doQuery(`INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
                          VALUES (?, ?, 'oracle_round', ?)`, [validatorPubkey, roundNumber, amount]);
@@ -218,14 +218,14 @@ module.exports = {
     // Inserts a row into validator_rewards for one anchor publish. INSERT IGNORE for
     // the same reason as the round reward above: the same hub recording twice is a
     // no-op, and the cross-pubkey collapse is decided by the caller before this runs.
-    // Moved here from src/RewardTracker.js:214.
+    // Moved here from src/anchor/reward_tracker.js:214.
     async createValidatorAnchorReward(validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier) {
         return this.doQuery(`INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
                      VALUES (?, ?, ?, ?, ?, ?)`, [validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier]);
     },
 
     // Reads one row from validator_rewards: what one validator is owed but has not claimed.
-    // Moved here from src/RewardTracker.js:275.
+    // Moved here from src/anchor/reward_tracker.js:275.
     async getUnclaimedValidatorRewardTotal(validatorPubkey) {
         return this.doQuery(`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total
                      FROM validator_rewards
@@ -233,7 +233,7 @@ module.exports = {
     },
 
     // Reads rows from validator_rewards: one validator's most recent rewards.
-    // Moved here from src/RewardTracker.js:283.
+    // Moved here from src/anchor/reward_tracker.js:283.
     async findValidatorRewardHistory(validatorPubkey, limit) {
         return this.doQuery(`SELECT round_number, reward_type, amount, claimed, created_at
                      FROM validator_rewards
@@ -243,7 +243,7 @@ module.exports = {
     },
 
     // Reads one row from validator_rewards: everything this hub has ever recorded.
-    // Moved here from src/RewardTracker.js:292.
+    // Moved here from src/anchor/reward_tracker.js:292.
     async getValidatorRewardsDistributedTotal() {
         return this.doQuery(`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total FROM validator_rewards`);
     },
@@ -271,7 +271,7 @@ module.exports = {
     },
 
     // Stamps the archive batch_seq on one not-yet-archived validator_rewards row.
-    // Moved here from src/StateAnchorPublisher.js:4753, the branch for a FINALIZED from a
+    // Moved here from src/anchor/publisher.js:4753, the branch for a FINALIZED from a
     // peer predating the round qualifier.
     async updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, validatorPubkey) {
         return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey]);
@@ -279,14 +279,14 @@ module.exports = {
 
     // Stamps the archive batch_seq on one not-yet-archived validator_rewards row, matched
     // on its round qualifier too, so a rebase-reissued archive seq cannot mark its twin.
-    // Moved here from src/StateAnchorPublisher.js:4753, the qualified branch.
+    // Moved here from src/anchor/publisher.js:4753, the qualified branch.
     async updateValidatorRewardArchiveBatchSeqByQualifier(batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier) {
         return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND round_qualifier = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier]);
     },
 
     // Reads a page of pending anchor reward rows for the archive, for a hub with no
     // flag-days to bind (unscoped or unknown network). Moved here from
-    // src/StateAnchorPublisher.js:2505, the branch with no exclusion clause.
+    // src/anchor/publisher.js:2505, the branch with no exclusion clause.
     async findArchivableAnchorRewards(maxBatch) {
         return this.doQuery(
             "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" + " " +

@@ -13,7 +13,7 @@
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const proxyquire       = require('proxyquire');
-const OracleConsensus  = require('../../src/OracleConsensus');
+const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub }       = require('../helpers/mockHub');
 const { waitUntil }           = require('../helpers/waitUntil');
 const { VALIDATORS_4, buildSubmissions } = require('../helpers/fixtures');
@@ -36,7 +36,7 @@ describe('Regression: Oracle Pipeline', function () {
 
         beforeEach(function () {
             axiosStub = { get: sinon.stub() };
-            PriceFetcher = proxyquire('../../src/PriceFetcher', { axios: axiosStub });
+            PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
         });
 
         afterEach(function () { sinon.restore(); });

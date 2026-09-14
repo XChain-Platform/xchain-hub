@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect }          = require('chai');
-const ValidatorIdentity   = require('../../src/ValidatorIdentity');
+const ValidatorIdentity   = require('../../src/validators/identity');
 
 describe('ValidatorIdentity', function () {
 

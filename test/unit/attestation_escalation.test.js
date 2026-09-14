@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const esc = require('../../src/attestation_escalation.js');
+const esc = require('../../src/attestation/escalation.js');
 
 describe('attestation_escalation: blocksElapsed', function () {
 

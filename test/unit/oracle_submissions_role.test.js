@@ -49,7 +49,7 @@ describe('getoraclesubmissions role reporting', function () {
             attestationRelay:     null,
             hubDbBroadcaster:     null,
             getOracle: () => oracle,
-            _oracleMaxAgeSeconds: () => 1800,
+            oracleMaxAgeSeconds: () => 1800,
             start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
             startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
             startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},

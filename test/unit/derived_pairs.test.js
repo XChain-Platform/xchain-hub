@@ -34,18 +34,18 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
-const OracleConsensus = require('../../src/OracleConsensus');
+const OracleConsensus = require('../../src/oracle/consensus');
 
 const { DERIVED_PAIRS } = require('../../src/constants.js');
-const PriceFetcher      = require('../../src/PriceFetcher.js');
+const PriceFetcher      = require('../../src/oracle/price_fetcher.js');
 
 describe('DERIVED_PAIRS admission allow-list @regression', function () {
 
     let hub, or, OracleRound;
 
     beforeEach(function () {
-        OracleRound = proxyquire('../../src/OracleRound', {
-            './PriceFetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
         });
         hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
         or  = new OracleRound(hub);

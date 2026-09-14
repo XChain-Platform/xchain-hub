@@ -38,8 +38,8 @@ const crypto          = require('crypto');
 const sinon           = require('sinon');
 const proxyquire      = require('proxyquire');
 const { expect }      = require('chai');
-const PriceAggregator = require('../../src/PriceAggregator');
-const OracleConsensus = require('../../src/OracleConsensus');
+const PriceAggregator = require('../../src/oracle/price_aggregator');
+const OracleConsensus = require('../../src/oracle/consensus');
 const swq             = require('../../src/stake_weighted_quorum.js');
 const { createMockHub } = require('../helpers/mockHub');
 const { DB_METHODS } = require('../helpers/mockHub.js');
@@ -353,7 +353,7 @@ describe('PriceAggregator: derived capability snapshots (chain-only hub)', funct
                 let derived = new PriceAggregator(derivedHub);
 
                 await oc._persistCapabilitySnapshot(capability, ANCHOR);
-                await derived._persistDerivedCapabilitySnapshot(capability, ANCHOR);
+                await derived.persistDerivedCapabilitySnapshot(capability, ANCHOR);
 
                 let ocInsert  = consensusDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
                 let devInsert = derivedDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
@@ -441,7 +441,7 @@ describe('PriceAggregator: derived capability snapshots (chain-only hub)', funct
             oc.db = consensusDb;
 
             await oc._persistCapabilitySnapshot('price', ANCHOR);
-            await agg._persistPriceCapabilitySnapshot(ANCHOR);
+            await agg.persistPriceCapabilitySnapshot(ANCHOR);
 
             let ocInsert  = consensusDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
             let aggInsert = db.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
@@ -452,7 +452,7 @@ describe('PriceAggregator: derived capability snapshots (chain-only hub)', funct
         });
 
         it('mirrors every committed row to hub-DB subscribers', async function () {
-            await agg._persistPriceCapabilitySnapshot(ANCHOR);
+            await agg.persistPriceCapabilitySnapshot(ANCHOR);
             expect(broadcaster.broadcastRow.callCount).to.equal(4);
             for (let call of broadcaster.broadcastRow.getCalls()) {
                 expect(call.args[0].table).to.equal('capability_snapshots');
@@ -521,7 +521,7 @@ describe('PriceAggregator: derived capability snapshots (chain-only hub)', funct
                 validators: SET.map(v => ({ ...v }))
             }));
 
-            let res = await agg._persistPriceCapabilitySnapshot(ANCHOR);
+            let res = await agg.persistPriceCapabilitySnapshot(ANCHOR);
 
             expect(res.status).to.equal('truncated');
             expect(res.rows).to.equal(0);

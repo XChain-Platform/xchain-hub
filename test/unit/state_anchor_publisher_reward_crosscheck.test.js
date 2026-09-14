@@ -31,7 +31,7 @@
 // rather than masking the regression the way a pubkey-agnostic mock would.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_WINNER = 'aa'.repeat(32);   // W: the row every honest hub derives + holds
@@ -99,7 +99,7 @@ const verify = async (pub, ar) => {
     let set   = await pub._resolveCapabilitySet('oracle_publish', BLOCK, '');
     let snaps = set.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
-    return pub._verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
+    return pub.verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
 };
 
 describe('StateAnchorPublisher #4383 archive reward cross-pubkey guard', function () {

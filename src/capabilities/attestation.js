@@ -34,7 +34,7 @@
 // credentials actually cover the approved model chain (primary vendor
 // required; ALL vendors when governance sets require_all_vendors) is the llm
 // module's healthCheck verdict, probed below.
-const { resolveHubLlmAuth, resolveOpenAiAuth } = require('../lib/hub-credentials');
+const { resolveHubLlmAuth, resolveOpenAiAuth } = require('../lib/hub_credentials');
 
 const PROVIDER_PROBES = {
     http_get: require('../providers/http_get.js')

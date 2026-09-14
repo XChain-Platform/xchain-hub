@@ -29,8 +29,8 @@ const vm           = require('vm');
 const sinon        = require('sinon');
 const EventEmitter = require('events');
 
-const FullNodeChallengeRound = require('../../src/FullNodeChallengeRound.js');
-const { applySignerHooks, buildSignerHooks } = require('../../src/lib/signer-loader.js');
+const FullNodeChallengeRound = require('../../src/consensus/full_node_challenge_round.js');
+const { applySignerHooks, buildSignerHooks } = require('../../src/lib/signer_loader.js');
 
 const TEMPLATE = path.join(__dirname, '..', '..', 'examples', 'doge-signer.example.js');
 const source   = fs.readFileSync(TEMPLATE, 'utf8').replace(/^#!.*\n/, '');
@@ -161,7 +161,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
         assert.strictEqual(eng.getBalanceFn, undefined,
             'a DOGE balance must not be read as the BTC publisher wallet');
 
-        await assert.rejects(() => eng._broadcastVerdict('NODEPROOF|wire'),
+        await assert.rejects(() => eng.broadcastVerdict('NODEPROOF|wire'),
             /no broadcast pipeline/);
 
         assert.strictEqual(spies.wallet.signPsbt.callCount, 0, 'no walletSign call');
@@ -183,7 +183,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
         eng.setBroadcastHook(hooks.broadcastFn, 'DOGE');
 
         let warned = await captureWarn(async () => {
-            await assert.rejects(() => eng._broadcastVerdict('NODEPROOF|wire'),
+            await assert.rejects(() => eng.broadcastVerdict('NODEPROOF|wire'),
                 /REFUSING to publish a NODEPROOF verdict/);
         });
         assert.strictEqual(warned.length, 1, 'one loud line, not one per attempt');
@@ -197,7 +197,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
         // A second attempt still refuses, and still costs nothing, without repeating
         // the line every poll tick.
         let again = await captureWarn(async () => {
-            await assert.rejects(() => eng._broadcastVerdict('NODEPROOF|wire'), /REFUSING/);
+            await assert.rejects(() => eng.broadcastVerdict('NODEPROOF|wire'), /REFUSING/);
         });
         assert.strictEqual(again.length, 0);
     });
@@ -207,7 +207,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
         let eng     = makeRound(encoder);
         let signed  = sinon.stub().resolves({ txid: 'd'.repeat(64) });
         eng.setBroadcastHook(signed, 'BTC');
-        let res = await eng._broadcastVerdict('NODEPROOF|wire');
+        let res = await eng.broadcastVerdict('NODEPROOF|wire');
         assert.strictEqual(res.txid, 'd'.repeat(64));
         assert.strictEqual(signed.callCount, 1);
     });
@@ -216,7 +216,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
         let eng    = makeRound(btcEncoderSpy());
         let signed = sinon.stub().resolves({ txid: 'd'.repeat(64) });
         eng.setBroadcastHook(signed);
-        await eng._broadcastVerdict('NODEPROOF|wire');
+        await eng.broadcastVerdict('NODEPROOF|wire');
         assert.strictEqual(signed.callCount, 1);
     });
 
@@ -249,7 +249,7 @@ describe('FullNodeChallengeRound signer chain gate', function () {
             leadRank: 0
         });
 
-        let warned = await captureWarn(() => eng._maybeFinalize(epoch));
+        let warned = await captureWarn(() => eng.maybeFinalize(epoch));
         assert.strictEqual(warned.length, 1);
         assert.match(warned[0], /REFUSING to publish a NODEPROOF verdict/);
         assert.strictEqual(eng.spendGuard.check.callCount, 0, 'budget must not be touched');

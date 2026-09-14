@@ -31,8 +31,8 @@
 'use strict';
 
 const assert          = require('assert');
-const OracleConsensus = require('../../src/OracleConsensus.js');
-const PriceAggregator = require('../../src/PriceAggregator.js');
+const OracleConsensus = require('../../src/oracle/consensus.js');
+const PriceAggregator = require('../../src/oracle/price_aggregator.js');
 const eq              = require('../../src/equivocation_header.js');
 
 const ANCHOR = 912345;   // equals the last round's own anchor, per the wire format
@@ -229,8 +229,8 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
     const HUB_MODULES = [
         '../../src/mirror_admission_activation.js',
         '../../src/lib/admission_height.js',
-        '../../src/OracleConsensus.js',
-        '../../src/PriceAggregator.js'
+        '../../src/oracle/consensus.js',
+        '../../src/oracle/price_aggregator.js'
     ];
     const INDEXER_MODULES = [
         '../../../xchain-indexer/src/mirror_admission_activation.js',
@@ -252,8 +252,8 @@ describe('PRICE v0 single-round canonical: three-way twin parity', function () {
         for (const p of paths) delete require.cache[p];
         process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
 
-        const ArmedOracleConsensus = require('../../src/OracleConsensus.js');
-        const ArmedPriceAggregator = require('../../src/PriceAggregator.js');
+        const ArmedOracleConsensus = require('../../src/oracle/consensus.js');
+        const ArmedPriceAggregator = require('../../src/oracle/price_aggregator.js');
         const act                  = require('../../src/mirror_admission_activation.js');
         const indexer              = indexerPaths ? require('../../../xchain-indexer/src/consensus/ed25519.js') : null;
 

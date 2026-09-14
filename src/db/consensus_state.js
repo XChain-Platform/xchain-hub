@@ -39,13 +39,13 @@ module.exports = {
     },
 
     // Reads rows from consensus_state.
-    // Moved here from src/Consensus.js:1356.
+    // Moved here from src/consensus/pbft.js:1356.
     async findConsensusState(key_name) {
         return this.doQuery('SELECT value FROM consensus_state WHERE key_name = ?', [key_name]);
     },
 
     // Inserts or updates a row in consensus_state.
-    // Moved here from src/Consensus.js:1379.
+    // Moved here from src/consensus/pbft.js:1379.
     async setConsensusState(key_name, value, value2) {
         return this.doQuery('INSERT INTO consensus_state (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()', [key_name, value, value2]);
     }

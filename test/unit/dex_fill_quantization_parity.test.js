@@ -32,7 +32,7 @@ require('mathjs');
 
 // axios is stubbed: the engine-level assertions below drive _tryOrderMatch directly and
 // must never reach an indexer.
-const CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: { post: sinon.stub() } });
+const CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: { post: sinon.stub() } });
 
 function makeDexHub() {
     const hub = createMockHub();
@@ -90,7 +90,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             // reintroduces 18 on either branch silently restores the divergence, and no
             // value-level test above would catch it because both branches are reachable
             // only through a full offer pair.
-            const src = fs.readFileSync(path.join(__dirname, '../../src/CrossChainDexEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(__dirname, '../../src/cross_chain/dex_engine.js'), 'utf8');
             const clampMuls = src.match(/bc\.bcmul\((?:max_get|max_give),\s*taker\w+Price,\s*(\d+)\)/g) || [];
             assert.strictEqual(clampMuls.length, 2, 'expected exactly the two clamp multiplications');
             for (const m of clampMuls) {
@@ -127,7 +127,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
         // KEPT from the pre-parity suite, deliberately: a fallback default is still the
         // wrong way to close this, and it is the edit someone would reach for first.
         it('the engine does NOT quantize with a guessed COIN_DECIMALS', function () {
-            const src = fs.readFileSync(path.join(__dirname, '../../src/CrossChainDexEngine.js'), 'utf8');
+            const src = fs.readFileSync(path.join(__dirname, '../../src/cross_chain/dex_engine.js'), 'utf8');
             assert.doesNotMatch(src, /bcround\s*\([^)]*COIN_DECIMALS/,
                 'guessing 8 decimals would mis-quantize every 0-decimal (NFT) and ' +
                 'non-8-decimal tick, which is worse than not rounding at all');
@@ -160,7 +160,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
                 block_index: 20, give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '21',
                 get_coin: 'LTC', get_tick: 'LTCT', get_amount: '42', give_ownership: 0,
                 get_ownership: 0, get_address: 'Daddr', give_decimals: 0 };
-            const d = eng._tryOrderMatch(maker, taker);
+            const d = eng.tryOrderMatch(maker, taker);
             assert.ok(d, 'the pair crosses');
             // DOGE leg (0 decimals) settles a whole number; LTC leg (8) keeps its grid.
             const dogeFill = (d.lo.home_coin === 'DOGE') ? d.loFill : d.hiFill;
@@ -182,20 +182,20 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             const taker = mk({ action_index: 7, home_coin: 'DOGE', block_index: 20, give_coin: 'DOGE',
                 give_tick: 'DOGT', give_amount: '20', get_coin: 'LTC', get_tick: 'LTCT',
                 get_amount: '40', get_address: 'Daddr', give_decimals: 8 });
-            assert.ok(eng._tryOrderMatch(maker, taker), 'control: with decimals on both sides it matches');
+            assert.ok(eng.tryOrderMatch(maker, taker), 'control: with decimals on both sides it matches');
 
             for (const missing of [undefined, null, '', 'eight', -1, 19, 2.5]) {
                 const bad = Object.assign({}, taker, { give_decimals: missing });
-                assert.strictEqual(eng._tryOrderMatch(maker, bad), null,
+                assert.strictEqual(eng.tryOrderMatch(maker, bad), null,
                     'give_decimals ' + JSON.stringify(missing) + ' must decline the match');
                 const badMaker = Object.assign({}, maker, { give_decimals: missing });
-                assert.strictEqual(eng._tryOrderMatch(badMaker, taker), null,
+                assert.strictEqual(eng.tryOrderMatch(badMaker, taker), null,
                     'the maker side must fail closed too');
             }
             // 0 is a VALID grid (indivisible ticks), not a missing value: a falsy check
             // here would silently refuse every NFT-side match.
             const zeroDp = Object.assign({}, taker, { give_decimals: 0 });
-            assert.ok(eng._tryOrderMatch(maker, zeroDp), '0 decimals is valid, not absent');
+            assert.ok(eng.tryOrderMatch(maker, zeroDp), '0 decimals is valid, not absent');
         });
     });
 });

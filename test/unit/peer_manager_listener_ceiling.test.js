@@ -37,9 +37,32 @@ const os   = require('os');
 const path = require('path');
 const { expect } = require('chai');
 
-const PeerManager = require('../../src/PeerManager.js');
+const PeerManager = require('../../src/peers/manager.js');
 
 const SRC_DIR = path.join(__dirname, '..', '..', 'src');
+
+// Every .js file under `dir`, feature directories included, as paths relative to
+// it. The subscribers live in feature directories, so a top-level listing would
+// find none of them and the parity below would compare an empty set.
+function sourceFiles(dir) {
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+            for (const sub of sourceFiles(path.join(dir, entry.name))) out.push(path.join(entry.name, sub));
+        } else if (entry.name.endsWith('.js')) {
+            out.push(entry.name);
+        }
+    }
+    return out;
+}
+
+// The roster names a subscriber by the class its file exports, because a file
+// name inside a feature directory (attestation/round.js) no longer says which
+// engine it holds. A file that exports no class is named by its basename.
+function moduleNameOf(file, text) {
+    const exported = /^module\.exports\s*=\s*(?:Object\.assign\(\s*)?([A-Z][\w$]*)/m.exec(text);
+    return exported ? exported[1] : path.basename(file).replace(/\.js$/, '');
+}
 
 // Modules that register a handler on a PeerManager's 'message' event, read from
 // the sources rather than from a list. `ws.on('message', ...)` is a socket-level
@@ -47,12 +70,11 @@ const SRC_DIR = path.join(__dirname, '..', '..', 'src');
 // excluded; that is what the two registrations inside PeerManager itself are.
 function subscribersFromSource(dir = SRC_DIR) {
     const found = new Map();
-    for (const file of fs.readdirSync(dir)) {
-        if (!file.endsWith('.js')) continue;
+    for (const file of sourceFiles(dir)) {
         const text = fs.readFileSync(path.join(dir, file), 'utf8');
         const hits = text.match(/([A-Za-z_$][\w$]*)\s*\.\s*(?:on|once|addListener|prependListener)\(\s*['"]message['"]/g) || [];
         const fanout = hits.filter(h => !/^ws\s*\./.test(h));
-        if (fanout.length) found.set(file.replace(/\.js$/, ''), fanout.length);
+        if (fanout.length) found.set(moduleNameOf(file, text), fanout.length);
     }
     return found;
 }
@@ -75,8 +97,7 @@ const rosterChannel = (entry) => {
 function constructionSites(module, dir = SRC_DIR) {
     const sites  = [];
     const needle = 'new ' + module + '(';
-    for (const file of fs.readdirSync(dir)) {
-        if (!file.endsWith('.js')) continue;
+    for (const file of sourceFiles(dir)) {
         const text = fs.readFileSync(path.join(dir, file), 'utf8');
         let from = 0;
         for (;;) {

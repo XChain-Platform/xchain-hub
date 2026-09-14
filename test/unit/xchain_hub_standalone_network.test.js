@@ -28,7 +28,7 @@ const { spawn }        = require('child_process');
 const { expect }       = require('chai');
 
 const XChainHub        = require('../../src/XChainHub');
-const PriceAggregator  = require('../../src/PriceAggregator');
+const PriceAggregator  = require('../../src/oracle/price_aggregator');
 
 // The real gate modules, used here to state the expected values rather than to
 // produce them: the assertions below read the aggregator's OWN behaviour.

@@ -21,10 +21,10 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-const OracleRound        = require('../../src/OracleRound');
-const OracleConsensus    = require('../../src/OracleConsensus');
-const CapabilityRegistry = require('../../src/CapabilityRegistry');
-const StakeWeightFeed    = require('../../src/StakeWeightFeed');
+const OracleRound        = require('../../src/oracle/round');
+const OracleConsensus    = require('../../src/oracle/consensus');
+const CapabilityRegistry = require('../../src/validators/capability_registry');
+const StakeWeightFeed    = require('../../src/validators/stake_weight_feed');
 const { createMockHub }  = require('../helpers/mockHub');
 const { makeValidator }  = require('../helpers/fixtures');
 
@@ -109,7 +109,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
                 return countResult(body.params.capability, body.params.block_index);
             return { data: { result: null } };
         }) };
-        CapabilitySnapshot = proxyquire('../../src/CapabilitySnapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
 
         hub = createMockHub({ p2pConfig: { HUB_NETWORK: 'testnet', ORACLE_EPOCH_START: 1704067200000 } });
         db  = hub.db;
@@ -123,7 +123,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
 
         hub.network                = 'testnet';
         hub._resolveBtcIndexerUrl  = async () => 'http://indexer.local/rpc';
-        hub._btcIndexerHeaders     = () => ({});
+        hub.btcIndexerHeaders     = () => ({});
         hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
         // A live registry with NO configured thresholds: exactly what a hub booted
         // without HUB_CAPABILITY_CONFIG carries.

@@ -12,10 +12,10 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const Consensus        = require('../../../src/Consensus');
-const OracleConsensus  = require('../../../src/OracleConsensus');
-const CrossChainEngine = require('../../../src/CrossChainEngine');
-const ReorgHandler     = require('../../../src/ReorgHandler');
+const Consensus        = require('../../../src/consensus/pbft');
+const OracleConsensus  = require('../../../src/oracle/consensus');
+const CrossChainEngine = require('../../../src/cross_chain/engine');
+const ReorgHandler     = require('../../../src/anchor/reorg_handler');
 const { createMockHub }       = require('../../helpers/mockHub');
 const { makeValidator }       = require('../../helpers/fixtures');
 

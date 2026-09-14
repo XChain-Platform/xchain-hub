@@ -12,7 +12,7 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const CrossChainEngine   = require('../../src/CrossChainEngine');
+const CrossChainEngine   = require('../../src/cross_chain/engine');
 const { createMockHub }  = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
 const { waitUntil }      = require('../helpers/waitUntil');
@@ -68,7 +68,7 @@ describe('CrossChainEngine', function () {
             engine.chainPairValidators = new Map([['BTC-LTC', pairValidators]]);
             engine.setValidatorSet(VALIDATORS_7);
 
-            let set = engine._getChainPairSet('BTC', 'LTC');
+            let set = engine.getChainPairSet('BTC', 'LTC');
             expect(set).to.equal(pairValidators);
         });
 
@@ -76,7 +76,7 @@ describe('CrossChainEngine', function () {
             let pairValidators = [makeValidator(1)];
             engine.chainPairValidators = new Map([['LTC-BTC', pairValidators]]);
 
-            let set = engine._getChainPairSet('BTC', 'LTC');
+            let set = engine.getChainPairSet('BTC', 'LTC');
             expect(set).to.equal(pairValidators);
         });
 
@@ -84,7 +84,7 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet(VALIDATORS_3);
             engine.chainPairValidators = new Map();
 
-            let set = engine._getChainPairSet('BTC', 'DOGE');
+            let set = engine.getChainPairSet('BTC', 'DOGE');
             expect(set).to.equal(VALIDATORS_3);
         });
 
@@ -92,7 +92,7 @@ describe('CrossChainEngine', function () {
             engine.chainPairValidators = new Map([['BTC-DOGE', []]]);
             engine.setValidatorSet(VALIDATORS_3);
 
-            let set = engine._getChainPairSet('BTC', 'DOGE');
+            let set = engine.getChainPairSet('BTC', 'DOGE');
             expect(set).to.equal(VALIDATORS_3);
         });
     });
@@ -750,7 +750,7 @@ describe('CrossChainEngine', function () {
             hub.capabilitySnapshot = null;
             engine.setValidatorSet(MEMBERS);
             let pending = { quorum: 2, memberPubkeys: null, prepares: new Set(['a', 'b']) };
-            expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
+            expect(engine.countedVotes(pending, pending.prepares)).to.equal(2);
         });
 
         it('an empty registry no longer buys a non-member a vote', async function () {
@@ -762,7 +762,7 @@ describe('CrossChainEngine', function () {
             pm.validatorPubkeys = new Map();
             let pending = { quorum: 2, memberPubkeys: new Set([MEMBERS[0].pubkey]),
                             prepares: new Set([MEMBERS[0].pubkey, 'ff'.repeat(32)]) };
-            expect(engine._countedVotes(pending, pending.prepares)).to.equal(1);
+            expect(engine.countedVotes(pending, pending.prepares)).to.equal(1);
         });
     });
 
@@ -951,7 +951,7 @@ describe('CrossChainEngine', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest first', function () {
             engine.finalizedMax = 5;
-            for (let i = 0; i < 20; i++) engine._markFinalized('att:' + i);
+            for (let i = 0; i < 20; i++) engine.markFinalized('att:' + i);
             expect(engine.finalized.size).to.equal(5);
             expect(engine._finalizedOrder.length).to.equal(5);
             // Oldest evicted, newest 5 (att:15..att:19) retained.
@@ -963,9 +963,9 @@ describe('CrossChainEngine', function () {
 
         it('is idempotent for a repeated id (no double-count, no double-evict)', function () {
             engine.finalizedMax = 3;
-            engine._markFinalized('a');
-            engine._markFinalized('a');
-            engine._markFinalized('a');
+            engine.markFinalized('a');
+            engine.markFinalized('a');
+            engine.markFinalized('a');
             expect(engine.finalized.size).to.equal(1);
             expect(engine._finalizedOrder).to.deep.equal(['a']);
         });

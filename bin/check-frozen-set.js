@@ -26,10 +26,11 @@
  *                                      knownGateKeys().join(','), is byte for
  *                                      byte what every peer publishes. A rules
  *                                      fork that no wire field names.
- *   src/CrossChainBridgeEngine.js:116  require('./' + moduleName + '.js'), catch
- *                                      -> null. The engine then idles, by design
- *                                      and correctly, but for the wrong reason,
- *                                      and no test exercises loadActivation.
+ *   src/cross_chain/bridge_engine.js:117  require(path.join(__dirname, '..',
+ *                                      moduleName + '.js')), catch -> null. The
+ *                                      engine then idles, by design and correctly,
+ *                                      but for the wrong reason, and only the
+ *                                      bridge activation resolve test notices.
  *
  * Neither failure throws, neither fails a suite and neither changes a published
  * number. A restructure cannot be trusted to remember that; it can be made to
@@ -185,7 +186,7 @@ function sharedGateModules() {
  * @returns {string[]}
  */
 function bridgeGateModules() {
-    const abs = path.join(REPO_ROOT, 'src/CrossChainBridgeEngine.js');
+    const abs = path.join(REPO_ROOT, 'src/cross_chain/bridge_engine.js');
     if (!fs.existsSync(abs)) return [];
     const src = fs.readFileSync(abs, 'utf8');
     return Array.from(new Set(Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g)).map((m) => m[1])));

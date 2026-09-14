@@ -12,7 +12,7 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const CrossChainEngine = require('../../../src/CrossChainEngine');
+const CrossChainEngine = require('../../../src/cross_chain/engine');
 const { createMockHub }       = require('../../helpers/mockHub');
 const { makeValidator, VALIDATORS_4 } = require('../../helpers/fixtures');
 
@@ -46,7 +46,7 @@ describe('Boundary: CrossChainEngine', function () {
             cc.setChainPairValidators(pairMap);
             cc.setValidatorSet(VALIDATORS_4);
 
-            let result = cc._getChainPairSet('BTC', 'LTC');
+            let result = cc.getChainPairSet('BTC', 'LTC');
             expect(result).to.equal(pairSet);
         });
 
@@ -57,7 +57,7 @@ describe('Boundary: CrossChainEngine', function () {
             cc.setChainPairValidators(pairMap);
 
             // Request DOGE→BTC, should find BTC-DOGE
-            let result = cc._getChainPairSet('DOGE', 'BTC');
+            let result = cc.getChainPairSet('DOGE', 'BTC');
             expect(result).to.equal(pairSet);
         });
 
@@ -65,7 +65,7 @@ describe('Boundary: CrossChainEngine', function () {
             cc.setValidatorSet(VALIDATORS_4);
             cc.setChainPairValidators(new Map());
 
-            let result = cc._getChainPairSet('BTC', 'UNKNOWN');
+            let result = cc.getChainPairSet('BTC', 'UNKNOWN');
             expect(result).to.equal(VALIDATORS_4);
         });
 
@@ -75,7 +75,7 @@ describe('Boundary: CrossChainEngine', function () {
             cc.setChainPairValidators(pairMap);
             cc.setValidatorSet(VALIDATORS_4);
 
-            let result = cc._getChainPairSet('BTC', 'LTC');
+            let result = cc.getChainPairSet('BTC', 'LTC');
             // Empty array → falls back to full set
             expect(result).to.equal(VALIDATORS_4);
         });
@@ -84,7 +84,7 @@ describe('Boundary: CrossChainEngine', function () {
             cc.setValidatorSet(VALIDATORS_4);
             cc.setChainPairValidators(new Map());
 
-            let result = cc._getChainPairSet('LTC', 'DOGE');
+            let result = cc.getChainPairSet('LTC', 'DOGE');
             expect(result).to.equal(VALIDATORS_4);
         });
     });

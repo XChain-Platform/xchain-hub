@@ -28,9 +28,9 @@
 
 const sinon                 = require('sinon');
 const { expect }            = require('chai');
-const PeerManager           = require('../../src/PeerManager');
-const ValidatorIdentity     = require('../../src/ValidatorIdentity');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const PeerManager           = require('../../src/peers/manager');
+const ValidatorIdentity     = require('../../src/validators/identity');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
 const { DB_METHODS }        = require('../helpers/mockHub.js');
 
 const TIP = {
@@ -121,7 +121,7 @@ describe('observer hub does not author into rounds it cannot sign', function () 
 
             let emitted = [];
             pm.on('message', (e) => emitted.push(e));
-            pm._handleInbound({ _peerAddr: 'ws://peer:10002', _remoteIp: '203.0.113.7' },
+            pm.handleInbound({ _peerAddr: 'ws://peer:10002', _remoteIp: '203.0.113.7' },
                 JSON.stringify(env), 'ws://peer:10002');
 
             expect(emitted, 'receiving is untouched by the hold').to.have.lengthOf(1);
@@ -136,7 +136,7 @@ describe('observer hub does not author into rounds it cannot sign', function () 
             };
             env.sig = new ValidatorIdentity(peer.privkeyHex).signEnvelope(env);
 
-            pm._handleInbound({ _peerAddr: 'ws://peer:10002', _remoteIp: '203.0.113.7' },
+            pm.handleInbound({ _peerAddr: 'ws://peer:10002', _remoteIp: '203.0.113.7' },
                 JSON.stringify(env), 'ws://peer:10002');
 
             expect(frames, 'gossip service continues').to.have.lengthOf(1);
@@ -172,7 +172,7 @@ describe('observer hub does not author into rounds it cannot sign', function () 
         sinon.stub(Date, 'now').returns(1757700000000);
         sinon.stub(pm, '_makeId').returns('xc2418-fixed-id');
 
-        let expected = JSON.stringify(pm._buildEnvelope('ORACLE_PROPOSE', { round: 7, price: '1.25' }));
+        let expected = JSON.stringify(pm.buildEnvelope('ORACLE_PROPOSE', { round: 7, price: '1.25' }));
         let envelope = pm.broadcast('ORACLE_PROPOSE', { round: 7, price: '1.25' });
 
         expect(envelope, 'the return contract is unchanged for a member').to.be.an('object');

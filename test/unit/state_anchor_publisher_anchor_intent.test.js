@@ -19,7 +19,7 @@
 // definitive pre-send failure and an ambiguous send.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A db double that routes by SQL shape and records every statement it saw.
@@ -60,7 +60,7 @@ function mkPub(db){
     pub.identity              = null;                 // skips the publisher-attestation round
     pub.peerManager           = null;                 // skips the XANC_BUNDLE_DONE announce
     pub._getActiveOraclePublishPubkeys = async () => ['aa'];
-    pub._mayPublish           = () => true;
+    pub.mayPublish           = () => true;
     return pub;
 }
 
@@ -93,7 +93,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('arms intent with a window-refreshing upsert', async function () {
             const db  = mkDb();
             const pub = mkPub(db);
-            await pub._recordAnchorIntent(mkRow());
+            await pub.recordAnchorIntent(mkRow());
             const q = sqlHits(db, 'INSERT INTO anchor_published_checkpoints')[0];
             expect(q.sql).to.contain('ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP');
             expect(q.sql).to.contain('sent_at = NULL');
@@ -103,19 +103,19 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('withdraws only an unconfirmed intent, never a confirmed marker', async function () {
             const db  = mkDb();
             const pub = mkPub(db);
-            await pub._withdrawAnchorIntent(mkRow());
+            await pub.withdrawAnchorIntent(mkRow());
             expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')[0].sql).to.contain('AND sent_at IS NULL');
         });
 
         it('never throws out of _markAnchorSent: the fee is already spent and the intent still holds', async function () {
             const pub = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
-            await pub._markAnchorSent(mkRow(), 'tx-1');   // resolves rather than rejecting
+            await pub.markAnchorSent(mkRow(), 'tx-1');   // resolves rather than rejecting
         });
 
         it('propagates a read failure so the caller fails closed', async function () {
             const pub = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
             let threw = false;
-            try { await pub._getAnchorIntent(mkRow()); } catch(e){ threw = true; }
+            try { await pub.getAnchorIntent(mkRow()); } catch(e){ threw = true; }
             expect(threw).to.equal(true);
         });
     });
@@ -124,7 +124,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('holds the checkpoint when an unconfirmed intent survives and the anchor is not yet mined', async function () {
             const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: 'earlier-tx', sent_at: null } });
             const pub = mkPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;      // mined view: definitively absent
+            pub.findExistingCheckpointAnchor = async () => null;      // mined view: definitively absent
             let broadcasts = 0;
             const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, 1000);
             expect(broadcasts).to.equal(0);
@@ -135,7 +135,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('falls through to the adopt path once the held anchor mines', async function () {
             const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: null, sent_at: null } });
             const pub = mkPub(db);
-            pub._findExistingCheckpointAnchor = async () => ({ exists: true, txid: 'mined-tx' });
+            pub.findExistingCheckpointAnchor = async () => ({ exists: true, txid: 'mined-tx' });
             let broadcasts = 0;
             const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, 1000);
             expect(broadcasts).to.equal(0);                            // adopted, never re-broadcast
@@ -147,7 +147,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(Date.now() - 60000), txid: null, sent_at: null } });
             const pub = mkPub(db);
             pub.anchorIntentTtlMs = 1000;
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             let broadcasts = 0;
             const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, 1000);
             expect(broadcasts).to.equal(1);
@@ -157,7 +157,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('arms intent BEFORE the broadcast and confirms it after', async function () {
             const db  = mkDb({ pending: [mkRow()] });
             const pub = mkPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             let armedBeforeSend = false;
             await pub._publishPendingCheckpoints({ broadcastFn: async () => {
                 armedBeforeSend = sqlHits(db, 'INSERT INTO anchor_published_checkpoints').length === 1;
@@ -170,7 +170,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('withdraws the intent when the send definitively never went out', async function () {
             const db  = mkDb({ pending: [mkRow()] });
             const pub = mkPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             await pub._publishPendingCheckpoints({ broadcastFn: async () => { throw new Error('no UTXOs available for Dpub1'); } }, 1000);
             expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')).to.have.length(1);
         });
@@ -178,7 +178,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('KEEPS the intent after an ambiguous send, which is the case the marker exists for', async function () {
             const db  = mkDb({ pending: [mkRow()] });
             const pub = mkPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             await pub._publishPendingCheckpoints({ broadcastFn: async () => {
                 const e = new Error('socket hang up'); e.anchorAmbiguousSend = true; throw e;
             } }, 1000);
@@ -201,7 +201,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             // A MET round. These cases are about WHERE the marker is read relative to the
             // round, not about what a degraded round does, and a degraded one now defers
             // the bundle before the publish path they exist to exercise is reached.
-            pub._runPublisherAttestationRound = async () => {
+            pub.runPublisherAttestationRound = async () => {
                 pub.rounds++;
                 return { met: true, sigs: [{ pubkey: 'aa'.repeat(32), sig: 'bb'.repeat(64) }], publisher: 'aa' };
             };
@@ -211,7 +211,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('does not open a publisher-attestation round for a held, unmined checkpoint', async function () {
             const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: 'earlier-tx', sent_at: null } });
             const pub = mkAttestingPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             let broadcasts = 0;
             const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, 1000);
             expect(pub.rounds, 'a held row must cost one DB read, not a federation quorum').to.equal(0);
@@ -225,7 +225,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             // rather than `continue`-ing past it.
             const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: null, sent_at: null } });
             const pub = mkAttestingPub(db);
-            pub._findExistingCheckpointAnchor = async () => ({ exists: true, txid: 'mined-tx' });
+            pub.findExistingCheckpointAnchor = async () => ({ exists: true, txid: 'mined-tx' });
             const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => ({ txid: 'fresh' }) }, 1000);
             expect(pub.rounds, 'a held-but-mined row still takes the normal publish path').to.equal(1);
             expect(out).to.have.length(1);
@@ -237,7 +237,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             // still open, or "rounds === 0" would prove nothing about the ordering.
             const db  = mkDb({ pending: [mkRow()] });
             const pub = mkAttestingPub(db);
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.findExistingCheckpointAnchor = async () => null;
             await pub._publishPendingCheckpoints({ broadcastFn: async () => ({ txid: 'fresh' }) }, 1000);
             expect(pub.rounds).to.equal(1);
         });
@@ -301,7 +301,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             pub.anchorMarkerRetentionMs = 7776000000;
             pub.anchorIntentTtlMs       = 21600000;
 
-            expect(await pub._pruneAnchorMarkers()).to.equal(6);
+            expect(await pub.pruneAnchorMarkers()).to.equal(6);
 
             const d = dels(db);
             expect(d.length, 'both marker tables must be swept').to.equal(2);
@@ -326,7 +326,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             pub.anchorMarkerRetentionMs = 60000;
             pub.anchorIntentTtlMs       = 21600000;   // 6 h
 
-            await pub._pruneAnchorMarkers();
+            await pub.pruneAnchorMarkers();
 
             const floorSec = (21600000 * 8) / 1000;
             expect(dels(db)[0].params[0]).to.equal(floorSec);
@@ -338,7 +338,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             const pub2 = mkPub(db2);
             pub2.anchorMarkerRetentionMs = 60000;
             pub2.anchorIntentTtlMs       = 43200000;   // 12 h
-            await pub2._pruneAnchorMarkers();
+            await pub2.pruneAnchorMarkers();
             expect(dels(db2)[0].params[0]).to.equal((43200000 * 8) / 1000);
         });
 
@@ -346,19 +346,19 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             const dbOff = mkRetentionDb(1);
             const off   = mkPub(dbOff);
             off.anchorMarkerRetentionMs = 0;
-            expect(await off._pruneAnchorMarkers()).to.equal(0);
+            expect(await off.pruneAnchorMarkers()).to.equal(0);
             expect(dels(dbOff).length).to.equal(0);
 
             const noDb = mkPub(mkRetentionDb(1));
             noDb.db = null;
-            expect(await noDb._pruneAnchorMarkers()).to.equal(0);
+            expect(await noDb.pruneAnchorMarkers()).to.equal(0);
         });
 
         it('runs the sweep at the end of a flush that reached the publishing stage', async function () {
             const db  = mkRetentionDb(1);
             const pub = mkPub(db);
-            pub._drainDeferredBundleDone   = async () => {};
-            pub._drainDeferredFinalized    = async () => {};
+            pub.drainDeferredBundleDone   = async () => {};
+            pub.drainDeferredFinalized    = async () => {};
             pub._drainDeferredRewardAttest = async () => {};
             pub._publishPendingCheckpoints = async () => [];
             pub._startArchiveRound         = async () => 'none';
@@ -374,8 +374,8 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('never lets a retention failure fail a flush that already spent DOGE', async function () {
             const db  = mkRetentionDb(0, true);   // every DELETE throws
             const pub = mkPub(db);
-            pub._drainDeferredBundleDone   = async () => {};
-            pub._drainDeferredFinalized    = async () => {};
+            pub.drainDeferredBundleDone   = async () => {};
+            pub.drainDeferredFinalized    = async () => {};
             pub._drainDeferredRewardAttest = async () => {};
             pub._publishPendingCheckpoints = async () => [{ chain: 'BTC', txid: 'paid' }];
             pub._startArchiveRound         = async () => 'none';

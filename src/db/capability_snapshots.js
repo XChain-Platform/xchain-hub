@@ -38,25 +38,25 @@ module.exports = {
     },
 
     // Reads rows from capability_snapshots.
-    // Moved here from src/StateAnchorPublisher.js:2922.
+    // Moved here from src/anchor/publisher.js:2922.
     async findCapabilitySnapshotsBySnapshotBlock(snapshot_block, capability) {
         return this.doQuery('SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC', [snapshot_block, capability]);
     },
 
     // Reads rows from capability_snapshots.
-    // Moved here from src/StateAnchorPublisher.js:4921.
+    // Moved here from src/anchor/publisher.js:4921.
     async findCapabilitySnapshotsBySnapshotBlockAndCapability(snapshot_block, capability) {
         return this.doQuery('SELECT signing_pubkey FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC', [snapshot_block, capability]);
     },
 
     // Reads one row from capability_snapshots.
-    // Moved here from src/AttestationBatchPublisher.js:783, src/AttestationRelay.js:1121, src/CrossChainBridgeEngine.js:1405, src/CrossChainCallEngine.js:1069, src/CrossChainDexEngine.js:1094, src/OracleConsensus.js:2435, src/PriceAggregator.js:2042, src/RetractionConsensus.js:461.
+    // Moved here from src/attestation/batch_publisher.js:783, src/attestation/relay.js:1121, src/cross_chain/bridge_engine.js:1405, src/cross_chain/call_engine.js:1069, src/cross_chain/dex_engine.js:1094, src/oracle/consensus.js:2435, src/oracle/price_aggregator.js:2042, src/consensus/retraction.js:461.
     async getCapabilitySnapshot(snapshot_block, capability, signing_pubkey, source) {
         return this.doQuery('SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1', [snapshot_block, capability, signing_pubkey, source]);
     },
 
     // Reads one row from capability_snapshots.
-    // Moved here from src/HubDbBroadcaster.js:647.
+    // Moved here from src/peers/hub_db_broadcaster.js:647.
     async getCapabilitySnapshotsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
     },

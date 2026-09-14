@@ -12,8 +12,8 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Governance   = require('../../src/Governance');
-const ValidatorIdentity = require('../../src/ValidatorIdentity');
+const Governance   = require('../../src/validators/governance');
+const ValidatorIdentity = require('../../src/validators/identity');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3 }    = require('../helpers/fixtures');
 
@@ -177,19 +177,19 @@ describe('Regression: Governance', function () {
 
     describe('REG-GOV-004: Parameter change bounds (normal)', function () {
         it('allows 50% increase @regression-p0', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
         });
 
         it('rejects 51% increase @regression-p0', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '151')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '151')).to.throw(/exceeds maximum/);
         });
 
         it('allows 33% decrease @regression-p0', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
         });
 
         it('rejects 34% decrease @regression-p0', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '66')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '66')).to.throw(/exceeds maximum/);
         });
     });
 
@@ -199,19 +199,19 @@ describe('Regression: Governance', function () {
 
     describe('REG-GOV-005: Slashing parameter bounds', function () {
         it('allows 25% increase for SLASH_DEVIATION_THRESHOLD @regression-p1', function () {
-            expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
         });
 
         it('rejects 26% increase for SLASH_DEVIATION_THRESHOLD @regression-p1', function () {
-            expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.063')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.063')).to.throw(/exceeds maximum/);
         });
 
         it('allows 20% decrease for SLASH_MISSED_ROUNDS_THRESHOLD @regression-p1', function () {
-            expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '24')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '24')).to.not.throw();
         });
 
         it('rejects 21% decrease for SLASH_MISSED_ROUNDS_THRESHOLD @regression-p1', function () {
-            expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
         });
     });
 
@@ -270,11 +270,11 @@ describe('Regression: Governance', function () {
 
     describe('REG-GOV-008: Edge cases', function () {
         it('skips validation for non-numeric values @regression-p2', function () {
-            expect(() => gov._validateChangeBounds('P', 'abc', 'def')).to.not.throw();
+            expect(() => gov.validateChangeBounds('P', 'abc', 'def')).to.not.throw();
         });
 
         it('skips validation when current value is 0 @regression-p2', function () {
-            expect(() => gov._validateChangeBounds('P', '0', '100')).to.not.throw();
+            expect(() => gov.validateChangeBounds('P', '0', '100')).to.not.throw();
         });
 
         it('throws when no identity configured @regression-p2', async function () {

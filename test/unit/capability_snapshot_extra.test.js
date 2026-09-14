@@ -31,7 +31,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/CapabilitySnapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
     });
 
     afterEach(function () {
@@ -44,7 +44,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             _resolveBtcIndexerUrl: (opts && opts.indexerUrl !== undefined)
                 ? async () => opts.indexerUrl
                 : async () => 'http://indexer.local/rpc',
-            _btcIndexerHeaders:    () => ({})
+            btcIndexerHeaders:    () => ({})
         };
     }
 
@@ -318,7 +318,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             let now  = Date.now();
             snap.cache.set('old:1',  { expiresAt: now - 1 });
             snap.cache.set('fresh:2', { expiresAt: now + 10000 });
-            snap._prune(now);
+            snap.prune(now);
             expect(snap.cache.has('old:1')).to.be.false;
             expect(snap.cache.has('fresh:2')).to.be.true;
         });

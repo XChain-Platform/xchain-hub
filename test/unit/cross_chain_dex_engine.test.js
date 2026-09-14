@@ -31,7 +31,7 @@ let CrossChainDexEngine;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: axiosStub });
+    CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: axiosStub });
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ describe('CrossChainDexEngine', function () {
                 { a_chain: 'DOGE', a_action_index: 7, a_amount: '20', b_chain: 'LTC', b_action_index: 1, b_amount: '40' }
             ]);
             let eng = new CrossChainDexEngine(hub);
-            await eng._rebuildCommitted();
+            await eng.rebuildCommitted();
             // DOGE:7 gave 20 / received 40 ; LTC:1 gave 40 / received 20
             expect(eng.committed.get('DOGE:7')).to.deep.equal({ give: '20', get: '40' });
             expect(eng.committed.get('LTC:1')).to.deep.equal({ give: '40', get: '20' });
@@ -181,7 +181,7 @@ describe('CrossChainDexEngine', function () {
                 Object.assign(new Error("Table 'xchain.cross_chain_matches' doesn't exist"),
                               { errno: 1146, code: 'ER_NO_SUCH_TABLE' }));
             let eng = new CrossChainDexEngine(hub);
-            expect(await eng._rebuildCommitted()).to.equal(true);
+            expect(await eng.rebuildCommitted()).to.equal(true);
             expect(eng.committed.size).to.equal(0);
             expect(eng._committedReady).to.equal(true);
         });
@@ -195,7 +195,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng.committed.set('LTC:1', { give: '40', get: '20' });
 
-            expect(await eng._rebuildCommitted()).to.equal(false);
+            expect(await eng.rebuildCommitted()).to.equal(false);
             expect(eng._committedReady, 'a failed rebuild must not leave the hub matching').to.equal(false);
             expect(eng.committed.get('LTC:1'), 'the prior reservations must survive').to.deep.equal({ give: '40', get: '20' });
         });
@@ -206,7 +206,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng.indexers.BTC.url = 'http://btc';        // without this the fetch is unreachable anyway
             let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
-            await eng._rebuildCommitted();
+            await eng.rebuildCommitted();
 
             await eng._discoverAndMatch();
             expect(fetch.called, 'a not-ready tick must not even read the books').to.equal(false);
@@ -223,7 +223,7 @@ describe('CrossChainDexEngine', function () {
             eng.indexers.BTC.url = 'http://btc';        // same reachability guard as above
             let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
 
-            await eng._rebuildCommitted();
+            await eng.rebuildCommitted();
             expect(eng._committedReady).to.equal(false);
 
             await eng._discoverAndMatch();          // retries the rebuild on the poll tick
@@ -237,7 +237,7 @@ describe('CrossChainDexEngine', function () {
         it('returns full amounts when nothing is committed', function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             let { a } = makeOrderPair();
-            let r = eng._effectiveRemaining(a);
+            let r = eng.effectiveRemaining(a);
             expect(r.give).to.equal('100');
             expect(r.get).to.equal('50');
         });
@@ -246,7 +246,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             let { a } = makeOrderPair();
             eng.committed.set('LTC:1', { give: '40', get: '20' });
-            let r = eng._effectiveRemaining(a);
+            let r = eng.effectiveRemaining(a);
             expect(r.give).to.equal('60');
             expect(r.get).to.equal('30');
         });
@@ -254,7 +254,7 @@ describe('CrossChainDexEngine', function () {
         it('treats an ownership side as a unit (amount 1)', function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             let off = { home_coin: 'LTC', action_index: 9, give_ownership: 1, give_amount: '1', get_amount: '5', get_ownership: 0 };
-            expect(eng._effectiveRemaining(off).give).to.equal('1');
+            expect(eng.effectiveRemaining(off).give).to.equal('1');
         });
     });
 
@@ -304,7 +304,7 @@ describe('CrossChainDexEngine', function () {
 
         it('produces the bottleneck-clamped fill (smaller side fully filled)', function () {
             let { a, b } = makeOrderPair();
-            let d = eng._tryMatch(a, b);
+            let d = eng.tryMatch(a, b);
             expect(d).to.not.be.null;
             expect(d.loKind).to.equal('order');
             // lo = DOGE (canonical-lower) gives 20 DOGT, hi = LTC gives 40 LTCT
@@ -317,13 +317,13 @@ describe('CrossChainDexEngine', function () {
 
         it('advances filled_before on a sequential fill and yields a distinct match_id', function () {
             let { a, b } = makeOrderPair();
-            let d1 = eng._tryMatch(a, b);
+            let d1 = eng.tryMatch(a, b);
             // simulate finalize: commit d1's fill to the ledger
             eng._applyCommit({ a_chain: d1.lo.home_coin, a_action_index: d1.lo.action_index, a_amount: d1.loFill,
                                b_chain: d1.hi.home_coin, b_action_index: d1.hi.action_index, b_amount: d1.hiFill }, +1);
             // a second DOGE order fills more of A
             let c = Object.assign({}, b, { action_index: 9, block_index: 21, get_address: 'Daddr2' });
-            let d2 = eng._tryMatch(a, c);
+            let d2 = eng.tryMatch(a, c);
             expect(d2.hiFilledBefore).to.equal('40');   // A already filled 40 LTCT
             let id1 = eng._deriveMatchId(d1.lo, d1.hi, 100, d1.loFilledBefore, d1.hiFilledBefore);
             let id2 = eng._deriveMatchId(d2.lo, d2.hi, 100, d2.loFilledBefore, d2.hiFilledBefore);
@@ -336,16 +336,16 @@ describe('CrossChainDexEngine', function () {
             // for 20 DOGT, taker.GIVE_PRICE = get/give = 30/20 = 1.5 < 2 → skipped (null).
             let { a, b } = makeOrderPair();
             b.get_amount = '30';
-            expect(eng._tryMatch(a, b)).to.be.null;
+            expect(eng.tryMatch(a, b)).to.be.null;
             // At the boundary (equal price, makeOrderPair's 40 → GIVE_PRICE 2) it matches.
             let { a: a2, b: b2 } = makeOrderPair();
-            expect(eng._tryMatch(a2, b2)).to.not.be.null;
+            expect(eng.tryMatch(a2, b2)).to.not.be.null;
         });
 
         it('does not over-fill once an order is fully committed', function () {
             let { a, b } = makeOrderPair();
             eng.committed.set('LTC:1', { give: '100', get: '50' });  // A fully filled
-            expect(eng._tryMatch(a, b)).to.be.null;
+            expect(eng.tryMatch(a, b)).to.be.null;
         });
 
         it('does not cross-match a SWAP against an ORDER (carry-forward): kind, not terms, is the bar', function () {
@@ -366,15 +366,15 @@ describe('CrossChainDexEngine', function () {
             let ordr2 = Object.assign({}, terms, { kind: 'order' });
 
             // SWAP↔ORDER carries forward in BOTH orderings (the only difference from the controls is kind).
-            expect(eng._tryMatch(order, swap), 'order×swap should carry forward').to.be.null;
-            expect(eng._tryMatch(swap, order), 'swap×order should carry forward').to.be.null;
+            expect(eng.tryMatch(order, swap), 'order×swap should carry forward').to.be.null;
+            expect(eng.tryMatch(swap, order), 'swap×order should carry forward').to.be.null;
 
             // Positive controls: the SAME crossing terms DO match when both sides are the same kind,
             // proving the null above is the SWAP↔ORDER boundary, not term incompatibility or the
             // network guard. order×order fills; swap×swap (an exact same-network pair) finalises.
-            expect(eng._tryMatch(order, ordr2), 'order×order control should match').to.not.be.null;
+            expect(eng.tryMatch(order, ordr2), 'order×order control should match').to.not.be.null;
             let { a: swapA, b: swapB } = makePair();
-            expect(eng._tryMatch(swapA, swapB), 'swap×swap control should match').to.not.be.null;
+            expect(eng.tryMatch(swapA, swapB), 'swap×swap control should match').to.not.be.null;
         });
     });
 
@@ -484,18 +484,18 @@ describe('CrossChainDexEngine', function () {
         before(function () { loadModule(); eng = new CrossChainDexEngine(makeDexHub()); });
 
         it('strips leading and trailing zeros', function () {
-            expect(eng._normalizeAmount('007.50')).to.equal('7.5');
-            expect(eng._normalizeAmount('100.00000000')).to.equal('100');
+            expect(eng.normalizeAmount('007.50')).to.equal('7.5');
+            expect(eng.normalizeAmount('100.00000000')).to.equal('100');
         });
         it('treats null / empty as empty', function () {
-            expect(eng._normalizeAmount(null)).to.equal('');
-            expect(eng._normalizeAmount('')).to.equal('');
+            expect(eng.normalizeAmount(null)).to.equal('');
+            expect(eng.normalizeAmount('')).to.equal('');
         });
         it('treats 100 and 100.00000000 as equal', function () {
-            expect(eng._amountsEqual('100', '100.00000000')).to.be.true;
+            expect(eng.amountsEqual('100', '100.00000000')).to.be.true;
         });
         it('returns false for unequal amounts', function () {
-            expect(eng._amountsEqual('100', '101')).to.be.false;
+            expect(eng.amountsEqual('100', '101')).to.be.false;
         });
     });
 
@@ -505,15 +505,15 @@ describe('CrossChainDexEngine', function () {
 
         it('returns true for a valid cross-chain exact match', function () {
             let { a, b } = makePair();
-            expect(eng._isExactMatch(a, b)).to.be.true;
+            expect(eng.isExactMatch(a, b)).to.be.true;
         });
         it('returns false on same chain / differing network / non-mirrored amounts', function () {
             let { a, b } = makePair();
-            expect(eng._isExactMatch(a, makeOffer({ home_coin: 'BTC', action_index: 2 }))).to.be.false;
+            expect(eng.isExactMatch(a, makeOffer({ home_coin: 'BTC', action_index: 2 }))).to.be.false;
             let p2 = makePair(); p2.b.home_network = 'testnet';
-            expect(eng._isExactMatch(p2.a, p2.b)).to.be.false;
+            expect(eng.isExactMatch(p2.a, p2.b)).to.be.false;
             let p3 = makePair(); p3.b.give_amount = '999';
-            expect(eng._isExactMatch(p3.a, p3.b)).to.be.false;
+            expect(eng.isExactMatch(p3.a, p3.b)).to.be.false;
         });
     });
 
@@ -522,7 +522,7 @@ describe('CrossChainDexEngine', function () {
     describe('validateProposedMatch()', function () {
         // Build the row _finalizeMatch would produce for an ORDER pair.
         function orderRow(eng, a, b, block) {
-            let d = eng._tryMatch(a, b);
+            let d = eng.tryMatch(a, b);
             return {
                 match_id:       eng._deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
                 snapshot_block: block, network: d.network,
@@ -673,7 +673,7 @@ describe('CrossChainDexEngine', function () {
 
             let { a, b } = makeOrderPair();
             const now = eng._nowSeconds();
-            let desc = eng._tryMatch(a, b);
+            let desc = eng.tryMatch(a, b);
             await eng._finalizeMatch(desc);
             expect(proposed, 'no row was proposed').to.not.equal(null);
             // 4 blocks of the SLOWER leg: both chains must hold the mirrored row before
@@ -952,7 +952,7 @@ describe('CrossChainDexEngine', function () {
                 b_filled_before: '0', b_ownership: 0, b_payout_addr: 'Db',
                 effective_time: 1700000000
             };
-            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await eng.writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
             expect(persist.calledWith('cross_chain', 150)).to.be.true;
         });
 
@@ -1026,7 +1026,7 @@ describe('CrossChainDexEngine', function () {
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
-            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await eng.writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(insert.called, 'must NOT insert the match row').to.be.false;
             expect(commit.called, 'must NOT apply the committed-ledger fill').to.be.false;
@@ -1046,7 +1046,7 @@ describe('CrossChainDexEngine', function () {
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
-            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await eng.writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(insert.called, 'must NOT insert the match row').to.be.false;
             expect(commit.called, 'must NOT apply the committed-ledger fill').to.be.false;
@@ -1064,7 +1064,7 @@ describe('CrossChainDexEngine', function () {
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
-            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await eng.writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(insert.calledOnce, 'must insert the match row').to.be.true;
             expect(commit.calledWith(row, +1), 'must apply the committed-ledger fill').to.be.true;
@@ -1088,7 +1088,7 @@ describe('CrossChainDexEngine', function () {
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
-            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await eng.writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(commit.calledWith(row, +1), 'the durable fill must still reach the ledger').to.be.true;
             expect(eng._inflight.has(row.match_id), 'the in-flight slot must be released').to.be.false;
@@ -1107,7 +1107,7 @@ describe('CrossChainDexEngine', function () {
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
             sinon.stub(eng, '_applyCommit');
 
-            await eng._writeFinalizedMatch({ row: finalizeRow(), signatures: [] });
+            await eng.writeFinalizedMatch({ row: finalizeRow(), signatures: [] });
 
             expect(broadcaster.broadcastRow.calledOnce).to.be.true;
             expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('cross_chain_matches');
@@ -1127,7 +1127,7 @@ describe('CrossChainDexEngine', function () {
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
-            await eng._writeFinalizedMatch({ row, signatures: [] });
+            await eng.writeFinalizedMatch({ row, signatures: [] });
 
             expect(commit.called, 'nothing was written, so nothing may be committed').to.be.false;
             expect(eng._inflight.has(row.match_id)).to.be.false;
@@ -1407,7 +1407,7 @@ describe('CrossChainDexEngine', function () {
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
 
             let { a, b } = makeOrderPair();
-            let desc = eng._tryMatch(a, b);
+            let desc = eng.tryMatch(a, b);
 
             let emitted = false;
             eng.on('match:finalized', () => { emitted = true; });

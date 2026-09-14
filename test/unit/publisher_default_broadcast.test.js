@@ -20,8 +20,8 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const AttestationPublisher = require('../../src/AttestationPublisher');
-const OraclePublisher      = require('../../src/OraclePublisher');
+const AttestationPublisher = require('../../src/attestation/publisher');
+const OraclePublisher      = require('../../src/oracle/publisher');
 
 // A minimal encoder stub that records the createTx arguments and returns canned
 // values for the rest of the pipeline.

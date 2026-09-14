@@ -25,8 +25,8 @@
 // test/integration/anchor/archiveSeqDivergence.integration.test.js.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const CP = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7, snapshot_block: 100 };
@@ -96,33 +96,33 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
 
         it('draws above a consumed seq the federation has demonstrably spent', async function () {
             const pub = mkPub(38);                 // our rows say 38; we missed the back-fills
-            pub._noteConsumedBatchSeq(40, 'test');
+            pub.noteConsumedBatchSeq(40, 'test');
             expect(await pub._getNextBatchSeq()).to.equal(41);
         });
 
         it('never walks the seq BACKWARDS on a stale observation', async function () {
             const pub = mkPub(41);
-            pub._noteConsumedBatchSeq(38, 'test');
+            pub.noteConsumedBatchSeq(38, 'test');
             expect(await pub._getNextBatchSeq()).to.equal(41);
         });
 
         it('keeps the highest floor it has seen and ignores a lower one', function () {
             const pub = mkPub(0);
-            pub._noteConsumedBatchSeq(40, 'test');
-            pub._noteConsumedBatchSeq(12, 'test');
+            pub.noteConsumedBatchSeq(40, 'test');
+            pub.noteConsumedBatchSeq(12, 'test');
             expect(pub._observedConsumedBatchSeq).to.equal(40);
         });
 
         it('ignores an implausible jump, so a Byzantine member cannot burn the numbering', async function () {
             const pub = mkPub(7);
-            pub._noteConsumedBatchSeq(7 + pub._archiveSeqFloorMaxJump + 1, 'test');
+            pub.noteConsumedBatchSeq(7 + pub._archiveSeqFloorMaxJump + 1, 'test');
             expect(await pub._getNextBatchSeq()).to.equal(7);
         });
 
         it('ignores a non-numeric observation', function () {
             const pub = mkPub(0);
-            pub._noteConsumedBatchSeq('not-a-seq', 'test');
-            pub._noteConsumedBatchSeq(null, 'test');
+            pub.noteConsumedBatchSeq('not-a-seq', 'test');
+            pub.noteConsumedBatchSeq(null, 'test');
             expect(pub._observedConsumedBatchSeq).to.equal(-1);
         });
     });
@@ -133,7 +133,7 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
             const pub = mkPub(0);
             const refusal = pub._seqRefusalCanonical(38, 40);
             expect(refusal).to.equal('XANCSEQ|38|40');
-            expect(refusal).to.not.equal(pub._finalizedCanonical(38, '40', 0));
+            expect(refusal).to.not.equal(pub.finalizedCanonical(38, '40', 0));
             expect(refusal.indexOf('XANCFIN')).to.equal(-1);
             expect(refusal.indexOf('XANCV2')).to.equal(-1);
         });

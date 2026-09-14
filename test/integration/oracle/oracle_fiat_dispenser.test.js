@@ -41,8 +41,8 @@ const testDb          = require('../../helpers/testDb');
 const { waitUntil }   = require('../../helpers/waitUntil');
 const mockApi         = require('../../helpers/mockExternalApi');
 const { VALIDATORS_1 } = require('../../helpers/fixtures');
-const OracleRound     = require('../../../src/OracleRound');
-const OracleConsensus = require('../../../src/OracleConsensus');
+const OracleRound     = require('../../../src/oracle/round');
+const OracleConsensus = require('../../../src/oracle/consensus');
 const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
 // The REAL dispenser-side consumption logic lives in the indexer's Utility.

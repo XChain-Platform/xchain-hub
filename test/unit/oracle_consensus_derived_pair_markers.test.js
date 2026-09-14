@@ -19,8 +19,8 @@
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const OracleConsensus   = require('../../src/OracleConsensus');
-const PriceFetcher      = require('../../src/PriceFetcher');
+const OracleConsensus   = require('../../src/oracle/consensus');
+const PriceFetcher      = require('../../src/oracle/price_fetcher');
 const { DERIVED_PAIRS } = require('../../src/constants.js');
 const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 
@@ -33,21 +33,21 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
     // (which xchain_price_activation's own suite already covers).
     function withGate(openFor) {
         return { getSubmissions: sinon.stub().returns(new Map()),
-                 _xchainPriceGateOpenFor: (round) => openFor(round) };
+                 xchainPriceGateOpenFor: (round) => openFor(round) };
     }
 
     afterEach(function () { sinon.restore(); });
 
     it('leaves the derived pair out while the activation gate is closed', function () {
         oc = new OracleConsensus(createMockHub(), withGate(() => false));
-        const pairs = oc._markerPairs(7);
+        const pairs = oc.markerPairs(7);
         expect(pairs).to.deep.equal(PriceFetcher.getCoinPairs());
         expect(pairs).to.not.include(XCHAIN);
     });
 
     it('unions the derived pair in once the gate is open for that round', function () {
         oc = new OracleConsensus(createMockHub(), withGate(() => true));
-        const pairs = oc._markerPairs(7);
+        const pairs = oc.markerPairs(7);
         expect(pairs).to.include(XCHAIN);
         // Union, not replacement: every fetched pair still gets its marker.
         for (const p of PriceFetcher.getCoinPairs()) expect(pairs, p).to.include(p);
@@ -60,21 +60,21 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
     it('asks the gate about the stored round, not whatever round is current', function () {
         const seen = [];
         oc = new OracleConsensus(createMockHub(), withGate((round) => { seen.push(round); return round >= 100; }));
-        expect(oc._markerPairs(99)).to.not.include(XCHAIN);
-        expect(oc._markerPairs(100)).to.include(XCHAIN);
+        expect(oc.markerPairs(99)).to.not.include(XCHAIN);
+        expect(oc.markerPairs(100)).to.include(XCHAIN);
         expect(seen).to.deep.equal([99, 100]);
     });
 
     it('fails closed to the fetched pairs when the gate throws', function () {
         oc = new OracleConsensus(createMockHub(),
             { getSubmissions: sinon.stub().returns(new Map()),
-              _xchainPriceGateOpenFor: () => { throw new Error('no epoch yet'); } });
-        expect(oc._markerPairs(7)).to.deep.equal(PriceFetcher.getCoinPairs());
+              xchainPriceGateOpenFor: () => { throw new Error('no epoch yet'); } });
+        expect(oc.markerPairs(7)).to.deep.equal(PriceFetcher.getCoinPairs());
     });
 
     it('fails closed against an OracleRound that predates the round-keyed gate', function () {
         oc = new OracleConsensus(createMockHub(), { getSubmissions: sinon.stub().returns(new Map()) });
-        expect(oc._markerPairs(7)).to.deep.equal(PriceFetcher.getCoinPairs());
+        expect(oc.markerPairs(7)).to.deep.equal(PriceFetcher.getCoinPairs());
     });
 
     // The whole point of the item: a gated-on round that finalizes the other pairs but

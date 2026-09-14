@@ -34,8 +34,8 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.js');
-const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
+const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../src/validators/identity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
@@ -351,7 +351,7 @@ describe('AttestationBatchPublisher', function () {
 
             expect(await p._resolveFloorWindow()).to.equal(p.windowStartFor(now));
             p._floorWindow = await p._resolveFloorWindow();
-            expect(await p._pendingWindows(now),
+            expect(await p.pendingWindows(now),
                 'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
         });
 
@@ -367,7 +367,7 @@ describe('AttestationBatchPublisher', function () {
 
             expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
                 .to.equal(now - 3 * WINDOW_S);
-            let pending = await p._pendingWindows(now);
+            let pending = await p.pendingWindows(now);
             expect(pending.map(w => w.windowStart),
                 'the skipped window is inside the catch-up horizon and must come back')
                 .to.deep.equal([now - 2 * WINDOW_S]);
@@ -388,7 +388,7 @@ describe('AttestationBatchPublisher', function () {
             p._floorWindow = await p._resolveFloorWindow();
 
             expect(p._floorWindow).to.equal(now - WINDOW_S);
-            expect(await p._pendingWindows(now)).to.deep.equal([]);
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
             expect(p.stats.coverageGapsDetected).to.equal(0);
         });
 
@@ -401,7 +401,7 @@ describe('AttestationBatchPublisher', function () {
 
             p._floorWindow = await p._resolveFloorWindow();
 
-            expect(await p._pendingWindows(now)).to.deep.equal([]);
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
             expect(p.stats.coverageGapsDetected).to.equal(0);
         });
 
@@ -416,7 +416,7 @@ describe('AttestationBatchPublisher', function () {
 
             p._floorWindow = await p._resolveFloorWindow();
 
-            expect(await p._pendingWindows(now),
+            expect(await p.pendingWindows(now),
                 'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);
             expect(p.stats.windowsQuarantined).to.equal(1);
         });
@@ -868,7 +868,7 @@ describe('AttestationBatchPublisher', function () {
                                   row_count: 3, status: 'landed', txid: 'dogetxid' });
             let p = makeScriptedPublisher(hub, []);
 
-            await p._clearIntent(start);
+            await p.clearIntent(start);
 
             expect(hub.db.marker(start).status).to.equal('landed');
             expect(hub.db.marker(start).txid).to.equal('dogetxid');
@@ -885,7 +885,7 @@ describe('AttestationBatchPublisher', function () {
 
             let p = makeScriptedPublisher(hub, []);
             let cap = captureErrors();
-            try { await p._hydrateMarkers(); } finally { cap.restore(); }
+            try { await p.hydrateMarkers(); } finally { cap.restore(); }
 
             expect(p._quarantined.has(start)).to.equal(true);
             expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);
@@ -939,7 +939,7 @@ describe('AttestationBatchPublisher', function () {
 
             // And the agreement is real, not arithmetic: B co-signs A's actual proposal.
             pA._floorWindow = start;
-            await pA._publishWindow(start, 4);
+            await pA.publishWindow(start, 4);
             expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
             await pB._handleSignReq({
                 type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
@@ -1030,7 +1030,7 @@ describe('AttestationBatchPublisher', function () {
             // case; the election has its own test below.
             // Nobody answers: the round times out, nothing is published, and NO marker is
             // written, which is what makes the retry possible at all.
-            await p._publishWindow(start, 4);
+            await p.publishWindow(start, 4);
             expect(p.wires.length).to.equal(0);
             expect(p.stats.signTimeouts).to.equal(1);
             expect(hub.db.marker(start)).to.equal(null);
@@ -1046,7 +1046,7 @@ describe('AttestationBatchPublisher', function () {
                 return orig.call(this, type, data);
             })(hub.peerManager.broadcast);
 
-            await p._publishWindow(start, 4);
+            await p.publishWindow(start, 4);
 
             expect(p.wires.length, 'the retried window must publish').to.equal(1);
             let head = decodeHead(p.wires[0]);
@@ -1072,7 +1072,7 @@ describe('AttestationBatchPublisher', function () {
             p._floorWindow = now - WINDOW_S;
             hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
 
-            await p._publishWindow(now - WINDOW_S, 4);
+            await p.publishWindow(now - WINDOW_S, 4);
 
             // A co-signature naming a DIFFERENT window is not counted, even though it
             // carries a real signature from a real member of the set.
@@ -1220,17 +1220,17 @@ describe('AttestationBatchPublisher', function () {
             let start = now - WINDOW_S;
             let window = { network: 'regtest', window_start: start, window_end: now,
                            row_count: 0, btc_block_height: ANCHOR, rows: [] };
-            let rank = (await p._electionRank(ANCHOR, abw.computeBatchKey(window))).rank;
+            let rank = (await p.electionRank(ANCHOR, abw.computeBatchKey(window))).rank;
             expect(rank).to.be.at.least(0).and.below(5);
 
             // One window younger than this hub's rank: not its turn.
             if (rank > 0) {
                 p._floorWindow = start;
-                await p._publishWindow(start, rank - 1);
+                await p.publishWindow(start, rank - 1);
                 expect(p.wires.length, 'a hub must not publish before its rank comes up').to.equal(0);
             }
             // At its rank, it takes over.
-            await p._publishWindow(start, rank);
+            await p.publishWindow(start, rank);
             expect(p.wires.length).to.equal(1);
         });
     });

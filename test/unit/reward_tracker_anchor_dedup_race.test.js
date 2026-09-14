@@ -23,7 +23,7 @@
 // fixed-path assertion cannot be green merely because the harness never raced.
 
 const { expect }    = require('chai');
-const RewardTracker = require('../../src/RewardTracker');
+const RewardTracker = require('../../src/anchor/reward_tracker');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_LOW  = 'aa'.repeat(32);
@@ -76,8 +76,8 @@ describe('RewardTracker #4182 anchor reward dedup is atomic across failover publ
     it('CONTROL: the unlocked body still double-mints under the same interleave', async function () {
         let { rt, rows } = makeTracker();
         await Promise.all([
-            rt._recordAnchorRewardLocked(TYPE, ROUND, PK_HIGH, BLOCK, ''),
-            rt._recordAnchorRewardLocked(TYPE, ROUND, PK_LOW,  BLOCK, '')
+            rt.recordAnchorRewardLocked(TYPE, ROUND, PK_HIGH, BLOCK, ''),
+            rt.recordAnchorRewardLocked(TYPE, ROUND, PK_LOW,  BLOCK, '')
         ]);
         expect(rows().length, 'the original defect must reproduce, or the fixed case proves nothing').to.equal(2);
     });

@@ -19,7 +19,7 @@
 // oversize anchor is dropped silently by every decoder.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 
 // LOCAL COPY of the canonical ceiling in xchain-documentation/protocol/
 // constants.js (MAX_ACTION_DATA_LENGTH). The decoder is the arbiter: it drops a
@@ -119,7 +119,7 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 
         it('splits the payload at exactly chunkMaxBytes, so chunk 0 is the binding case', function () {
             const pub    = mkPub();
-            const chunks = pub._splitChunks('B'.repeat(pub.chunkMaxBytes * 2 + 17));
+            const chunks = pub.splitChunks('B'.repeat(pub.chunkMaxBytes * 2 + 17));
             expect(chunks.length).to.equal(3);
             expect(chunks[0].length).to.equal(pub.chunkMaxBytes);
             expect(chunks[1].length).to.equal(pub.chunkMaxBytes);
@@ -197,10 +197,10 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 
         it('a (PUBKEY, SIG) pair costs the same 194 bytes in a section and in the tail', function () {
             const pub = mkPub();
-            const one = pub._v7Bytes(sections(1, 1), hex(64), 0);
-            const two = pub._v7Bytes(sections(1, 2), hex(64), 0);
+            const one = pub.v7Bytes(sections(1, 1), hex(64), 0);
+            const two = pub.v7Bytes(sections(1, 2), hex(64), 0);
             expect(two - one, 'one more section signature').to.equal(SIG_PAIR_BYTES);
-            expect(pub._v7Bytes(sections(1, 1), hex(64), 1) - one, 'one more attesting signer').to.equal(SIG_PAIR_BYTES);
+            expect(pub.v7Bytes(sections(1, 1), hex(64), 1) - one, 'one more attesting signer').to.equal(SIG_PAIR_BYTES);
         });
 
         it('_v7Bytes predicts the real wire length without the signatures existing yet', function () {
@@ -209,15 +209,15 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             const pub  = mkPub();
             const att  = Array.from({ length: 5 }, (_, i) => ({ pubkey: String(i).repeat(64), sig: String(i).repeat(128) }));
             const real = Buffer.byteLength(pub._buildV7Payload(sections(3, 5), hex(64), att), 'utf8');
-            expect(pub._v7Bytes(sections(3, 5), hex(64), att.length)).to.equal(real);
+            expect(pub.v7Bytes(sections(3, 5), hex(64), att.length)).to.equal(real);
         });
 
         it('fits 6 chains at 4 signers, 5 at 5, and 3 at 7 - the documented capacity cliff', function () {
             const pub = mkPub();
             for(const [signers, chains] of [[4, 6], [5, 5], [7, 3]]){
-                expect(pub._v7Bytes(sections(chains, signers), hex(64), signers),
+                expect(pub.v7Bytes(sections(chains, signers), hex(64), signers),
                     signers + ' signers, ' + chains + ' chains').to.be.at.most(BUNDLE_BUDGET);
-                expect(pub._v7Bytes(sections(chains + 1, signers), hex(64), signers),
+                expect(pub.v7Bytes(sections(chains + 1, signers), hex(64), signers),
                     signers + ' signers, ' + (chains + 1) + ' chains overflows').to.be.above(BUNDLE_BUDGET);
             }
         });
@@ -225,15 +225,15 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
         // AT8: the split itself, not just the arithmetic.
         it('AT8: a 7-signer 4-chain bundle splits into two, chain-ascending, each under the budget', function () {
             const pub   = mkPub();
-            const split = pub._splitBundle(sections(4, 7).slice().reverse(), hex(64), 7);   // input out of order
+            const split = pub.splitBundle(sections(4, 7).slice().reverse(), hex(64), 7);   // input out of order
             expect(split.oversize, 'nothing is refused: every section fits alone').to.deep.equal([]);
             expect(split.bundles.length, 'split into two bundles').to.equal(2);
             expect(split.bundles.map(b => b.map(x => x.chain)),
                 'chain-ascending, three then the remainder').to.deep.equal([['AAAA', 'BBBB', 'CCCC'], ['DDDD']]);
             for(const b of split.bundles)
-                expect(pub._v7Bytes(b, hex(64), 7), 'each bundle fits').to.be.at.most(BUNDLE_BUDGET);
+                expect(pub.v7Bytes(b, hex(64), 7), 'each bundle fits').to.be.at.most(BUNDLE_BUDGET);
             // Unsplit, the same four sections do NOT fit: the split is doing real work.
-            expect(pub._v7Bytes(sections(4, 7), hex(64), 7)).to.be.above(BUNDLE_BUDGET);
+            expect(pub.v7Bytes(sections(4, 7), hex(64), 7)).to.be.above(BUNDLE_BUDGET);
         });
 
         it('AT8: a single section wider than the budget is refused and counted, never sent', function () {
@@ -241,8 +241,8 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             // 45 signers on one section puts it past the budget even before the tail is
             // added, which is the refusal criterion at its most extreme: no split rescues it.
             const huge = section('AAAA', 45);
-            expect(pub._v7Bytes([huge], hex(64), 0)).to.be.above(BUNDLE_BUDGET);
-            const split = pub._splitBundle([huge, section('BBBB', 4)], hex(64), 4);
+            expect(pub.v7Bytes([huge], hex(64), 0)).to.be.above(BUNDLE_BUDGET);
+            const split = pub.splitBundle([huge, section('BBBB', 4)], hex(64), 4);
             expect(split.oversize.map(x => x.chain), 'the wide section is refused').to.deep.equal(['AAAA']);
             expect(split.oversize[0].bytes).to.be.above(BUNDLE_BUDGET);
             expect(split.bundles.map(b => b.map(x => x.chain)),
@@ -258,18 +258,18 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             // 20 section signatures and a 23-signer attestation tail: the section alone
             // clears the budget with no tail and blows past it with one.
             const lone = section('AAAA', 20);
-            expect(pub._v7Bytes([lone], hex(64), 0), 'fits with an empty tail').to.be.at.most(BUNDLE_BUDGET);
-            expect(pub._v7Bytes([lone], hex(64), 23), 'does not fit with the real tail').to.be.above(BUNDLE_BUDGET);
-            const split = pub._splitBundle([lone], hex(64), 23);
+            expect(pub.v7Bytes([lone], hex(64), 0), 'fits with an empty tail').to.be.at.most(BUNDLE_BUDGET);
+            expect(pub.v7Bytes([lone], hex(64), 23), 'does not fit with the real tail').to.be.above(BUNDLE_BUDGET);
+            const split = pub.splitBundle([lone], hex(64), 23);
             expect(split.bundles, 'nothing is handed to the publisher').to.deep.equal([]);
             expect(split.oversize.map(x => x.chain), 'the section is refused').to.deep.equal(['AAAA']);
             expect(split.oversize[0].bytes, 'the refusal reports the tail-inclusive size')
-                .to.equal(pub._v7Bytes([lone], hex(64), 23));
+                .to.equal(pub.v7Bytes([lone], hex(64), 23));
         });
 
         it('a bundle that already fits is never split', function () {
             const pub   = mkPub();
-            const split = pub._splitBundle(sections(3, 5), hex(64), 5);
+            const split = pub.splitBundle(sections(3, 5), hex(64), 5);
             expect(split.bundles.length).to.equal(1);
             expect(split.bundles[0].map(x => x.chain)).to.deep.equal(['AAAA', 'BBBB', 'CCCC']);
             expect(split.oversize).to.deep.equal([]);

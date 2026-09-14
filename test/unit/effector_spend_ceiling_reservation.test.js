@@ -40,7 +40,7 @@ const os         = require('os');
 const path       = require('path');
 
 const SpendGuard       = require('../../src/lib/spend_guard.js');
-const AttestationRelay = require('../../src/AttestationRelay.js');
+const AttestationRelay = require('../../src/attestation/relay.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A promise plus the handle that settles it, so a test can park a broadcast
@@ -89,9 +89,9 @@ describe('await-safe spend gating on the hub effectors', function () {
     it('OraclePublisher: two overlapping publish passes spend one window slot, not two', async function () {
         const entry  = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/OraclePublisher', {
+        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            './EncoderClient': function () { return null; }
+            '../peers/encoder_client': function () { return null; }
         });
 
         // One broadcast per window: the ceiling is what the second pass must hit.
@@ -109,8 +109,8 @@ describe('await-safe spend gating on the hub effectors', function () {
         // hide the spend race behind a skip, and the point here is that the gate
         // holds even when a second pass reaches the send (a future second call
         // site, a sweep timer, or a caller that bypasses the wrapper).
-        const passA = pub._processQueueInner();
-        const passB = pub._processQueueInner();
+        const passA = pub.processQueueInner();
+        const passB = pub.processQueueInner();
 
         // Let both passes reach the awaited broadcast before either settles.
         await new Promise(r => setImmediate(r));
@@ -126,9 +126,9 @@ describe('await-safe spend gating on the hub effectors', function () {
     it('OraclePublisher: a declined round leaves no publish-intent row behind', async function () {
         const entry  = { round: 9, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/OraclePublisher', {
+        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            './EncoderClient': function () { return null; }
+            '../peers/encoder_client': function () { return null; }
         });
 
         const pub = new OraclePublisher(makeOracleHub({
@@ -146,7 +146,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         pub.db = { ...DB_METHODS, doQuery: doQuery };
 
         pub.spendGuard.pause('ceiling closed for this test');
-        await pub._processQueueInner();
+        await pub.processQueueInner();
 
         const intentWrites = doQuery.getCalls().filter(c => /INSERT INTO oracle_published_rounds/.test(String(c.args[0])));
         expect(intentWrites.length,
@@ -174,10 +174,10 @@ describe('await-safe spend gating on the hub effectors', function () {
         const gate = deferred();
         const broadcastStub = sinon.stub().returns(gate.promise);
         relay.broadcastFn = broadcastStub;
-        relay._legState('request').wire.set(rid, { coin: null, wire: 'ATTEST|3|' + rid });
+        relay.legState('request').wire.set(rid, { coin: null, wire: 'ATTEST|3|' + rid });
 
-        const sendA = relay._broadcast('request', rid);
-        const sendB = relay._broadcast('request', rid);
+        const sendA = relay.broadcast('request', rid);
+        const sendB = relay.broadcast('request', rid);
 
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));

@@ -50,7 +50,7 @@ function makeHub(overrides) {
         getIdentity:        () => makeIdentity(o.pubkey),
         capabilitySnapshot: o.capabilitySnapshot !== undefined ? o.capabilitySnapshot : null,
         _resolveBtcIndexerUrl: o._resolveBtcIndexerUrl || sinon.stub().resolves(null),
-        _btcIndexerHeaders: () => ({})
+        btcIndexerHeaders: () => ({})
     };
     hub._peerManager = pm;
     return hub;
@@ -72,7 +72,7 @@ let AttestationRound;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    AttestationRound = proxyquire('../../src/AttestationRound', { axios: axiosStub });
+    AttestationRound = proxyquire('../../src/attestation/round', { axios: axiosStub });
 }
 
 describe('AttestationRound zero-confirmation flip', function () {

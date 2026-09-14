@@ -19,11 +19,11 @@
 // 2650 mirror persist, 2651 self-sign).
 
 const { expect }              = require('chai');
-const StateCheckpointEngine   = require('../../src/StateCheckpointEngine');
-const StateAnchorPublisher    = require('../../src/StateAnchorPublisher');
-const ValidatorIdentity       = require('../../src/ValidatorIdentity');
+const StateCheckpointEngine   = require('../../src/anchor/checkpoint_engine');
+const StateAnchorPublisher    = require('../../src/anchor/publisher');
+const ValidatorIdentity       = require('../../src/validators/identity');
 const swq                     = require('../../src/stake_weighted_quorum');
-const { resolveQuorumNetwork } = require('../../src/lib/quorum_network');
+const { resolveQuorumNetwork } = require('../../src/anchor/quorum_network');
 const { waitUntil }           = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
@@ -226,13 +226,13 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
                 { snapshot_block: 970000, capability: 'oracle_publish', signing_pubkey: PK, amount: '100', source: 'srcB' }
             ]
         };
-        let ok = await pub._verifyArchiveAgainstLocal(archive);
+        let ok = await pub.verifyArchiveAgainstLocal(archive);
         expect(ok, 'multi-source archive snapshot group verifies').to.be.true;
 
         // Control: a genuinely divergent archived set (a source we did not resolve) is
         // still rejected, proving the widened key did not weaken the check.
         archive.capability_snapshots[1].source = 'srcWRONG';
-        let bad = await pub._verifyArchiveAgainstLocal(archive);
+        let bad = await pub.verifyArchiveAgainstLocal(archive);
         expect(bad, 'a mismatched source is still rejected').to.be.false;
     });
 

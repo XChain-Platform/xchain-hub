@@ -26,7 +26,7 @@ describe('PriceFetcher', function () {
 
     beforeEach(function () {
         axiosStub = { get: sinon.stub() };
-        PriceFetcher = proxyquire('../../src/PriceFetcher', { axios: axiosStub });
+        PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
     });
 
     afterEach(function () {
@@ -517,8 +517,8 @@ describe('PriceFetcher', function () {
             // The structural half: a future fifth source that misses the declaration
             // must degrade to a correct count, not to a counter that reads as working.
             pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
-            pf._reportBoundRejects('a-source-nobody-declared', 'NewSource', ['X/USD=0', 'Y/USD=0']);
-            pf._reportBoundRejects('a-source-nobody-declared', 'NewSource', ['Z/USD=0']);
+            pf.reportBoundRejects('a-source-nobody-declared', 'NewSource', ['X/USD=0', 'Y/USD=0']);
+            pf.reportBoundRejects('a-source-nobody-declared', 'NewSource', ['Z/USD=0']);
             expect(pf._boundRejects['a-source-nobody-declared']).to.equal(3);
         });
 

@@ -18,7 +18,7 @@
 const { expect } = require('chai');
 const crypto = require('crypto');
 const eq  = require('../../src/equivocation_header.js');
-const AttestationConsensus = require('../../src/AttestationConsensus.js');
+const AttestationConsensus = require('../../src/attestation/consensus.js');
 
 function mockHub(network){
     return { network: network, getPeerManager: () => ({}), db: {}, getIdentity: () => null, p2pConfig: {} };

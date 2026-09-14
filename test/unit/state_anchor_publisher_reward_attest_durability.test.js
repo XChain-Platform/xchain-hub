@@ -29,7 +29,7 @@
 
 const { expect }           = require('chai');
 const sinon                = require('sinon');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const arMod                = require('../../src/anchor_reward_activation.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
@@ -76,9 +76,9 @@ function makePub(plan) {
     const pub = new StateAnchorPublisher({ db, getIdentity: () => null, hubDbBroadcaster: broadcaster });
     pub.indexers.DOGE = { url: 'http://doge.indexer.invalid', key: '' };
     pub.dogeConfirmations = 60;
-    pub._verifyAnchorOnChain = async () => 'verified';
+    pub.verifyAnchorOnChain = async () => 'verified';
     const federated = [];
-    pub._federateRewardAttestation = (...a) => { federated.push(a); };
+    pub.federateRewardAttestation = (...a) => { federated.push(a); };
     return { pub, inserts, broadcast, resyncs, federated, selects: () => selectAttempt };
 }
 
@@ -100,7 +100,7 @@ describe('StateAnchorPublisher #7579 a confirmed reward survives a transient wri
 
     it('RETAINS the pending entry when the attestation INSERT fails, and retries it next pass', async () => {
         const { pub, inserts, broadcast, federated } = makePub({ insertFailsUntil: 2 });
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         expect(pub._deferredRewardAttest.size, 'entry queued').to.equal(1);
 
         await pub._drainDeferredRewardAttest();                        // DB is sick
@@ -118,7 +118,7 @@ describe('StateAnchorPublisher #7579 a confirmed reward survives a transient wri
 
     it('clears the entry and federates on a clean write (control)', async () => {
         const { pub, inserts, broadcast, federated } = makePub();
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         await pub._drainDeferredRewardAttest();
         expect(inserts.length).to.equal(1);
         expect(broadcast.length).to.equal(1);
@@ -134,7 +134,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
 
     it('repairs a read-back that THROWS after the row committed', async () => {
         const { pub, inserts, broadcast, resyncs, federated } = makePub({ readBackThrows: true });
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         await pub._drainDeferredRewardAttest();
         expect(inserts.length, 'the row is durable').to.equal(1);
         expect(broadcast.length, 'nothing could be streamed').to.equal(0);
@@ -146,7 +146,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
 
     it('repairs a read-back that comes back EMPTY after the row committed', async () => {
         const { pub, broadcast, resyncs } = makePub({ readBackEmpty: true });
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         await pub._drainDeferredRewardAttest();
         expect(broadcast.length).to.equal(0);
         expect(resyncs.length, 'an empty read-back is the same undeliverable-row event').to.equal(1);
@@ -154,7 +154,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
 
     it('does NOT churn mirrors when there are no subscribers to gap', async () => {
         const { pub, inserts, resyncs, selects } = makePub({ readBackThrows: true, subscribers: new Set() });
-        pub._deferRewardAttestation(entry());
+        pub.deferRewardAttestation(entry());
         await pub._drainDeferredRewardAttest();
         expect(inserts.length, 'the write still happens').to.equal(1);
         expect(selects(), 'and no read-back is even attempted').to.equal(0);

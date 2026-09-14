@@ -139,7 +139,7 @@ function coinConsensusPins() {
  */
 function codeIdentity() {
     const rulesModule = loadFromRepo('src/consensus_rules_digest.js');
-    const { HUB_SCHEMA_VERSION } = loadFromRepo('src/hub-schema-version.js');
+    const { HUB_SCHEMA_VERSION } = loadFromRepo('src/hub_schema_version.js');
 
     const rules = rulesModule.computeConsensusRulesDigest();
     // The GATES field verbatim, because the hash alone cannot be checked by hand

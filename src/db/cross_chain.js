@@ -29,7 +29,7 @@
 // columns (batch_seq/archived_status/anchor_txid), and the mirror-internal
 // consensus fences (finalizing_view/push_generation): those serve signature
 // verification and reorg fencing, not operator/explorer display.
-// Moved here from src/CrossChainCallEngine.js:133.
+// Moved here from src/cross_chain/call_engine.js:133.
 const CALL_SURFACE_COLS = 'id, call_id, phase, snapshot_block, network, source_chain, ' +
     'source_action_index, source_contract_index, target_chain, target_contract_index, ' +
     'method, params_json, gas_limit, cross_hops, effective_time, status, result_status, ' +
@@ -46,7 +46,7 @@ const CALL_LIST_FILTERS = [
 ];
 
 // The column list a finalized cross_chain_calls row is written with.
-// Moved here from src/CrossChainCallEngine.js:850.
+// Moved here from src/cross_chain/call_engine.js:850.
 const CALL_FINALIZED_COLS = ['call_id','phase','snapshot_block','network',
                     'source_chain','source_action_index','source_contract_index',
                     'target_chain','target_contract_index','method','params_json',
@@ -62,7 +62,7 @@ const CALL_FINALIZED_COLS = ['call_id','phase','snapshot_block','network',
 
 // The range clause both reorg-retraction statements share, and its params. Built only
 // from fixed fragments: `bounded` and `fenced` choose which clauses join, and every
-// bound is a bound parameter. Moved here from src/CrossChainCallEngine.js:1125.
+// bound is a bound parameter. Moved here from src/cross_chain/call_engine.js:1125.
 function crossChainCallRetractionTail(chain, bounds) {
     let tail = " AND source_chain = ? AND source_action_index >= ?" +
                (bounds.bounded ? " AND source_action_index <= ?" : "") +
@@ -89,7 +89,7 @@ const CROSS_CHAIN_MATCH_COLUMNS = ['match_id','snapshot_block','network',
 
 module.exports = {
     // Reads rows from cross_chain_calls.
-    // Moved here from src/StateAnchorPublisher.js:2491.
+    // Moved here from src/anchor/publisher.js:2491.
     async findCrossChainCallsByBatchSeq(maxBatch) {
         return this.doQuery('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status ORDER BY call_id ASC, phase ASC LIMIT ?', [maxBatch]);
     },
@@ -101,13 +101,13 @@ module.exports = {
     },
 
     // Reads rows from cross_chain_calls.
-    // Moved here from src/CrossChainCallEngine.js:283.
+    // Moved here from src/cross_chain/call_engine.js:283.
     async findCrossChainCallsByPhase() {
         return this.doQuery(`SELECT d.target_chain, COUNT(*) AS pending_relay_count FROM cross_chain_calls d LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND r.id IS NULL GROUP BY d.target_chain`);
     },
 
     // Reads rows from cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:2488.
+    // Moved here from src/anchor/publisher.js:2488.
     async findCrossChainMatchesByBatchSeq(maxBatch) {
         return this.doQuery('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status ORDER BY match_id ASC LIMIT ?', [maxBatch]);
     },
@@ -119,79 +119,79 @@ module.exports = {
     },
 
     // Reads rows from cross_chain_matches.
-    // Moved here from src/CrossChainDexEngine.js:240.
+    // Moved here from src/cross_chain/dex_engine.js:240.
     async findCrossChainMatchesByStatus() {
         return this.doQuery(`SELECT a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches WHERE status = 'finalized'`);
     },
 
     // Reads one row from cross_chain_calls.
-    // Moved here from src/CrossChainCallEngine.js:770.
+    // Moved here from src/cross_chain/call_engine.js:770.
     async getCrossChainCallByCallId(call_id) {
         return this.doQuery(`SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' AND status <> 'retracted' LIMIT 1`, [call_id]);
     },
 
     // Reads one row from cross_chain_calls.
-    // Moved here from src/CrossChainCallEngine.js:998, src/StateAnchorPublisher.js:3598, src/StateAnchorPublisher.js:4502.
+    // Moved here from src/cross_chain/call_engine.js:998, src/anchor/publisher.js:3598, src/anchor/publisher.js:4502.
     async getCrossChainCallByCallIdAndPhase(call_id, phase) {
         return this.doQuery('SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [call_id, phase]);
     },
 
     // Reads one row from cross_chain_calls.
-    // Moved here from src/HubDbBroadcaster.js:667.
+    // Moved here from src/peers/hub_db_broadcaster.js:667.
     async getCrossChainCallsMaxLiveId() {
         return this.doQuery(`SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'`);
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/CrossChainDexEngine.js:997, src/StateAnchorPublisher.js:3560, src/StateAnchorPublisher.js:4492.
+    // Moved here from src/cross_chain/dex_engine.js:997, src/anchor/publisher.js:3560, src/anchor/publisher.js:4492.
     async getCrossChainMatchByMatchId(match_id) {
         return this.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [match_id]);
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/HubDbBroadcaster.js:643.
+    // Moved here from src/peers/hub_db_broadcaster.js:643.
     async getCrossChainMatchesMaxLiveId() {
         return this.doQuery(`SELECT MAX(id) AS max_id FROM cross_chain_matches WHERE status <> 'retracted'`);
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:4808.
+    // Moved here from src/anchor/publisher.js:4808.
     async getNextAnchorBatchSeq() {
         return this.doQuery('SELECT COALESCE(GREATEST(  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1),   COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1),   COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1)), -1) + 1 AS next_seq');
     },
 
     // Probes for a matching row in cross_chain_calls.
-    // Moved here from src/CrossChainCallEngine.js:1174.
+    // Moved here from src/cross_chain/call_engine.js:1174.
     async hasCrossChainCalls(callId, phase) {
         return this.doQuery(`SELECT 1 FROM cross_chain_calls WHERE call_id = ? AND phase = ? AND status <> 'retracted' LIMIT 1`, [callId, phase]);
     },
 
     // Updates cross_chain_calls.
-    // Moved here from src/StateAnchorPublisher.js:4783.
+    // Moved here from src/anchor/publisher.js:4783.
     async updateCrossChainCall(batchSeq, status, txid, call_id, phase) {
         return this.doQuery('UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE call_id = ? AND phase = ? AND (batch_seq IS NULL OR archived_status <> status)', [batchSeq, status, txid, call_id, phase]);
     },
 
     // Updates cross_chain_matches.
-    // Moved here from src/CrossChainDexEngine.js:968.
+    // Moved here from src/cross_chain/dex_engine.js:968.
     async updateCrossChainMatchByMatchId(validator_signatures, finalizing_view, effective_time, match_id) {
         return this.doQuery(`UPDATE cross_chain_matches SET status = 'finalized', validator_signatures = ?, finalizing_view = ?, effective_time = ? WHERE match_id = ? AND status = 'retracted'`, [validator_signatures, finalizing_view, effective_time, match_id]);
     },
 
     // Updates cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:4759.
+    // Moved here from src/anchor/publisher.js:4759.
     async updateCrossChainMatchByMatchIdAndBatchSeq(batchSeq, status, txid, match_id) {
         return this.doQuery('UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE match_id = ? AND (batch_seq IS NULL OR archived_status <> status)', [batchSeq, status, txid, match_id]);
     },
 
     // Updates cross_chain_matches.
-    // Moved here from src/CrossChainDexEngine.js:1136.
+    // Moved here from src/cross_chain/dex_engine.js:1136.
     async updateCrossChainMatchRetracted(match_id) {
         return this.doQuery(`UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?`, [match_id]);
     },
 
     // Reads both phases of one XCALL relay, retracted rows included, with the surface
-    // columns only. Moved here from src/CrossChainCallEngine.js:304.
+    // columns only. Moved here from src/cross_chain/call_engine.js:304.
     async findCrossChainCallPhasesByCallId(callId) {
         return this.doQuery(
             'SELECT ' + CALL_SURFACE_COLS + " FROM cross_chain_calls WHERE call_id = ? ORDER BY phase",
@@ -199,7 +199,7 @@ module.exports = {
     },
 
     // Reads a newest-first page of relay rows with any of the listCalls filters.
-    // Moved here from src/CrossChainCallEngine.js:317. The caller clamps `limit`.
+    // Moved here from src/cross_chain/call_engine.js:317. The caller clamps `limit`.
     async findCrossChainCallsForSurface(filters, limit) {
         let where = [];
         let args  = [];
@@ -215,7 +215,7 @@ module.exports = {
 
     // Reads the finalized dispatches on one target chain that still have no live result
     // row, skipping the call_ids parked in the result backoff. Moved here from
-    // src/CrossChainCallEngine.js:451. The parked ids are bound one placeholder each;
+    // src/cross_chain/call_engine.js:451. The parked ids are bound one placeholder each;
     // their count is all they change about the statement.
     async findCrossChainCallDispatchesAwaitingResult(targetChain, parkedCallIds) {
         let exclude = parkedCallIds.length ? (" AND d.call_id NOT IN (" + parkedCallIds.map(() => '?').join(',') + ")") : "";
@@ -227,7 +227,7 @@ module.exports = {
     },
 
     // Writes one finalized cross_chain_calls row, stamping btc_chain_id into the value
-    // list rather than onto the row. Moved here from src/CrossChainCallEngine.js:879.
+    // list rather than onto the row. Moved here from src/cross_chain/call_engine.js:879.
     //
     // A retracted row for the same (call_id, phase) can exist after a reorg.
     // INSERT IGNORE would silently discard the re-finalized content, leaving
@@ -246,21 +246,21 @@ module.exports = {
     },
 
     // Reads the finalized cross_chain_calls rows a reorg retraction covers.
-    // Moved here from src/CrossChainCallEngine.js:1131.
+    // Moved here from src/cross_chain/call_engine.js:1131.
     async findFinalizedCrossChainCallsInRetractionRange(chain, bounds) {
         let { tail, params } = crossChainCallRetractionTail(chain, bounds);
         return this.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
     },
 
     // Marks the finalized cross_chain_calls rows a reorg retraction covers 'retracted'.
-    // Moved here from src/CrossChainCallEngine.js:1133.
+    // Moved here from src/cross_chain/call_engine.js:1133.
     async updateCrossChainCallsRetractedInRange(chain, bounds) {
         let { tail, params } = crossChainCallRetractionTail(chain, bounds);
         return this.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
     },
 
     // Reads the non-retracted cross_chain_matches rows among an explicit set of match ids,
-    // for the anchor-stamp re-broadcast. Moved here from src/StateAnchorPublisher.js:4732.
+    // for the anchor-stamp re-broadcast. Moved here from src/anchor/publisher.js:4732.
     // The ids are bound one placeholder each; their count is all they change.
     async findLiveCrossChainMatchesByMatchIds(matchIds) {
         return this.doQuery(
@@ -269,7 +269,7 @@ module.exports = {
     },
 
     // Writes one finalized match row, idempotently.
-    // Moved here from src/CrossChainDexEngine.js:952.
+    // Moved here from src/cross_chain/dex_engine.js:952.
     //
     // INSERT IGNORE: match_id is unique, so a re-finalize (another hub, or a restart
     // racing the poll) is a harmless no-op, and the caller reads affectedRows to credit
@@ -284,7 +284,7 @@ module.exports = {
     },
 
     // Finalized matches with a leg on a reorged chain, for retraction.
-    // Moved here from src/CrossChainDexEngine.js:1125.
+    // Moved here from src/cross_chain/dex_engine.js:1125.
     //
     // Two-sided: the per-leg clause applies to whichever leg (a/b) is on `chain`, and each
     // leg is fenced by ITS OWN push generation. `bounded` closes the range at `to` so a leg

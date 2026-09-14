@@ -31,7 +31,7 @@
 const assert  = require('assert')
 const express = require('express')
 const cors    = require('cors')
-const { parseCorsOrigin } = require('../../src/lib/corsOrigin.js')
+const { parseCorsOrigin } = require('../../src/lib/cors_origin.js')
 
 // Mount cors exactly as src/api.js does and ask what a browser would receive.
 // Returns the ACAO header (or null) for each probed origin.

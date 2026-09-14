@@ -21,8 +21,8 @@
 //     same flag-day-aware snapshot as the leader quorum and the on-chain verifier.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
-const ValidatorIdentity    = require('../../src/ValidatorIdentity');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../src/validators/identity');
 const swq                  = require('../../src/stake_weighted_quorum');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
@@ -57,7 +57,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
     it('v4/v5 round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
         let { pub } = buildPub();
         pub._resolveCapabilitySet = async () => [];               // resolver divergence: unresolved at snapshot_block
-        let r = await pub._runPublisherAttestationRound(CP, 'D'.repeat(34));
+        let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
         expect(r.met, 'must not claim quorum off an unresolved set').to.equal(false);
         expect(r.sigs).to.deep.equal([]);
         expect(r.publisher, 'no publisher is attested').to.equal(undefined);
@@ -67,7 +67,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         let { pub, identity } = buildPub();
         let me = identity.getPubkeyHex().toLowerCase();
         pub._resolveCapabilitySet = async () => [{ pubkey: me, amount: '1', source: '' }];
-        let r = await pub._runPublisherAttestationRound(CP, 'D'.repeat(34));
+        let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
         expect(r.met).to.equal(true);
         expect(r.sigs.length).to.equal(1);
         expect(r.sigs[0].pubkey).to.equal(me);
@@ -76,14 +76,14 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
     it('v4/v5 round: a single-member set that is NOT us still abstains', async () => {
         let { pub } = buildPub();
         pub._resolveCapabilitySet = async () => [{ pubkey: 'ab'.repeat(33), amount: '1', source: '' }];
-        let r = await pub._runPublisherAttestationRound(CP, 'D'.repeat(34));
+        let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
         expect(r.met).to.equal(false);
     });
 
     it('v1 archive round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
         let { pub } = buildPub();
         pub._resolveCapabilitySet = async () => [];
-        let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
+        let r = await pub.runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
         expect(r.met).to.equal(false);
         expect(r.sigs).to.deep.equal([]);
     });
@@ -92,7 +92,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         let { pub, identity } = buildPub();
         let me = identity.getPubkeyHex().toLowerCase();
         pub._resolveCapabilitySet = async () => [{ pubkey: me, amount: '1', source: '' }];
-        let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
+        let r = await pub.runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
         expect(r.met).to.equal(true);
         expect(r.sigs.length).to.equal(1);
     });
@@ -105,7 +105,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
     it('v4/v5 round: a THROWING resolver degrades to the legacy anchor instead of propagating', async () => {
         let { pub } = buildPub({ network: 'mainnet' });
         pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
-        let r = await pub._runPublisherAttestationRound(CP, 'D'.repeat(34));
+        let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
         expect(r.met, 'no attestation, but the caller still publishes').to.equal(false);
         expect(r.sigs).to.deep.equal([]);
     });
@@ -113,7 +113,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
     it('v1 archive round: a THROWING resolver degrades to ATTEST_SIG_COUNT 0 instead of discarding the round', async () => {
         let { pub } = buildPub({ network: 'mainnet' });
         pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
-        let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
+        let r = await pub.runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
         expect(r.met).to.equal(false);
         expect(r.sigs).to.deep.equal([]);
     });
@@ -319,33 +319,33 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
             }
         });
         pub._getActiveOraclePublishPubkeys = async () => [me];    // sole member => rank 0, unlocked
-        pub._recordReward = () => {};                             // isolate the stamp assertion
+        pub.recordReward = () => {};                             // isolate the stamp assertion
         pub.verdict = opts.verdict || 'absent';
-        pub._verifyAnchorOnChain = async () => pub.verdict;
+        pub.verifyAnchorOnChain = async () => pub.verdict;
 
         let d = { network: 'regtest', snapshot_block: 100, txid: 'aa'.repeat(32),
                   sections: rows.map(r => ({ chain: r.chain, block_index: r.block_index, checkpoint_seq: r.checkpoint_seq })) };
         d.sig_pubkey = me;
-        d.sig = identity.sign(pub._bundleDoneCanonical(d, d.txid));
+        d.sig = identity.sign(pub.bundleDoneCanonical(d, d.txid));
         return { pub, d, me, rows, updates, envelope: { type: 'XANC_BUNDLE_DONE', sender: me, data: d } };
     }
 
     it('queues a mempool-age announcement, then stamps every section once the anchor confirms', async () => {
         let r = buildReceiver({ verdict: 'absent' });
 
-        await r.pub._handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
         expect(r.updates.length, 'nothing stamped off an unconfirmed anchor').to.equal(0);
         expect(r.pub._deferredBundleDone.size, 'announcement retained for re-verification').to.equal(1);
 
         // Still not buried: the drain leaves it queued and stamps nothing.
         r.pub.verdict = 'shallow';
-        await r.pub._drainDeferredBundleDone();
+        await r.pub.drainDeferredBundleDone();
         expect(r.updates.length).to.equal(0);
         expect(r.pub._deferredBundleDone.size).to.equal(1);
 
         // 60 confirmations later. EVERY section is stamped from the one announcement.
         r.pub.verdict = 'verified';
-        await r.pub._drainDeferredBundleDone();
+        await r.pub.drainDeferredBundleDone();
         expect(r.updates.length, 'stamped once buried, one row per section').to.equal(2);
         expect(r.updates.map(u => u[0])).to.deep.equal([r.d.txid, r.d.txid]);
         expect(r.updates.map(u => u[1]), 'both chains').to.deep.equal(['BTC', 'LTC']);
@@ -355,7 +355,7 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
 
     it('an already-buried announcement still stamps immediately, without queuing', async () => {
         let r = buildReceiver({ verdict: 'verified' });
-        await r.pub._handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
         expect(r.updates.length).to.equal(2);
         expect(r.pub._deferredBundleDone.size).to.equal(0);
     });
@@ -363,7 +363,7 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
     it('a positively-detected forge is dropped, never queued', async () => {
         for (let verdict of ['rejected:mismatch', 'rejected:txid', 'rejected:version', 'rejected:status']) {
             let r = buildReceiver({ verdict });
-            await r.pub._handleBundleDone(r.envelope);
+            await r.pub.handleBundleDone(r.envelope);
             expect(r.updates.length, verdict).to.equal(0);
             expect(r.pub._deferredBundleDone.size, verdict + ' must not be retried').to.equal(0);
         }
@@ -372,21 +372,21 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
     it('a queued announcement that never confirms expires, so the failover ladder can re-anchor', async () => {
         let r = buildReceiver({ verdict: 'absent' });
         r.pub.announceRetryTtlMs = -1;                      // already past its TTL on the next drain
-        await r.pub._handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
         expect(r.pub._deferredBundleDone.size).to.equal(1);
 
         r.pub.verdict = 'verified';                          // even a late confirm cannot resurrect it
-        await r.pub._drainDeferredBundleDone();
+        await r.pub.drainDeferredBundleDone();
         expect(r.pub._deferredBundleDone.size, 'expired entry dropped').to.equal(0);
         expect(r.updates.length, 'nothing stamped from an expired entry').to.equal(0);
     });
 
     it('drops the queued entry (without a second stamp) once every section is already anchored', async () => {
         let r = buildReceiver({ verdict: 'absent' });
-        await r.pub._handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
         for (let row of r.rows) row.anchor_txid = 'bb'.repeat(32);   // our own publish stamped them meanwhile
         r.pub.verdict = 'verified';
-        await r.pub._drainDeferredBundleDone();
+        await r.pub.drainDeferredBundleDone();
         expect(r.updates.length, 'no redundant UPDATE').to.equal(0);
         expect(r.pub._deferredBundleDone.size).to.equal(0);
     });
@@ -395,7 +395,7 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
         let r = buildReceiver({ verdict: 'absent' });
         r.pub.announceQueueMax = 3;
         for (let block = 1; block <= 10; block++)
-            r.pub._deferBundleDone({ network: 'regtest', snapshot_block: block, txid: 'cc'.repeat(32),
+            r.pub.deferBundleDone({ network: 'regtest', snapshot_block: block, txid: 'cc'.repeat(32),
                                      sections: [{ chain: 'BTC', block_index: 400 + block, checkpoint_seq: block }] }, r.me, 'absent');
         expect(r.pub._deferredBundleDone.size).to.equal(3);
         expect([...r.pub._deferredBundleDone.keys()].some(k => k.startsWith('regtest|8|')), 'newest kept').to.equal(true);
@@ -404,14 +404,14 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
 
     it('a duplicate announcement for the same txid does not double-queue', async () => {
         let r = buildReceiver({ verdict: 'absent' });
-        await r.pub._handleBundleDone(r.envelope);
-        await r.pub._handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
+        await r.pub.handleBundleDone(r.envelope);
         expect(r.pub._deferredBundleDone.size).to.equal(1);
     });
 
     it('flush drains the queue before the failover-rank re-anchor decision', async () => {
         let r = buildReceiver({ verdict: 'verified' });
-        r.pub._deferBundleDone(r.d, r.me, 'absent');
+        r.pub.deferBundleDone(r.d, r.me, 'absent');
         r.pub._publishPendingCheckpoints = async () => [];   // isolate flush from the publish pipeline
         r.pub._startArchiveRound        = async () => 'none';
         await r.pub.flush();
@@ -427,7 +427,7 @@ describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dr
             sections: [{ chain: 'BTC', block_index: 494, checkpoint_seq: 7 },
                        { chain: 'LTC', block_index: 990, checkpoint_seq: 8 }]
         });
-        await r.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: r.me, data: tampered });
+        await r.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: r.me, data: tampered });
         expect(r.updates.length, 'nothing stamped from a re-pointed announcement').to.equal(0);
     });
 });
