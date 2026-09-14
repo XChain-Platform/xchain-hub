@@ -118,6 +118,7 @@ const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
 const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
         PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
 const ah = require('../lib/admission_height.js');
+const hubConfig = require('../config');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -192,7 +193,7 @@ class OraclePublisher {
 
         // Config (read from env or hub p2pConfig)
         let cfg = hub.p2pConfig || {};
-        this.queuePath          = process.env.PUBLISHER_QUEUE_PATH || cfg.PUBLISHER_QUEUE_PATH || './data/publisher-queue.jsonl';
+        this.queuePath          = hubConfig.PUBLISHER_QUEUE_PATH || cfg.PUBLISHER_QUEUE_PATH || './data/publisher-queue.jsonl';
         // Append-only sink for rounds that exhaust maxAttempts. Kept next to the
         // queue so operators find both together; never truncated (open 'a').
         this.deadLetterPath     = this.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
@@ -251,10 +252,10 @@ class OraclePublisher {
         // durable guard is inert and the in-process tracker is the only at-most-once cover.
         this._quarantinedRounds = new Set();
         this.lastObservedBalance = null;
-        this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
-        this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
-        this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
-        this.maxAttempts        = parseInt(process.env.PUBLISHER_MAX_ATTEMPTS || cfg.PUBLISHER_MAX_ATTEMPTS || '5');
+        this.dogeAddress        = hubConfig.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
+        this.dogePubkeyHex      = hubConfig.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
+        this.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
+        this.maxAttempts        = parseInt(hubConfig.PUBLISHER_MAX_ATTEMPTS || cfg.PUBLISHER_MAX_ATTEMPTS || '5');
         // Retention window (in rounds) for the durable oracle_published_rounds marker
         // table. One row lands per published round forever, so on a money-bearing
         // broadcast path the table grows without bound for the life of the deployment.
@@ -270,7 +271,7 @@ class OraclePublisher {
         // The window counts ROUNDS, never wires, so it means the same 90 days under
         // v2 batching even though the wire count per day falls by ORACLE_BATCH_WINDOW_ROUNDS.
         this.publishedRoundsRetentionRounds = parseInt(
-            process.env.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS ||
+            hubConfig.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS ||
             cfg.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS);
         if (!Number.isFinite(this.publishedRoundsRetentionRounds) || this.publishedRoundsRetentionRounds < 0) {
             this.publishedRoundsRetentionRounds = 12960;
@@ -286,7 +287,7 @@ class OraclePublisher {
         // ANCHOR_ENABLED gate: a first-class lever to halt outbound DOGE spend
         // during an incident (bad price feed, runaway fees, compromised signer)
         // without tearing down the broadcast pipeline config. Default: enabled.
-        this.enabled = String(process.env.ORACLE_PUBLISH_ENABLED || cfg.ORACLE_PUBLISH_ENABLED || 'true') !== 'false';
+        this.enabled = String(hubConfig.ORACLE_PUBLISH_ENABLED || cfg.ORACLE_PUBLISH_ENABLED || 'true') !== 'false';
 
         // Shared SpendGuard (supersedes the old per-publisher SpendCeiling).
         // Composes the per-window spend ceiling (count + a $2000-clamped USD-cents
@@ -311,11 +312,11 @@ class OraclePublisher {
         // paid for, so it stays an opt-in an operator arms per deployment once the
         // observation feed below is known to work.
         this.failoverWindowBlocks = parseInt(
-            process.env.ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS ||
+            hubConfig.ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS ||
             cfg.ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS || '0');
         if (!Number.isFinite(this.failoverWindowBlocks) || this.failoverWindowBlocks < 0) this.failoverWindowBlocks = 0;
         this.approxBlockMs = parseInt(
-            process.env.ORACLE_PUBLISH_BLOCK_MS || cfg.ORACLE_PUBLISH_BLOCK_MS || APPROX_BTC_BLOCK_MS);
+            hubConfig.ORACLE_PUBLISH_BLOCK_MS || cfg.ORACLE_PUBLISH_BLOCK_MS || APPROX_BTC_BLOCK_MS);
         if (!Number.isFinite(this.approxBlockMs) || this.approxBlockMs <= 0) this.approxBlockMs = APPROX_BTC_BLOCK_MS;
         // Timers for windows this hub may take over, keyed by window index.
         this._takeoverTimers   = new Map();
@@ -334,7 +335,7 @@ class OraclePublisher {
         // tx that has not reached this hub's observed-on-chain view in that long did
         // not land, so re-publishing then costs nothing that was not already lost.
         this.takeoverAmbiguousCooldownMs = parseInt(
-            process.env.ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS ||
+            hubConfig.ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS ||
             cfg.ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS ||
             String(this.failoverWindowBlocks * this.approxBlockMs), 10);
         if (!Number.isFinite(this.takeoverAmbiguousCooldownMs) || this.takeoverAmbiguousCooldownMs < 0) {
@@ -350,7 +351,7 @@ class OraclePublisher {
         // venue that mines on demand (regtest), where chaining is free and waiting
         // for a confirmation would stall the harness.
         this.allowUnconfirmedInputs =
-            String(process.env.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
+            String(hubConfig.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
                    cfg.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
 
         // Narrow exception to the rule above: a wire may spend the change of a wire
@@ -362,7 +363,7 @@ class OraclePublisher {
         // one fee policy, so they rise and fall together. Bounded by depth, and the
         // next pass still defers wholesale on the NO_CONFIRMED_UTXO gate.
         this.selfChainMaxDepth = parseInt(
-            process.env.ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH ||
+            hubConfig.ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH ||
             cfg.ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH || '4');
         if (!Number.isFinite(this.selfChainMaxDepth) || this.selfChainMaxDepth < 0) this.selfChainMaxDepth = 4;
 
@@ -392,8 +393,8 @@ class OraclePublisher {
 
         // Auto-create EncoderClient if DOGE_ENCODER_URL env var is set
         // This is the JSON-RPC endpoint of an xchain-encoder instance configured for DOGE.
-        let encoderUrl = process.env.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
-        let encoderKey = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
+        let encoderUrl = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
+        let encoderKey = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
         this.encoder   = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
 
         // Pluggable hooks (wired by the operator at startup)
@@ -418,13 +419,13 @@ class OraclePublisher {
         // Read BEFORE the window size: the window ceiling is derived from the grace,
         // the round cadence and the pinned staleness bound (see below).
         this.batchGraceMs         = positiveIntConfig(
-            process.env.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
+            hubConfig.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
             300000, 'ORACLE_BATCH_GRACE_MS');
         this.batchBufferMaxRounds = positiveIntConfig(
-            process.env.ORACLE_BATCH_BUFFER_MAX_ROUNDS || cfg.ORACLE_BATCH_BUFFER_MAX_ROUNDS,
+            hubConfig.ORACLE_BATCH_BUFFER_MAX_ROUNDS || cfg.ORACLE_BATCH_BUFFER_MAX_ROUNDS,
             4032, 'ORACLE_BATCH_BUFFER_MAX_ROUNDS');
         this.batchCatchupIntervalMs = positiveIntConfig(
-            process.env.ORACLE_BATCH_CATCHUP_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_INTERVAL_MS,
+            hubConfig.ORACLE_BATCH_CATCHUP_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_INTERVAL_MS,
             DEFAULT_BATCH_CATCHUP_INTERVAL_MS, 'ORACLE_BATCH_CATCHUP_INTERVAL_MS');
         // The backlog cadence, clamped so it can never be SLOWER than the idle one: a
         // deployment that deliberately slows the sweep down has not asked for a faster
@@ -432,16 +433,16 @@ class OraclePublisher {
         this.batchCatchupBacklogIntervalMs = Math.min(
             this.batchCatchupIntervalMs,
             positiveIntConfig(
-                process.env.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS,
+                hubConfig.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS,
                 DEFAULT_BATCH_CATCHUP_BACKLOG_INTERVAL_MS, 'ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS'));
         // 0 disables retirement entirely: every window is re-proposed forever, which is
         // the pre-fix behaviour and the right setting for an operator who would
         // rather a stuck backlog stay visible than be retired quietly.
         this.catchupMaxAttempts = nonNegativeIntConfig(
-            process.env.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS || cfg.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS,
+            hubConfig.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS || cfg.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS,
             DEFAULT_CATCHUP_MAX_ATTEMPTS, 'ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS');
         this.catchupRetireAfterMs = nonNegativeIntConfig(
-            process.env.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS || cfg.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS,
+            hubConfig.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS || cfg.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS,
             DEFAULT_CATCHUP_RETIRE_AFTER_MS, 'ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS');
 
         // ---- The window ceiling, and why the window is not just a number
@@ -463,10 +464,10 @@ class OraclePublisher {
         // honouring it does not give the operator a cheaper rail, it gives them a chain
         // whose fees cannot be priced.
         this.roundIntervalMs      = positiveIntConfig(
-            process.env.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
+            hubConfig.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
             DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
         this.batchLandingReserveMs = nonNegativeIntConfig(
-            process.env.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
+            hubConfig.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
             DEFAULT_BATCH_LANDING_RESERVE_MS, 'ORACLE_BATCH_LANDING_RESERVE_MS');
         this.oracleMaxPriceAgeMs  = pinnedMaxPriceAgeMs(this.network);
 
@@ -479,7 +480,7 @@ class OraclePublisher {
         this.batchWindowRoundsCeiling = cadence.ceiling;
 
         this.batchWindowRounds    = positiveIntConfig(
-            process.env.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
+            hubConfig.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
             cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
             'ORACLE_BATCH_WINDOW_ROUNDS');
         if (cadence.ceiling !== null && this.batchWindowRounds > cadence.ceiling) {
@@ -604,13 +605,13 @@ class OraclePublisher {
         // Watchdog cadence. 0 disables the timer entirely (the counters stay live for
         // a caller that drives checkPublishedConfirmations itself).
         this.confirmCheckIntervalMs   = nonNegativeIntConfig(
-            process.env.ORACLE_PUBLISH_CONFIRM_CHECK_MS || cfg.ORACLE_PUBLISH_CONFIRM_CHECK_MS,
+            hubConfig.ORACLE_PUBLISH_CONFIRM_CHECK_MS || cfg.ORACLE_PUBLISH_CONFIRM_CHECK_MS,
             300000, 'ORACLE_PUBLISH_CONFIRM_CHECK_MS');
         // Age past which a still-unconfirmed broadcast is logged rather than only
         // counted. DOGE targets one-minute blocks, so half an hour of silence is a
         // stall an operator should see, not ordinary latency.
         this.confirmStaleMs           = nonNegativeIntConfig(
-            process.env.ORACLE_PUBLISH_CONFIRM_STALE_MS || cfg.ORACLE_PUBLISH_CONFIRM_STALE_MS,
+            hubConfig.ORACLE_PUBLISH_CONFIRM_STALE_MS || cfg.ORACLE_PUBLISH_CONFIRM_STALE_MS,
             1800000, 'ORACLE_PUBLISH_CONFIRM_STALE_MS');
     }
 
@@ -1852,7 +1853,7 @@ class OraclePublisher {
             } else {
                 // Literal names, deliberately: a computed process.env[expr] read is
                 // invisible to the env-var documentation gate.
-                url = process.env.DOGE_INDEXER_API_URL || process.env.DOGE_INDEXER_URL || null;
+                url = hubConfig.DOGE_INDEXER_API_URL || hubConfig.DOGE_INDEXER_URL || null;
             }
         } catch (e) {
             return this.chainReconcileFailed('cannot resolve the ' + PRICE_LANDING_COIN + ' indexer URL: ' + (e && e.message));
@@ -1860,7 +1861,7 @@ class OraclePublisher {
         if (!url) return this.chainReconcileFailed('no ' + PRICE_LANDING_COIN + ' indexer URL configured (set ' +
             PRICE_LANDING_COIN + '_INDEXER_API_URL)');
         let cfg = (this.hub && this.hub.p2pConfig) || {};
-        let key = process.env.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
+        let key = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
         let result;
         try {
             result = await this._indexerRpc(url, key, 'getpricebatches',

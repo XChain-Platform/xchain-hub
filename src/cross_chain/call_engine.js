@@ -100,6 +100,7 @@ const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = requir
 
 // Canonical integer-spelling guard for the signed fields (see lib/canonical_int.js).
 const { allCanonicalInts } = require('../lib/canonical_int.js');
+const hubConfig = require('../config');
 
 // The INT/BIGINT-backed fields each phase signs VERBATIM into _canonicalMatch and
 // every verifier re-derives from a normalized integer. Decimal, address, method,
@@ -140,7 +141,7 @@ class CrossChainCallEngine extends EventEmitter {
         this.capSnapshot = hub.capabilitySnapshot || null;
 
         let cfg = hub.p2pConfig || {};
-        this.pollMs = parseInt(process.env.XCALL_POLL_MS || cfg.XCALL_POLL_MS || DEFAULT_POLL_MS);
+        this.pollMs = parseInt(hubConfig.XCALL_POLL_MS || cfg.XCALL_POLL_MS || DEFAULT_POLL_MS);
 
         // Confirmation thresholds (env -> p2pConfig -> default), shared with the
         // swap-attestation engine so operators tune ONE depth per chain.
@@ -150,7 +151,7 @@ class CrossChainCallEngine extends EventEmitter {
         // Relay margin in blocks (env -> p2pConfig -> default). Stamped onto every
         // relayed row's effective_time, sized by the gating chain's nominal block
         // interval. See DEFAULT_RELAY_MARGIN_BLOCKS.
-        let marginBlocks = parseInt(process.env.XCALL_RELAY_MARGIN_BLOCKS, 10);
+        let marginBlocks = parseInt(hubConfig.XCALL_RELAY_MARGIN_BLOCKS, 10);
         if(!Number.isFinite(marginBlocks)) marginBlocks = parseInt(cfg.XCALL_RELAY_MARGIN_BLOCKS, 10);
         if(!Number.isFinite(marginBlocks) || marginBlocks < 0) marginBlocks = DEFAULT_RELAY_MARGIN_BLOCKS;
         this.relayMarginBlocks = marginBlocks;
@@ -162,8 +163,8 @@ class CrossChainCallEngine extends EventEmitter {
         // anchor or the seeded validator on mainnet/testnet. Mirrors StateCheckpointEngine.
         this.network = (hub && hub.network) ? hub.network : '';
         let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints (same idiom as CrossChainDexEngine).

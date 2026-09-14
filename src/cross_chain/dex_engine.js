@@ -56,6 +56,7 @@ const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('../lib/relay_margin.j
 const { allCanonicalInts }   = require('../lib/canonical_int.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
 const coins                  = require('../coins');
+const hubConfig = require('../config');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
 // settlement pass rebuilds them from the mirrored BIGINT row. The fill and
@@ -92,7 +93,7 @@ class CrossChainDexEngine extends EventEmitter {
         this.capSnapshot  = hub.capabilitySnapshot || null;
 
         let cfg = hub.p2pConfig || {};
-        this.pollMs = parseInt(process.env.XDEX_POLL_MS || cfg.XDEX_POLL_MS || DEFAULT_POLL_MS);
+        this.pollMs = parseInt(hubConfig.XDEX_POLL_MS || cfg.XDEX_POLL_MS || DEFAULT_POLL_MS);
 
         // Regtest-only seams (OFF in prod). On a no-BTC regtest there is no BTC chain to
         // anchor the snapshot block or to source the cross_chain validator set from, so:
@@ -105,8 +106,8 @@ class CrossChainDexEngine extends EventEmitter {
         // anchor or the seeded validator on mainnet/testnet. Mirrors StateCheckpointEngine.
         this.network = (hub && hub.network) ? hub.network : '';
         let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints for the matching view (federation read
@@ -151,7 +152,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Precedence per coin: XDEX_MIN_CONFIRMATIONS_<COIN> > flat XDEX_MIN_CONFIRMATIONS
         // (legacy knob, e.g. regtest venues pinning 1) > coins.DEFAULT_CONFIRMATIONS[coin].
         // A signing gate only, not signed content: no canonical/flag-day impact.
-        let flatMinConf = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS);
+        let flatMinConf = parseInt(hubConfig.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS);
         // Clamp an override back up to the per-coin default on mainnet and testnet, the
         // same raise-only rule coins.resolveConfirmations enforces for XCHAIN_CONFIRMATIONS_<COIN>
         // (CF-1): a lowered depth here lets this hub co-sign a match against an escrow the rest

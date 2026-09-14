@@ -97,23 +97,24 @@ const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('./constants');
 
-const HUB_PORT = process.env.HUB_PORT;
-const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
-const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
+const hubConfig = require('./config');
+const HUB_PORT = hubConfig.HUB_PORT;
+const HUB_HOST = hubConfig.HUB_HOST || '0.0.0.0';
+const HUB_DB_KEEPALIVE_INTERVAL = parseInt(hubConfig.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
 
 // HUB_API_KEY gates the write/WS-subscribe surface: set, those paths fail closed
 // (401) without a valid key. Unset, the hub REFUSES TO BOOT unless keyless
 // operation is declared with HUB_ALLOW_UNAUTHENTICATED; see the posture
 // block below.
-const HUB_API_KEY        = process.env.HUB_API_KEY || '';
+const HUB_API_KEY        = hubConfig.HUB_API_KEY || '';
 // Explicit declaration that this hub runs keyless (private network, fronting
 // proxy, single-host regtest). It exists so a blind hard-require of HUB_API_KEY
 // does not crash-loop managed deploys the way the same over-tightening did to the
 // indexer (771880c) and the encoder (e2bf7c4) pre-launch: xchain-node's
 // ConfigService sets this var for a managed deploy that has no key in its host
 // env, so keyless stays possible but is always a stated choice, never a default.
-const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
-const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
+const HUB_ALLOW_UNAUTHENTICATED = (hubConfig.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
+const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
 // Loopback and private-range callers skip the per-IP cap by default. The
 // caller this protects is the node's OWN indexer replaying a batch-bearing chain: it
 // pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
@@ -121,26 +122,26 @@ const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 // recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
 // private-IP reverse proxy is still throttled; see src/lib/rate_limit_policy.js.
 // Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
-const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(process.env.HUB_RATE_LIMIT_EXEMPT_LOCAL);
+const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
 // cross-origin by several wallet shells at once. parseCorsOrigin is what makes
 // that work - handing `cors` the raw string echoes it verbatim to every caller
 // and is accepted by no browser. See src/lib/corsOrigin.js.
-const CORS_ORIGIN        = parseCorsOrigin(process.env.CORS_ORIGIN);
+const CORS_ORIGIN        = parseCorsOrigin(hubConfig.CORS_ORIGIN);
 
 // Usage telemetry (anonymous install pings from xchain-node operators).
 // Enabled by default on the central hub; an operator's local hub can refuse pings
 // by setting TELEMETRY_ENABLED=false. Rows older than TELEMETRY_RETENTION_DAYS are pruned daily.
-const TELEMETRY_ENABLED        = (process.env.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
-const TELEMETRY_RETENTION_DAYS = parseInt(process.env.TELEMETRY_RETENTION_DAYS) || 90;
+const TELEMETRY_ENABLED        = (hubConfig.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
+const TELEMETRY_RETENTION_DAYS = parseInt(hubConfig.TELEMETRY_RETENTION_DAYS) || 90;
 // Secret salt for the one-way IP hash. The connecting IP is NEVER stored; at ingest we
 // derive a coarse country/region and a keyed HMAC, then discard the IP. Without a salt set,
 // ip_hash is left null (we never store an unsalted hash, which would be trivially reversible).
-const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
+const TELEMETRY_IP_SALT        = hubConfig.TELEMETRY_IP_SALT || '';
 // Gate for the per-install detail endpoint (GET /telemetry/operators). Unlike the
 // aggregate summary, that endpoint exposes per-server data (ip_hash/region/what-runs-where),
 // so it is fail-closed: without this key set, the endpoint returns 401 for everyone.
-const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
+const TELEMETRY_ADMIN_KEY      = hubConfig.TELEMETRY_ADMIN_KEY || '';
 
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
@@ -196,7 +197,7 @@ const FEED_RPC_METHODS = new Set([
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ]);
-const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
+const HUB_REORG_API_KEY   = hubConfig.HUB_REORG_API_KEY || '';
 
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
 // HUB_API_KEY is set: getallconfigs returns every service's connection
@@ -215,7 +216,7 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 // before the chain evicts them, which is a map of who to knock over. The ledger
 // facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
 // here at all; they live on the BTC indexer, where they are authoritative.
-const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);const SENSITIVE_READ_AUTH = hubConfig.HUB_SENSITIVE_READ_AUTH !== '0';
 
 // CREDENTIAL TIER. Served verbatim, the configs table hands the coin node's rpc
 // pass and every service's DB password in plaintext to any caller holding the
@@ -242,7 +243,7 @@ const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);c
 // replication sources). ROLLOUT ORDER: deploy those two before a hub carrying
 // this change, since an older consumer does not send the flag and would receive
 // a redacted password.
-const HUB_CONFIG_SECRETS_API_KEY = process.env.HUB_CONFIG_SECRETS_API_KEY || '';
+const HUB_CONFIG_SECRETS_API_KEY = hubConfig.HUB_CONFIG_SECRETS_API_KEY || '';
 const configRedaction = require('./lib/config_redaction.js');
 
 // True when a JSON-RPC call object is a getallconfigs asking for the
@@ -324,7 +325,7 @@ function validateSince(since) {
 }
 
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
-const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
+const P2P_VALIDATOR_ADDR = hubConfig.P2P_VALIDATOR_ADDR || '';
 
 // Write-method auth posture. Keyless, every write method is callable by
 // anyone who can reach the port, on a validator AND on a config-oracle hub. The
@@ -344,7 +345,7 @@ if(bootPosture.refuse){
     process.exit(1);
 }
 
-if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
+if (P2P_VALIDATOR_ADDR && !hubConfig.ORACLE_EPOCH_START) {
     console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
     process.exit(1);
 }
@@ -353,7 +354,7 @@ if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
 // network. Consensus-critical, so it is REQUIRED in validator mode and validated
 // (no silent default: a wrong/blank value would mis-gate the quorum rule). Must
 // match the INDEXER_NETWORK of the chains this hub federates.
-const HUB_NETWORK = (process.env.HUB_NETWORK || '').toLowerCase();
+const HUB_NETWORK = (hubConfig.HUB_NETWORK || '').toLowerCase();
 const HUB_NETWORKS = ['mainnet', 'testnet', 'regtest'];
 if (P2P_VALIDATOR_ADDR && !HUB_NETWORKS.includes(HUB_NETWORK)) {
     console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
@@ -375,27 +376,27 @@ if (!P2P_VALIDATOR_ADDR && HUB_NETWORK && !HUB_NETWORKS.includes(HUB_NETWORK)) {
 }
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
     HUB_NETWORK:            HUB_NETWORK,
-    P2P_PORT:               parseInt(process.env.P2P_PORT) || 10001,
-    P2P_HOST:               process.env.P2P_HOST || '0.0.0.0',
-    SEED_NODES:             (process.env.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
+    P2P_PORT:               parseInt(hubConfig.P2P_PORT) || 10001,
+    P2P_HOST:               hubConfig.P2P_HOST || '0.0.0.0',
+    SEED_NODES:             (hubConfig.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
     SIGNING_PRIVKEY_HEX:    resolveSecretEnv('SIGNING_PRIVKEY_HEX') || '',
-    REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
-    P2P_HEARTBEAT_INTERVAL:    parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
-    P2P_DEDUP_PRUNE_INTERVAL:  parseInt(process.env.P2P_DEDUP_PRUNE_INTERVAL) || 30000,
-    P2P_WS_PING_INTERVAL:      parseInt(process.env.P2P_WS_PING_INTERVAL) || 30000,
+    REQUIRE_SIGNATURES:     (hubConfig.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
+    P2P_HEARTBEAT_INTERVAL:    parseInt(hubConfig.P2P_HEARTBEAT_INTERVAL) || 15000,
+    P2P_DEDUP_PRUNE_INTERVAL:  parseInt(hubConfig.P2P_DEDUP_PRUNE_INTERVAL) || 30000,
+    P2P_WS_PING_INTERVAL:      parseInt(hubConfig.P2P_WS_PING_INTERVAL) || 30000,
     // Transport signer-set refresh poll (Option A auth follows on-chain validator
     // key rotation). Read at XChainHub.js:155; without it wired here the env knob
     // never reached p2pConfig and the interval was permanently pinned to 30000.
-    P2P_SIGNER_SET_REFRESH_MS: parseInt(process.env.P2P_SIGNER_SET_REFRESH_MS) || 30000,
-    P2P_RECONNECT_BASE:        parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
-    P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
+    P2P_SIGNER_SET_REFRESH_MS: parseInt(hubConfig.P2P_SIGNER_SET_REFRESH_MS) || 30000,
+    P2P_RECONNECT_BASE:        parseInt(hubConfig.P2P_RECONNECT_BASE) || 2000,
+    P2P_RECONNECT_MAX:      parseInt(hubConfig.P2P_RECONNECT_MAX) || 60000,
     // Per-IP inbound cap (anti-DoS, PeerManager). The default of 3 is too low
     // for co-located federations (N validators on one IP need N-1 inbound
     // slots each); without this line the env knob never reaches PeerManager.
-    P2P_MAX_CONNECTIONS_PER_IP: parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP) || 3,
-    P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
-    P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
+    P2P_MAX_CONNECTIONS_PER_IP: parseInt(hubConfig.P2P_MAX_CONNECTIONS_PER_IP) || 3,
+    P2P_MSG_DEDUP_TTL:      parseInt(hubConfig.P2P_MSG_DEDUP_TTL) || 60000,
+    P2P_MAX_PAYLOAD:        parseInt(hubConfig.P2P_MAX_PAYLOAD) || 1048576,
     // XCHAIN derived-price source. Read-only access to THIS validator's own
     // BTC indexer database; XCHAIN is listed on no exchange, so the pair is computed
     // from realized on-chain fills rather than fetched. Unset = this hub abstains from
@@ -410,20 +411,20 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // That rule is now ENFORCED rather than merely stated: XchainPriceSource honors these
     // four only when HUB_NETWORK is regtest and logs a set-but-IGNORED warning otherwise.
     // They are still forwarded raw so the gate and its warning live at the single read.
-    XCHAIN_PRICE_INDEXER_DB_HOST: process.env.XCHAIN_PRICE_INDEXER_DB_HOST || '',
-    XCHAIN_PRICE_INDEXER_DB_PORT: process.env.XCHAIN_PRICE_INDEXER_DB_PORT || '',
-    XCHAIN_PRICE_INDEXER_DB_NAME: process.env.XCHAIN_PRICE_INDEXER_DB_NAME || '',
-    XCHAIN_PRICE_INDEXER_DB_USER: process.env.XCHAIN_PRICE_INDEXER_DB_USER || '',
+    XCHAIN_PRICE_INDEXER_DB_HOST: hubConfig.XCHAIN_PRICE_INDEXER_DB_HOST || '',
+    XCHAIN_PRICE_INDEXER_DB_PORT: hubConfig.XCHAIN_PRICE_INDEXER_DB_PORT || '',
+    XCHAIN_PRICE_INDEXER_DB_NAME: hubConfig.XCHAIN_PRICE_INDEXER_DB_NAME || '',
+    XCHAIN_PRICE_INDEXER_DB_USER: hubConfig.XCHAIN_PRICE_INDEXER_DB_USER || '',
     XCHAIN_PRICE_INDEXER_DB_PASS: resolveSecretEnv('XCHAIN_PRICE_INDEXER_DB_PASS') || '',
-    XCHAIN_PRICE_INDEXER_DB_COIN: process.env.XCHAIN_PRICE_INDEXER_DB_COIN || 'BTC',
-    XCHAIN_PRICE_WINDOW_BLOCKS:       process.env.XCHAIN_PRICE_WINDOW_BLOCKS || '',
-    XCHAIN_PRICE_CONFIRMATION_BUFFER: process.env.XCHAIN_PRICE_CONFIRMATION_BUFFER || '',
-    XCHAIN_PRICE_BOOTSTRAP_SATS:      process.env.XCHAIN_PRICE_BOOTSTRAP_SATS || '',
-    XCHAIN_PRICE_MIN_BTC_VOLUME:      process.env.XCHAIN_PRICE_MIN_BTC_VOLUME || '',
+    XCHAIN_PRICE_INDEXER_DB_COIN: hubConfig.XCHAIN_PRICE_INDEXER_DB_COIN || 'BTC',
+    XCHAIN_PRICE_WINDOW_BLOCKS:       hubConfig.XCHAIN_PRICE_WINDOW_BLOCKS || '',
+    XCHAIN_PRICE_CONFIRMATION_BUFFER: hubConfig.XCHAIN_PRICE_CONFIRMATION_BUFFER || '',
+    XCHAIN_PRICE_BOOTSTRAP_SATS:      hubConfig.XCHAIN_PRICE_BOOTSTRAP_SATS || '',
+    XCHAIN_PRICE_MIN_BTC_VOLUME:      hubConfig.XCHAIN_PRICE_MIN_BTC_VOLUME || '',
 
-    ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
-    ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-    ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
+    ORACLE_EPOCH_START:     parseInt(hubConfig.ORACLE_EPOCH_START),
+    ORACLE_ROUND_INTERVAL:  parseInt(hubConfig.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
+    ORACLE_SUBMISSION_WINDOW: parseInt(hubConfig.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
     // Per-round cap on collected peer submissions (anti-flood, OracleRound.js).
     // Passed through UNPARSED for the same reason as the retention knob below:
     // OracleRound.js owns the parse, the range check and the 200 default, so a
@@ -431,26 +432,26 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // the api.js copy silently eat any value the consumer treats specially.
     // Same dead-knob class as P2P_SIGNER_SET_REFRESH_MS above: without this line
     // the env var never reached p2pConfig and the cap was pinned to the default.
-    ORACLE_MAX_SUBMISSIONS_PER_ROUND: process.env.ORACLE_MAX_SUBMISSIONS_PER_ROUND,
+    ORACLE_MAX_SUBMISSIONS_PER_ROUND: hubConfig.ORACLE_MAX_SUBMISSIONS_PER_ROUND,
     // Retention window (in rounds) for the diagnostic oracle_submissions table.
     // Passed through UNPARSED on purpose: OracleRound.js:88 does its own parseInt +
     // range validation and owns the 12960-round default, and it honours an explicit
     // 0 as "disable pruning" - which a `parseInt(...) || DEFAULT` here would eat.
     // Same class as P2P_SIGNER_SET_REFRESH_MS above: without this line the env knob
     // never reached p2pConfig and retention was permanently pinned to the default.
-    ORACLE_SUBMISSIONS_RETENTION_ROUNDS: process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
+    ORACLE_SUBMISSIONS_RETENTION_ROUNDS: hubConfig.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
     // Attestation round cadence (AttestationRound.js:100, AttestationConsensus.js:295).
     // Same dead-knob class as P2P_SIGNER_SET_REFRESH_MS above: without these two lines
     // the env vars never reached p2pConfig and a real api.js child stayed pinned to the
     // 15s poll / 120s round-timeout defaults regardless of what the operator set.
-    ATTESTATION_POLL_MS:            process.env.ATTESTATION_POLL_MS,
-    ATTESTATION_ROUND_TIMEOUT_MS:   process.env.ATTESTATION_ROUND_TIMEOUT_MS,
-    ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
-    SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
-    SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
-    COINGECKO_API_KEY:      process.env.COINGECKO_API_KEY || '',
-    COINMARKETCAP_API_KEY:  process.env.COINMARKETCAP_API_KEY || '',
-    PRICE_FETCH_TIMEOUT:    parseInt(process.env.PRICE_FETCH_TIMEOUT) || 10000
+    ATTESTATION_POLL_MS:            hubConfig.ATTESTATION_POLL_MS,
+    ATTESTATION_ROUND_TIMEOUT_MS:   hubConfig.ATTESTATION_ROUND_TIMEOUT_MS,
+    ORACLE_REWARD_PER_ROUND: hubConfig.ORACLE_REWARD_PER_ROUND || '10.00000000',
+    SLASH_DEVIATION_THRESHOLD: hubConfig.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
+    SLASH_MISSED_ROUNDS_THRESHOLD: hubConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
+    COINGECKO_API_KEY:      hubConfig.COINGECKO_API_KEY || '',
+    COINMARKETCAP_API_KEY:  hubConfig.COINMARKETCAP_API_KEY || '',
+    PRICE_FETCH_TIMEOUT:    parseInt(hubConfig.PRICE_FETCH_TIMEOUT) || 10000
 } : null;
 
 // Timeout for DB / oracle-freshness probe Promises inside ping, health, and the
@@ -469,10 +470,10 @@ const configFetchCounters = { served: 0, errors: 0 };
 
 async function startApi(){
     const hub = new XChainHub(
-        process.env.HUB_DB_HOST,
-        process.env.HUB_DB_PORT,
-        process.env.HUB_DB_NAME,
-        process.env.HUB_DB_USER,
+        hubConfig.HUB_DB_HOST,
+        hubConfig.HUB_DB_PORT,
+        hubConfig.HUB_DB_NAME,
+        hubConfig.HUB_DB_USER,
         HUB_DB_SECRET,
         p2pConfig,
         // Standalone-mode network. Inert in validator mode, where p2pConfig.HUB_NETWORK
@@ -497,7 +498,7 @@ async function startApi(){
     // Previously this was never called, leaving self-tests, stake tracking, and
     // qualification dormant. HUB_CAPABILITY_CONFIG points at the JSON config that
     // supplies MIN_STAKE thresholds and the per-capability self-test config blocks.
-    await hub.startCapabilities(process.env.HUB_CAPABILITY_CONFIG || null);
+    await hub.startCapabilities(hubConfig.HUB_CAPABILITY_CONFIG || null);
 
     // Start sampling the per-table per-chain admission height watermark.
     // The broadcaster is constructed with (p2pConfig, db) and holds no hub handle, so the
@@ -528,7 +529,7 @@ async function startApi(){
     // count (e.g. `1`), or an address/CIDR list per the express docs. For
     // telemetry the IP is only used transiently to derive a coarse
     // country/region + keyed hash and is never stored.
-    let trustProxy = process.env.HUB_TRUST_PROXY || 'loopback, uniquelocal';
+    let trustProxy = hubConfig.HUB_TRUST_PROXY || 'loopback, uniquelocal';
     if (trustProxy === 'true')       trustProxy = true;
     else if (trustProxy === 'false') trustProxy = false;
     else if (/^\d+$/.test(trustProxy)) trustProxy = parseInt(trustProxy);
@@ -569,7 +570,7 @@ async function startApi(){
     const observability = installObservability(app, {
         service: 'xchain-hub',
         version: hubVersion,
-        network: process.env.HUB_NETWORK || ''
+        network: hubConfig.HUB_NETWORK || ''
     });
 
     // Oracle-round heartbeat (item a98d6746). Round freshness was reachable only
@@ -775,7 +776,7 @@ async function startApi(){
                     let roundIntervalMs = p2pConfig.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
                     // Default to 2x the round interval; an operator can override for
                     // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
-                    oracleThresholdS = parseInt(process.env.ORACLE_STALENESS_THRESHOLD_S)
+                    oracleThresholdS = parseInt(hubConfig.ORACLE_STALENESS_THRESHOLD_S)
                         || Math.round((roundIntervalMs * 2) / 1000);
                     let rows = await Promise.race([
                         hub.db.getPriceSnapshotsFinalizedAgeSeconds(),
@@ -2529,7 +2530,7 @@ async function startApi(){
     // charged its token by this point, so an oversize batch is never free.
     // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
     // (every connector sends one call object), so the cap breaks no existing client.
-    app.use(makeRpcBatchGuard(resolveMaxBatch(process.env.HUB_MAX_RPC_BATCH, 20)));
+    app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));
 
     // Express 5 / body-parser 2.x leaves req.body undefined when a request carries
     // no JSON body (a GET, or a POST without application/json), whereas body-parser
@@ -2624,7 +2625,7 @@ async function startApi(){
         if (!HUB_API_KEY) {
             console.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
                 '(fail closed; the port stays gossip-only)');
-        } else if (String(process.env.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
+        } else if (String(hubConfig.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
             console.log('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
         } else {
             hub.peerManager.setFeedHandlers(

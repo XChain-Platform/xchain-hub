@@ -99,6 +99,7 @@ const ckpt                  = require('../checkpoint_commitment_activation.js');
 const ccr                   = require('../cross_chain_royalty_activation.js');
 const ar                    = require('../anchor_reward_activation.js');
 const ark                   = require('./anchor_reward_key.js');
+const hubConfig = require('../config');
 
 // The reward types the indexer re-derives from chain above a flag-day, split by WHICH
 // flag-day judges them. One definition, read by both forms of the eligibility rule
@@ -254,13 +255,13 @@ class StateAnchorPublisher {
         //   transactions in one cycle; 200 rows is ~19. Both trade cost against
         //   archive latency and neither affects what the archive MEANS: too large
         //   spends more DOGE per cycle, too small drains the backlog more slowly.
-        this.enabled       = String(process.env.ANCHOR_ENABLED || cfg.ANCHOR_ENABLED || 'true') !== 'false';
-        this.intervalMs    = parseInt(process.env.ANCHOR_INTERVAL_MS      || cfg.ANCHOR_INTERVAL_MS      || '86400000'); // daily
-        this.batchSize     = parseInt(process.env.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
-        this.maxBatch      = parseInt(process.env.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
-        this.chunkMaxBytes = parseInt(process.env.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
-        this.roundTimeoutMs = parseInt(process.env.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
-        this.chunkRetryDelayMs = parseInt(process.env.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
+        this.enabled       = String(hubConfig.ANCHOR_ENABLED || cfg.ANCHOR_ENABLED || 'true') !== 'false';
+        this.intervalMs    = parseInt(hubConfig.ANCHOR_INTERVAL_MS      || cfg.ANCHOR_INTERVAL_MS      || '86400000'); // daily
+        this.batchSize     = parseInt(hubConfig.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
+        this.maxBatch      = parseInt(hubConfig.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
+        this.chunkMaxBytes = parseInt(hubConfig.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
+        this.roundTimeoutMs = parseInt(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
+        this.chunkRetryDelayMs = parseInt(hubConfig.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
         // Encoder rate-limit (429) waits, which are NOT the transient-failure retry
         // above. The encoder sheds two different ways and both answer 429 + a
         // Retry-After the caller should obey rather than guess: the per-IP limiter
@@ -270,12 +271,12 @@ class StateAnchorPublisher {
         // an already-shedding replica. rateLimitMaxWaitMs caps one honoured wait;
         // rateLimitMaxWaits caps how many a single broadcast may take before the
         // anchor defers to a later flush instead of stalling this one.
-        this.rateLimitMaxWaitMs = parseInt(process.env.ANCHOR_RATELIMIT_MAX_WAIT_MS || cfg.ANCHOR_RATELIMIT_MAX_WAIT_MS || '60000');
-        this.rateLimitMaxWaits  = parseInt(process.env.ANCHOR_RATELIMIT_MAX_WAITS   || cfg.ANCHOR_RATELIMIT_MAX_WAITS   || '3');
+        this.rateLimitMaxWaitMs = parseInt(hubConfig.ANCHOR_RATELIMIT_MAX_WAIT_MS || cfg.ANCHOR_RATELIMIT_MAX_WAIT_MS || '60000');
+        this.rateLimitMaxWaits  = parseInt(hubConfig.ANCHOR_RATELIMIT_MAX_WAITS   || cfg.ANCHOR_RATELIMIT_MAX_WAITS   || '3');
         // Ambiguous-send existence poll: how long to wait for a maybe-
         // accepted anchor to reach the indexer's mined view before deferring.
-        this.ambiguousPollAttempts = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
-        this.ambiguousPollDelayMs  = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
+        this.ambiguousPollAttempts = parseInt(hubConfig.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
+        this.ambiguousPollDelayMs  = parseInt(hubConfig.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
         // Failover-ladder step (see the derivation above; the ladder itself is in
         // _rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
         // every hub computes the same rank unlock without clock sync; 36 blocks is
@@ -312,7 +313,7 @@ class StateAnchorPublisher {
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in _handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
-        this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
+        this.electionToleranceBlocks = parseInt(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         // Failover wake. The ladder above only unlocks a rank when
         // something RE-EVALUATES it, and rank is evaluated only inside flush(); with
         // flush on the 24h interval plus size triggers, the "ranks 1-3 get a slot
@@ -329,7 +330,7 @@ class StateAnchorPublisher {
         // skips every election this hub leads (see flush / _publishPendingCheckpoints
         // / _startArchiveRound), so rank-0 publishing keeps its interval and size
         // triggers and the federation still pays for one anchor per checkpoint.
-        this.rankWakeMs = parseInt(process.env.ANCHOR_RANK_WAKE_MS || cfg.ANCHOR_RANK_WAKE_MS || '900000');  // 15 min
+        this.rankWakeMs = parseInt(hubConfig.ANCHOR_RANK_WAKE_MS || cfg.ANCHOR_RANK_WAKE_MS || '900000');  // 15 min
         // Startup catch-up flush. The interval timer fires first after a FULL
         // ANCHOR_INTERVAL_MS, and the rank wake runs failover-only, so a hub that was
         // recreated more often than once per interval never ran a leader flush at
@@ -343,7 +344,7 @@ class StateAnchorPublisher {
         // balance source settle first; flush is fail-closed on all three anyway.
         // 0 disables (tests, and operators who want the interval to be the only
         // leader cadence); garbage or a negative value falls back to the default.
-        this.startupFlushMs = parseInt(process.env.ANCHOR_STARTUP_FLUSH_MS || cfg.ANCHOR_STARTUP_FLUSH_MS, 10);
+        this.startupFlushMs = parseInt(hubConfig.ANCHOR_STARTUP_FLUSH_MS || cfg.ANCHOR_STARTUP_FLUSH_MS, 10);
         if(!Number.isFinite(this.startupFlushMs) || this.startupFlushMs < 0) this.startupFlushMs = 60000;
         this._startupTimer = null;
         // CONFIRMED INPUTS ONLY, the same rule the PRICE rail adopted.
@@ -359,7 +360,7 @@ class StateAnchorPublisher {
         // Archive CHUNKS are the one designed exception: they descend from the head
         // on purpose and are always allowed to spend it (see _publishArchive).
         this.allowUnconfirmedInputs =
-            String(process.env.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
+            String(hubConfig.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
                    cfg.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
         // Set by a flush that had to stand down for want of a confirmed input while
         // it (probably) led a pending row. The next rank wake then runs a NORMAL
@@ -385,15 +386,15 @@ class StateAnchorPublisher {
         // fee-bumps.
         this._pendingConfirmations   = new Map();   // txid -> { txid, kind, ref, sentAt }
         this.pendingConfirmationsMax = 200;
-        this.confirmCheckIntervalMs  = parseInt(process.env.ANCHOR_CONFIRM_CHECK_MS || cfg.ANCHOR_CONFIRM_CHECK_MS, 10);
+        this.confirmCheckIntervalMs  = parseInt(hubConfig.ANCHOR_CONFIRM_CHECK_MS || cfg.ANCHOR_CONFIRM_CHECK_MS, 10);
         if(!Number.isFinite(this.confirmCheckIntervalMs) || this.confirmCheckIntervalMs < 0) this.confirmCheckIntervalMs = 300000;   // 5 min
-        this.confirmStaleMs = parseInt(process.env.ANCHOR_CONFIRM_STALE_MS || cfg.ANCHOR_CONFIRM_STALE_MS, 10);
+        this.confirmStaleMs = parseInt(hubConfig.ANCHOR_CONFIRM_STALE_MS || cfg.ANCHOR_CONFIRM_STALE_MS, 10);
         if(!Number.isFinite(this.confirmStaleMs) || this.confirmStaleMs < 0) this.confirmStaleMs = 1800000;   // 30 min
         this._confirmTimer            = null;
         this.confirmedPublishes       = 0;
         this.confirmationCheckFailures = 0;
         this.lastConfirmationCheckAt  = null;
-        this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
+        this.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         // Shared SpendGuard for the on-chain anchor spend path. Adds the
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and
         // a per-capability runtime pause on top of the existing balance floor, so an
@@ -422,16 +423,16 @@ class StateAnchorPublisher {
         // consensus data, so the predicate stays deterministic fleet-wide. At the
         // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
         this.anchorEveryNCheckpoints = Math.max(1,
-            parseInt(process.env.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
+            parseInt(hubConfig.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
         // The engine's own cadence step (StateCheckpointEngine.js), resolved through the
         // one shared function it also calls so the two cannot drift. Always positive: a
         // zero divisor makes the SQL MOD NULL, which would silently select nothing.
         this.checkpointIntervalBlocks = resolveCheckpointIntervalBlocks(cfg);
 
-        this.dogeAddress   = process.env.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
-        this.dogePubkeyHex = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
-        let encoderUrl = process.env.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
-        let encoderKey = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
+        this.dogeAddress   = hubConfig.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
+        this.dogePubkeyHex = hubConfig.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
+        let encoderUrl = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
+        let encoderKey = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
         this.encoder   = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
 
         // Pluggable hooks; unset -> borrow the price publisher's DOGE signer.
@@ -618,9 +619,9 @@ class StateAnchorPublisher {
         // queued here and only written by _drainDeferredRewardAttest, on the same size +
         // TTL knobs as the two announcement queues.
         this._deferredRewardAttest = new Map();
-        this.announceRetryMs      = parseInt(process.env.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min
-        this.announceRetryTtlMs   = parseInt(process.env.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || '21600000');  // 6 h, ~6x the 60-conf DOGE window
-        this.announceQueueMax     = parseInt(process.env.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
+        this.announceRetryMs      = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min
+        this.announceRetryTtlMs   = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || '21600000');  // 6 h, ~6x the 60-conf DOGE window
+        this.announceQueueMax     = parseInt(hubConfig.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
         this._deferTimer          = null;
         this._rankWakeTimer       = null;   // failover wake, see rankWakeMs
         // How long a durable broadcast intent with no mined anchor HOLDS its
@@ -628,14 +629,14 @@ class StateAnchorPublisher {
         // same reasoning as announceRetryTtlMs above: ~6x the 60-conf DOGE window, past
         // which a send that never relayed is not coming back and holding the row costs
         // more than re-broadcasting it.
-        this.anchorIntentTtlMs    = parseInt(process.env.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
+        this.anchorIntentTtlMs    = parseInt(hubConfig.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
         // Retention window for the two durable anchor marker tables. Both appended one
         // row per DOGE-spending broadcast and never removed one, so they grew for the
         // life of the deployment while their oracle_published_rounds sibling was swept.
         // Only CONFIRMED rows are pruned, and only past a floor derived from
         // anchorIntentTtlMs; see pruneAnchorMarkers for both invariants. 0 disables
         // pruning; garbage or a negative value falls back to the default.
-        this.anchorMarkerRetentionMs = parseInt(process.env.ANCHOR_MARKER_RETENTION_MS ||
+        this.anchorMarkerRetentionMs = parseInt(hubConfig.ANCHOR_MARKER_RETENTION_MS ||
                                                 cfg.ANCHOR_MARKER_RETENTION_MS, 10);
         if(!Number.isFinite(this.anchorMarkerRetentionMs) || this.anchorMarkerRetentionMs < 0)
             this.anchorMarkerRetentionMs = DEFAULT_ANCHOR_MARKER_RETENTION_MS;

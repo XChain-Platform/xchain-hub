@@ -110,6 +110,7 @@ const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcas
 const { allCanonicalInts } = require('../lib/canonical_int.js');
 const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const hubConfig = require('../config');
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
 // parseInt() off the v3/v4 wire. request_id / response_hash are hex, and
@@ -188,21 +189,21 @@ class AttestationRelay {
 
         // Opt-in, not a kill switch: a fleet that has merely DEPLOYED this code must
         // run nothing at all. See the deploy-order note in the file header.
-        this.enabled = String(process.env.ATTEST_RELAY_ENABLED || cfg.ATTEST_RELAY_ENABLED || '0') === '1';
+        this.enabled = String(hubConfig.ATTEST_RELAY_ENABLED || cfg.ATTEST_RELAY_ENABLED || '0') === '1';
 
-        this.pollMs = parseInt(process.env.ATTEST_RELAY_POLL_MS || cfg.ATTEST_RELAY_POLL_MS || DEFAULT_POLL_MS);
+        this.pollMs = parseInt(hubConfig.ATTEST_RELAY_POLL_MS || cfg.ATTEST_RELAY_POLL_MS || DEFAULT_POLL_MS);
 
         // Per-chain confirmation depth, shared with the swap/XCALL engines so an
         // operator tunes ONE depth per chain (mainnet floor-clamped).
         this.confirmations = coins.resolveConfirmations(cfg, this.network);
 
-        this.failoverWindowMs = parseInt(process.env.ATTEST_RELAY_FAILOVER_MS ||
+        this.failoverWindowMs = parseInt(hubConfig.ATTEST_RELAY_FAILOVER_MS ||
                                          cfg.ATTEST_RELAY_FAILOVER_MS || DEFAULT_FAILOVER_WINDOW_MS);
 
         // Origin blocks past a request's deadline before its records are evicted.
         // A garbage or negative value falls back rather than shrinking the
         // window: this is the guard that stops an early eviction from re-spending.
-        this.evictGraceBlocks = parseInt(process.env.ATTEST_RELAY_EVICT_GRACE_BLOCKS ||
+        this.evictGraceBlocks = parseInt(hubConfig.ATTEST_RELAY_EVICT_GRACE_BLOCKS ||
                                          cfg.ATTEST_RELAY_EVICT_GRACE_BLOCKS || DEFAULT_EVICTION_GRACE_BLOCKS);
         if(!Number.isFinite(this.evictGraceBlocks) || this.evictGraceBlocks < 0)
             this.evictGraceBlocks = DEFAULT_EVICTION_GRACE_BLOCKS;
@@ -220,11 +221,11 @@ class AttestationRelay {
         // BTC (home) broadcast rail, for the v3 request leg. Mirrors
         // AttestationPublisher: an operator signer hook wins, otherwise the
         // encoder + wallet-sign pipeline.
-        let encoderUrl = process.env.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
-        let encoderKey = process.env.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
+        let encoderUrl = hubConfig.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
+        let encoderKey = hubConfig.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
         this.encoder      = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
-        this.btcAddress   = process.env.BTC_ADDRESS    || cfg.BTC_ADDRESS    || '';
-        this.btcPubkeyHex = process.env.BTC_PUBKEY_HEX || cfg.BTC_PUBKEY_HEX || '';
+        this.btcAddress   = hubConfig.BTC_ADDRESS    || cfg.BTC_ADDRESS    || '';
+        this.btcPubkeyHex = hubConfig.BTC_PUBKEY_HEX || cfg.BTC_PUBKEY_HEX || '';
         this.broadcastFn  = null;
         this.walletSignFn = null;
 
@@ -265,7 +266,7 @@ class AttestationRelay {
         // on-chain ('REQUEST_ID already present'), so replaying one only burns a real
         // BTC fee; the WAL is what stops a restart from doing that. See loadWal for
         // why a crash between intent and outcome is treated as sent.
-        this.walPath   = process.env.ATTEST_RELAY_QUEUE_PATH || cfg.ATTEST_RELAY_QUEUE_PATH || './data/attest-relay-queue.jsonl';
+        this.walPath   = hubConfig.ATTEST_RELAY_QUEUE_PATH || cfg.ATTEST_RELAY_QUEUE_PATH || './data/attest-relay-queue.jsonl';
         this._published = new AtMostOnce();
 
         // The response leg's own at-most-once set. Idempotency keys on

@@ -33,6 +33,7 @@ const { admitMarginBlocks } = require('../mirror_admission_activation.js');
 
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
 const { bigIntReplacer } = require('../lib/bigint_replacer.js');
+const hubConfig = require('../config');
 
 // ---------------------------------------------------------------------------
 // The per-table per-chain admission height watermark
@@ -114,28 +115,28 @@ class AdmissionHeightWatermark {
         // round timeout, because a view change re-arms the timeout on a round that is still
         // open (CrossChainDexConsensus.js:134, :140).
         let xdexTimeout = positiveIntConfig(
-            process.env.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS, 120000, 'XDEX_ROUND_TIMEOUT_MS');
+            hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS, 120000, 'XDEX_ROUND_TIMEOUT_MS');
         this.roundWindows = {
             xdex: positiveIntConfig(
-                process.env.XDEX_ROUND_MAX_LIFETIME_MS || this.config.XDEX_ROUND_MAX_LIFETIME_MS,
+                hubConfig.XDEX_ROUND_MAX_LIFETIME_MS || this.config.XDEX_ROUND_MAX_LIFETIME_MS,
                 xdexTimeout * 4, 'XDEX_ROUND_MAX_LIFETIME_MS'),
             attest: positiveIntConfig(
-                process.env.ATTESTATION_ROUND_TIMEOUT_MS || this.config.ATTESTATION_ROUND_TIMEOUT_MS,
+                hubConfig.ATTESTATION_ROUND_TIMEOUT_MS || this.config.ATTESTATION_ROUND_TIMEOUT_MS,
                 120000, 'ATTESTATION_ROUND_TIMEOUT_MS'),
             anchor: positiveIntConfig(
-                process.env.ANCHOR_ROUND_TIMEOUT_MS || this.config.ANCHOR_ROUND_TIMEOUT_MS,
+                hubConfig.ANCHOR_ROUND_TIMEOUT_MS || this.config.ANCHOR_ROUND_TIMEOUT_MS,
                 120000, 'ANCHOR_ROUND_TIMEOUT_MS'),
             // A price round's terminal bound is its own cadence: the next round opens only
             // once this one is finalized or skipped, so the interval is what bounds how long
             // a round can hold the watermark.
             price: positiveIntConfig(
-                process.env.ORACLE_ROUND_INTERVAL || this.config.ORACLE_ROUND_INTERVAL,
+                hubConfig.ORACLE_ROUND_INTERVAL || this.config.ORACLE_ROUND_INTERVAL,
                 600000, 'ORACLE_ROUND_INTERVAL'),
             // oracle_prices has no consensus round at all: the rows are the hub's own ingest
             // of an on-chain PRICE v1 transaction, so the bound is how long an ingest may
             // trail the chain it reads. Its own knob, because nothing else sizes it.
             oracle: positiveIntConfig(
-                process.env.ADMISSION_ORACLE_INGEST_WINDOW_MS || this.config.ADMISSION_ORACLE_INGEST_WINDOW_MS,
+                hubConfig.ADMISSION_ORACLE_INGEST_WINDOW_MS || this.config.ADMISSION_ORACLE_INGEST_WINDOW_MS,
                 600000, 'ADMISSION_ORACLE_INGEST_WINDOW_MS'),
         };
 
@@ -143,8 +144,8 @@ class AdmissionHeightWatermark {
         // of another hub's database, observes no rounds and may therefore CLAIM nothing. It
         // republishes its upstream's entry verbatim or publishes none, and its indexers
         // defer fail-closed, attributable and bounded by the hold ceiling.
-        this.relay = String(process.env.HUB_ADMISSION_RELAY || this.config.HUB_ADMISSION_RELAY || '') === '1'
-                  || String(process.env.HUB_ADMISSION_RELAY || this.config.HUB_ADMISSION_RELAY || '').toLowerCase() === 'true';
+        this.relay = String(hubConfig.HUB_ADMISSION_RELAY || this.config.HUB_ADMISSION_RELAY || '') === '1'
+                  || String(hubConfig.HUB_ADMISSION_RELAY || this.config.HUB_ADMISSION_RELAY || '').toLowerCase() === 'true';
 
         this._obs   = new Map();   // chain -> [{atMs, height}], heights strictly increasing
         this._caps  = new Map();   // 'table|chain' -> height ceiling, or absent
@@ -389,11 +390,11 @@ class HubDbBroadcaster {
         // Zero carries no "disabled" meaning at any of these three sites (it would
         // reject every connection, or close on the first buffered message).
         this.maxPerIp = positiveIntConfig(
-            process.env.WS_MAX_PER_IP || this.config.WS_MAX_PER_IP, 100, 'WS_MAX_PER_IP');
+            hubConfig.WS_MAX_PER_IP || this.config.WS_MAX_PER_IP, 100, 'WS_MAX_PER_IP');
         this.maxSubscribers = positiveIntConfig(
-            process.env.WS_MAX_SUBSCRIBERS || this.config.WS_MAX_SUBSCRIBERS, 1000, 'WS_MAX_SUBSCRIBERS');
+            hubConfig.WS_MAX_SUBSCRIBERS || this.config.WS_MAX_SUBSCRIBERS, 1000, 'WS_MAX_SUBSCRIBERS');
         this.maxBufferedMessages = positiveIntConfig(
-            process.env.WS_BACKPRESSURE_LIMIT || this.config.WS_BACKPRESSURE_LIMIT, 50, 'WS_BACKPRESSURE_LIMIT');
+            hubConfig.WS_BACKPRESSURE_LIMIT || this.config.WS_BACKPRESSURE_LIMIT, 50, 'WS_BACKPRESSURE_LIMIT');
 
         // Stream-position watermark heartbeat. Every interval, tell subscribers
         // "you have received every row event produced up to ts". Row events are
@@ -405,7 +406,7 @@ class HubDbBroadcaster {
         // storming every subscriber, and serializes as null in the 'ready' frame so
         // consumers cannot size their watchdog from it.
         this.watermarkIntervalMs = positiveIntConfig(
-            process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS, 10000, 'WS_WATERMARK_INTERVAL_MS');
+            hubConfig.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS, 10000, 'WS_WATERMARK_INTERVAL_MS');
 
         // Heartbeat-cadence instrumentation. Whether a consumer's price
         // stream watermark sits within one heartbeat of wall clock used to be
@@ -417,7 +418,7 @@ class HubDbBroadcaster {
         // never be further behind wall clock than the gap between two ticks plus
         // flight time. A gap past watermarkLateThresholdMs is counted and logged,
         // and getWatermarkStats() exposes the whole picture for /health.
-        let lateFactor = parseFloat(process.env.WS_WATERMARK_LATE_FACTOR || this.config.WS_WATERMARK_LATE_FACTOR || 2);
+        let lateFactor = parseFloat(hubConfig.WS_WATERMARK_LATE_FACTOR || this.config.WS_WATERMARK_LATE_FACTOR || 2);
         // A factor below 1 would mark an exactly-on-time tick late, so a bad knob
         // degrades to the default instead of producing permanent false alarms.
         if (!isFinite(lateFactor) || lateFactor < 1) lateFactor = 2;
@@ -444,7 +445,7 @@ class HubDbBroadcaster {
         // object and starts no timer: additive on the wire, inert in behaviour.
         this.admissionWatermark = new AdmissionHeightWatermark(this.config);
         this.admissionSampleMs  = positiveIntConfig(
-            process.env.ADMISSION_WATERMARK_SAMPLE_MS || this.config.ADMISSION_WATERMARK_SAMPLE_MS,
+            hubConfig.ADMISSION_WATERMARK_SAMPLE_MS || this.config.ADMISSION_WATERMARK_SAMPLE_MS,
             30000, 'ADMISSION_WATERMARK_SAMPLE_MS');
         this._admissionHub   = null;
         this._admissionTimer = null;

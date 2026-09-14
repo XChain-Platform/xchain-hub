@@ -71,6 +71,7 @@ const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 // a verifier-local 6 that drift apart resolve different validator sets for the
 // same declared height with nothing logged.
 const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
+const hubConfig = require('../config');
 
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the
@@ -595,7 +596,7 @@ class CapabilitySnapshot {
     // than disabling the alarm (a typo must not silently restore the old
     // silent-fail-closed behaviour).
     resolveAlertAfterFailures() {
-        let raw = process.env.HUB_CONSENSUS_INPUT_ALERT_AFTER;
+        let raw = hubConfig.HUB_CONSENSUS_INPUT_ALERT_AFTER;
         if (raw === undefined || raw === '') return undefined;
         let n = Number(raw);
         if (!Number.isInteger(n) || n < 1) {
@@ -645,7 +646,7 @@ class CapabilitySnapshot {
     // XChainHub._assertCanonicalMinStakes, which guards the identical fork
     // class for MIN_STAKE.
     resolveReorgBuffer() {
-        let raw = process.env.HUB_SNAPSHOT_REORG_BUFFER;
+        let raw = hubConfig.HUB_SNAPSHOT_REORG_BUFFER;
         if (raw === undefined || raw === '') return CANONICAL_REORG_BUFFER;
         let n = Number(raw);
         if (!Number.isInteger(n) || n < 0) {
@@ -660,7 +661,7 @@ class CapabilitySnapshot {
             'so a hub running a different value locks a different block for the same round: divergent ' +
             'validator sets and quorum N across the federation. Change it fleet-wide or not at all ' +
             '(XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 to bypass on a venue where every hub runs the SAME override).';
-        if (process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
+        if (hubConfig.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
             console.warn('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1: skipping the canonical reorg-buffer ' +
                 'assertion. ' + detail);
             return n;

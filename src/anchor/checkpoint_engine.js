@@ -61,6 +61,7 @@ const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const coins             = require('../coins');
 const { noteCheckpointStalled } = require('../consensus/diagnostics');
+const hubConfig = require('../config');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -97,20 +98,20 @@ class StateCheckpointEngine extends EventEmitter {
         this.network     = (hub && hub.network) ? hub.network : '';
 
         let cfg = hub.p2pConfig || {};
-        this.enabled        = String(process.env.CHECKPOINT_ENABLED || cfg.CHECKPOINT_ENABLED || 'true') !== 'false';
+        this.enabled        = String(hubConfig.CHECKPOINT_ENABLED || cfg.CHECKPOINT_ENABLED || 'true') !== 'false';
         // Resolve the cadence knobs through the house guards, not bare parseInt: a NaN
         // pollMs makes setInterval clamp to ~1ms and storm, and a NaN or zero
         // intervalBlocks makes the cadence latch never hold, anchoring 3 chains every poll.
         // intervalBlocks goes through the shared resolver the anchor publisher also calls,
         // so the two readers of CHECKPOINT_INTERVAL_BLOCKS cannot drift.
         this.intervalBlocks = resolveCheckpointIntervalBlocks(cfg);
-        this.pollMs         = positiveIntConfig(process.env.CHECKPOINT_POLL_MS || cfg.CHECKPOINT_POLL_MS,
+        this.pollMs         = positiveIntConfig(hubConfig.CHECKPOINT_POLL_MS || cfg.CHECKPOINT_POLL_MS,
                                                 60000, 'CHECKPOINT_POLL_MS');
-        this.roundTimeoutMs = positiveIntConfig(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS,
+        this.roundTimeoutMs = positiveIntConfig(hubConfig.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS,
                                                 60000, 'CHECKPOINT_ROUND_TIMEOUT_MS');
         // Confirmations is the one knob where 0 is meaningful (checkpoint the tip itself,
         // the regtest venue setting), so it takes a non-negative guard rather than positiveIntConfig.
-        this.confirmations  = parseInt(process.env.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
+        this.confirmations  = parseInt(hubConfig.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
         if(!(this.confirmations >= 0)) this.confirmations = 6;
 
         // Follower co-sign freshness bound on the leader-supplied snapshot_block.
@@ -131,18 +132,18 @@ class StateCheckpointEngine extends EventEmitter {
         // positiveIntConfig, because 0 is meaningful here: it demands an exact
         // snapshot_block match, and widening that back to the default would LOOSEN the
         // bound the operator asked to tighten. Same idiom as `confirmations` above.
-        this.cosignToleranceBlocks = parseInt(process.env.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS
+        this.cosignToleranceBlocks = parseInt(hubConfig.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS
             || cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS || String(CHECKPOINT_COSIGN_TOLERANCE_BLOCKS));
         if(!(this.cosignToleranceBlocks >= 0)){
             console.warn('config: CHECKPOINT_COSIGN_TOLERANCE_BLOCKS="' +
-                         String(process.env.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS ||
+                         String(hubConfig.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS ||
                                 cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS) +
                          '" is not a non-negative integer; using the default (' +
                          CHECKPOINT_COSIGN_TOLERANCE_BLOCKS + '). An unvalidated value would ' +
                          'disable the co-sign snapshot freshness guard outright.');
             this.cosignToleranceBlocks = CHECKPOINT_COSIGN_TOLERANCE_BLOCKS;
         }
-        this.chains = String(process.env.CHECKPOINT_CHAINS || cfg.CHECKPOINT_CHAINS || ALLOWED_CHAINS.join(','))
+        this.chains = String(hubConfig.CHECKPOINT_CHAINS || cfg.CHECKPOINT_CHAINS || ALLOWED_CHAINS.join(','))
             .split(',').map(c => c.trim().toUpperCase()).filter(c => ALLOWED_CHAINS.includes(c));
 
         // Regtest seams: shared with the cross-chain DEX engine so a no-BTC
@@ -152,8 +153,8 @@ class StateCheckpointEngine extends EventEmitter {
         // stray env var or configs-table row must never reach them on mainnet/testnet.
         // Honored ONLY on regtest; NaN/false everywhere else (fail closed to the real set).
         let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints (same env surface as CrossChainDexEngine).
@@ -217,7 +218,7 @@ class StateCheckpointEngine extends EventEmitter {
         this._cadenceStallLoggedAt = 0;
         // Log throttle: the poll runs far faster than the cadence, so log the reason
         // at most once an hour and let the counter carry the true rate.
-        this._cadenceStallLogMs = parseInt(process.env.CHECKPOINT_STALL_LOG_MS
+        this._cadenceStallLogMs = parseInt(hubConfig.CHECKPOINT_STALL_LOG_MS
             || cfg.CHECKPOINT_STALL_LOG_MS || String(60 * 60 * 1000));
 
         // Frozen-tip livelock meter. The cadence leader is pubkeys[btcBlock % N], so
@@ -231,7 +232,7 @@ class StateCheckpointEngine extends EventEmitter {
         // tick is metered as a stall naming the frozen block. K defaults to an hour of
         // the default 60s poll, longer than any BTC inter-block gap that normal
         // rotation would survive; a wedged tip stays wedged and crosses it.
-        this._frozenTipTicks = parseInt(process.env.CHECKPOINT_FROZEN_TIP_TICKS
+        this._frozenTipTicks = parseInt(hubConfig.CHECKPOINT_FROZEN_TIP_TICKS
             || cfg.CHECKPOINT_FROZEN_TIP_TICKS || '60');
         if(!(this._frozenTipTicks > 0)) this._frozenTipTicks = 60;
         this._notMySlotBlock = null;     // btcBlock seen by the last not-my-slot tick

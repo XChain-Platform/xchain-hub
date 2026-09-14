@@ -30,6 +30,7 @@ const crypto = require('crypto');
 const dns    = require('dns');
 const net    = require('net');
 const { URL } = require('url');
+const hubConfig = require('../config');
 
 const USER_AGENT = 'XChain-Attestation/1.0';
 
@@ -169,8 +170,8 @@ exports.fetch = async (payload, options) => {
     // Escape hatch, network-gated (see the header). Off regtest the hatch is
     // dropped and the full guard runs: the literal check, the resolve-once
     // rejection of any non-public answer, and the pinned `lookup` below.
-    const hatchSet = process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1';
-    const network  = String(options.network || process.env.HUB_NETWORK || '').toLowerCase();
+    const hatchSet = hubConfig.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1';
+    const network  = String(options.network || hubConfig.HUB_NETWORK || '').toLowerCase();
     if (hatchSet && network !== 'regtest' && !warnedHatchIgnored) {
         warnedHatchIgnored = true;
         console.log('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +

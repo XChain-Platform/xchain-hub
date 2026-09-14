@@ -40,6 +40,7 @@ const EventEmitter = require('events');
 const coins        = require('../coins');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { noteDrop } = require('../consensus/diagnostics');
+const hubConfig = require('../config');
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
@@ -71,7 +72,7 @@ class ReorgHandler extends EventEmitter {
         // Rate limit: max 1 reorg report per chain per 60 seconds
         this.reorgRateTracker = new Map();
 
-        this.timeout = parseInt(process.env.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
+        this.timeout = parseInt(hubConfig.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
 
         // Blast-radius bound. _executeRollback DELETEs attestations and disputes price
         // snapshots relative to the reorg `timestamp`, which is caller-supplied and only
@@ -81,18 +82,18 @@ class ReorgHandler extends EventEmitter {
         // is older than this window (or too far in the future) before it can drive a
         // rollback. Self-node verification (below) covers validity; this bounds the
         // timestamp dimension independently.
-        this.maxLookbackMs = parseInt(process.env.REORG_MAX_LOOKBACK_MS) || 86400000; // 24h
+        this.maxLookbackMs = parseInt(hubConfig.REORG_MAX_LOOKBACK_MS) || 86400000; // 24h
 
         // Height-dimension blast-radius bound: refuse a reorgHeight deeper than this
         // many blocks below our own indexer's tip (DOGE's 1-minute blocks are ~1440
         // per 24h, so the default clears every chain's 24h window with margin).
-        this.maxReorgDepth = parseInt(process.env.REORG_MAX_DEPTH) || 2000;
+        this.maxReorgDepth = parseInt(hubConfig.REORG_MAX_DEPTH) || 2000;
 
         // How far a reported reorg `timestamp` may PREDATE our own node's block_time
         // for reorgHeight before we refuse to act on it (see
         // timestampConsistentWithBlockTime). Default 3h: covers the ~2h future
         // miner-timestamp skew consensus rules allow, plus clock-skew margin.
-        this.timestampSkewToleranceMs = parseInt(process.env.REORG_TIMESTAMP_SKEW_MS) || 10800000;
+        this.timestampSkewToleranceMs = parseInt(hubConfig.REORG_TIMESTAMP_SKEW_MS) || 10800000;
 
         // Federation network (mainnet|testnet|regtest). When set, a getblockhashes
         // response naming a different network is refused (mirrors
@@ -121,7 +122,7 @@ class ReorgHandler extends EventEmitter {
         // reorgIds could otherwise grow pendingReorgs without bound and fan a PREPARE to
         // every peer per entry (REORG-INBOUND-UNBOUNDED-ROUNDS-1). Rounds self-expire on
         // the timeout, so this only bounds a burst; a real reorg needs one round per chain.
-        this.maxPendingReorgs = parseInt(process.env.REORG_MAX_PENDING) || 64;
+        this.maxPendingReorgs = parseInt(hubConfig.REORG_MAX_PENDING) || 64;
     }
 
     // The canonical reorgId for an observation. Honest reporters build it from these exact
@@ -749,7 +750,7 @@ class ReorgHandler extends EventEmitter {
         // would rather co-sign than abstain. Measured 2026-07-29: 3 of 171 recorded
         // orphaned blocks on mainnet carry a null hash (DOGE 6280198 + 6279100,
         // LTC 3137602), so the abstention cost of leaving this off is those heights.
-        if (sawUnrecorded && String(process.env.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
+        if (sawUnrecorded && String(hubConfig.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
             console.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
                 ' because REORG_ALLOW_UNRECORDED_OLDHASH=1 (the orphaned hash is unrecorded, so this ' +
                 'co-signs a claim this node cannot check)');

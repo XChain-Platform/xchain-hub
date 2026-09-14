@@ -61,6 +61,7 @@ const activation        = require('../lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
 // parameters. See the constructor.
 const coins             = require('../coins/index.js');
+const hubConfig = require('../config');
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
 const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';
@@ -160,9 +161,9 @@ class FullNodeChallengeRound {
         let fn = cfg.FULLNODE || {};
         // OPERATIONAL knobs only below this line: they affect this hub's local timing
         // and participation, not what any hub computes, so they keep their env surface.
-        this.enabled       = String(process.env.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
-        this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
-        this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
+        this.enabled       = String(hubConfig.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
+        this.pollMs        = parseInt(hubConfig.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
+        this.collectMs     = parseInt(hubConfig.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
         // Genesis verifiers seed the eligible-verifier universe before any node is
         // verified on-chain, so a key dropped here shrinks the quorum denominator: it is
         // a consensus input and comes from the pinned registry with the rest.
@@ -181,23 +182,23 @@ class FullNodeChallengeRound {
 
         // BTC indexer JSON-RPC (ledger-hash seed + tip); same env surface as
         // StateCheckpointEngine / CrossChainDexEngine.
-        this.indexerUrl = process.env.BTC_INDEXER_URL     || cfg.BTC_INDEXER_URL     || '';
-        this.indexerKey = process.env.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
+        this.indexerUrl = hubConfig.BTC_INDEXER_URL     || cfg.BTC_INDEXER_URL     || '';
+        this.indexerKey = hubConfig.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
 
         // BTC coin full-node RPC (compute the possession answer). Reuses the
         // cross_chain capability's per-chain RPC config; a light validator simply
         // has none, so it can't participate (exactly the property we want).
         let cc = (cfg.cross_chain && cfg.cross_chain.chains && cfg.cross_chain.chains.BTC) || {};
-        this.coinRpcUrl = process.env.FULLNODE_BTC_RPC || (cfg.FULLNODE && cfg.FULLNODE.BTC_RPC) || cc.rpc || '';
+        this.coinRpcUrl = hubConfig.FULLNODE_BTC_RPC || (cfg.FULLNODE && cfg.FULLNODE.BTC_RPC) || cc.rpc || '';
 
         // On-chain verdict broadcast: operator hook (preferred) or BTC encoder
         // pipeline, mirroring AttestationPublisher / OraclePublisher.
-        let encUrl  = process.env.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
-        let encKey  = process.env.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
+        let encUrl  = hubConfig.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
+        let encKey  = hubConfig.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
         this.encoder      = encUrl ? new EncoderClient(encUrl, encKey) : null;
         this.broadcastFn  = null;   // fn(wirePayload) -> Promise<{txid}>
         this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
-        this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
+        this.btcAddress   = hubConfig.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
         // The rail a verdict settles on: built, funded and broadcast on BTC through the
         // encoder and address above. src/lib/signer_loader.js reads this to decide
@@ -228,7 +229,7 @@ class FullNodeChallengeRound {
         // anchor_txid IS NULL row); this path had only a post-success console.log, so
         // a crash mid-flight left nothing but stdout retention to say a fee had been
         // committed. Same JSONL-plus-fsync shape and path idiom as AttestationPublisher.
-        this.spendLogPath = process.env.FULLNODE_SPEND_LOG_PATH || cfg.FULLNODE_SPEND_LOG_PATH ||
+        this.spendLogPath = hubConfig.FULLNODE_SPEND_LOG_PATH || cfg.FULLNODE_SPEND_LOG_PATH ||
                             './data/fullnode-verdict.spend.jsonl';
 
         this.rounds   = new Map();  // epoch -> round state

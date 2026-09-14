@@ -45,8 +45,9 @@
 const { spawn } = require('child_process');
 const os = require('os');
 const { resolveHubLlmAuth } = require('./hub_credentials');
+const hubConfig = require('../config');
 
-const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
+const CLAUDE_BIN = hubConfig.CLAUDE_BIN || 'claude';
 
 // Credential env vars the CLI reads on its own. hub-credentials.js declares a
 // resolution order and picks exactly ONE source, so any of these still inherited

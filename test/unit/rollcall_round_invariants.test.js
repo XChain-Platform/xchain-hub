@@ -149,11 +149,13 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
         // cannot pass by renaming the assertion with it.
         const src  = fs.readFileSync(path.join(__dirname, '../../src/rollcall/round.js'), 'utf8');
         const used = new Set();
-        // Two read forms: the literal process.env.NAME, and the three publish
-        // tunables, which go through resolveTunable('NAME', ...) and are therefore
-        // invisible to a literal scan. Missing the second form is exactly how an
+        // Two read forms: the named read, spelled hubConfig.NAME since the config
+        // home took over the environment (process.env.NAME before that, and still
+        // the spelling under a computed key), and the three publish tunables,
+        // which go through resolveTunable('NAME', ...) and are therefore invisible
+        // to a literal scan. Missing the second form is exactly how an
         // undocumented knob would ship.
-        for (const re of [/process\.env\.(ROLLCALL_[A-Z_0-9]+)/g,
+        for (const re of [/(?:process\.env|hubConfig)\.(ROLLCALL_[A-Z_0-9]+)/g,
                           /resolveTunable\(\s*'(ROLLCALL_[A-Z_0-9]+)'/g]) {
             let m;
             while ((m = re.exec(src)) !== null) used.add(m[1]);

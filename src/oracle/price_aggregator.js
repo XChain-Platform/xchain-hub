@@ -55,6 +55,7 @@ const ah                = require('../lib/admission_height.js');
 // same kind of non-canonical read.
 const { isMirrorAdmissionProducerActive } = require('../mirror_admission_activation.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
+const hubConfig = require('../config');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -1631,7 +1632,7 @@ class PriceAggregator extends EventEmitter {
     // because a hub that silently stops writing these rows is the failure this whole
     // path exists to close: an operator must have to spell the word to lose it.
     priceCapabilityDerivationEnabled() {
-        return String(process.env.HUB_PRICE_CAPABILITY_DERIVE || '').trim().toLowerCase() !== 'off';
+        return String(hubConfig.HUB_PRICE_CAPABILITY_DERIVE || '').trim().toLowerCase() !== 'off';
     }
 
     // True when THIS hub holds a signing identity, the precondition every consensus
@@ -1701,7 +1702,7 @@ class PriceAggregator extends EventEmitter {
                 + 'head will be stored `unverified`.');
             return false;
         }
-        let intervalS = positiveIntConfig(process.env.HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S,
+        let intervalS = positiveIntConfig(hubConfig.HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S,
             PRICE_CAP_DERIVE_INTERVAL_S, 'HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S');
         // The FIRST pass waits a full interval rather than firing now: start() has not yet
         // been followed by startP2P/startOracle, so a pass at t=0 would run on a validator
@@ -1758,7 +1759,7 @@ class PriceAggregator extends EventEmitter {
             }
             t = Math.floor(t);
 
-            let lookback = positiveIntConfig(process.env.HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS,
+            let lookback = positiveIntConfig(hubConfig.HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS,
                 PRICE_CAP_DERIVE_LOOKBACK_BLOCKS, 'HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS');
             let from = Math.max(0, t - lookback + 1);
 

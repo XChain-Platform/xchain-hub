@@ -43,6 +43,7 @@ const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const { noteDrop, noteRoundLost } = require('../consensus/diagnostics');
 const ah                = require('../lib/admission_height.js');
+const hubConfig = require('../config');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -188,7 +189,7 @@ class OracleConsensus extends EventEmitter {
         // live round and will never be re-proposed.
         this.finalized = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax = positiveIntConfig(process.env.ORACLE_FINALIZED_MAX, 10000, 'ORACLE_FINALIZED_MAX');
+        this.finalizedMax = positiveIntConfig(hubConfig.ORACLE_FINALIZED_MAX, 10000, 'ORACLE_FINALIZED_MAX');
 
         // Rounds this hub stored as 'skipped' for a LOCAL reason (its gossip lagged
         // below minSubmissions at the block boundary, or its own aggregate was
@@ -231,14 +232,14 @@ class OracleConsensus extends EventEmitter {
         // value keeps the condition true at size 0, where `keys().next().value` is
         // undefined and `delete(undefined)` changes nothing. The loop never terminates and
         // wedges the event loop for the whole hub process on the first buffered message.
-        this.earlyMessageMaxRounds = positiveIntConfig(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS, 256,
+        this.earlyMessageMaxRounds = positiveIntConfig(hubConfig.ORACLE_EARLY_MSG_MAX_ROUNDS, 256,
             'ORACLE_EARLY_MSG_MAX_ROUNDS');
 
         this.validatorSet = [];
 
         this._messageHandler = null;
 
-        this.finalizationTimeout = parseInt(process.env.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
+        this.finalizationTimeout = parseInt(hubConfig.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
         // Default to a 2-hub diversity floor: a single hub's single external source must never
         // become a federation-signed price. A real federation always clears 2; single-host / regtest
         // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
@@ -247,7 +248,7 @@ class OracleConsensus extends EventEmitter {
         // pass straight through and make the `submissions.size < this.minSubmissions` floor checks
         // permanently false, removing the floor rather than lowering it. Non-positive and
         // unparseable values now fall back to 2.
-        this.minSubmissions      = positiveIntConfig(process.env.ORACLE_MIN_SUBMISSIONS, 2, 'ORACLE_MIN_SUBMISSIONS');
+        this.minSubmissions      = positiveIntConfig(hubConfig.ORACLE_MIN_SUBMISSIONS, 2, 'ORACLE_MIN_SUBMISSIONS');
         // Unlike ORACLE_ALLOW_UNVERIFIED_PAIRS below, this knob is NOT regtest-gated: single-host
         // PROD is a supported deployment (xchain-node ConfigService passes the key through, and
         // HubConsensusEnvGuard refuses a container regenerate that drops it) and ignoring the
@@ -260,7 +261,7 @@ class OracleConsensus extends EventEmitter {
                 'is STOOD DOWN on this hub, so one submitter can carry a federation-signed round. ' +
                 'Intended only for a deliberate single-host deployment.');
         }
-        this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+        this.leaderTimeout       = parseInt(hubConfig.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
         // Follower freshness bound on the leader-supplied btcBlockHeight in a
         // PROPOSE. That height selects the price snapshot (quorum N), the member set
         // the round's leader is elected from, and the STAKE_WEIGHTED_QUORUM
@@ -269,7 +270,7 @@ class OracleConsensus extends EventEmitter {
         // CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks, so
         // honest tip skew between hubs costs a round nothing. 0 is meaningful (pin to
         // our own tip exactly), hence the non-negative guard rather than `|| default`.
-        this.snapshotToleranceBlocks = parseInt(process.env.ORACLE_SNAPSHOT_TOLERANCE_BLOCKS
+        this.snapshotToleranceBlocks = parseInt(hubConfig.ORACLE_SNAPSHOT_TOLERANCE_BLOCKS
             || String(DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS));
         if (!(this.snapshotToleranceBlocks >= 0))
             this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;
@@ -278,7 +279,7 @@ class OracleConsensus extends EventEmitter {
         // roundAbandonMs() derives the window from the ladder, so a deployment
         // that widens ORACLE_FINALIZATION_TIMEOUT widens the watchdog with it and
         // this knob never has to be retuned alongside it.
-        this.roundAbandonGraceMs = positiveIntConfig(process.env.ORACLE_ROUND_ABANDON_GRACE_MS,
+        this.roundAbandonGraceMs = positiveIntConfig(hubConfig.ORACLE_ROUND_ABANDON_GRACE_MS,
             DEFAULT_ROUND_ABANDON_GRACE_MS, 'ORACLE_ROUND_ABANDON_GRACE_MS');
         // A proposed pair this follower can verify against NOTHING (no live
         // local aggregate AND no finalized history) used to fall through with only
@@ -297,7 +298,7 @@ class OracleConsensus extends EventEmitter {
         // Byzantine-leader defense in silence. hub.network is the api.js-validated
         // HUB_NETWORK (mainnet|testnet|regtest, required in validator mode, and this engine
         // only ever starts in validator mode); anything else, '' included, fails closed.
-        let allowUnverifiedEnv = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
+        let allowUnverifiedEnv = String(hubConfig.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
         let isRegtest          = !!(this.hub && this.hub.network === 'regtest');
         if (allowUnverifiedEnv && !isRegtest) {
             console.log('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
@@ -340,7 +341,7 @@ class OracleConsensus extends EventEmitter {
         // catches up to rows it already holds, never what any hub clamps to. A longer
         // interval degrades toward the pre-fix staleness, a shorter one costs one
         // indexed query. So it needs no flag day and no regtest-only gate.
-        this._reseedIntervalMs = positiveIntConfig(process.env.ORACLE_CLAMP_RESEED_MS, 60000,
+        this._reseedIntervalMs = positiveIntConfig(hubConfig.ORACLE_CLAMP_RESEED_MS, 60000,
             'ORACLE_CLAMP_RESEED_MS');
         this._reseedTimer = setInterval(() => {
             // In-flight guard, the convention XChainHub.refreshTransportSignerSet uses:

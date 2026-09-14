@@ -78,6 +78,7 @@ const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcas
 const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
+const hubConfig = require('../config');
 
 const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence
@@ -108,12 +109,12 @@ class AttestationPublisher {
         this.identity = hub.getIdentity ? hub.getIdentity() : null;
 
         let cfg = hub.p2pConfig || {};
-        this.queuePath = process.env.ATTESTATION_QUEUE_PATH || cfg.ATTESTATION_QUEUE_PATH || './data/attestation-queue.jsonl';
+        this.queuePath = hubConfig.ATTESTATION_QUEUE_PATH || cfg.ATTESTATION_QUEUE_PATH || './data/attestation-queue.jsonl';
 
         // Operator kill switch. Mirrors StateAnchorPublisher's
         // ANCHOR_ENABLED gate. Halts outbound BTC spend (both the live path and the
         // failover sweep) during an incident without tearing down config. Default on.
-        this.enabled = String(process.env.ATTEST_ENABLED || cfg.ATTEST_ENABLED || 'true') !== 'false';
+        this.enabled = String(hubConfig.ATTEST_ENABLED || cfg.ATTEST_ENABLED || 'true') !== 'false';
 
         // Shared SpendGuard (supersedes the old per-publisher SpendCeiling).
         // Per-window spend ceiling (count + a $2000-clamped USD-cents budget, default-ON),
@@ -142,22 +143,22 @@ class AttestationPublisher {
         this._ambiguousSends = new Map();
 
         // Failover / replay tuning
-        this.failoverWindowBlocks = parseInt(process.env.ATTESTATION_FAILOVER_WINDOW_BLOCKS || cfg.ATTESTATION_FAILOVER_WINDOW_BLOCKS || DEFAULT_FAILOVER_WINDOW_BLOCKS);
-        this.failoverPollMs       = parseInt(process.env.ATTESTATION_FAILOVER_POLL_MS       || cfg.ATTESTATION_FAILOVER_POLL_MS       || DEFAULT_FAILOVER_POLL_MS);
-        this.leaderRetryMs        = parseInt(process.env.ATTESTATION_LEADER_RETRY_MS        || cfg.ATTESTATION_LEADER_RETRY_MS        || DEFAULT_LEADER_RETRY_MS);
-        this.approxBlockMs        = parseInt(process.env.ATTESTATION_BLOCK_MS               || cfg.ATTESTATION_BLOCK_MS               || APPROX_BTC_BLOCK_MS);
+        this.failoverWindowBlocks = parseInt(hubConfig.ATTESTATION_FAILOVER_WINDOW_BLOCKS || cfg.ATTESTATION_FAILOVER_WINDOW_BLOCKS || DEFAULT_FAILOVER_WINDOW_BLOCKS);
+        this.failoverPollMs       = parseInt(hubConfig.ATTESTATION_FAILOVER_POLL_MS       || cfg.ATTESTATION_FAILOVER_POLL_MS       || DEFAULT_FAILOVER_POLL_MS);
+        this.leaderRetryMs        = parseInt(hubConfig.ATTESTATION_LEADER_RETRY_MS        || cfg.ATTESTATION_LEADER_RETRY_MS        || DEFAULT_LEADER_RETRY_MS);
+        this.approxBlockMs        = parseInt(hubConfig.ATTESTATION_BLOCK_MS               || cfg.ATTESTATION_BLOCK_MS               || APPROX_BTC_BLOCK_MS);
 
         // How long after an ambiguous send the sweep defers re-broadcast,
         // giving a possibly-accepted tx time to reach the indexer's mined view before
         // we conclude it never landed. Defaults to one failover window.
-        this.ambiguousCooldownMs  = parseInt(process.env.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || cfg.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || String(this.failoverWindowBlocks * this.approxBlockMs), 10);
+        this.ambiguousCooldownMs  = parseInt(hubConfig.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || cfg.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || String(this.failoverWindowBlocks * this.approxBlockMs), 10);
 
         // Optional BTC encoder wiring (default pipeline). Mirrors OraclePublisher.
-        let encoderUrl = process.env.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
-        let encoderKey = process.env.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
+        let encoderUrl = hubConfig.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
+        let encoderKey = hubConfig.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
         this.encoder   = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
-        this.btcAddress    = process.env.BTC_ADDRESS    || cfg.BTC_ADDRESS    || '';
-        this.btcPubkeyHex  = process.env.BTC_PUBKEY_HEX || cfg.BTC_PUBKEY_HEX || '';
+        this.btcAddress    = hubConfig.BTC_ADDRESS    || cfg.BTC_ADDRESS    || '';
+        this.btcPubkeyHex  = hubConfig.BTC_PUBKEY_HEX || cfg.BTC_PUBKEY_HEX || '';
 
         // Operator-supplied hooks
         this.broadcastFn  = null;  // fn(wirePayload) → Promise<{txid}>
@@ -199,7 +200,7 @@ class AttestationPublisher {
         // re-presentability floor; see prunePublishedRequests for both invariants.
         // 0 disables pruning; garbage or a negative value falls back to the default.
         this.publishedRequestsRetentionMs = parseInt(
-            process.env.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS ||
+            hubConfig.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS ||
             cfg.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS, 10);
         if (!Number.isFinite(this.publishedRequestsRetentionMs) || this.publishedRequestsRetentionMs < 0){
             this.publishedRequestsRetentionMs = DEFAULT_PUBLISHED_RETENTION_MS;

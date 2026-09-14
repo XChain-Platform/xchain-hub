@@ -575,7 +575,7 @@ describe('OracleRound (extra coverage)', function () {
         it('is passed through unparsed so an explicit 0 survives', function () {
             const line = /ORACLE_SUBMISSIONS_RETENTION_ROUNDS\s*:\s*([^\n,]+)/.exec(p2pConfigLiteral());
             expect(line, 'ORACLE_SUBMISSIONS_RETENTION_ROUNDS not wired').to.not.equal(null);
-            expect(line[1].trim()).to.equal('process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS',
+            expect(line[1].trim()).to.equal('hubConfig.ORACLE_SUBMISSIONS_RETENTION_ROUNDS',
                 'wrap it in parseInt(...) || DEFAULT and the documented "0 disables pruning" setting '
                 + 'collapses back to the default; OracleRound.js owns the parse and the default');
         });
@@ -639,7 +639,7 @@ describe('OracleRound (extra coverage)', function () {
         it('is passed through unparsed so the consumer owns the parse and the default', function () {
             const line = /ORACLE_MAX_SUBMISSIONS_PER_ROUND\s*:\s*([^\n,]+)/.exec(p2pConfigLiteral());
             expect(line, 'ORACLE_MAX_SUBMISSIONS_PER_ROUND not wired').to.not.equal(null);
-            expect(line[1].trim()).to.equal('process.env.ORACLE_MAX_SUBMISSIONS_PER_ROUND',
+            expect(line[1].trim()).to.equal('hubConfig.ORACLE_MAX_SUBMISSIONS_PER_ROUND',
                 'a parseInt(...) || 200 tidy-up here forks the default into two files and lets the '
                 + 'api.js copy eat values (0, negatives) that OracleRound.js handles deliberately');
         });

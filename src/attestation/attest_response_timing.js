@@ -61,6 +61,7 @@
  ********************************************************************/
 
 'use strict';
+const hubConfig = require('../config');
 
 // Seconds ahead of the leader's clock that a mirror-era response binds. FROZEN
 // PROTOCOL CONSTANT: it is not read from the row, it is the expectation every
@@ -119,7 +120,7 @@ function resolveAttestResponseForwardS(network, p2pConfig){
     // for the messages below, where it is a real deduplication.
     let raw = (p2pConfig && p2pConfig[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] != null)
         ? p2pConfig[ATTEST_RESPONSE_FORWARD_S_OVERRIDE]
-        : process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE;
+        : hubConfig.ATTEST_RESPONSE_FORWARD_S_OVERRIDE;
 
     if(raw === null || raw === undefined || String(raw).trim() === '')
         return ATTEST_RESPONSE_FORWARD_S;
@@ -160,7 +161,7 @@ function resolveAttestBatchWindowS(network, p2pConfig){
     // invisible to the env-var documentation sweep.
     let raw = (p2pConfig && p2pConfig[ATTEST_BATCH_WINDOW_S_OVERRIDE] != null)
         ? p2pConfig[ATTEST_BATCH_WINDOW_S_OVERRIDE]
-        : process.env.ATTEST_BATCH_WINDOW_S_OVERRIDE;
+        : hubConfig.ATTEST_BATCH_WINDOW_S_OVERRIDE;
 
     if(raw === null || raw === undefined || String(raw).trim() === '')
         return ATTEST_BATCH_WINDOW_S;

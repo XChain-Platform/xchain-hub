@@ -67,6 +67,7 @@ const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
 const fs                 = require('fs');
 const axios              = require('axios');
+const hubConfig = require('./config');
 // self_sync rides the same string-parameter path as the rest of this list: it
 // marks a checkpoint-schema descriptor (coin/network module "checkpoint",
 // row 39 / #4138 decoupling) as one the explorer's own HubMirrorSyncManager
@@ -1021,7 +1022,7 @@ class XChainHub {
     oracleMaxAgeSeconds(coinPair) {
         let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
             ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
-            : process.env.ORACLE_MAX_PRICE_AGE_SECONDS;
+            : hubConfig.ORACLE_MAX_PRICE_AGE_SECONDS;
         let v = parseInt(raw, 10);
         if (!Number.isFinite(v)) return this.registryOracleMaxAge(coinPair);
         if (this.network === 'regtest') return v;
@@ -1280,7 +1281,7 @@ class XChainHub {
     // failing every round forever is the behaviour this refusal replaces.
     _assertCanonicalMinStakes(caps){
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
-        if(process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
+        if(hubConfig.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
             console.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +
                 'assertion. Divergent thresholds fork the qualified validator set; ' +
                 'only bypass on a venue where every hub runs the SAME override.');
@@ -1382,7 +1383,7 @@ class XChainHub {
     // consensus, so it belongs in the pinned bundle. Throws FULLNODE_CONFIG_MISMATCH.
     assertCanonicalFullnode(fn){
         if(!fn || typeof fn !== 'object' || Array.isArray(fn)) return;
-        if(process.env.XCHAIN_HUB_SKIP_FULLNODE_ASSERT === '1'){
+        if(hubConfig.XCHAIN_HUB_SKIP_FULLNODE_ASSERT === '1'){
             console.warn('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1: skipping canonical FULLNODE ' +
                 'assertion. Divergent NODEPROOF knobs fork the challenge schedule, the ' +
                 'verifier quorum and the oracle reward split; only bypass on a venue where every ' +
@@ -1613,7 +1614,7 @@ class XChainHub {
             // committed tip trails the decoder's; past a configurable gap the tip no
             // longer reflects recent chain state, so degrade rather than lock a stale
             // validator set into the round.
-            let maxLag = Number(process.env.MAX_INDEXER_LAG_BLOCKS);
+            let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
             if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
             if(result.lag != null && Number(result.lag) > maxLag){
                 console.warn('XChainHub: BTC indexer lag ' + result.lag +
@@ -1644,7 +1645,7 @@ class XChainHub {
         let blockTime = Number(tip.blockTime);
         if(!Number.isFinite(blockTime) || blockTime <= 0) return true;
         if(Number(directHeight) > Number(tip.blockHeight)) return true;
-        let maxAge = Number(process.env.MAX_DIRECT_TIP_AGE_S);
+        let maxAge = Number(hubConfig.MAX_DIRECT_TIP_AGE_S);
         if(!Number.isFinite(maxAge) || maxAge <= 0) maxAge = 7200;
         let ageS = Math.floor(Date.now() / 1000) - blockTime;
         if(ageS <= maxAge) return true;
@@ -1658,7 +1659,7 @@ class XChainHub {
     // false when the tip is older than MAX_TIP_AGE_S or its block_time is missing.
     // Default bound mirrors OracleRound: 2x the oracle round interval.
     btcPushedTipFresh(tip){
-        let maxAge = Number(process.env.MAX_TIP_AGE_S);
+        let maxAge = Number(hubConfig.MAX_TIP_AGE_S);
         if(!Number.isFinite(maxAge) || maxAge <= 0){
             let roundIntervalMs = (this.p2pConfig && Number(this.p2pConfig.ORACLE_ROUND_INTERVAL)) || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
             maxAge = Math.floor((2 * roundIntervalMs) / 1000);
@@ -1775,7 +1776,7 @@ class XChainHub {
             this._admissionTipSeen.set(c, { height: Number(tip), atMs: nowMs });
             return true;
         }
-        let maxAgeS = Number(process.env.ADMISSION_TIP_MAX_AGE_S);
+        let maxAgeS = Number(hubConfig.ADMISSION_TIP_MAX_AGE_S);
         if(!Number.isFinite(maxAgeS) || maxAgeS <= 0)
             maxAgeS = XChainHub.ADMISSION_TIP_STALL_BLOCKS * blockIntervalS(c);
         let ageS = Math.floor((nowMs - Number(prev.atMs)) / 1000);
@@ -1883,7 +1884,7 @@ class XChainHub {
     // hub-to-indexer traffic (the same var RewardTracker uses).
     btcIndexerHeaders(){
         let headers = { 'Content-Type': 'application/json' };
-        let key = process.env.BTC_INDEXER_API_KEY || '';
+        let key = hubConfig.BTC_INDEXER_API_KEY || '';
         if(key) headers['x-api-key'] = key;
         return headers;
     }
@@ -1903,7 +1904,7 @@ class XChainHub {
     // unreachable or no coin field means false. Verdicts cache per URL: 'ok' is permanent,
     // a mismatch is re-probed on the TTL so a repointed hub recovers on its own.
     async _indexerCoinMismatch(url, want){
-        if(process.env.INDEXER_COIN_CHECK === '0') return false;
+        if(hubConfig.INDEXER_COIN_CHECK === '0') return false;
         if(!this._indexerCoinVerdicts) this._indexerCoinVerdicts = new Map();
         const RECHECK_MS = 60000;
         let key    = want + '@' + url;

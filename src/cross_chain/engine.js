@@ -30,6 +30,7 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
 const { noteDrop } = require('../consensus/diagnostics');
+const hubConfig = require('../config');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -81,7 +82,7 @@ class CrossChainEngine extends EventEmitter {
         // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
         this.finalized = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax = positiveIntConfig(process.env.XCHAIN_ATTEST_FINALIZED_MAX, 10000, 'XCHAIN_ATTEST_FINALIZED_MAX');
+        this.finalizedMax = positiveIntConfig(hubConfig.XCHAIN_ATTEST_FINALIZED_MAX, 10000, 'XCHAIN_ATTEST_FINALIZED_MAX');
 
         // Message handler
         this._messageHandler = null;
@@ -90,14 +91,14 @@ class CrossChainEngine extends EventEmitter {
         this.seq = 0;
 
         // Config
-        this.timeout = parseInt(process.env.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
+        this.timeout = parseInt(hubConfig.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
 
         // Persistence retry for a quorum-finalized attestation. The
         // INSERT is idempotent (ON DUPLICATE KEY UPDATE), so re-running it after
         // a partial failure is safe.
-        this.storeRetryAttempts = positiveIntConfig(process.env.XCHAIN_ATTEST_STORE_RETRIES,
+        this.storeRetryAttempts = positiveIntConfig(hubConfig.XCHAIN_ATTEST_STORE_RETRIES,
             DEFAULT_STORE_RETRY_ATTEMPTS, 'XCHAIN_ATTEST_STORE_RETRIES');
-        this.storeRetryBaseMs   = positiveIntConfig(process.env.XCHAIN_ATTEST_STORE_RETRY_MS,
+        this.storeRetryBaseMs   = positiveIntConfig(hubConfig.XCHAIN_ATTEST_STORE_RETRY_MS,
             DEFAULT_STORE_RETRY_BASE_MS, 'XCHAIN_ATTEST_STORE_RETRY_MS');
 
         // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
@@ -598,7 +599,7 @@ class CrossChainEngine extends EventEmitter {
         if (ix.key) headers['x-api-key'] = ix.key;
         let resp = await axios.post(ix.url,
             { jsonrpc: '2.0', method, params: params || {}, id: 1 },
-            { headers, timeout: parseInt(process.env.CROSS_CHAIN_INDEXER_TIMEOUT) || 15000 });
+            { headers, timeout: parseInt(hubConfig.CROSS_CHAIN_INDEXER_TIMEOUT) || 15000 });
         if (resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
         return resp.data ? resp.data.result : null;
     }

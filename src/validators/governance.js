@@ -32,6 +32,7 @@ const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 // (see validateSlashBandFloor). constants.js requires nothing, so no cycle.
 const { ORACLE_DEVIATION_THRESHOLD } = require('../constants.js');
 const { noteDrop } = require('../consensus/diagnostics');
+const hubConfig = require('../config');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -144,8 +145,8 @@ class Governance extends EventEmitter {
         this._messageHandler = null;
         this._tallyTimer = null;
 
-        this.votingPeriod  = parseInt(process.env.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
-        this.tallyInterval = parseInt(process.env.GOVERNANCE_TALLY_INTERVAL) || 60000;
+        this.votingPeriod  = parseInt(hubConfig.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
+        this.tallyInterval = parseInt(hubConfig.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
 
     // Canonicalize the set's ORDER on the way in, so

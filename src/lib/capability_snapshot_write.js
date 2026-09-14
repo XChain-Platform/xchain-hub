@@ -1,4 +1,5 @@
 'use strict';
+const hubConfig = require('../config');
 
 /*********************************************************************
  *
@@ -73,7 +74,7 @@ async function resolveBtcChainId(db){
         if(!db || typeof db.getChainTip !== 'function') return null;
         // capability_snapshots has no network column: the set belongs to the hub, so the
         // hub's own network is the one to ask about.
-        let tip = await db.getChainTip('bitcoin', process.env.HUB_NETWORK || '');
+        let tip = await db.getChainTip('bitcoin', hubConfig.HUB_NETWORK || '');
         return (tip && tip.chainId) ? tip.chainId : null;
     } catch(e){
         return null;

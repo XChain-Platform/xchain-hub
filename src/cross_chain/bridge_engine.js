@@ -62,6 +62,7 @@ const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('../lib/relay_margin.j
 const { allCanonicalInts }   = require('../lib/canonical_int.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
 const coins                  = require('../coins');
+const hubConfig = require('../config');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -134,7 +135,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         this.capSnapshot = hub.capabilitySnapshot || null;
 
         let cfg = hub.p2pConfig || {};
-        this.pollMs  = parseInt(process.env.XBRIDGE_POLL_MS || cfg.XBRIDGE_POLL_MS || DEFAULT_POLL_MS);
+        this.pollMs  = parseInt(hubConfig.XBRIDGE_POLL_MS || cfg.XBRIDGE_POLL_MS || DEFAULT_POLL_MS);
         this.network = (hub && hub.network) ? hub.network : '';
 
         // Platform confirmation depth per chain, the canonical XCHAIN_CONFIRMATIONS_<COIN>
@@ -149,8 +150,8 @@ class CrossChainBridgeEngine extends EventEmitter {
         // NaN/false on every other network, so a stray env var or configs row can never
         // reach a SIGNED snapshot anchor or seed a validator on mainnet or testnet.
         let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints, the idiom every cross-chain engine uses.

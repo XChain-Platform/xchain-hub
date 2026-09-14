@@ -27,6 +27,7 @@
 'use strict';
 
 const { positiveIntConfig } = require('../lib/config_int.js');
+const hubConfig = require('../config');
 
 const DEFAULT_CHECKPOINT_INTERVAL_BLOCKS = 6;
 
@@ -38,7 +39,7 @@ const DEFAULT_CHECKPOINT_INTERVAL_BLOCKS = 6;
  */
 function resolveCheckpointIntervalBlocks(cfg) {
     cfg = cfg || {};
-    let raw = process.env.CHECKPOINT_INTERVAL_BLOCKS;
+    let raw = hubConfig.CHECKPOINT_INTERVAL_BLOCKS;
     if (raw === undefined || raw === null || raw === '') raw = cfg.CHECKPOINT_INTERVAL_BLOCKS;
     return positiveIntConfig(raw, DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, 'CHECKPOINT_INTERVAL_BLOCKS');
 }

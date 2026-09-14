@@ -24,6 +24,7 @@ const axios  = require('axios');
 const ar     = require('../anchor_reward_activation.js');
 const ark    = require('./anchor_reward_key.js');
 const bcmath = require('../bcmath.js');
+const hubConfig = require('../config');
 
 class RewardTracker {
 
@@ -32,13 +33,13 @@ class RewardTracker {
         this.db  = hub.db;
 
         this.rewardPerRound = hub.p2pConfig.ORACLE_REWARD_PER_ROUND || '10.00000000';
-        this.anchorReward   = process.env.ANCHOR_REWARD_PER_PUBLISH || hub.p2pConfig.ANCHOR_REWARD_PER_PUBLISH || '10.00000000';
+        this.anchorReward   = hubConfig.ANCHOR_REWARD_PER_PUBLISH || hub.p2pConfig.ANCHOR_REWARD_PER_PUBLISH || '10.00000000';
 
         // BTC indexer endpoint, READ-ONLY: the only call made on it is
         // resolveSourceByPubkey, which asks which staking source owned a signing pubkey
         // at a block. Nothing here writes to the indexer (see recordAnchorReward).
-        this.btcIndexerApiUrl = process.env.BTC_INDEXER_API_URL || '';
-        this.btcIndexerApiKey = process.env.BTC_INDEXER_API_KEY || '';
+        this.btcIndexerApiUrl = hubConfig.BTC_INDEXER_API_URL || '';
+        this.btcIndexerApiKey = hubConfig.BTC_INDEXER_API_KEY || '';
     }
 
     // Distribute rewards for a finalized oracle round. HUB-LOCAL ONLY (ops

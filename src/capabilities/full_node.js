@@ -27,11 +27,12 @@
  *
  ********************************************************************/
 
+const hubConfig = require('../config');
 exports.selfTest = async (config) => {
     let cfg = config || {};
     let rpc = (cfg.FULLNODE && cfg.FULLNODE.BTC_RPC)
         || (cfg.cross_chain && cfg.cross_chain.chains && cfg.cross_chain.chains.BTC && cfg.cross_chain.chains.BTC.rpc)
-        || process.env.FULLNODE_BTC_RPC
+        || hubConfig.FULLNODE_BTC_RPC
         || '';
     if (!rpc) {
         return { ok: false, reason: 'no BTC coin full-node RPC configured (FULLNODE.BTC_RPC or cross_chain.chains.BTC.rpc); light validators cannot claim full_node' };

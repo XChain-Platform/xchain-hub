@@ -96,6 +96,7 @@ const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('../attest_response_mirror
 const snapWrite = require('../lib/capability_snapshot_write.js');
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
 const abw = require('../lib/attest_batch_wire.js');
+const hubConfig = require('../config');
 
 // The two P2P envelope types this engine owns. There is no message-type registry on
 // the hub: every engine subscribes to PeerManager's 'message' event and switches on
@@ -134,14 +135,14 @@ class AttestationBatchPublisher {
         // to halt outbound DOGE spend during an incident without tearing down the
         // pipeline's configuration. A halted publisher skips windows rather than
         // buffering them, so re-enabling it does not flood the rail.
-        this.enabled = String(process.env.ATTEST_BATCH_PUBLISH_ENABLED ||
+        this.enabled = String(hubConfig.ATTEST_BATCH_PUBLISH_ENABLED ||
                               cfg.ATTEST_BATCH_PUBLISH_ENABLED || 'true') !== 'false';
 
         // Its OWN files, never the PRICE publisher's. The buffer records what a window
         // was built from at the moment it published, so an operator replaying a
         // dead-lettered or quarantined window has the content and does not have to
         // reconstruct it from a table that has since moved on.
-        this.bufferPath = process.env.ATTEST_BATCH_BUFFER_PATH || cfg.ATTEST_BATCH_BUFFER_PATH ||
+        this.bufferPath = hubConfig.ATTEST_BATCH_BUFFER_PATH || cfg.ATTEST_BATCH_BUFFER_PATH ||
                           './data/attest-batch-buffer.jsonl';
         this.deadLetterPath = this.bufferPath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
 
@@ -152,17 +153,17 @@ class AttestationBatchPublisher {
         // The one operator DOGE wallet, read from the same keys OraclePublisher reads:
         // there is one funded address and one signer module, and this is its third
         // consumer. Only the SPEND BUDGET is separate, never the wallet.
-        this.dogeAddress   = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
-        this.dogePubkeyHex = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
-        this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD ||
+        this.dogeAddress   = hubConfig.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
+        this.dogePubkeyHex = hubConfig.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
+        this.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD ||
                                               cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         this.spendGuard.minBalance = this.lowBalanceThreshold;
         this.allowUnconfirmedInputs =
-            String(process.env.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
+            String(hubConfig.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
                    cfg.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
 
-        let encoderUrl = process.env.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
-        let encoderKey = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
+        let encoderUrl = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
+        let encoderKey = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
         this.encoder = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
 
         this.broadcastFn  = null;
@@ -172,7 +173,7 @@ class AttestationBatchPublisher {
         // The signing round reuses the PRICE batch signer's knobs (D76): the two rounds
         // have the same shape and the same failure mode, and a second family of timeout
         // names would be a second thing to drift.
-        this.signTimeoutMs = parseInt(process.env.ORACLE_BATCH_SIGN_TIMEOUT_MS ||
+        this.signTimeoutMs = parseInt(hubConfig.ORACLE_BATCH_SIGN_TIMEOUT_MS ||
                                       cfg.ORACLE_BATCH_SIGN_TIMEOUT_MS || '15000', 10);
         if(!Number.isFinite(this.signTimeoutMs) || this.signTimeoutMs <= 0) this.signTimeoutMs = 15000;
 
@@ -181,7 +182,7 @@ class AttestationBatchPublisher {
         // because a refusal that never clears (a wire the encoder rejects on its content,
         // not on its funding) would otherwise re-propose and re-collect a signing quorum
         // every window forever, and the federation's signing capacity is the scarce thing.
-        this.maxRefusalAttempts = parseInt(process.env.ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS ||
+        this.maxRefusalAttempts = parseInt(hubConfig.ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS ||
                                            cfg.ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS || '3', 10);
         if(!Number.isFinite(this.maxRefusalAttempts) || this.maxRefusalAttempts < 1)
             this.maxRefusalAttempts = 3;

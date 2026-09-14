@@ -32,6 +32,7 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const { noteDrop } = require('./diagnostics');
+const hubConfig = require('../config');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -131,11 +132,11 @@ class Consensus {
         this._messageHandler = null;
         this.lastAppliedSeq = 0;
 
-        this.timeout       = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
-        this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
+        this.timeout       = parseInt(hubConfig.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
+        this.minValidators = parseInt(hubConfig.MIN_VALIDATORS) || 1;
         // See DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS. 0 is meaningful (pin to our own
         // tip exactly), so this takes a non-negative guard rather than `|| default`.
-        this.snapshotToleranceBlocks = parseInt(process.env.PBFT_SNAPSHOT_TOLERANCE_BLOCKS
+        this.snapshotToleranceBlocks = parseInt(hubConfig.PBFT_SNAPSHOT_TOLERANCE_BLOCKS
             || String(DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS));
         if(!(this.snapshotToleranceBlocks >= 0))
             this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;

@@ -61,6 +61,7 @@ const path = require('path');
 const { resolveLlmVendorAuth } = require('../lib/hub_credentials');
 const { runClaudePrint } = require('../lib/claude_spawn');
 const SpendGuard = require('../lib/spend_guard.js');
+const hubConfig = require('../config');
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are
 // arbitrary attacker-chosen bytes (only the sender's signature over them is
@@ -94,7 +95,7 @@ const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 // the only survivor. So the record falls through two more sinks (tmpdir, then
 // stderr under a stable prefix) and the fault is counted into spendStats().
 const _spendLogPath = () =>
-    process.env.LLM_SPEND_LOG_PATH || './data/llm-spend.jsonl';
+    hubConfig.LLM_SPEND_LOG_PATH || './data/llm-spend.jsonl';
 
 // Fallback sink for a primary path that cannot be written. Dispatch stays
 // unconditional (see the block above: refusing to call would turn an audit fault
@@ -104,7 +105,7 @@ const _spendLogPath = () =>
 // per-dispatch identity, so an operator reconciling a vendor invoice against it
 // cannot tell which call was which.
 const _fallbackSpendLogPath = () =>
-    process.env.LLM_SPEND_LOG_FALLBACK_PATH || path.join(os.tmpdir(), 'llm-spend.jsonl');
+    hubConfig.LLM_SPEND_LOG_FALLBACK_PATH || path.join(os.tmpdir(), 'llm-spend.jsonl');
 
 // Counters for the operator surface. A per-call console.warn is invisible once
 // stdout rotates, so a degraded sink needs a standing signal of its own: these
@@ -370,11 +371,11 @@ exports.anthropicRejectsSampling = anthropicRejectsSampling;
 // Default (both unset): enabled, so behavior is unchanged.
 let LLM_ENABLED_CONFIG = true;   // governance additional_config.enabled (default on)
 function llmEnabled() {
-    if (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false') return false;
+    if (String(hubConfig.LLM_PROVIDER_ENABLED || 'true') === 'false') return false;
     return LLM_ENABLED_CONFIG !== false;
 }
 function pausedError() {
-    let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
+    let src = (String(hubConfig.LLM_PROVIDER_ENABLED || 'true') === 'false')
         ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
     let err = new Error('llm: provider paused (' + src + '); no paid API call issued');
     err.paused = true;   // distinct, non-transient marker so callers/health can tell
@@ -412,7 +413,7 @@ exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) 
 const DEFAULT_MAX_BUDGET_USD = 5;
 let MAX_BUDGET_USD_CONFIG = null;   // governance additional_config.max_budget_usd
 function resolveMaxBudgetUsd() {
-    let envVal = parseFloat(process.env.LLM_MAX_BUDGET_USD);
+    let envVal = parseFloat(hubConfig.LLM_MAX_BUDGET_USD);
     if (Number.isFinite(envVal) && envVal > 0) return envVal;
     if (Number.isFinite(MAX_BUDGET_USD_CONFIG) && MAX_BUDGET_USD_CONFIG > 0) return MAX_BUDGET_USD_CONFIG;
     // Sized so it cannot cut off legitimate work: one attestation call is a
@@ -1133,7 +1134,7 @@ exports.healthCheck = async (ctx) => {
     // switch from a real outage in the logs. Carries paused:true for callers that
     // want to treat a pause differently from an ordinary ok:false.
     if (!llmEnabled()) {
-        let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
+        let src = (String(hubConfig.LLM_PROVIDER_ENABLED || 'true') === 'false')
             ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
         return { ok: false, paused: true, error: 'llm: provider paused (' + src + ')' };
     }

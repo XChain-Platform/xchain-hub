@@ -96,6 +96,7 @@ const rga                        = require('../rollcall_gates_activation.js');
 const { knownGateKeys }          = require('../consensus_rules_digest.js');
 const { buildRollcallCanonical } = require('./rollcall_canonical.js');
 const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
+const hubConfig = require('../config');
 
 // The one gossip type this engine adds. PeerManager.broadcast has no type
 // registry, so a new type is this constant plus one `case` in _handleMessage.
@@ -167,8 +168,8 @@ class RollcallRound {
         this.acceptWindow = rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS[this.network];
 
         // Operational knobs: this hub's own timing and participation only.
-        this.enabled = String(process.env.ROLLCALL_ENABLED || cfg.ROLLCALL_ENABLED || 'true') !== 'false';
-        this.pollMs  = parseInt(process.env.ROLLCALL_POLL_MS || cfg.ROLLCALL_POLL_MS || '30000');
+        this.enabled = String(hubConfig.ROLLCALL_ENABLED || cfg.ROLLCALL_ENABLED || 'true') !== 'false';
+        this.pollMs  = parseInt(hubConfig.ROLLCALL_POLL_MS || cfg.ROLLCALL_POLL_MS || '30000');
 
         this.publishDelayBlocks      = this.resolveTunable('ROLLCALL_PUBLISH_DELAY_BLOCKS',      PUBLISH_DELAY_DEFAULTS);
         this.electionToleranceBlocks = this.resolveTunable('ROLLCALL_ELECTION_TOLERANCE_BLOCKS', ELECTION_TOLERANCE_DEFAULTS);
@@ -176,24 +177,24 @@ class RollcallRound {
 
         // BTC indexer (ledger_hash + tip) and DOGE indexer (what is already on
         // chain for the epoch). Same env surface the rest of the hub uses.
-        this.indexerUrl = process.env.BTC_INDEXER_URL || cfg.BTC_INDEXER_URL || '';
-        this.indexerKey = process.env.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
-        this.dogeIndexerUrl = process.env.DOGE_INDEXER_API_URL || process.env.DOGE_INDEXER_URL ||
+        this.indexerUrl = hubConfig.BTC_INDEXER_URL || cfg.BTC_INDEXER_URL || '';
+        this.indexerKey = hubConfig.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
+        this.dogeIndexerUrl = hubConfig.DOGE_INDEXER_API_URL || hubConfig.DOGE_INDEXER_URL ||
                               cfg.DOGE_INDEXER_URL || '';
-        this.dogeIndexerKey = process.env.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
+        this.dogeIndexerKey = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
 
         // DOGE publish rail, identical to the anchor rail's: same address, same
         // encoder, same balance floor. Hooks left null here are borrowed from the
         // price publisher at send time (resolveSigner).
-        this.dogeAddress = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
-        let encoderUrl   = process.env.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
-        let encoderKey   = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
+        this.dogeAddress = hubConfig.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
+        let encoderUrl   = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
+        let encoderKey   = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
         this.encoder     = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
         this.broadcastFn  = null;
         this.walletSignFn = null;
         this.getBalanceFn = null;
 
-        this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
+        this.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         this.spendGuard = new SpendGuard('ROLLCALL', cfg, 'RollcallRound');
         this.spendGuard.minBalance = this.lowBalanceThreshold;
 
@@ -201,14 +202,14 @@ class RollcallRound {
         // hub effector uses. The intent line is written and fsync'd BEFORE the
         // money moves and the broadcast is gated on it, so a crash mid-flight
         // still leaves a recoverable trace that DOGE may have been spent.
-        this.spendLogPath = process.env.ROLLCALL_SPEND_LOG_PATH || cfg.ROLLCALL_SPEND_LOG_PATH ||
+        this.spendLogPath = hubConfig.ROLLCALL_SPEND_LOG_PATH || cfg.ROLLCALL_SPEND_LOG_PATH ||
                             './data/rollcall-publish.spend.jsonl';
         // Durable signature store. A restart inside the accept window must
         // re-emit the SAME signature rather than mint a second one: the epoch's
         // ledger_hash is fixed, so a fresh signature would be redundant gossip,
         // and a hub whose indexer has gone dark since would otherwise fall silent
         // for an epoch it had already answered.
-        this.signLogPath = process.env.ROLLCALL_SIGN_LOG_PATH || cfg.ROLLCALL_SIGN_LOG_PATH ||
+        this.signLogPath = hubConfig.ROLLCALL_SIGN_LOG_PATH || cfg.ROLLCALL_SIGN_LOG_PATH ||
                            './data/rollcall-signatures.jsonl';
 
         this.rounds       = new Map();   // epoch -> round state
