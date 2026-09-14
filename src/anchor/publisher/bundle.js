@@ -76,42 +76,34 @@ module.exports = {
         return order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
     },
 
-    // ONE ANCHOR v0 bundle per network per cycle: the LATEST un-anchored checkpoint of
-    // every chain rides as a SECTION of one transaction (spec §2.2). Older un-anchored
-    // seqs are superseded (the chained hashes commit to all prior history), so only the
-    // newest per chain costs DOGE bytes. The bundle runs ONE election, ONE attestation
-    // round and ONE UTXO spend where the retired per-chain wires ran N of each.
+    // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (its checkpoint
+    // ORDINAL, seq divided by the cadence step, divisible by
+    // anchorEveryNCheckpoints - see the constructor for why the raw seq cannot
+    // carry this) that is not yet on-chain. Selecting the max eligible seq rather
+    // than the absolute max means ineligible rounds never block: they simply stay
+    // off-chain. With N=1 (MOD(x,1)=0 for all) this is identical to anchoring every
+    // checkpoint.
+    // Scoped to this.network when one is configured (matching
+    // StateCheckpointEngine's latch loader): a hub DB carrying rows from a
+    // prior network deployment must never re-elect publishers for (or spend
+    // a real DOGE anchor on) a dead network's perpetually-unanchored
+    // checkpoints. A hub with no configured network keeps the legacy
+    // unscoped behavior rather than filtering everything out.
     //
-    // The method keeps its name: flush() and the deferral suites drive it, and what
-    // changed is the unit of work inside it, not the seam.
-    async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
-        // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (its checkpoint
-        // ORDINAL, seq divided by the cadence step, divisible by
-        // anchorEveryNCheckpoints - see the constructor for why the raw seq cannot
-        // carry this) that is not yet on-chain. Selecting the max eligible seq rather
-        // than the absolute max means ineligible rounds never block: they simply stay
-        // off-chain. With N=1 (MOD(x,1)=0 for all) this is identical to anchoring every
-        // checkpoint.
-        // Scoped to this.network when one is configured (matching
-        // StateCheckpointEngine's latch loader): a hub DB carrying rows from a
-        // prior network deployment must never re-elect publishers for (or spend
-        // a real DOGE anchor on) a dead network's perpetually-unanchored
-        // checkpoints. A hub with no configured network keeps the legacy
-        // unscoped behavior rather than filtering everything out.
-        //
-        // The statement lives in db/state_checkpoints.js beside its D24 note: the
-        // `anchor_txid IS NULL` predicate stays OUTSIDE the MAX subquery.
-        let rows = this.network
+    // The statement lives in db/state_checkpoints.js beside its D24 note: the
+    // `anchor_txid IS NULL` predicate stays OUTSIDE the MAX subquery.
+    async findAnchorEligibleSections(){
+        return this.network
             ? await this.db.findAnchorEligibleUnanchoredCheckpointsByNetwork(this.checkpointIntervalBlocks,
                                                                              this.anchorEveryNCheckpoints, this.network)
             : await this.db.findAnchorEligibleUnanchoredCheckpoints(this.checkpointIntervalBlocks,
                                                                     this.anchorEveryNCheckpoints);
-        let anchored = [];
-        let skipped  = { rows: 0 };
+    },
 
-        // Group the result set into ONE bundle per network. A chain absent from a
-        // group is NOT an anomaly (D4): under the daily cadence the normal case is a
-        // chain whose newest eligible seq is already anchored.
+    // Group the result set into ONE bundle per network. A chain absent from a
+    // group is NOT an anomaly (D4): under the daily cadence the normal case is a
+    // chain whose newest eligible seq is already anchored.
+    groupSectionsByNetwork(rows){
         let byNetwork = new Map();
         for(let row of (rows || [])){
             // D8: the bundle is root-bearing by construction, so a row with no
@@ -130,47 +122,67 @@ module.exports = {
             if(!byNetwork.has(net)) byNetwork.set(net, []);
             byNetwork.get(net).push(row);
         }
+        return byNetwork;
+    },
 
-        for(let [network, sections] of byNetwork){
-            // The bundle's election and attestation block is the MAX of the sections'
-            // snapshot blocks (D6); in the normal case every section shares it, and a
-            // lagging chain's older un-anchored row rides at its own block.
-            let snapshotBlock = sections.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
-            let eligible;
-            try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
-            catch(_e){ eligible = []; }
-            // Fail closed: an empty/unresolved oracle_publish set is NOT a licence for
-            // every hub to anchor independently (a guaranteed N-way double-anchor + DOGE
-            // burn). Skip until the set resolves.
-            if(!eligible || eligible.length === 0){
-                logger.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
-                             ' deferred: empty oracle_publish set (fail closed)');
-                continue;
-            }
-            let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-            // Split BEFORE electing, so each bundle the split produces runs its own
-            // election at its own SNAPSHOT_BLOCK (publishBundle re-resolves the set there).
-            // Sizing uses the max-height oracle_publish set as the attestation tail: exact
-            // for an unsplit bundle, whose block IS this one, and a close estimate for a
-            // split group at an older block, where the set of that height sizes the round.
-            // Size the tail the bundle will ACTUALLY carry. Below the anchor-reward
-            // flag-day publishBundle attaches none at all, so charging a tail there would
-            // refuse sections that anchor fine today; at/above it an unmet attestation
-            // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
-            let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
-            let split = this.splitBundle(sections, me, attestTail);
-            for(let refused of split.oversize){
-                this._bundlesOversize++;
-                logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
-                              ' @ ' + refused.block_index + ': the section alone is ' + refused.bytes +
-                              ' bytes at ' + attestTail + ' attesting signer(s), past the ' +
-                              ANCHOR_BUNDLE_MAX_BYTES + '-byte budget. The decoder DROPS an oversize ' +
-                              'action silently, so this checkpoint stays off chain until the federation ' +
-                              'signer count comes down');
-            }
-            for(let group of split.bundles)
-                await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped);
+    // Publish every bundle one network's sections split into. Each split group elects
+    // independently, and a group whose oracle_publish set will not resolve is skipped
+    // rather than anchored by every hub at once.
+    async publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped){
+        // The bundle's election and attestation block is the MAX of the sections'
+        // snapshot blocks (D6); in the normal case every section shares it, and a
+        // lagging chain's older un-anchored row rides at its own block.
+        let snapshotBlock = sections.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+        let eligible;
+        try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
+        catch(_e){ eligible = []; }
+        // Fail closed: an empty/unresolved oracle_publish set is NOT a licence for
+        // every hub to anchor independently (a guaranteed N-way double-anchor + DOGE
+        // burn). Skip until the set resolves.
+        if(!eligible || eligible.length === 0){
+            logger.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
+                         ' deferred: empty oracle_publish set (fail closed)');
+            return;
         }
+        let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        // Split BEFORE electing, so each bundle the split produces runs its own
+        // election at its own SNAPSHOT_BLOCK (publishBundle re-resolves the set there).
+        // Sizing uses the max-height oracle_publish set as the attestation tail: exact
+        // for an unsplit bundle, whose block IS this one, and a close estimate for a
+        // split group at an older block, where the set of that height sizes the round.
+        // Size the tail the bundle will ACTUALLY carry. Below the anchor-reward
+        // flag-day publishBundle attaches none at all, so charging a tail there would
+        // refuse sections that anchor fine today; at/above it an unmet attestation
+        // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
+        let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
+        let split = this.splitBundle(sections, me, attestTail);
+        for(let refused of split.oversize){
+            this._bundlesOversize++;
+            logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
+                          ' @ ' + refused.block_index + ': the section alone is ' + refused.bytes +
+                          ' bytes at ' + attestTail + ' attesting signer(s), past the ' +
+                          ANCHOR_BUNDLE_MAX_BYTES + '-byte budget. The decoder DROPS an oversize ' +
+                          'action silently, so this checkpoint stays off chain until the federation ' +
+                          'signer count comes down');
+        }
+        for(let group of split.bundles)
+            await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped);
+    },
+
+    // ONE ANCHOR v0 bundle per network per cycle: the LATEST un-anchored checkpoint of
+    // every chain rides as a SECTION of one transaction (spec §2.2). Older un-anchored
+    // seqs are superseded (the chained hashes commit to all prior history), so only the
+    // newest per chain costs DOGE bytes. The bundle runs ONE election, ONE attestation
+    // round and ONE UTXO spend where the retired per-chain wires ran N of each.
+    //
+    // The method keeps its name: flush() and the deferral suites drive it, and what
+    // changed is the unit of work inside it, not the seam.
+    async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
+        let rows     = await this.findAnchorEligibleSections();
+        let anchored = [];
+        let skipped  = { rows: 0 };
+        for(let [network, sections] of this.groupSectionsByNetwork(rows))
+            await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
         // it walked candidates and published none, so the stand-down is visible in the
