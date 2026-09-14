@@ -18,7 +18,7 @@
 # WHY THE PREFLIGHT MATTERS MORE THAN THE DATABASE. This tier reaches into a sibling
 # repository by PATH POSITION rather than through an environment variable:
 #
-#   test/integration/oracle/oracleFiatDispenser.integration.test.js
+#   test/integration/oracle/oracle_fiat_dispenser.test.js
 #     require(path.resolve(__dirname, '../../../../xchain-indexer/src/utility.js'))
 #
 # There is no override for that. A checkout sitting anywhere other than beside
@@ -33,7 +33,7 @@
 #   bin/run-db-tiers.sh                       # integration tier (default)
 #   bin/run-db-tiers.sh unit integration      # both, in order
 #   bin/run-db-tiers.sh --keep integration    # leave the database up afterwards
-#   bin/run-db-tiers.sh -- test/integration/api/jsonrpc.integration.test.js
+#   bin/run-db-tiers.sh -- test/integration/api/jsonrpc.test.js
 #                                             # one file, straight to mocha
 #
 # ENVIRONMENT (all optional)
@@ -80,7 +80,7 @@ run-db-tiers: cannot load the sibling indexer, so this run would die at module l
 
   Expected: $SIBLING
 
-  test/integration/oracle/oracleFiatDispenser.integration.test.js requires the
+  test/integration/oracle/oracle_fiat_dispenser.test.js requires the
   indexer's utility.js by PATH POSITION ('../../../../xchain-indexer/src/utility.js')
   and there is NO environment override. A checkout that does not sit beside
   xchain-indexer fails with MODULE_NOT_FOUND before any test runs, and mocha reports

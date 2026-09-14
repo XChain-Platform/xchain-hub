@@ -79,7 +79,7 @@ function krakenResultCandidates(altname) {
 // fiat added here alone is fetched and co-signed but rejected on push, and a coin added
 // to coins/ alone is picked up here automatically while v1 ingest still calls it an
 // invalid coin. Pinned to the v1 fence and to the indexer config by
-// test/unit/constants-conformance.test.js (#7215).
+// test/unit/constants_conformance.test.js (#7215).
 const coins = require('../coins');
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
@@ -101,7 +101,7 @@ for (let coin of COINS) {
 // key, and which pairs it can price. multiSourceCapablePairs() derives the
 // multi-source-capable set from this instead of restating the lineup, which is how
 // nineteen pairs sat outside the single-source health signal for the whole life of the
-// keyless Coinbase source (item 7068). test/unit/PriceFetcher.test.js pins it against
+// keyless Coinbase source (item 7068). test/unit/price_fetcher.test.js pins it against
 // the fetchers fetchPrices() actually dispatches, so adding or dropping a source on one
 // side reddens rather than silently re-opening the gap.
 //

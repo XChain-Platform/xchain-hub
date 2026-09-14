@@ -16,7 +16,7 @@
  *
  * VENDORED TWIN of xchain-indexer/src/actions/anchor/anchor_reward_key.js. The executable region
  * (from the strict-mode pragma down) is byte-identical and held so by
- * test/unit/anchorRewardKeyTwinParity.test.js; only this header differs, because each
+ * test/unit/anchor_reward_key_twin_parity.test.js; only this header differs, because each
  * side names its OWN call sites. Change the rule in the indexer copy and mirror it here
  * in the same change: the qualifier decides which two archive rewards are the same row,
  * so a divergence lets the hub conserve a reward the indexer pays, or refuse to co-sign

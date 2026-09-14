@@ -54,14 +54,14 @@ const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
 // Every SUBSCRIPTION to the PeerManager 'message' fan-out that a full boot creates,
 // one entry each. The ceiling below is derived from this roster instead of being a
 // hand-picked number, so it cannot drift away from what actually subscribes;
-// PeerManagerListenerCeiling.test.js re-derives the roster from the sources and
+// peer_manager_listener_ceiling.test.js re-derives the roster from the sources and
 // fails when the two disagree.
 //
 // Most entries are a bare module name, because most subscribers are singletons and
 // their module registers exactly one handler. CrossChainDexConsensus is not: it is a
 // parameterized PBFT channel and the hub boots one instance per round family, so its
 // extra channels are named `<module>:<channel>` and each one is a listener of its own.
-// PeerManagerListenerCeiling.test.js recovers the module from an entry by splitting on
+// peer_manager_listener_ceiling.test.js recovers the module from an entry by splitting on
 // the first ':' when it compares the roster against the sources.
 //
 // Two of the subscribers are a CONFIGURATION question rather than a constant, so the
@@ -93,7 +93,7 @@ const UNCONDITIONAL_SUBSCRIBERS = Object.freeze([
 // via XC_ROLLCALL_REGTEST_ACTIVATION).
 //
 // Written without the registration call spelled out, deliberately: the source-parity
-// derivation in PeerManagerListenerCeiling.test.js scans these files for that call
+// derivation in peer_manager_listener_ceiling.test.js scans these files for that call
 // and would read a comment quoting it as a subscriber PeerManager itself registers.
 //
 // An unresolvable network is CREDITED, not skipped. PeerManager sees only its own
@@ -147,7 +147,7 @@ class PeerManager extends EventEmitter {
     // The roster of a PeerManager carrying no configuration of its own, under this
     // process's environment: every unconditional subscriber, plus each conditional one
     // whose gate is open or unresolvable. It is the roster's widest honest reading, and
-    // what the source-parity derivation in PeerManagerListenerCeiling.test.js compares
+    // what the source-parity derivation in peer_manager_listener_ceiling.test.js compares
     // module names against. A CONFIGURED hub's ceiling comes from messageSubscribers().
     static get MESSAGE_SUBSCRIBERS()   { return PeerManager.messageSubscribers(null, process.env); }
     static get MAX_MESSAGE_LISTENERS() { return PeerManager.MESSAGE_SUBSCRIBERS.length; }

@@ -946,7 +946,7 @@ class AttestationRound {
     //
     // All four now run the SAME canonical vectors
     // (xchain-documentation/protocol/test-vectors/responsible_set.json): copies 1 and 3
-    // in AttestationRound.test.js, copies 2 and 4 in the indexer's
+    // in attestation_round.test.js, copies 2 and 4 in the indexer's
     // test/unit/actions/attest-responsible-set-vectors.test.js. Add a vector there when
     // you change the rule, or the copies can drift in a direction every suite calls green.
     //
