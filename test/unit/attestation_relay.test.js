@@ -220,7 +220,14 @@ describe('AttestationRelay', function () {
             const attestPath = process.env.XCHAIN_INDEXER_DIR
                 ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest', 'index.js')
                 : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest', 'index.js');
-            if (!fs.existsSync(attestPath)) return this.skip();
+            // The skip is for a bare clone. A run that declared its siblings supplied
+            // fails instead, so a dropped indexer checkout cannot leave the canonical
+            // uncompared while the suite still reports green.
+            if (!fs.existsSync(attestPath)) {
+                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling was not found at ' + attestPath);
+                return this.skip();
+            }
 
             const Attest = require(attestPath);
             // Both canonicals touch only this._sha256 and the module-scoped
@@ -266,7 +273,11 @@ describe('AttestationRelay', function () {
             const attestPath = process.env.XCHAIN_INDEXER_DIR
                 ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest', 'index.js')
                 : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest', 'index.js');
-            if (!fs.existsSync(attestPath)) return this.skip();
+            if (!fs.existsSync(attestPath)) {
+                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling was not found at ' + attestPath);
+                return this.skip();
+            }
 
             const Attest = require(attestPath);
             const ix     = Object.create(Attest.prototype);
