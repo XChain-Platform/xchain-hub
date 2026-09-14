@@ -57,6 +57,13 @@
 # read. The observability compare below is a tier because ci.yml's drift-guards
 # job runs it.
 #
+# THE ONE EXCEPTION: bin/check-frozen-set.js runs as a tier below even though no
+# ci.yml job calls it. It reads only this checkout (no sibling, no network), so
+# it cannot red on state a hub commit did not cause, and until this change it
+# ran in no gate at all: a carrier move or rename could land, published, with
+# nothing catching it. Self-contained checks that only look at this tree belong
+# in every push; the sibling-reading ones above stay lane-level.
+#
 # All tiers run even after one fails (GitHub reports every red job, so this
 # reports every red tier); the exit code is red if any tier was.
 #
@@ -98,6 +105,12 @@ export TEST_DB_NAME="${TEST_DB_NAME:-${CI_DB_NAME:-xchain_hub_test}}"
 
 need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm xchain-decoder \
          xchain-encoder xchain-utxo-tracker xchain-sync
+
+# --- local guard: frozen carrier set (check:frozen-set) --------------------
+# No ci.yml job runs this; it is wired in here anyway (see THE ONE EXCEPTION,
+# above) because the hazard it catches never fails a suite and never changes a
+# published number on its own. Cheap and self-contained, so it runs first.
+run_tier "frozen carrier set (check:frozen-set)" npm run check:frozen-set
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" npm run ci
