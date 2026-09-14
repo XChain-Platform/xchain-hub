@@ -84,18 +84,18 @@ const fs    = require('fs');
 const path  = require('path');
 const axios = require('axios');
 
-const ValidatorIdentity          = require('./ValidatorIdentity.js');
-const EncoderClient              = require('./EncoderClient.js');
-const SpendGuard                 = require('./lib/spend_guard.js');
-const StateAnchorPublisher       = require('./anchor/publisher.js');
-const { isAmbiguousSendError }   = require('./lib/idempotent_broadcast.js');
-const { forwardableUtxos }       = require('./lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const rca                        = require('./rollcall_activation.js');
-const rga                        = require('./rollcall_gates_activation.js');
-const { knownGateKeys }          = require('./consensus_rules_digest.js');
+const ValidatorIdentity          = require('../ValidatorIdentity.js');
+const EncoderClient              = require('../EncoderClient.js');
+const SpendGuard                 = require('../lib/spend_guard.js');
+const StateAnchorPublisher       = require('../anchor/publisher.js');
+const { isAmbiguousSendError }   = require('../lib/idempotent_broadcast.js');
+const { forwardableUtxos }       = require('../lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const rca                        = require('../rollcall_activation.js');
+const rga                        = require('../rollcall_gates_activation.js');
+const { knownGateKeys }          = require('../consensus_rules_digest.js');
 const { buildRollcallCanonical } = require('./rollcall_canonical.js');
-const { CANONICAL_REORG_BUFFER } = require('./snapshot_reorg_buffer.js');
+const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
 
 // The one gossip type this engine adds. PeerManager.broadcast has no type
 // registry, so a new type is this constant plus one `case` in _handleMessage.

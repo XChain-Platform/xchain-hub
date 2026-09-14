@@ -54,7 +54,7 @@ let axiosStub, RollcallRound, tmpDir, savedEnv;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    RollcallRound = proxyquire('../../src/RollcallRound.js', { axios: axiosStub });
+    RollcallRound = proxyquire('../../src/rollcall/round.js', { axios: axiosStub });
 }
 
 // Indexer dispatcher: the BTC indexer answers getblockhashes (tip and per-block

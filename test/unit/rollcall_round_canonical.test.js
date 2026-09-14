@@ -27,7 +27,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const RollcallRound     = require('../../src/RollcallRound.js');
+const RollcallRound     = require('../../src/rollcall/round.js');
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 
 const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
@@ -203,7 +203,7 @@ describe('RollcallRound canonical + wire conformance', function () {
         // The commitment is sha256 of the field EXACTLY as carried, and the vector
         // states it separately so a helper that hashed a normalised list would fail
         // here rather than at an eviction a year later.
-        const rc = require('../../src/rollcall_canonical.js');
+        const rc = require('../../src/rollcall/rollcall_canonical.js');
         assert.strictEqual(rc.gatesHash(V1.gates), V1.gates_hash);
         assert.ok(V1.expected.endsWith('|' + V1.gates_hash));
         assert.strictEqual(Buffer.byteLength(V1.gates, 'utf8'), V1.gates_bytes);

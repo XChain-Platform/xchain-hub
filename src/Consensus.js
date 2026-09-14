@@ -30,7 +30,7 @@ const swq    = require('./stake_weighted_quorum.js');
 const eq     = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('./lib/chain_signer_admission.js');
-const { canonicalValidatorOrder } = require('./validator_order.js');
+const { canonicalValidatorOrder } = require('./rollcall/validator_order.js');
 const { noteDrop } = require('./consensusDiagnostics');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';

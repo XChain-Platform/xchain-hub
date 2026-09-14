@@ -20,7 +20,7 @@
 
 const assert = require('assert');
 
-const RollcallRound = require('../../src/RollcallRound.js');
+const RollcallRound = require('../../src/rollcall/round.js');
 const rca           = require('../../src/rollcall_activation.js');
 const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
 
@@ -147,7 +147,7 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
         const doc  = fs.readFileSync(path.join(__dirname, '..', '..', 'CONFIGURATION.md'), 'utf8');
         // Read the names out of the engine rather than restating them, so a rename
         // cannot pass by renaming the assertion with it.
-        const src  = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'RollcallRound.js'), 'utf8');
+        const src  = fs.readFileSync(path.join(__dirname, '../../src/rollcall/round.js'), 'utf8');
         const used = new Set();
         // Two read forms: the literal process.env.NAME, and the three publish
         // tunables, which go through _resolveTunable('NAME', ...) and are therefore
@@ -164,7 +164,7 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
             assert.ok(used.has(knob), 'env-name extraction missed ' + knob);
         const missing = [...used].filter(name => !doc.includes(name)).sort();
         assert.deepStrictEqual(missing, [],
-            'ROLLCALL_ env vars read in src/RollcallRound.js but undocumented in CONFIGURATION.md: ' +
+            'ROLLCALL_ env vars read in src/rollcall/round.js but undocumented in CONFIGURATION.md: ' +
             missing.join(', '));
     });
 });
