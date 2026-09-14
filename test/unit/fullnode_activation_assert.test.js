@@ -196,12 +196,12 @@ describe('XChainHub._assertCanonicalFullnode', function () {
     });
 
     it('accepts a local-keys-only override on mainnet', function () {
-        expect(() => makeHub('mainnet')._assertCanonicalFullnode({ BTC_RPC: 'http://coin' })).to.not.throw();
+        expect(() => makeHub('mainnet').assertCanonicalFullnode({ BTC_RPC: 'http://coin' })).to.not.throw();
     });
 
     it('refuses a divergent challenge interval on mainnet', function () {
         let err = null;
-        try { makeHub('mainnet')._assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 10 }); } catch (e) { err = e; }
+        try { makeHub('mainnet').assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 10 }); } catch (e) { err = e; }
         expect(err).to.not.equal(null);
         expect(err.code).to.equal('FULLNODE_CONFIG_MISMATCH');
         expect(err.message).to.include('CHALLENGE_INTERVAL_BLOCKS');
@@ -211,7 +211,7 @@ describe('XChainHub._assertCanonicalFullnode', function () {
     it('refuses a per-operator activation on mainnet (consensus change, must ship in the bundle)', function () {
         let err = null;
         try {
-            makeHub('mainnet')._assertCanonicalFullnode({ REWARD_SHARE: '0.25', GENESIS_VERIFIERS: [PK1] });
+            makeHub('mainnet').assertCanonicalFullnode({ REWARD_SHARE: '0.25', GENESIS_VERIFIERS: [PK1] });
         } catch (e) { err = e; }
         expect(err).to.not.equal(null);
         expect(err.code).to.equal('FULLNODE_CONFIG_MISMATCH');
@@ -219,31 +219,31 @@ describe('XChainHub._assertCanonicalFullnode', function () {
     });
 
     it('refuses on testnet too', function () {
-        expect(() => makeHub('testnet')._assertCanonicalFullnode({ REWARD_SHARE: '0.5' }))
+        expect(() => makeHub('testnet').assertCanonicalFullnode({ REWARD_SHARE: '0.5' }))
             .to.throw().with.property('code', 'FULLNODE_CONFIG_MISMATCH');
     });
 
     it('warns instead of throwing on regtest (venues run their own cadence)', function () {
-        expect(() => makeHub('regtest')._assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 4 })).to.not.throw();
+        expect(() => makeHub('regtest').assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 4 })).to.not.throw();
         expect(warnStub.calledWithMatch(/FULLNODE config problem/)).to.equal(true);
     });
 
     it('warns instead of throwing in standalone mode (no HUB_NETWORK)', function () {
-        expect(() => makeHub(undefined)._assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 4 })).to.not.throw();
+        expect(() => makeHub(undefined).assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 4 })).to.not.throw();
         expect(warnStub.calledWithMatch(/FULLNODE config problem/)).to.equal(true);
     });
 
     it('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1 bypasses loudly, even on mainnet', function () {
         process.env.XCHAIN_HUB_SKIP_FULLNODE_ASSERT = '1';
-        expect(() => makeHub('mainnet')._assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 10 })).to.not.throw();
+        expect(() => makeHub('mainnet').assertCanonicalFullnode({ CHALLENGE_INTERVAL_BLOCKS: 10 })).to.not.throw();
         expect(warnStub.calledWithMatch(/XCHAIN_HUB_SKIP_FULLNODE_ASSERT/)).to.equal(true);
     });
 
     it('is a no-op for a missing/invalid FULLNODE block', function () {
         let hub = makeHub('mainnet');
-        expect(() => hub._assertCanonicalFullnode(undefined)).to.not.throw();
-        expect(() => hub._assertCanonicalFullnode([])).to.not.throw();
-        expect(() => hub._assertCanonicalFullnode('nope')).to.not.throw();
+        expect(() => hub.assertCanonicalFullnode(undefined)).to.not.throw();
+        expect(() => hub.assertCanonicalFullnode([])).to.not.throw();
+        expect(() => hub.assertCanonicalFullnode('nope')).to.not.throw();
     });
 });
 
@@ -261,13 +261,13 @@ describe('XChainHub._seedCanonicalFullnode', function () {
     it('never creates p2pConfig (a null one is standalone mode, startP2P returns early)', function () {
         let hub = makeHub(undefined);
         expect(hub.p2pConfig).to.equal(null);
-        hub._seedCanonicalFullnode();
+        hub.seedCanonicalFullnode();
         expect(hub.p2pConfig).to.equal(null);
     });
 
     it('seeds the canonical bundle when the operator supplied nothing', function () {
         let hub = makeHub('mainnet');
-        hub._seedCanonicalFullnode();
+        hub.seedCanonicalFullnode();
         expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal(CANONICAL.REWARD_SHARE);
         expect(hub.p2pConfig.FULLNODE.CHALLENGE_INTERVAL_BLOCKS)
             .to.equal(CANONICAL.CHALLENGE_INTERVAL_BLOCKS);
@@ -277,16 +277,16 @@ describe('XChainHub._seedCanonicalFullnode', function () {
     it('keeps operator local keys on top of the bundle', function () {
         let hub = makeHub('mainnet');
         hub.p2pConfig.FULLNODE = { BTC_RPC: 'http://coin' };
-        hub._seedCanonicalFullnode();
+        hub.seedCanonicalFullnode();
         expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://coin');
         expect(hub.p2pConfig.FULLNODE.PROOF_WINDOW_BLOCKS).to.equal(CANONICAL.PROOF_WINDOW_BLOCKS);
     });
 
     it('is idempotent across a config hot-reload', function () {
         let hub = makeHub('mainnet');
-        hub._seedCanonicalFullnode();
+        hub.seedCanonicalFullnode();
         let first = JSON.stringify(hub.p2pConfig.FULLNODE);
-        hub._seedCanonicalFullnode();
+        hub.seedCanonicalFullnode();
         expect(JSON.stringify(hub.p2pConfig.FULLNODE)).to.equal(first);
     });
 
@@ -297,7 +297,7 @@ describe('XChainHub._seedCanonicalFullnode', function () {
         process.env.FULLNODE_CHALLENGE_INTERVAL_BLOCKS = '4';
         try {
             let hub = makeHub('regtest');
-            hub._seedCanonicalFullnode();
+            hub.seedCanonicalFullnode();
             expect(hub.p2pConfig.FULLNODE.GENESIS_VERIFIERS).to.deep.equal([PK1, PK2]);
             expect(hub.p2pConfig.FULLNODE.CHALLENGE_INTERVAL_BLOCKS).to.equal(4);
         } finally {
@@ -329,7 +329,7 @@ describe('XChainHub._loadCapabilityConfigFile FULLNODE integration', function ()
 
     it('refuses a divergent FULLNODE file on mainnet WITHOUT merging it', function () {
         let hub = makeHub('mainnet');
-        expect(() => hub._loadCapabilityConfigFile(writeConfig({ FULLNODE: { REWARD_SHARE: '0.25' } })))
+        expect(() => hub.loadCapabilityConfigFile(writeConfig({ FULLNODE: { REWARD_SHARE: '0.25' } })))
             .to.throw().with.property('code', 'FULLNODE_CONFIG_MISMATCH');
         // The refused value must not have leaked in: the hub keeps the pinned bundle.
         expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal(CANONICAL.REWARD_SHARE);
@@ -337,13 +337,13 @@ describe('XChainHub._loadCapabilityConfigFile FULLNODE integration', function ()
 
     it('applies the assert to the "full_node" spelling alias too', function () {
         let hub = makeHub('mainnet');
-        expect(() => hub._loadCapabilityConfigFile(writeConfig({ full_node: { REWARD_SHARE: '0.25' } })))
+        expect(() => hub.loadCapabilityConfigFile(writeConfig({ full_node: { REWARD_SHARE: '0.25' } })))
             .to.throw().with.property('code', 'FULLNODE_CONFIG_MISMATCH');
     });
 
     it('loads a local-keys-only FULLNODE file and seeds the canonical knobs under it', function () {
         let hub = makeHub('mainnet');
-        hub._loadCapabilityConfigFile(writeConfig({ FULLNODE: { BTC_RPC: 'http://coin' } }));
+        hub.loadCapabilityConfigFile(writeConfig({ FULLNODE: { BTC_RPC: 'http://coin' } }));
         expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://coin');
         expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal(CANONICAL.REWARD_SHARE);
         expect(hub.p2pConfig.FULLNODE.CONFIRM_DEPTH).to.equal(CANONICAL.CONFIRM_DEPTH);

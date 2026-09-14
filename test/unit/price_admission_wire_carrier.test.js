@@ -700,7 +700,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
         function aggWithTip(network, tip) {
             const hub = createMockHub({ network });
             if (tip !== 'no-resolver')
-                hub._resolveAdmissionTip = sinon.stub().resolves(tip);
+                hub.resolveAdmissionTip = sinon.stub().resolves(tip);
             const agg = new armed.PriceAggregator(hub);
             let insertArgs = null;
             hub.db.doQuery.callsFake(async (sql, params) => {
@@ -718,7 +718,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             const result = await t.agg.receiveOraclePrice('LTC', V1);
             expect(result).to.deep.equal({ accepted: true });
             // The tip was read for LTC, the row's own source_chain, not for BTC.
-            expect(t.hub._resolveAdmissionTip.calledOnceWithExactly('LTC')).to.equal(true);
+            expect(t.hub.resolveAdmissionTip.calledOnceWithExactly('LTC')).to.equal(true);
             expect(t.insert()[ADMIT_BLOCK]).to.equal(799011);
             expect(events[0].row.admit_block).to.equal(799011,
                 'the broadcast row must carry the same height the INSERT stored');
@@ -737,7 +737,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
 
             function aggAt(tip) {
                 const hub = createMockHub({ network: NETWORK });
-                hub._resolveAdmissionTip = sinon.stub().resolves(tip);
+                hub.resolveAdmissionTip = sinon.stub().resolves(tip);
                 const agg = new zeroArmed.PriceAggregator(hub);
                 let insertArgs = null;
                 hub.db.doQuery.callsFake(async (sql, params) => {
@@ -770,7 +770,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
 
         it('leaves NULL when the tip read throws', async function () {
             const t = aggWithTip(NETWORK, null);
-            t.hub._resolveAdmissionTip = sinon.stub().rejects(new Error('indexer down'));
+            t.hub.resolveAdmissionTip = sinon.stub().rejects(new Error('indexer down'));
             await t.agg.receiveOraclePrice('LTC', V1);
             expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
         });
@@ -798,7 +798,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             const t = aggWithTip(NETWORK, 799010);
             await t.agg.receiveOraclePrice('', V1);
             expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
-            expect(t.hub._resolveAdmissionTip.called).to.equal(false);
+            expect(t.hub.resolveAdmissionTip.called).to.equal(false);
         });
 
         it('guards the stamp with the same generation rule as every other column', async function () {

@@ -1297,7 +1297,7 @@ class AttestationPublisher {
                     jsonrpc: '2.0', id: Date.now(),
                     method:  'getpendingattestation_requests',
                     params:  params
-                }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+                }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             } catch (e) {
                 console.warn('AttestationPublisher: pending-request fetch failed:', (e && e.message ? e.message : e));
                 return null;

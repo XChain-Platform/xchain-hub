@@ -227,7 +227,7 @@ class SlashGovernance {
             // the suspended validator stays in every in-memory validatorSet
             // until restart and the penalty is a DB row, not an exclusion.
             if (typeof this.hub._loadValidatorPubkeys === 'function') await this.hub._loadValidatorPubkeys();
-            if (typeof this.hub._propagateValidatorSet === 'function') await this.hub._propagateValidatorSet();
+            if (typeof this.hub.propagateValidatorSet === 'function') await this.hub.propagateValidatorSet();
         }
 
         console.log('SlashGovernance: executed penalty "' + penalty + '" on validator ' +

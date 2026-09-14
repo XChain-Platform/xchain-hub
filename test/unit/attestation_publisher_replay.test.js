@@ -38,7 +38,7 @@ function makeHub(myPub) {
             getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }, { pubkey: LEADER_PUB }] })
         },
         _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
-        _btcIndexerHeaders: () => ({})
+        btcIndexerHeaders: () => ({})
     };
 }
 

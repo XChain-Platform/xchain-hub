@@ -703,7 +703,7 @@ describe('ProviderRegistry', function () {
 
             let liveReg = new ProviderRegistry(makeHub());
             liveReg._seedProviderConfigGenesis();
-            await XChainHub.prototype._applyProviderGovernanceChange.call(
+            await XChainHub.prototype.applyProviderGovernanceChange.call(
                 { providerRegistry: liveReg },
                 { parameter: 'ATTESTATION_PROVIDER:llm', activationBlock: 7000,
                   newValue: JSON.stringify(proposal) });

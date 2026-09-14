@@ -196,7 +196,7 @@ function makeHub(overrides){
             getSnapshot:       sinon.stub().resolves({ validators: weightedValidators() })
         },
         providerRegistry:     { getMinStake: () => '1000' },
-        _btcIndexerHeaders:   () => ({}),
+        btcIndexerHeaders:   () => ({}),
         _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;

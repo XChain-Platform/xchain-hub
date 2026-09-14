@@ -105,9 +105,9 @@ describe('Regression: validator setup/run fixes', function () {
             const hub = {
                 identity: { getPubkeyHex: () => 'aa'.repeat(33) },
                 capabilityRegistry: registry,
-                _broadcastOwnCapabilityState: sinon.stub().resolves(),
-                _compareDecimal:    XChainHub.prototype._compareDecimal,
-                _parseDecimalParts: XChainHub.prototype._parseDecimalParts
+                broadcastOwnCapabilityState: sinon.stub().resolves(),
+                compareDecimal:    XChainHub.prototype.compareDecimal,
+                parseDecimalParts: XChainHub.prototype.parseDecimalParts
             };
             return { hub, setQual };
         }

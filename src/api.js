@@ -712,7 +712,7 @@ async function startApi(){
                     jsonrpc: '2.0', id: Date.now(),
                     method:  'getpendingattestation_requests',
                     params:  params
-                }, { headers: hub._btcIndexerHeaders(), timeout: 5000 });
+                }, { headers: hub.btcIndexerHeaders(), timeout: 5000 });
             } catch (e){ return null; }
             let result = res && res.data && res.data.result;
             if(!result || result.error) return null;
@@ -939,7 +939,7 @@ async function startApi(){
             // the registry default, the correct representative scalar while all
             // registry coins share one bound. Additive: callers that ignore the
             // field are unaffected, and it is null when the registry read fails.
-            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds()};
+            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds()};
         },
 
         // status is optional and additive: omitted/'finalized' preserves the
@@ -967,7 +967,7 @@ async function startApi(){
                 if (with_watermark) {
                     return {
                         watermark: Math.floor(Date.now() / 1000),
-                        oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds(),
+                        oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds(),
                         snapshots,
                     };
                 }

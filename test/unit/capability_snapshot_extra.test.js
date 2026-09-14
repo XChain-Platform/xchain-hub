@@ -44,7 +44,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             _resolveBtcIndexerUrl: (opts && opts.indexerUrl !== undefined)
                 ? async () => opts.indexerUrl
                 : async () => 'http://indexer.local/rpc',
-            _btcIndexerHeaders:    () => ({})
+            btcIndexerHeaders:    () => ({})
         };
     }
 

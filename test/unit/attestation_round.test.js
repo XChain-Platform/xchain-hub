@@ -49,7 +49,7 @@ function makeHub(overrides) {
         _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
             ? overrides._resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
-        _btcIndexerHeaders: () => ({})
+        btcIndexerHeaders: () => ({})
     };
     hub._peerManager = pm;
     return hub;

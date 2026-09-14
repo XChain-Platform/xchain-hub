@@ -49,7 +49,7 @@ function makeHub(myPub, overrides) {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
         _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
-        _btcIndexerHeaders: () => ({})
+        btcIndexerHeaders: () => ({})
     }, overrides);
 }
 
@@ -927,7 +927,7 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
         // tier run and passed in isolation. Injecting at a seam the test owns keeps this
         // case deterministic and off the network.
         const pub = makePublisher(MY_PUB, {
-            _btcIndexerHeaders: () => { throw { code: 'ECONNREFUSED' }; }   // plain object, no .message
+            btcIndexerHeaders: () => { throw { code: 'ECONNREFUSED' }; }   // plain object, no .message
         });
         const ids = await pub._fetchPendingRequestIds();
         expect(ids).to.be.null;

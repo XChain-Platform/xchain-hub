@@ -206,7 +206,7 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
         return {
             capabilityRegistry: opts.registry || null,
             _resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
-            _btcIndexerHeaders: () => ({})
+            btcIndexerHeaders: () => ({})
         };
     }
 

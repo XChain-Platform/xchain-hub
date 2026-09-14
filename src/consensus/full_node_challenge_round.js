@@ -300,8 +300,8 @@ class FullNodeChallengeRound {
             try { url = (await this.hub._resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
         }
         if(!url) throw new Error('no BTC indexer URL (set BTC_INDEXER_API_URL / BTC_INDEXER_URL)');
-        let headers = (this.hub && typeof this.hub._btcIndexerHeaders === 'function')
-            ? this.hub._btcIndexerHeaders()
+        let headers = (this.hub && typeof this.hub.btcIndexerHeaders === 'function')
+            ? this.hub.btcIndexerHeaders()
             : Object.assign({ 'Content-Type': 'application/json' }, this.indexerKey ? { 'x-api-key': this.indexerKey } : {});
         let resp = await axios.post(url, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
         if(resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));

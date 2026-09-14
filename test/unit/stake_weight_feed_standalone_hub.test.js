@@ -123,7 +123,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
 
         hub.network                = 'testnet';
         hub._resolveBtcIndexerUrl  = async () => 'http://indexer.local/rpc';
-        hub._btcIndexerHeaders     = () => ({});
+        hub.btcIndexerHeaders     = () => ({});
         hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
         // A live registry with NO configured thresholds: exactly what a hub booted
         // without HUB_CAPABILITY_CONFIG carries.

@@ -51,7 +51,7 @@ function makeHub(myPub, overrides) {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }] })
         },
         _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
-        _btcIndexerHeaders: () => ({})
+        btcIndexerHeaders: () => ({})
     }, overrides);
 }
 

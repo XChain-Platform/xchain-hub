@@ -277,7 +277,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getcapabilityvalidators',
                 params:  params
-            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
@@ -338,7 +338,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getstakeweightsbycapability',
                 params:  params
-            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result, { requireWeight: true });
@@ -385,7 +385,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getactivevalidators',
                 params:  { block_index: blockIndex }
-            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
@@ -430,7 +430,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getactivestakeweights',
                 params:  { block_index: blockIndex }
-            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result, { requireWeight: true });

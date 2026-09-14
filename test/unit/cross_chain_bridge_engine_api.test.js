@@ -62,7 +62,7 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
             getAttestationRound: () => null,
             getProviderRegistry: () => null,
             _resolveBtcIndexerUrl: async () => null,
-            _btcIndexerHeaders: () => ({}),
+            btcIndexerHeaders: () => ({}),
             start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
             startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
             startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},

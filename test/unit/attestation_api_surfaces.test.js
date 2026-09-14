@@ -53,7 +53,7 @@ describe('attestation API surfaces (p2pConfig knobs + responsible-set read)', fu
             getAttestationRound: () => null,
             getProviderRegistry: () => null,
             _resolveBtcIndexerUrl: async () => null,
-            _btcIndexerHeaders: () => ({}),
+            btcIndexerHeaders: () => ({}),
             start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
             startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
             startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},

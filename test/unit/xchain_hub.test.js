@@ -461,16 +461,16 @@ describe('XChainHub', function () {
             const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
             let h = new XChainHub('host', 3306, 'db', 'user', 'pass', { ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
             let stub = sinon.stub(console, 'log');
-            try { expect(h._oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned); } finally { stub.restore(); }
+            try { expect(h.oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned); } finally { stub.restore(); }
         });
 
         it('sources the default bound from the consensus-pinned coin registry (no literal 1800)', function () {
             const coins = require('../../src/coins');
             // No env/p2pConfig override -> the bound is the registry value, not a literal.
             const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
-            expect(hub._oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned);
+            expect(hub.oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned);
             // A non-registry advisory pair (XCHAIN/USD) still resolves via the BTC fallback.
-            expect(hub._oracleMaxAgeSeconds('XCHAIN/USD')).to.equal(pinned);
+            expect(hub.oracleMaxAgeSeconds('XCHAIN/USD')).to.equal(pinned);
         });
 
         // Item #4479: getoraclesubmissions publishes this bound as the scalar
@@ -481,8 +481,8 @@ describe('XChainHub', function () {
         it('resolves the representative scalar when called with no coin pair (#4479)', function () {
             const coins = require('../../src/coins');
             const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
-            expect(hub._oracleMaxAgeSeconds()).to.equal(pinned);
-            expect(hub._oracleMaxAgeSeconds()).to.be.greaterThan(0);
+            expect(hub.oracleMaxAgeSeconds()).to.equal(pinned);
+            expect(hub.oracleMaxAgeSeconds()).to.be.greaterThan(0);
         });
     });
 
@@ -504,21 +504,21 @@ describe('XChainHub', function () {
         });
 
         it('_parseCapabilityParameter recognizes CAPABILITY_<CAP>_MIN_STAKE', function () {
-            expect(hub._parseCapabilityParameter('CAPABILITY_PRICE_MIN_STAKE'))
+            expect(hub.parseCapabilityParameter('CAPABILITY_PRICE_MIN_STAKE'))
                 .to.deep.equal({ capability: 'price', parameterKey: 'MIN_STAKE' });
-            expect(hub._parseCapabilityParameter('CAPABILITY_CROSS_CHAIN_MIN_STAKE'))
+            expect(hub.parseCapabilityParameter('CAPABILITY_CROSS_CHAIN_MIN_STAKE'))
                 .to.deep.equal({ capability: 'cross_chain', parameterKey: 'MIN_STAKE' });
         });
 
         it('_parseCapabilityParameter returns null for non-capability params', function () {
-            expect(hub._parseCapabilityParameter('ORACLE_ROUND_INTERVAL')).to.be.null;
-            expect(hub._parseCapabilityParameter('CAPABILITY_BOGUS_MIN_STAKE')).to.be.null;
-            expect(hub._parseCapabilityParameter('')).to.be.null;
+            expect(hub.parseCapabilityParameter('ORACLE_ROUND_INTERVAL')).to.be.null;
+            expect(hub.parseCapabilityParameter('CAPABILITY_BOGUS_MIN_STAKE')).to.be.null;
+            expect(hub.parseCapabilityParameter('')).to.be.null;
         });
 
         it('does NOT apply a finalized CAPABILITY_*_MIN_STAKE change (pinned pre-launch #4352)', async function () {
             expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
-            await hub._applyCapabilityGovernanceChange({
+            await hub.applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
                 activationBlock: 1000
             });
@@ -530,7 +530,7 @@ describe('XChainHub', function () {
         });
 
         it('does NOT apply a MIN_STAKE change with no activation block either', async function () {
-            await hub._applyCapabilityGovernanceChange({
+            await hub.applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
             });
             expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('10000');
@@ -539,7 +539,7 @@ describe('XChainHub', function () {
         it('does not re-qualify on a pinned MIN_STAKE change (no apply, no setQualification)', async function () {
             let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
             hub._latestStakeAmount = '15000';
-            await hub._applyCapabilityGovernanceChange({
+            await hub.applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
                 activationBlock: 1000
             });
@@ -552,7 +552,7 @@ describe('XChainHub', function () {
 
         it('ignores non-capability proposals', async function () {
             let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
-            await hub._applyCapabilityGovernanceChange({
+            await hub.applyCapabilityGovernanceChange({
                 parameter: 'ORACLE_ROUND_INTERVAL', oldValue: '600000', newValue: '900000'
             });
             expect(setQual.called).to.be.false;
@@ -812,7 +812,7 @@ describe('XChainHub', function () {
             hub.capabilitySnapshot = {
                 getActiveValidatorSnapshot: sinon.stub().resolves({ validators: pubkeys.map(pk => ({ pubkey: pk })) })
             };
-            return hub._refreshTransportSignerSet();
+            return hub.refreshTransportSignerSet();
         }
 
         beforeEach(function () {
@@ -927,9 +927,9 @@ describe('XChainHub', function () {
 
         it('_btcIndexerHeaders includes x-api-key only when configured', function () {
             delete process.env.BTC_INDEXER_API_KEY;
-            expect(hub._btcIndexerHeaders()).to.not.have.property('x-api-key');
+            expect(hub.btcIndexerHeaders()).to.not.have.property('x-api-key');
             process.env.BTC_INDEXER_API_KEY = 'fixture';
-            expect(hub._btcIndexerHeaders()['x-api-key']).to.equal('fixture');
+            expect(hub.btcIndexerHeaders()['x-api-key']).to.equal('fixture');
             delete process.env.BTC_INDEXER_API_KEY;
         });
 
@@ -953,21 +953,21 @@ describe('XChainHub', function () {
         });
 
         it('_parseDecimalParts parses decimals and rejects junk', function () {
-            expect(hub._parseDecimalParts('12.50')).to.deep.equal({ neg: false, int: '12', frac: '50' });
-            expect(hub._parseDecimalParts('-3')).to.deep.equal({ neg: true, int: '3', frac: '' });
-            expect(hub._parseDecimalParts('+.5')).to.deep.equal({ neg: false, int: '0', frac: '5' });
-            expect(hub._parseDecimalParts('-0.0')).to.deep.equal({ neg: false, int: '0', frac: '0' }); // negative-zero normalised
-            expect(hub._parseDecimalParts('abc')).to.be.null;
-            expect(hub._parseDecimalParts(null)).to.be.null;
+            expect(hub.parseDecimalParts('12.50')).to.deep.equal({ neg: false, int: '12', frac: '50' });
+            expect(hub.parseDecimalParts('-3')).to.deep.equal({ neg: true, int: '3', frac: '' });
+            expect(hub.parseDecimalParts('+.5')).to.deep.equal({ neg: false, int: '0', frac: '5' });
+            expect(hub.parseDecimalParts('-0.0')).to.deep.equal({ neg: false, int: '0', frac: '0' }); // negative-zero normalised
+            expect(hub.parseDecimalParts('abc')).to.be.null;
+            expect(hub.parseDecimalParts(null)).to.be.null;
         });
 
         it('_compareDecimal orders values exactly (incl. signs and scale)', function () {
-            expect(hub._compareDecimal('10', '10.00')).to.equal(0);
-            expect(hub._compareDecimal('1.5', '1.50001')).to.equal(-1);
-            expect(hub._compareDecimal('2', '1.9')).to.equal(1);
-            expect(hub._compareDecimal('-5', '3')).to.equal(-1);   // different signs
-            expect(hub._compareDecimal('-2', '-9')).to.equal(1);   // both negative
-            expect(hub._compareDecimal('abc', '1')).to.equal(0);   // unparseable → 0
+            expect(hub.compareDecimal('10', '10.00')).to.equal(0);
+            expect(hub.compareDecimal('1.5', '1.50001')).to.equal(-1);
+            expect(hub.compareDecimal('2', '1.9')).to.equal(1);
+            expect(hub.compareDecimal('-5', '3')).to.equal(-1);   // different signs
+            expect(hub.compareDecimal('-2', '-9')).to.equal(1);   // both negative
+            expect(hub.compareDecimal('abc', '1')).to.equal(0);   // unparseable → 0
         });
 
         it('close() clears timers and stops every active subsystem', async function () {

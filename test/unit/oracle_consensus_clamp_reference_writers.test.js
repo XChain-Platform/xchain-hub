@@ -71,16 +71,16 @@ describe('OracleConsensus clamp-reference writers (item 5834)', function () {
         it('the hub listener routes price_snapshots rows and ignores other tables', function () {
             let fake = { oracleConsensus: oc };
             oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100.00000000' }], 1);
-            XChainHub.prototype._noteAggregatorRow.call(fake, {
+            XChainHub.prototype.noteAggregatorRow.call(fake, {
                 table: 'oracle_prices', row: { coin_pair: 'BTC/USD', price: '999.00000000' }
             });
             expect(oc._getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
-            XChainHub.prototype._noteAggregatorRow.call(fake, finalizedEvent(2, 'BTC/USD', '150.00000000'));
+            XChainHub.prototype.noteAggregatorRow.call(fake, finalizedEvent(2, 'BTC/USD', '150.00000000'));
             expect(oc._getLastFinalizedPrice('BTC/USD')).to.equal('150.00000000');
         });
 
         it('the hub listener survives a consensus engine that is not up yet', function () {
-            expect(() => XChainHub.prototype._noteAggregatorRow.call(
+            expect(() => XChainHub.prototype.noteAggregatorRow.call(
                 { oracleConsensus: null }, finalizedEvent(2, 'BTC/USD', '150.00000000'))).to.not.throw();
         });
     });

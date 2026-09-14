@@ -252,7 +252,7 @@ class StakeShareWatcher {
     // hub's single header builder, despite the name). Tolerates a hub stub that
     // does not define it so a read never dies on a missing header.
     _headers() {
-        if (this.hub && typeof this.hub._btcIndexerHeaders === 'function') return this.hub._btcIndexerHeaders();
+        if (this.hub && typeof this.hub.btcIndexerHeaders === 'function') return this.hub.btcIndexerHeaders();
         return { 'Content-Type': 'application/json' };
     }
 

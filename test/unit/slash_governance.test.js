@@ -36,7 +36,7 @@ describe('SlashGovernance', function () {
         hub = createMockHub();
         hub.governance = { propose: sinon.stub().resolves({ proposalId: 'gov:x:1', status: 'voting' }) };
         hub._loadValidatorPubkeys  = sinon.stub().resolves();
-        hub._propagateValidatorSet = sinon.stub().resolves([]);
+        hub.propagateValidatorSet = sinon.stub().resolves([]);
         sg = new SlashGovernance(hub);
     });
 
@@ -184,7 +184,7 @@ describe('SlashGovernance', function () {
             expect(suspendCall.args[1]).to.deep.equal([PK]);
 
             expect(hub._loadValidatorPubkeys.calledOnce).to.equal(true);
-            expect(hub._propagateValidatorSet.calledOnce).to.equal(true);
+            expect(hub.propagateValidatorSet.calledOnce).to.equal(true);
         });
 
         it('dismiss: rejects evidence rows and leaves the validator active', async function () {
@@ -198,7 +198,7 @@ describe('SlashGovernance', function () {
             expect(hub.db.doQuery.getCall(1).args[1]).to.deep.equal(['rejected', PK, 1]);
             // No validators UPDATE, no set propagation on dismiss
             expect(hub.db.doQuery.callCount).to.equal(2);
-            expect(hub._propagateValidatorSet.called).to.equal(false);
+            expect(hub.propagateValidatorSet.called).to.equal(false);
         });
 
         it('rows added after propose are NOT swept (dismiss only rejects the voted subset)', async function () {
@@ -245,7 +245,7 @@ describe('SlashGovernance', function () {
             // Call 1 is the validators UPDATE, not an evidence sweep.
             expect(hub.db.doQuery.callCount).to.equal(2);
             expect(hub.db.doQuery.getCall(1).args[0]).to.include("SET status = 'suspended'");
-            expect(hub._propagateValidatorSet.calledOnce).to.equal(true);
+            expect(hub.propagateValidatorSet.calledOnce).to.equal(true);
             expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
         });
 
@@ -284,7 +284,7 @@ describe('SlashGovernance', function () {
             let ghub = createMockHub();
             ghub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
             ghub._loadValidatorPubkeys  = sinon.stub().resolves();
-            ghub._propagateValidatorSet = sinon.stub().resolves([]);
+            ghub.propagateValidatorSet = sinon.stub().resolves([]);
 
             let gov = new Governance(ghub);
             gov.setValidatorSet(VALIDATORS_3);

@@ -93,7 +93,7 @@ async function bootApi(heightsMode) {
         startAttestation: sinon.stub().resolves(),
         startCapabilities: sinon.stub().resolves(),
         getPriceSnapshots: sinon.stub().resolves([]),
-        _oracleMaxAgeSeconds: sinon.stub().returns(900),
+        oracleMaxAgeSeconds: sinon.stub().returns(900),
         getPrice: sinon.stub().resolves(null),
         getFeeQuote: sinon.stub().resolves({}),
         getOracle: sinon.stub().returns(null),

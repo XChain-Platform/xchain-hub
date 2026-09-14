@@ -1245,10 +1245,10 @@ class PriceAggregator extends EventEmitter {
         }
         let chain = readSet[0];
 
-        if (!this.hub || typeof this.hub._resolveAdmissionTip !== 'function') return null;
+        if (!this.hub || typeof this.hub.resolveAdmissionTip !== 'function') return null;
         let tip;
         try {
-            tip = await this.hub._resolveAdmissionTip(chain);
+            tip = await this.hub.resolveAdmissionTip(chain);
         } catch (e) {
             console.warn('PriceAggregator: the ' + chain + ' admission tip threw (' + (e && e.message) +
                 '); storing this PRICE v1 row as a legacy row.');

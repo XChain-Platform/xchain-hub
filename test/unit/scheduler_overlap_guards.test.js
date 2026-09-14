@@ -207,7 +207,7 @@ describe('AttestationPublisher._processQueue overlap guard', function () {
             attestationConsensus: null,
             capabilitySnapshot: { getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }] }) },
             _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
-            _btcIndexerHeaders: () => ({})
+            btcIndexerHeaders: () => ({})
         };
         const pub = new AttestationPublisher(hub);
         pub.queuePath = queueFile;
@@ -373,9 +373,9 @@ describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
         let first = true;
         runAllSelfTests.callsFake(async () => { if (first) { first = false; await gate; } });
 
-        const a = hub._runOwnCapabilityCheck('pk');   // parks inside runAllSelfTests
+        const a = hub.runOwnCapabilityCheck('pk');   // parks inside runAllSelfTests
         await flush();
-        await hub._runOwnCapabilityCheck('pk');       // the interval (or config watch) fires on top
+        await hub.runOwnCapabilityCheck('pk');       // the interval (or config watch) fires on top
 
         expect(runAllSelfTests.callCount, 'the second pass never re-ran the self-tests').to.equal(1);
         expect(broadcast.callCount, 'the second pass broadcast nothing').to.equal(0);
@@ -388,11 +388,11 @@ describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
 
     it('a rejected self-test pass does not wedge the re-check loop', async function () {
         runAllSelfTests.rejects(new Error('capability module blew up'));
-        await hub._runOwnCapabilityCheck('pk').catch(() => {});
+        await hub.runOwnCapabilityCheck('pk').catch(() => {});
         expect(hub._capabilityCheckRunning, 'a failed pass must not wedge the timer').to.equal(false);
 
         runAllSelfTests.resolves();
-        await hub._runOwnCapabilityCheck('pk');
+        await hub.runOwnCapabilityCheck('pk');
         expect(broadcast.callCount, 'the next pass runs normally').to.equal(1);
     });
 });
@@ -409,7 +409,7 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
         hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
         refreshOwnQualification     = sinon.stub().resolves();
         hub.refreshOwnQualification = refreshOwnQualification;
-        hub._btcIndexerHeaders      = () => ({});
+        hub.btcIndexerHeaders      = () => ({});
         hub._resolveBtcIndexerUrl   = async () => 'http://indexer.test';
     });
 
@@ -425,9 +425,9 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
             return 'http://indexer.test';
         };
 
-        const a = hub._pollOwnStake('pk');            // parks before the indexer round-trip
+        const a = hub.pollOwnStake('pk');            // parks before the indexer round-trip
         await flush();
-        await hub._pollOwnStake('pk');                // the interval fires on top
+        await hub.pollOwnStake('pk');                // the interval fires on top
 
         expect(axiosStub.post.callCount, 'the second pass never hit the indexer').to.equal(0);
 
@@ -440,11 +440,11 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
 
     it('a rejected stake poll does not wedge the poll loop', async function () {
         hub._resolveBtcIndexerUrl = async () => { throw new Error('config lookup failed'); };
-        await hub._pollOwnStake('pk').catch(() => {});
+        await hub.pollOwnStake('pk').catch(() => {});
         expect(hub._stakePollRunning, 'a failed poll must not wedge the timer').to.equal(false);
 
         hub._resolveBtcIndexerUrl = async () => 'http://indexer.test';
-        await hub._pollOwnStake('pk');
+        await hub.pollOwnStake('pk');
         expect(refreshOwnQualification.callCount, 'the next poll runs normally').to.equal(1);
     });
 });
@@ -488,9 +488,9 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
             return 200;
         };
 
-        const a = hub._refreshTransportSignerSet();   // parks before the snapshot round-trip
+        const a = hub.refreshTransportSignerSet();   // parks before the snapshot round-trip
         await flush();
-        await hub._refreshTransportSignerSet();       // the interval fires on top
+        await hub.refreshTransportSignerSet();       // the interval fires on top
 
         expect(snapshot.callCount, 'the second pass never asked for a snapshot').to.equal(0);
 
@@ -501,23 +501,23 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
         expect(hub._transportSetRefreshRunning, 'flag released in finally').to.equal(false);
 
         // And the loop still works on the next tick, with the newer block's set.
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.lastCall.args[0].has(NEWER), 'the later tick writes the newer set').to.equal(true);
     });
 
     it('a rejected refresh does not wedge the refresh loop', async function () {
         hub._resolveBtcLatestBlock = async () => { throw new Error('BTC tip lookup failed'); };
-        await hub._refreshTransportSignerSet().catch(() => {});
+        await hub.refreshTransportSignerSet().catch(() => {});
         expect(hub._transportSetRefreshRunning, 'a failed refresh must not wedge the timer').to.equal(false);
 
         hub._resolveBtcLatestBlock = async () => 200;
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'the next refresh runs normally').to.equal(1);
     });
 
     it('an unresolved tip releases the flag without writing the set', async function () {
         hub._resolveBtcLatestBlock = async () => null;
-        await hub._refreshTransportSignerSet();
+        await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'no set is written on an unresolved tip').to.equal(0);
         expect(hub._transportSetRefreshRunning, 'the early return still clears the flag').to.equal(false);
     });

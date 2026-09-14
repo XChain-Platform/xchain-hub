@@ -1042,7 +1042,7 @@ class AttestationResponseMirror {
                 jsonrpc: '2.0', id: Date.now(),
                 method:  'getpendingattestation_requests',
                 params:  params
-            }, { headers: hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: hub.btcIndexerHeaders(), timeout: 5000 });
         } catch (e){
             console.warn('AttestationResponseMirror: request lookup failed for ' +
                          row.request_id.substring(0, 16) + '...: ' + (e && e.message ? e.message : e));

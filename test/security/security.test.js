@@ -1232,7 +1232,7 @@ describe('Security Hardening', function () {
                 getPriceSnapshots: sinon.stub().resolves([]),
                 // The with_watermark envelope carries the price-age bound the hub
                 // resolves for getprice; a fixed stand-in here, asserted below.
-                _oracleMaxAgeSeconds: sinon.stub().returns(900),
+                oracleMaxAgeSeconds: sinon.stub().returns(900),
                 getPrice: sinon.stub().resolves(null),
                 getFeeQuote: sinon.stub().resolves({}),
                 getOracle: sinon.stub().returns(null),

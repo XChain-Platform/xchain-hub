@@ -113,7 +113,7 @@ function makeHub(o) {
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
         _resolveBtcIndexerUrl: async () => BTC_URL,
-        _btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
+        btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
     return hub;

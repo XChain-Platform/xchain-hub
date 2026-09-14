@@ -312,7 +312,7 @@ class AttestationRound {
                 jsonrpc: '2.0', id: Date.now(),
                 method:  'getpendingattestation_requests',
                 params:  params
-            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
             let status = e && e.response && e.response.status;
             if(status === 401 || status === 403){
