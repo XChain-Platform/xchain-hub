@@ -96,17 +96,17 @@ describe('Regression: Attestation meta size cap', function () {
         });
     });
 
-    describe('_handlePrepare()', function () {
+    describe('handlePrepare()', function () {
         it('rejects an oversized meta before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', META_MAX + 1));
+            consensus.handlePrepare(envelope('ATTEST_PREPARE', META_MAX + 1));
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').prepares.has(SENDER_PK)).to.equal(false);
         });
 
         it('lets a normal-size meta through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', META_MAX));
+            consensus.handlePrepare(envelope('ATTEST_PREPARE', META_MAX));
             expect(verify.calledOnce).to.equal(true);
         });
     });

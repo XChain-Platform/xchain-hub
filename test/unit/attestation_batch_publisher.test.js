@@ -941,7 +941,7 @@ describe('AttestationBatchPublisher', function () {
             pA._floorWindow = start;
             await pA.publishWindow(start, 4);
             expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
-            await pB._handleSignReq({
+            await pB.handleSignReq({
                 type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
                 sig_pubkey: hubA._identity.getPubkeyHex().toLowerCase(),
                 data: proposals[0]
@@ -1001,7 +1001,7 @@ describe('AttestationBatchPublisher', function () {
                         // The follower's own payload shape, window bounds included: a
                         // co-signature that did not name its window would be counted into
                         // whatever round happened to be open.
-                        state.publisher._handleSign({
+                        state.publisher.handleSign({
                             type: AttestationBatchPublisher.XATTESTB_SIGN,
                             data: { network: data.network, window_start: data.window_start,
                                     window_end: data.window_end,
@@ -1076,7 +1076,7 @@ describe('AttestationBatchPublisher', function () {
 
             // A co-signature naming a DIFFERENT window is not counted, even though it
             // carries a real signature from a real member of the set.
-            await p._handleSign({
+            await p.handleSign({
                 type: AttestationBatchPublisher.XATTESTB_SIGN,
                 data: { network: 'regtest', window_start: 1, window_end: 2,
                         pubkey: followers[0].getPubkeyHex().toLowerCase(), sig: 'ab'.repeat(64) }
@@ -1114,9 +1114,9 @@ describe('AttestationBatchPublisher', function () {
             };
 
             // An invented row, an altered row, and a row silently dropped from the window.
-            await p._handleSignReq(proposal([wireRow(makeRow({ effective_time: start + 1 }))]));
-            await p._handleSignReq(proposal([Object.assign(wireRow(mine), { response_payload: 'tampered' })]));
-            await p._handleSignReq(proposal([]));
+            await p.handleSignReq(proposal([wireRow(makeRow({ effective_time: start + 1 }))]));
+            await p.handleSignReq(proposal([Object.assign(wireRow(mine), { response_payload: 'tampered' })]));
+            await p.handleSignReq(proposal([]));
             expect(sent.length, 'every refusal must be silent on the wire').to.equal(0);
             expect(p.stats.signRefusals).to.equal(3);
             // None of these three is the missing-chain-tip shape, so the dedicated
@@ -1124,7 +1124,7 @@ describe('AttestationBatchPublisher', function () {
             expect(p.stats.signRefusalsNoChainTip).to.equal(0);
 
             // The honest proposal is co-signed.
-            await p._handleSignReq(proposal([wireRow(mine)]));
+            await p.handleSignReq(proposal([wireRow(mine)]));
             expect(sent.length).to.equal(1);
             expect(sent[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
         });
@@ -1138,7 +1138,7 @@ describe('AttestationBatchPublisher', function () {
 
             let at = async (anchor) => {
                 sent.length = 0;
-                await p._handleSignReq({
+                await p.handleSignReq({
                     type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
                     sig_pubkey: 'ff'.repeat(32),
                     data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
@@ -1161,7 +1161,7 @@ describe('AttestationBatchPublisher', function () {
             let start = 200 * WINDOW_S;
             hub.db.setTip(null);   // no chain_tips row for this network at all
 
-            await p._handleSignReq({
+            await p.handleSignReq({
                 type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
                 sig_pubkey: 'ff'.repeat(32),
                 data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
@@ -1190,7 +1190,7 @@ describe('AttestationBatchPublisher', function () {
 
             let at = async (anchor) => {
                 sent.length = 0;
-                await p._handleSignReq({
+                await p.handleSignReq({
                     type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
                     sig_pubkey: 'ff'.repeat(32),
                     data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,

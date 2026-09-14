@@ -17,7 +17,7 @@
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
  * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
  * _computeResponsible, _fetchPendingRequestIds, _resolveBtcIndexerUrl,
- * _defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
+ * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
 
@@ -612,7 +612,7 @@ describe('AttestationPublisher: getBroadcaster', function () {
         expect(pub.getBroadcaster()).to.be.null;
     });
 
-    it('returns the _defaultBroadcast pipeline when encoder + walletSignFn + address + pubkey are all set', function () {
+    it('returns the defaultBroadcast pipeline when encoder + walletSignFn + address + pubkey are all set', function () {
         const pub = makePublisher();
         pub.setEncoder({ getUtxos: sinon.stub(), createTx: sinon.stub(), broadcastTx: sinon.stub() });
         pub.setWalletSignHook(sinon.stub().resolves('txhex'));
@@ -1469,9 +1469,9 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
     });
 });
 
-// ---------- _defaultBroadcast -----------------------------------------------
+// ---------- defaultBroadcast -----------------------------------------------
 
-describe('AttestationPublisher: _defaultBroadcast', function () {
+describe('AttestationPublisher: defaultBroadcast', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -1481,7 +1481,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no encoder/);
     });
@@ -1492,7 +1492,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no wallet sign hook/);
     });
@@ -1503,7 +1503,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.setWalletSignHook(sinon.stub().resolves('txhex'));
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no BTC_ADDRESS/);
     });
@@ -1514,7 +1514,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.setWalletSignHook(sinon.stub().resolves('txhex'));
         pub.btcAddress = '1Test';
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no BTC_PUBKEY_HEX/);
     });
@@ -1526,7 +1526,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no UTXOs/);
     });
@@ -1538,7 +1538,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no UTXOs/);
     });
@@ -1554,7 +1554,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/no PSBT/);
     });
@@ -1570,7 +1570,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;
-        try { await pub._defaultBroadcast('wire'); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('wire'); } catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/invalid tx hex/);
     });
@@ -1587,7 +1587,7 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
 
-        const result = await pub._defaultBroadcast('wire-payload');
+        const result = await pub.defaultBroadcast('wire-payload');
         expect(result.txid).to.equal('broadcast-txid');
         expect(encoder.createTx.calledOnce).to.equal(true);
         const createTxArgs = encoder.createTx.args[0][0];

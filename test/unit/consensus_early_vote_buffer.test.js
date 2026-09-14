@@ -115,7 +115,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
         });
 
         it('buffers a PREPARE instead of dropping it', function () {
-            consensus._handlePrepare(voteEnvelope('PBFT_PREPARE', PEER, digest));
+            consensus.handlePrepare(voteEnvelope('PBFT_PREPARE', PEER, digest));
             expect(consensus.earlyVotes.get(SEQ)).to.have.length(1);
         });
 
@@ -188,7 +188,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
         });
 
         it('counts a replayed PREPARE toward this hub sending its own COMMIT', async function () {
-            consensus._handlePrepare(voteEnvelope('PBFT_PREPARE', PEER, digest));
+            consensus.handlePrepare(voteEnvelope('PBFT_PREPARE', PEER, digest));
 
             await consensus._handlePrePrepare(prePrepareEnvelope(consensus));
 

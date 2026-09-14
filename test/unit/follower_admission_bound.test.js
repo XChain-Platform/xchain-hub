@@ -140,7 +140,7 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
                 cross_hops: 1, deadline_block: ERA_BLOCK + 2000
             }
         });
-        sinon.stub(engine, '_resolveSnapshotBlock').resolves(ERA_BLOCK);
+        sinon.stub(engine, 'resolveSnapshotBlock').resolves(ERA_BLOCK);
         return engine;
     }
 
@@ -266,7 +266,7 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
                 cross_hops: 1, deadline_block: LEGACY_BLK + 2000
             }
         });
-        sinon.stub(engine, '_resolveSnapshotBlock').resolves(LEGACY_BLK);
+        sinon.stub(engine, 'resolveSnapshotBlock').resolves(LEGACY_BLK);
         tipCalls = [];
         expect(await engine.validateProposedMatch(dispatchRow(engine, { snapshot_block: LEGACY_BLK }))).to.equal(true);
         expect(tipCalls).to.deep.equal([]);

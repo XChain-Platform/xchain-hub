@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// Stress-sweep 2026-07-08: Consensus._handleViewChange must not rewind the
+// Stress-sweep 2026-07-08: Consensus.handleViewChange must not rewind the
 // view (monotonicity) and must not create a pendingViewChanges bucket for an
 // out-of-window (too-far-ahead) view number.
 
@@ -31,7 +31,7 @@ describe('Consensus view-change guard (stress-sweep 2026-07-08)', function () {
     afterEach(function () { sinon.restore(); });
 
     function vc(view, seq) {
-        consensus._handleViewChange({ sender: 'ws://peer:10001', sig_pubkey: pubkeyForTestSender('ws://peer:10001'), data: { view, seq: seq || 1 } });
+        consensus.handleViewChange({ sender: 'ws://peer:10001', sig_pubkey: pubkeyForTestSender('ws://peer:10001'), data: { view, seq: seq || 1 } });
     }
 
     it('ignores a VIEW_CHANGE for a view <= the current view (no rewind, no bucket)', function () {

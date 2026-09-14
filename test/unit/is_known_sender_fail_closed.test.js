@@ -44,7 +44,7 @@ const CHAIN_KEYED = [
 
 // Governance and ReorgHandler deliberately do NOT appear above. Both derive their
 // quorum denominator from the LOCAL registry (Governance via buildValidatorSnapshot
-// off validatorSet, ReorgHandler via _getQuorum off validatorSet), so neither has the
+// off validatorSet, ReorgHandler via getQuorum off validatorSet), so neither has the
 // chain-denominator/registry-numerator mismatch this change fixes, and neither should
 // start admitting on chain state alone. They keep the registry-keyed predicate.
 const REGISTRY_KEYED = [

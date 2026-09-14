@@ -247,7 +247,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
         // The single-node branch aggregates locally; stub the aggregate so the test
         // exercises the store path rather than the trimmed-median math.
         sinon.stub(oc, '_aggregateAll').returns([{ coinPair: 'BTC/USD', price: '100000' }]);
-        sinon.stub(oc, '_memberPubkeySet').returns(null);
+        sinon.stub(oc, 'memberPubkeySet').returns(null);
 
         await oc.finalizeRound(ROUND, BTC_ANCHOR, 1700000000);
 

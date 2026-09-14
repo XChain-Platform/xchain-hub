@@ -10,7 +10,7 @@
 
 // Below the STAKE_WEIGHTED_QUORUM activation height the fail-closed federation guards
 // were conditional on weighted mode, so a NULL price snapshot (indexer down / timeout /
-// 401-403 / malformed) fell through to _getQuorum(), which reads this hub's own
+// 401-403 / malformed) fell through to getQuorum(), which reads this hub's own
 // validatorSet or open-peer count. The finalization THRESHOLD then depended on local
 // reachability: at one height a hub holding a three-member snapshot needs two votes
 // while a hub whose fetch failed needs whatever its live set implies. The same null also
@@ -75,7 +75,7 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
             oc.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[0].addr;                 // leader for round 0
             oracleRound.getSubmissions.returns(memberSubmissions());
-            let quorumSpy = sinon.spy(oc, '_getQuorum');
+            let quorumSpy = sinon.spy(oc, 'getQuorum');
 
             await oc.finalizeRound(0, HEIGHT, 1700000000);
 
@@ -85,7 +85,7 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
             let insert = hub.db.doQuery.getCalls().find(c => /price_snapshots/.test(String(c.args[0])));
             expect(insert, 'a skipped-round row must be written').to.not.equal(undefined);
             expect(String(insert.args[0])).to.include('skipped');
-            // The federation test may consult _getQuorum, but nothing downstream may SIZE
+            // The federation test may consult getQuorum, but nothing downstream may SIZE
             // the round from it: no round was opened at all.
             expect(quorumSpy.called).to.equal(true);
         });
@@ -106,11 +106,11 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
 
         // A genuine single-node / regtest hub has no peer to diverge from, so it keeps the
         // bootstrap self-finalize path. Same federation test as the empty-snapshot guard.
-        it('leaves a single-node hub (_getQuorum() === 0) on its bootstrap path', async function () {
+        it('leaves a single-node hub (getQuorum() === 0) on its bootstrap path', async function () {
             hub.capabilitySnapshot = nullSnapshotSource();
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            expect(oc._getQuorum()).to.equal(0);
+            expect(oc.getQuorum()).to.equal(0);
             pm.validatorAddr = 'ws://solo:10001';
             oracleRound.getSubmissions.returns(buildSubmissions([{ sender: 'ws://solo:10001', prices: PRICES }]));
             let storeSpy = sinon.spy(oc, '_storeSnapshot');
@@ -146,10 +146,10 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
             expect(oc.pendingRounds.has(0)).to.equal(true);
         });
 
-        it('leaves a single-node hub (_getQuorum() === 0) on its bootstrap path', async function () {
+        it('leaves a single-node hub (getQuorum() === 0) on its bootstrap path', async function () {
             hub.capabilitySnapshot = nullSnapshotSource();
             oc.setValidatorSet(VALIDATORS_3);
-            sinon.stub(oc, '_getQuorum').returns(0);
+            sinon.stub(oc, 'getQuorum').returns(0);
             pm.validatorAddr = VALIDATORS_3[1].addr;
             oracleRound.getSubmissions.returns(memberSubmissions());
 

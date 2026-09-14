@@ -138,7 +138,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
             for (let n of nodes) {
                 if (n.pubkey === msg.from) continue;
                 if (msg.envelope.type === 'ATTEST_PROPOSE') n.consensus._handlePropose(msg.envelope);
-                else if (msg.envelope.type === 'ATTEST_PREPARE') n.consensus._handlePrepare(msg.envelope);
+                else if (msg.envelope.type === 'ATTEST_PREPARE') n.consensus.handlePrepare(msg.envelope);
                 else if (msg.envelope.type === 'ATTEST_COMMIT')  n.consensus._handleCommit(msg.envelope);
             }
         }

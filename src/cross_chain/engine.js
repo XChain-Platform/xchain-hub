@@ -353,8 +353,8 @@ class CrossChainEngine extends EventEmitter {
     // snapshot resolved. Null DISABLES the membership filter, which preserves the
     // bootstrap / single-node path _resolveQuorum already keeps (there the quorum came
     // from the live validator set, not from a snapshot, so there is no snapshot
-    // population to gate against). Mirrors OracleConsensus._memberPubkeySet.
-    _memberPubkeySet(snapshot) {
+    // population to gate against). Mirrors OracleConsensus.memberPubkeySet.
+    memberPubkeySet(snapshot) {
         if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
         let set = new Set();
         for (let v of snapshot.validators) {
@@ -373,7 +373,7 @@ class CrossChainEngine extends EventEmitter {
     async resolveMemberPubkeys(btcBlockHeight) {
         if (!this.hub.capabilitySnapshot || btcBlockHeight == null) return null;
         try {
-            return this._memberPubkeySet(
+            return this.memberPubkeySet(
                 await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight));
         } catch (err) {
             logger.warn('CrossChain: could not resolve the cross_chain member set at block ' +
@@ -423,7 +423,7 @@ class CrossChainEngine extends EventEmitter {
                         (envelope && envelope.data && envelope.data.attestationId),
                         err && err.message)));
                 break;
-            case XCHAIN_ATTEST_PREPARE: this._handlePrepare(envelope); break;
+            case XCHAIN_ATTEST_PREPARE: this.handlePrepare(envelope); break;
             case XCHAIN_ATTEST_COMMIT:  this._handleCommit(envelope);  break;
         }
     }
@@ -525,7 +525,7 @@ class CrossChainEngine extends EventEmitter {
         this.checkPrepareQuorum(attestationId);
     }
 
-    _handlePrepare(envelope) {
+    handlePrepare(envelope) {
         let { attestationId, digest } = envelope.data;
         if (!attestationId || !digest) return;
 
@@ -615,7 +615,7 @@ class CrossChainEngine extends EventEmitter {
         // not a live recompute; this keeps every hub in lockstep across the round.
         // Votes are counted against the round's locked snapshot population (countedVotes),
         // so the threshold and the electorate come from one set.
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         if (this.countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             let selfPkOnCommit = this.selfPubkey();
@@ -635,7 +635,7 @@ class CrossChainEngine extends EventEmitter {
         if (!pending || pending.finalized) return;
 
         // Same locked quorum and same snapshot-gated tally as checkPrepareQuorum.
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         if (this.countedVotes(pending, pending.commits) >= quorum) {
             pending.finalized = true;
             // Do NOT clear the round timer here: it is the backstop for a store
@@ -748,7 +748,7 @@ class CrossChainEngine extends EventEmitter {
     // Federation-split guard (fail closed), mirroring Consensus.js:170-173 and
     // OraclePublisher's retired live-registry fallback. The prior
     // form fell back to this hub's LOCAL live validator set (or, worse, open-peer
-    // count + 1 in _getQuorum) whenever the snapshot was unresolved -- so a hub with
+    // count + 1 in getQuorum) whenever the snapshot was unresolved -- so a hub with
     // an unreachable BTC indexer locked a DIFFERENT N/quorum than a healthy peer for
     // the same (cross_chain, block) round. When federated, refuse rather than
     // split. Single-node / regtest hubs (no snapshot AND a live quorum of 0, i.e. no
@@ -760,7 +760,7 @@ class CrossChainEngine extends EventEmitter {
             ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
             : null;
         if (snapshot) return this.hub.capabilitySnapshot.getQuorum(snapshot);
-        let live = this._getQuorum(sourceChain, destChain);
+        let live = this.getQuorum(sourceChain, destChain);
         if (live > 0) {
             throw new Error('CrossChain: refusing to resolve quorum without a deterministic ' +
                 'cross_chain snapshot while federated (block ' + btcBlockHeight + '); the indexer ' +
@@ -770,7 +770,7 @@ class CrossChainEngine extends EventEmitter {
         return live;
     }
 
-    _getQuorum(sourceChain, destChain) {
+    getQuorum(sourceChain, destChain) {
         let N;
         if (sourceChain && destChain) {
             let set = this.getChainPairSet(sourceChain, destChain);

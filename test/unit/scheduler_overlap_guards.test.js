@@ -117,7 +117,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
     it('a rejected book fetch does not wedge matching forever', async function () {
         const eng = makeEngine();
         const finalize = sinon.stub(eng, '_finalizeMatch').resolves();
-        // _resolveSnapshotBlock is awaited inside _finalizeMatch; the throw we want comes
+        // resolveSnapshotBlock is awaited inside _finalizeMatch; the throw we want comes
         // from _findMatches, which runs after the books land and is not caught per-coin.
         eng._fetchOpenOffers = async (coin) => book(coin);
         const boom = sinon.stub(eng, '_findMatches').throws(new Error('matcher blew up'));
@@ -633,7 +633,7 @@ describe('OraclePublisher._processQueue overlap guard', function () {
     it('a rejected pass releases the guard instead of wedging the publisher', async function () {
         const pub = makePublisher();
         writeQueue([entry(7)]);
-        const balance = sinon.stub(pub, '_checkBalance').rejects(new Error('balance source exploded'));
+        const balance = sinon.stub(pub, 'checkBalance').rejects(new Error('balance source exploded'));
 
         await pub._processQueue().catch(() => {});
         expect(pub._sweeping, 'a rejected pass must not wedge the publish path').to.equal(false);

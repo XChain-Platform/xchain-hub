@@ -204,7 +204,7 @@ function makeEngine(opts) {
         capabilitySnapshot: {
             async getSnapshot() { return { validators: [{ pubkey: 'a'.repeat(64), amount: '1' }] }; },
             // STAKE_WEIGHTED_QUORUM (WI-1) is active at regtest/testnet block 0+, so
-            // _resolveCapabilityValidators takes the weighted path: source-keyed rows.
+            // resolveCapabilityValidators takes the weighted path: source-keyed rows.
             async getWeightSnapshot() {
                 return { validators: [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1' }], count: 1, sourceCount: 1 };
             }
@@ -784,14 +784,14 @@ describe('CrossChainCallEngine', function () {
 
         it('_persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
             const { engine } = makeEngine();
-            engine._resolveCapabilityValidators = async () =>
+            engine.resolveCapabilityValidators = async () =>
                 [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' },
                  { pubkey: 'b'.repeat(64), source: 's2', weight: '1', amount: '1' }];
             expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(2);
 
             const capped = [{ pubkey: 'c'.repeat(64), source: 's3', weight: '1', amount: '1' }];
             capped.truncated = true;
-            engine._resolveCapabilityValidators = async () => capped;
+            engine.resolveCapabilityValidators = async () => capped;
             expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(0);
         });
 
@@ -1031,20 +1031,20 @@ describe('CrossChainCallEngine', function () {
         });
     });
 
-    describe('_resolveCapabilityValidators (SWQ-TRUNC flag propagation)', function () {
+    describe('resolveCapabilityValidators (SWQ-TRUNC flag propagation)', function () {
         it('carries truncated=true through the .map when the weighted snapshot overflowed the cap', async function () {
             const { engine } = makeEngine();
             engine.capSnapshot.getWeightSnapshot = async () => ({
                 validators: [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1' }], count: 1, truncated: true
             });
-            const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
+            const vals = await engine.resolveCapabilityValidators('cross_chain', 100, 'regtest');
             // The consensus fails closed only when the flag survives the map (meetsStakeThreshold).
             expect(vals.truncated).to.equal(true);
         });
 
         it('does NOT mark truncated for a complete weighted snapshot', async function () {
             const { engine } = makeEngine();
-            const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
+            const vals = await engine.resolveCapabilityValidators('cross_chain', 100, 'regtest');
             expect(vals.truncated).to.not.equal(true);
         });
 
@@ -1066,7 +1066,7 @@ describe('CrossChainCallEngine', function () {
             const { engine } = makeEngine();
             const capped = [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' }];
             capped.truncated = true;
-            engine._resolveCapabilityValidators = async () => capped;
+            engine.resolveCapabilityValidators = async () => capped;
             const seen = countSnapshotWrites(engine);
 
             await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
@@ -1075,7 +1075,7 @@ describe('CrossChainCallEngine', function () {
 
         it('persist still writes an untruncated set (the #4175 guard is not a blanket refusal)', async function () {
             const { engine } = makeEngine();
-            engine._resolveCapabilityValidators = async () =>
+            engine.resolveCapabilityValidators = async () =>
                 [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' }];
             const seen = countSnapshotWrites(engine);
 

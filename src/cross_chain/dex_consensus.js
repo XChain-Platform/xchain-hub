@@ -394,10 +394,10 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => logger.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
-            case this.types.PREPARE:     this._handlePrepare(envelope);    break;
+            case this.types.PREPARE:     this.handlePrepare(envelope);    break;
             case this.types.COMMIT:      this._handleCommit(envelope);     break;
-            case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
-            case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
+            case this.types.VIEW_CHANGE: this.handleViewChange(envelope); break;
+            case this.types.NEW_VIEW:    this.handleNewView(envelope);    break;
             case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => logger.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
         }
     }
@@ -414,13 +414,13 @@ class CrossChainDexConsensus extends EventEmitter {
         let sameBlock   = String(row.snapshot_block) === String(pending.row.snapshot_block);
         let sameNetwork = String(row.network || '')  === String(pending.row.network || '');
         if(sameBlock && sameNetwork) return null;
-        if(typeof this.engine._resolveCapabilityValidators !== 'function'){
+        if(typeof this.engine.resolveCapabilityValidators !== 'function'){
             logger.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
                 ' because this engine cannot re-resolve the cross_chain set');
             return false;
         }
         let raw = null;
-        try { raw = await this.engine._resolveCapabilityValidators('cross_chain', Number(row.snapshot_block), row.network); }
+        try { raw = await this.engine.resolveCapabilityValidators('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ raw = null; }
         if(!Array.isArray(raw) || raw.length === 0){
             logger.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
@@ -614,7 +614,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(adopted) this.drainEarlyMessages(rid);
     }
 
-    _handlePrepare(envelope){
+    handlePrepare(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
@@ -780,7 +780,7 @@ class CrossChainDexConsensus extends EventEmitter {
         this.maybeAssumeLeadership(rid, view);
     }
 
-    _handleViewChange(envelope){
+    handleViewChange(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid) return;
@@ -911,15 +911,15 @@ class CrossChainDexConsensus extends EventEmitter {
         // node that had already rotated would otherwise publish these signatures under a
         // view whose EQUIV canonical none of them cover (persisted as finalizing_view,
         // mirrored, and folded into the anchor archive). Lowering the view is safe and
-        // deliberate: finalize sets pending.finalized, and _handleViewChange /
-        // _handleNewView both short-circuit on a finalized round, so the monotonic-view
+        // deliberate: finalize sets pending.finalized, and handleViewChange /
+        // handleNewView both short-circuit on a finalized round, so the monotonic-view
         // guard is never consulted for this round again. Taking the higher view is the bug.
         pending.view       = syncView;
         logger.info('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
         this.finalize(rid);
     }
 
-    _handleNewView(envelope){
+    handleNewView(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
@@ -929,7 +929,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!Number.isFinite(view) || view <= pending.view) return;        // monotonic: never rewind
         let announcer = String(d.sig_pubkey || '').toLowerCase();
         // Announcer must be the designated leader for the CLAIMED view, and prove it
-        // with a valid signature (mirrors Consensus._handleNewView's leader-identity
+        // with a valid signature (mirrors Consensus.handleNewView's leader-identity
         // guard: a Byzantine node can only announce views in which it is the leader).
         let expected = this._leaderFor(rid, pending.validators, view);
         if(!expected || announcer !== expected) {

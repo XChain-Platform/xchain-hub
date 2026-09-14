@@ -686,7 +686,7 @@ class AttestationRelay {
         let roundId = this._roundId('response', rid);
         if(this._inflight.has(roundId)) return;
 
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) return;
         if(!attestRelay.isAttestRelayActive(snapshotBlock, this.network)){
             this.logGateOnce(snapshotBlock);
@@ -737,7 +737,7 @@ class AttestationRelay {
             return;
         }
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -813,7 +813,7 @@ class AttestationRelay {
         let roundId = this._roundId('request', rid);
         if(this._inflight.has(roundId)) return;
 
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) return;
 
         // The flag-day gate, evaluated on the BTC-anchored snapshot we are about to
@@ -849,7 +849,7 @@ class AttestationRelay {
             return;
         }
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -983,7 +983,7 @@ class AttestationRelay {
         if(String(row.network || '') !== String(this.network || '')) return false;
         if(String(row.round_id).toLowerCase() !== this._roundId(phase, rid)) return false;
         if(!attestRelay.isAttestRelayActive(row.snapshot_block, this.network)) return false;
-        let myBlock = await this._resolveSnapshotBlock();
+        let myBlock = await this.resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_DRIFT_BLOCKS) return false;
         return true;
     }
@@ -1097,7 +1097,7 @@ class AttestationRelay {
     // the only one they see. Deterministic + INSERT IGNORE, so all hubs write the
     // same rows. Same contract as CrossChainCallEngine._persistCapabilitySnapshot.
     async _persistCapabilitySnapshot(capability, block, network){
-        let validators = await this._resolveCapabilityValidators(capability, block, network);
+        let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. This writer has no
         // caller today, which is exactly why the guard goes in now: the next caller would
@@ -1131,7 +1131,7 @@ class AttestationRelay {
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM, legacy count set below it. Mirrors
     // CrossChainCallEngine so the relay resolves the identical cross_chain set the
     // XCALL rail does at the same block.
-    async _resolveCapabilityValidators(capability, block, network){
+    async resolveCapabilityValidators(capability, block, network){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
@@ -1324,7 +1324,7 @@ class AttestationRelay {
             // A PRE-SEND failure is never ambiguous: nothing left this process, so it
             // must stay retryable. The shared classifier cannot tell the difference (it
             // defaults an unrecognised error to ambiguous, which is the right default
-            // for an opaque operator hook), so _defaultBroadcast tags the steps it
+            // for an opaque operator hook), so defaultBroadcast tags the steps it
             // knows ran before the send. Without this a transient "no UTXOs available"
             // would suppress the request permanently.
             if(!e._relayPreSend && isAmbiguousSendError(e)){
@@ -1396,7 +1396,7 @@ class AttestationRelay {
         if(String(coin) === HOME_CHAIN || coin == null){
             if(this.broadcastFn) return (payload) => this.broadcastFn(payload);
             if(this.encoder && this.walletSignFn && this.btcAddress && this.btcPubkeyHex)
-                return (payload) => this._defaultBroadcast(payload, this.encoder, this.btcAddress, this.walletSignFn, HOME_CHAIN);
+                return (payload) => this.defaultBroadcast(payload, this.encoder, this.btcAddress, this.walletSignFn, HOME_CHAIN);
             return null;
         }
         let rail = this.chainRails[String(coin)];
@@ -1404,11 +1404,11 @@ class AttestationRelay {
         if(rail.broadcastFn) return (payload) => rail.broadcastFn(payload);
         let signFn = rail.walletSignFn || this.walletSignFn;
         if(rail.encoder && signFn && rail.address)
-            return (payload) => this._defaultBroadcast(payload, rail.encoder, rail.address, signFn, String(coin));
+            return (payload) => this.defaultBroadcast(payload, rail.encoder, rail.address, signFn, String(coin));
         return null;
     }
 
-    // The encoder pipeline, mirroring AttestationPublisher._defaultBroadcast: P2SH
+    // The encoder pipeline, mirroring AttestationPublisher.defaultBroadcast: P2SH
     // because a relay leg with several signatures exceeds the 80-byte OP_RETURN.
     // Parameterised on the chain's rail so the v3 (BTC) and v4 (origin) legs share
     // one implementation instead of drifting.
@@ -1417,7 +1417,7 @@ class AttestationRelay {
     // leaves this process, so those failures are tagged _relayPreSend and stay
     // retryable. Only broadcastTx can leave a tx on the wire, so only its failures
     // reach the ambiguity classifier.
-    async _defaultBroadcast(payload, encoder, address, walletSignFn, coin){
+    async defaultBroadcast(payload, encoder, address, walletSignFn, coin){
         encoder      = encoder      || this.encoder;
         address      = address      || this.btcAddress;
         walletSignFn = walletSignFn || this.walletSignFn;
@@ -1713,7 +1713,7 @@ class AttestationRelay {
         return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
     }
 
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         return this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
     }
 

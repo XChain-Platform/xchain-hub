@@ -101,10 +101,10 @@ describe('Regression: Attestation status size cap', function () {
         });
     });
 
-    describe('_handlePrepare()', function () {
+    describe('handlePrepare()', function () {
         it('rejects an oversized status before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', STATUS_MAX + 1));
+            consensus.handlePrepare(envelope('ATTEST_PREPARE', STATUS_MAX + 1));
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').prepares.has(SENDER_PK)).to.equal(false);
             expect(warns.some(m => m.indexOf('oversized PREPARE status') !== -1)).to.equal(true);
@@ -112,7 +112,7 @@ describe('Regression: Attestation status size cap', function () {
 
         it('lets a max-length status through to the non-ok gates @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', STATUS_MAX));
+            consensus.handlePrepare(envelope('ATTEST_PREPARE', STATUS_MAX));
             // Past the size gate: the envelope now dies on the non-ok canonical-shape
             // check (non-empty body/meta), which is the next gate downstream.
             expect(warns.some(m => m.indexOf('oversized') !== -1)).to.equal(false);

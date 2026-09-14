@@ -309,11 +309,11 @@ class OracleBatchSigner {
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XPRICEB_SIGN_REQ:
-                this._handleSignReq(envelope).catch(e =>
+                this.handleSignReq(envelope).catch(e =>
                     logger.error('OracleBatchSigner: XPRICEB_SIGN_REQ error: ' + (e && e.message)));
                 break;
             case XPRICEB_SIGN:
-                this._handleSign(envelope).catch(e =>
+                this.handleSign(envelope).catch(e =>
                     logger.error('OracleBatchSigner: XPRICEB_SIGN error: ' + (e && e.message)));
                 break;
         }
@@ -323,7 +323,7 @@ class OracleBatchSigner {
     // bytes byte-for-byte from its OWN finalized price_snapshots. Every refusal is
     // SILENT (logged locally, nothing sent), because the only honest answer to "I
     // cannot reproduce that" is to withhold a signature.
-    async _handleSignReq(envelope){
+    async handleSignReq(envelope){
         let d = envelope.data;
         if(!this.identity || !this.peerManager || !this.db) return;
 
@@ -440,7 +440,7 @@ class OracleBatchSigner {
         });
     }
 
-    async _handleSign(envelope){
+    async handleSign(envelope){
         let d     = envelope.data;
         let round = this._signRound;
         if(!round || round.done || !d) return;

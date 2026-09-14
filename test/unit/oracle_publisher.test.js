@@ -450,13 +450,13 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _checkBalance ─────────────────────────────────────────────────────────
+    // ── checkBalance ─────────────────────────────────────────────────────────
 
-    describe('_checkBalance()', function () {
+    describe('checkBalance()', function () {
         it('returns null when no getBalanceFn and no encoder', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.be.null;
         });
 
@@ -464,7 +464,7 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             pub.getBalanceFn = sinon.stub().resolves(42.5);
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.equal(42.5);
         });
 
@@ -472,7 +472,7 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             pub.getBalanceFn = sinon.stub().rejects(new Error('rpc error'));
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.be.null;
         });
 
@@ -490,7 +490,7 @@ describe('OraclePublisher', function () {
                     { value: '350000000', amount: '3.50000000' }
                 ])
             };
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.equal(8.5);
         });
 
@@ -499,7 +499,7 @@ describe('OraclePublisher', function () {
             let pub = new OraclePublisher(hub);
             pub.dogeAddress = 'D123';
             pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '850000000' }]) };
-            expect(await pub._checkBalance()).to.equal(8.5);
+            expect(await pub.checkBalance()).to.equal(8.5);
         });
 
         it('reads a genuinely low wallet as below the floor', async function () {
@@ -507,7 +507,7 @@ describe('OraclePublisher', function () {
             let pub = new OraclePublisher(hub);
             pub.dogeAddress = 'D123';
             pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '400000000', amount: '4.00000000' }]) };
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.equal(4);
             expect(bal).to.be.below(pub.lowBalanceThreshold);
         });
@@ -519,7 +519,7 @@ describe('OraclePublisher', function () {
             pub.encoder = {
                 getUtxos: sinon.stub().rejects(new Error('encoder error'))
             };
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.be.null;
         });
 
@@ -528,7 +528,7 @@ describe('OraclePublisher', function () {
             let pub = new OraclePublisher(hub);
             pub.dogeAddress = 'D123';
             pub.encoder = { getUtxos: sinon.stub().resolves(null) };
-            let bal = await pub._checkBalance();
+            let bal = await pub.checkBalance();
             expect(bal).to.be.null;
         });
     });
@@ -851,8 +851,8 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _defaultBroadcast() pipeline ────────────────────────────────────────
-    describe('_defaultBroadcast()', function () {
+    // ── defaultBroadcast() pipeline ────────────────────────────────────────
+    describe('defaultBroadcast()', function () {
         // Build a publisher with a fully-wired encoder + hooks, then let each test
         // knock out one prerequisite to exercise the corresponding guard.
         function wiredPub() {
@@ -868,7 +868,7 @@ describe('OraclePublisher', function () {
             return pub;
         }
         async function expectThrow(pub, frag) {
-            try { await pub._defaultBroadcast('payload'); expect.fail('should throw'); }
+            try { await pub.defaultBroadcast('payload'); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include(frag); }
         }
 
@@ -902,7 +902,7 @@ describe('OraclePublisher', function () {
         });
         it('signs, broadcasts, and returns the txid on success', async function () {
             let pub = wiredPub();
-            let result = await pub._defaultBroadcast('the-payload');
+            let result = await pub.defaultBroadcast('the-payload');
             expect(result).to.deep.equal({ txid: 'TXID' });
             expect(pub.encoder.createTx.getCall(0).args[0].data).to.equal('the-payload');
             expect(pub.walletSignFn.calledWith('psbthex')).to.be.true;
@@ -910,7 +910,7 @@ describe('OraclePublisher', function () {
         });
         it('falls back to { txid: null } when broadcast returns nothing', async function () {
             let pub = wiredPub(); pub.encoder.broadcastTx = sinon.stub().resolves(null);
-            let result = await pub._defaultBroadcast('p');
+            let result = await pub.defaultBroadcast('p');
             expect(result).to.deep.equal({ txid: null });
         });
     });
@@ -1075,7 +1075,7 @@ describe('OraclePublisher', function () {
             let broadcastStub = sinon.stub().rejects(timeout);
             pub.broadcastFn  = broadcastStub;
             pub.getBalanceFn = sinon.stub().resolves(50);
-            let dead = sinon.stub(pub, '_deadLetter');
+            let dead = sinon.stub(pub, 'deadLetter');
             await pub._processQueue();
             expect(broadcastStub.calledOnce).to.be.true;
             expect(dead.calledOnce, 'ambiguous send must be dead-lettered').to.be.true;
@@ -1091,7 +1091,7 @@ describe('OraclePublisher', function () {
             let refused = new Error('connect ECONNREFUSED'); refused.code = 'ECONNREFUSED';
             pub.broadcastFn  = sinon.stub().rejects(refused);
             pub.getBalanceFn = sinon.stub().resolves(50);
-            let dead = sinon.stub(pub, '_deadLetter');
+            let dead = sinon.stub(pub, 'deadLetter');
             await pub._processQueue();
             expect(dead.called, 'definitive error must not dead-letter').to.be.false;
             // round retained with attempts incremented
@@ -1113,7 +1113,7 @@ describe('OraclePublisher', function () {
             rejected.phase1Txid     = 'f'.repeat(64);
             pub.broadcastFn  = sinon.stub().rejects(rejected);
             pub.getBalanceFn = sinon.stub().resolves(50);
-            let dead = sinon.stub(pub, '_deadLetter');
+            let dead = sinon.stub(pub, 'deadLetter');
             await pub._processQueue();
             expect(dead.calledOnce, 'a funded payload must never be rebuilt').to.be.true;
             let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
@@ -1127,7 +1127,7 @@ describe('OraclePublisher', function () {
             pub.broadcastFn  = sinon.stub().rejects(
                 new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
             pub.getBalanceFn = sinon.stub().resolves(50);
-            let dead = sinon.stub(pub, '_deadLetter');
+            let dead = sinon.stub(pub, 'deadLetter');
             await pub._processQueue();
             expect(dead.called, 'an untagged pre-send rejection keeps its retry').to.be.false;
             let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
@@ -1157,7 +1157,7 @@ describe('OraclePublisher', function () {
         async function runQueueWith(pub) {
             let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
             fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
-            let dead = sinon.stub(pub, '_deadLetter');
+            let dead = sinon.stub(pub, 'deadLetter');
             await pub._processQueue();
             let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
             return { dead, rewritten };

@@ -199,7 +199,7 @@ class OracleConsensus extends EventEmitter {
         // empty), NOT because the whole federation skipped (stress-sweep #7). These
         // are kept separate from `finalized` so a legitimate later PROPOSE from the
         // federation still processes: without this, a locally-skipped round landed
-        // in `finalized`, _handlePropose dropped the real PROPOSE, and _handlePrepare
+        // in `finalized`, _handlePropose dropped the real PROPOSE, and handlePrepare
         // /_handleCommit refused to buffer, so the hub permanently held a NULL
         // price_snapshot for a round the rest of the federation finalized. When the
         // round does reach commit quorum here, _storeSnapshot's ON DUPLICATE KEY
@@ -661,9 +661,9 @@ class OracleConsensus extends EventEmitter {
             // reachability forks the finalization THRESHOLD semantics: peers finalize on
             // summed stake while this hub finalizes/stalls on a count quorum over the same
             // N validators. In a real federation, skip the round rather than diverge.
-            // A single-node / regtest hub (no peers, _getQuorum()===0) has no peer to
+            // A single-node / regtest hub (no peers, getQuorum()===0) has no peer to
             // split from, so it keeps the graceful count fallback below.
-            if (this._getQuorum() > 0) {
+            if (this.getQuorum() > 0) {
                 logger.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
                     'unavailable while federated; skipping rather than downgrading to a count quorum ' +
                     'this hub\'s peers are not using.');
@@ -680,7 +680,7 @@ class OracleConsensus extends EventEmitter {
 
         // No deterministic snapshot on a FEDERATED hub: skip, in both quorum modes. A
         // null snapshot (indexer down / timeout / 401-403 / malformed) otherwise falls
-        // through to _getQuorum(), which reads this hub's own validatorSet or open-peer
+        // through to getQuorum(), which reads this hub's own validatorSet or open-peer
         // count, so the finalization THRESHOLD becomes a function of local reachability:
         // at one height a hub holding a seven-member snapshot needs five votes while a
         // hub whose fetch failed needs three over its live four. The same null also
@@ -690,9 +690,9 @@ class OracleConsensus extends EventEmitter {
         // getValidatorsByCapability at the same height), so the degradation buys no
         // liveness and spends a fee to say so. Consensus.js takes exactly this posture
         // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
-        // not a new one. Genuine single-node / regtest bootstrap (_getQuorum() === 0)
+        // not a new one. Genuine single-node / regtest bootstrap (getQuorum() === 0)
         // keeps the self-finalize path, same federation test as the empty-set guard below.
-        if (!this.hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
+        if (!this.hasDeterministicSnapshot(snapshot) && this.getQuorum() > 0) {
             logger.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
                 'hub\'s live validator set, which peers do not share.');
@@ -722,7 +722,7 @@ class OracleConsensus extends EventEmitter {
         // vote in the trimmed median every hub then co-signs. Null snapshot keeps
         // the unfiltered legacy map (graceful degradation, same as the quorum
         // fallback below).
-        let memberPubkeys = this._memberPubkeySet(snapshot);
+        let memberPubkeys = this.memberPubkeySet(snapshot);
         submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
         if (!submissions || submissions.size === 0) {
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
@@ -751,7 +751,7 @@ class OracleConsensus extends EventEmitter {
 
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
-            : this._getQuorum();
+            : this.getQuorum();
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
             // Mirror the federated proposeRound guard: _aggregateAll can
@@ -906,7 +906,7 @@ class OracleConsensus extends EventEmitter {
     // Propose a round (used both by the real leader and the fallback proposer).
     // snapshot + quorum are captured in finalizeRound() at the block boundary
     // and threaded through so the entire round uses the same locked validator
-    // set. Without the snapshot, falls back to live _getQuorum() per legacy.
+    // set. Without the snapshot, falls back to live getQuorum() per legacy.
     //
     // Async only for the admission era: the leader pins the round's admission map from
     // this hub's own tips before it signs, and that read is the ONE await in here. Below
@@ -957,7 +957,7 @@ class OracleConsensus extends EventEmitter {
             // against the same N for the round's full lifecycle, even when
             // on-chain stake state changes mid-round (capability-staking spec §6).
             snapshot:       snapshot || null,
-            quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this._getQuorum(),
+            quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this.getQuorum(),
             // STAKE_WEIGHTED_QUORUM round? Carry the source-keyed validator weights so
             // checkPrepareQuorum/checkCommitQuorum can tally signer stake (the count
             // quorum above is ignored when weighted).
@@ -1093,7 +1093,7 @@ class OracleConsensus extends EventEmitter {
     // snapshot (indexer unreachable / empty validators). Null disables the
     // membership filter, preserving the legacy graceful-degradation path; the
     // empty-snapshot case is separately skipped via isEmptyFederationSnapshot.
-    _memberPubkeySet(snapshot) {
+    memberPubkeySet(snapshot) {
         if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
         let set = new Set();
         for (let v of snapshot.validators) {
@@ -1135,7 +1135,7 @@ class OracleConsensus extends EventEmitter {
                         (envelope && envelope.data && envelope.data.round),
                         err && err.message ? err.message : err)));
                 break;
-            case ORACLE_PREPARE: this._handlePrepare(envelope); break;
+            case ORACLE_PREPARE: this.handlePrepare(envelope); break;
             case ORACLE_COMMIT:  this._handleCommit(envelope);  break;
         }
     }
@@ -1155,11 +1155,11 @@ class OracleConsensus extends EventEmitter {
         // path. Only reachable from a peer that omits the height (old peer mid
         // rolling deploy, or a malformed envelope) -- current honest senders always
         // populate it. Fail closed: drop the PROPOSE rather than pin to a fake block.
-        // A single-node / regtest hub (_getQuorum()===0) has no peer to split from,
+        // A single-node / regtest hub (getQuorum()===0) has no peer to split from,
         // so it keeps the legacy round-as-anchor fallback for bootstrap.
         let blockHeight = btcBlockHeight;
         if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
-            if (this._getQuorum() > 0) {
+            if (this.getQuorum() > 0) {
                 logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
                     'height in envelope on a federated hub; refusing to pin the price snapshot ' +
                     'at the round id (not a BTC block boundary), which would diverge from the ' +
@@ -1184,7 +1184,7 @@ class OracleConsensus extends EventEmitter {
         // decline when we cannot resolve a tip of our own. Same shape and
         // tolerance as StateCheckpointEngine's co-sign guard. Federated hubs
         // only, like every other fail-closed guard on this path.
-        if (this._getQuorum() > 0) {
+        if (this.getQuorum() > 0) {
             let myTip = this.hub && this.hub._resolveBtcLatestBlock
                 ? await this.hub._resolveBtcLatestBlock()
                 : null;
@@ -1286,9 +1286,9 @@ class OracleConsensus extends EventEmitter {
                     // reachability (e.g. a per-RPC getstakeweightsbycapability failure) forks
                     // the finalization THRESHOLD: peers tally summed stake while this hub
                     // tallies a count over the same N. Skip the round rather than diverge.
-                    // A single-node / regtest hub (_getQuorum()===0) has no peer to split
+                    // A single-node / regtest hub (getQuorum()===0) has no peer to split
                     // from, so it keeps the graceful count fallback below.
-                    if (this._getQuorum() > 0) {
+                    if (this.getQuorum() > 0) {
                         logger.warn('Oracle: dropping PROPOSE for round ' + round + ': weighted mode ' +
                             'active but weight snapshot unavailable while federated; refusing to open a ' +
                             'count-mode pending round this hub\'s peers are not using.');
@@ -1303,11 +1303,11 @@ class OracleConsensus extends EventEmitter {
                 // finalizeRound, in BOTH quorum modes and in the same position relative to
                 // the empty-snapshot check, so a leader and a follower refuse exactly the
                 // same rounds. Without it this follower opens a pending round sized from
-                // its own live set (quorumForRound falls through to _getQuorum below) with
+                // its own live set (quorumForRound falls through to getQuorum below) with
                 // memberPubkeys null, so its vote tally is unfiltered and its leader
                 // election is live-set rotation: three ways to disagree with every peer at
                 // the same height on nothing but its own indexer reachability.
-                if (!this.hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
+                if (!this.hasDeterministicSnapshot(snap) && this.getQuorum() > 0) {
                     logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
                         'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
                         'pending round sized from this hub\'s live validator set.');
@@ -1315,7 +1315,7 @@ class OracleConsensus extends EventEmitter {
                 }
                 quorumForRound = snap
                     ? this.hub.capabilitySnapshot.getQuorum(snap)
-                    : this._getQuorum();
+                    : this.getQuorum();
                 // Refuse to open a pending round on an empty federation snapshot: quorum
                 // would be 0 and quorumMet (count mode) returns `size >= 0` = true, so a
                 // single PREPARE/COMMIT would finalize. A legitimate leader skips such a
@@ -1328,7 +1328,7 @@ class OracleConsensus extends EventEmitter {
                         'such a round; not accepting a single-signature finalization).');
                     return;
                 }
-                memberPubkeys = this._memberPubkeySet(snap);
+                memberPubkeys = this.memberPubkeySet(snap);
             }
         }
 
@@ -1729,7 +1729,7 @@ class OracleConsensus extends EventEmitter {
         this.checkPrepareQuorum(round);
     }
 
-    _handlePrepare(envelope) {
+    handlePrepare(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
         if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
 
@@ -1770,7 +1770,7 @@ class OracleConsensus extends EventEmitter {
 
         let pending = this.pendingRounds.get(round);
         if (!pending) {
-            // Same early-arrival race as _handlePrepare (finding F7).
+            // Same early-arrival race as handlePrepare (finding F7).
             if (!this.finalized.has(round)) this.bufferEarlyMessage(round, envelope);
             else noteDrop({ reason: 'round_torn_down', phase: 'commit', round, sender: envelope.sender, envelope });
             return;
@@ -1795,7 +1795,7 @@ class OracleConsensus extends EventEmitter {
     quorumMet(pending, voteSet) {
         if (pending.weighted)
             return swq.meetsStakeThreshold(pending.validators, [...pending.signatures.keys()]);
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         // Count-mode quorum tallies DISTINCT MEMBER KEYS. The quorum above is sized
         // from the snapshot's qualified set, so a vote from a key with no qualifying
         // stake must not count toward it. Null memberPubkeys keeps the raw count
@@ -2329,13 +2329,13 @@ class OracleConsensus extends EventEmitter {
 
     // Resolve the qualifying validator set for `capability` at a BTC block, normalized to
     // { pubkey, source, weight, amount }. Same shape and same activation gate as
-    // StateCheckpointEngine/CrossChainDexEngine._resolveCapabilityValidators: at/above
+    // StateCheckpointEngine/CrossChainDexEngine.resolveCapabilityValidators: at/above
     // STAKE_WEIGHTED_QUORUM activation (keyed on the BTC block + this hub's network) the
     // SOURCE-KEYED weights, below it the legacy count set (source='', weight=amount), so
     // the rows this hub mirrors match the rows those engines mirror for the same block.
     // A degraded snapshot (indexer RPC error / auth mismatch surfaces as null) normalizes
     // to [], which persists nothing rather than inventing membership.
-    async _resolveCapabilityValidators(capability, block) {
+    async resolveCapabilityValidators(capability, block) {
         let validators = [];
         let capSnapshot = this.hub ? this.hub.capabilitySnapshot : null;
         if (!capSnapshot) return validators;
@@ -2383,7 +2383,7 @@ class OracleConsensus extends EventEmitter {
     // widened uq_cap_snap (block, capability, pubkey, SOURCE) because a pubkey delegated by
     // two sources has two rows and a pubkey-only LIMIT 1 re-read would stream only one.
     async _persistCapabilitySnapshot(capability, block) {
-        let validators = await this._resolveCapabilityValidators(capability, block);
+        let validators = await this.resolveCapabilityValidators(capability, block);
         // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated` marker is what
         // fails this hub's own meetsStakeThreshold closed, but it is a JS array property
         // with no capability_snapshots column behind it, so persisting the capped rows
@@ -2627,7 +2627,7 @@ class OracleConsensus extends EventEmitter {
         // Key the signatures map on LOWERCASE pubkey hex (item 5334). This was the one
         // wire-pubkey keying site in the engine that stored the value verbatim, while every
         // structure the map is read beside is normalized: pending.validators (:697/:1235),
-        // _memberPubkeySet, resolveSenderPubkey, and PriceAggregator's verifier of the same
+        // memberPubkeySet, resolveSenderPubkey, and PriceAggregator's verifier of the same
         // PRICE v0 proof. Hex decoding is case-insensitive, so a peer sending 'AB..' hex
         // verified and then took a SECOND map slot beside its own 'ab..' entry, duplicating
         // that validator in the sigsArray this hub publishes on the wire. (The weighted
@@ -2959,7 +2959,7 @@ class OracleConsensus extends EventEmitter {
         return null;
     }
 
-    _getQuorum() {
+    getQuorum() {
         let N = this.validatorSet.length;
         if (N <= 0) {
             // Fall back to peer count
@@ -2977,16 +2977,16 @@ class OracleConsensus extends EventEmitter {
     // bypass in a federation self-finalizes the round with ONE signature, storing
     // a divergent 'finalized' row and publishing a PRICE v0 the indexer's
     // >2/3-stake gate then rejects. Such a round must be SKIPPED instead. The
-    // federation test is `_getQuorum() > 0` (validatorSet has >=2 registered
+    // federation test is `getQuorum() > 0` (validatorSet has >=2 registered
     // members, or a live peer is connected); a genuine single-node / regtest
-    // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
+    // bootstrap has `getQuorum() === 0`, so it keeps the self-finalize path. A
     // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
     // earlier on both round paths by hasDeterministicSnapshot.
     isEmptyFederationSnapshot(snapshot) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
         let empty = !Array.isArray(vals) || vals.length === 0;
-        return empty && this._getQuorum() > 0;
+        return empty && this.getQuorum() > 0;
     }
 
     // Fail-closed gate for a federated hub: a block-anchored snapshot is what makes the

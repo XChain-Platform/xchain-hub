@@ -617,7 +617,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let declared = bus.nodes.map(nd => nd.pubkey).concat(extra)
             .map(pk => ({ pubkey: pk, source: 'src:' + pk, weight: '1', amount: '1' }));
         bus.nodes.forEach(nd => {
-            nd.consensus.engine._resolveCapabilityValidators = async () => declared.slice();
+            nd.consensus.engine.resolveCapabilityValidators = async () => declared.slice();
         });
         return bus;
     }
@@ -673,7 +673,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
     it('refuses a row whose declared snapshot cannot be resolved, rather than voting under the old set', async function () {
         let bus = buildMesh(4);
         bus.nodes.forEach(nd => {
-            nd.consensus.engine._resolveCapabilityValidators = async () => [];
+            nd.consensus.engine.resolveCapabilityValidators = async () => [];
         });
         await startAll(bus);
         let mid = '3c'.repeat(32), row = sampleRow(mid);
@@ -696,7 +696,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         // The declared snapshot drops the proposing leader. Its signature is one an
         // indexer discards, so the round must not count it either.
         bus.nodes.forEach(nd => {
-            nd.consensus.engine._resolveCapabilityValidators = async () =>
+            nd.consensus.engine.resolveCapabilityValidators = async () =>
                 bus.nodes.filter(x => x.pubkey !== leaderPk)
                     .map(x => ({ pubkey: x.pubkey, source: 'src:' + x.pubkey, weight: '1', amount: '1' }));
         });

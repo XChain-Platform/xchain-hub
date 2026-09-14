@@ -1814,7 +1814,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             };
 
             let threw = null;
-            try { await h.p._defaultBroadcast('PRICE|0|0|5|800005|1|...'); } catch (e) { threw = e; }
+            try { await h.p.defaultBroadcast('PRICE|0|0|5|800005|1|...'); } catch (e) { threw = e; }
 
             expect(threw, 'the guard must throw').to.not.equal(null);
             expect(threw.message).to.match(/phase 1 of a two-transaction/);

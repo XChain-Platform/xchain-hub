@@ -334,7 +334,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(this._polling) return;               // never overlap a slow poll
         this._polling = true;
         try {
-            let snapshotBlock = await this._resolveSnapshotBlock();
+            let snapshotBlock = await this.resolveSnapshotBlock();
             if(snapshotBlock == null) return;   // no anchor: sign nothing this tick
             // A hub on a pre-activation network never polls (base spec section 7). The gate
             // is keyed on the BTC-anchored snapshot block, the same anchor that selects the
@@ -525,7 +525,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // A transfer is read by dest_chain alone, so its map has one entry.
         if(!await this.stampAdmission('bridge_transfers', row, 'transfer ' + transferId)) return;
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
         this._inflight.add(transferId);
         this._inflightSourceLegs.add(sourceLegKey);
         this._inflightTransferLeg.set(transferId, sourceLegKey);
@@ -669,7 +669,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // its map must cover every chain the federation serves, NOT the pair's own copies.
         if(!await this.stampAdmission('policy_snapshots', row, 'policy snapshot ' + snapshotId)) return;
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
         this._inflight.add(snapshotId);
         try {
             await this.policyConsensus.propose(snapshotId, {
@@ -884,7 +884,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // is the only thing that stops a Byzantine leader pinning an ancient validator set:
         // the CrossChainCallEngine.validateProposedMatch rule, the same 144 blocks, applied
         // to both families before any per-family gate reads the height.
-        let myBlock = await this._resolveSnapshotBlock();
+        let myBlock = await this.resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_BLOCK_TOLERANCE) return false;
         // The snapshot block is a BTC height (the anchor that selects the validator set), so
         // it is judged against the BTC key. The source chain's own flag day is checked in
@@ -1354,7 +1354,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // Shared plumbing (the sibling engines' helpers, kept in lockstep by design)
     // ---------------------------------------------------------------------------
 
-    async _resolveCapabilityValidators(capability, block, network){
+    async resolveCapabilityValidators(capability, block, network){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
@@ -1393,7 +1393,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // an off-BTC indexer can verify this record's signatures against a set it holds.
     // Returns the number of rows resolved; 0 is the fail-closed money-path signal.
     async _persistCapabilitySnapshot(capability, block, network){
-        let validators = await this._resolveCapabilityValidators(capability, block, network);
+        let validators = await this.resolveCapabilityValidators(capability, block, network);
         // A TRUNCATED set is never mirrored: the marker fails this hub's own threshold check
         // closed, but it is a JS array property with no column behind it, so persisting the
         // capped rows would let an off-BTC verifier read a partial set as COMPLETE. Zero rows
@@ -1461,7 +1461,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // The BTC-anchored snapshot block. On a no-BTC regtest, fall back to the fixed
     // deterministic override the sibling engines share, so a record and the capability
     // snapshot it is verified against use one anchor.
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;

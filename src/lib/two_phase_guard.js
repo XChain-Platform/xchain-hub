@@ -21,7 +21,7 @@
  * a funding tx has none). The TAPROOT envelope lane is the same shape, answered
  * as a commit PSBT plus a `revealPsbt`.
  *
- * Every built-in `_defaultBroadcast` here does exactly one create_tx, one
+ * Every built-in `defaultBroadcast` here does exactly one create_tx, one
  * walletSign and one broadcastTx, so on those lanes it publishes the FUNDING tx,
  * returns its txid as success, and discards `carrierScripts` - the only material
  * from which the reveal (or a sweep of the funding outputs) could be

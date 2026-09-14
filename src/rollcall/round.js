@@ -442,7 +442,7 @@ class RollcallRound {
             this.lastTip = tipBlock;
 
             let epoch = this.newestSignableEpoch(tipBlock);
-            if(epoch !== null && !this.rounds.has(epoch)) await this._runEpoch(epoch, tipBlock);
+            if(epoch !== null && !this.rounds.has(epoch)) await this.runEpoch(epoch, tipBlock);
 
             // Every open round advances on every tick, not just the newest: the
             // sweeper ladder and the self-publish escape hatch both unlock on the
@@ -478,7 +478,7 @@ class RollcallRound {
 
     // ── sign + gossip ────────────────────────────────────────────────────────
 
-    async _runEpoch(epoch, tipBlock){
+    async runEpoch(epoch, tipBlock){
         let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
         let ledgerHash = (bh && bh.ledger_hash) ? String(bh.ledger_hash).toLowerCase() : '';
         if(!/^[0-9a-f]{64}$/.test(ledgerHash)){
@@ -835,7 +835,7 @@ class RollcallRound {
         // broadcast is GATED on it: an unwritable audit path must not let a real DOGE
         // fee be spent with no recoverable trace, and a batch the ceiling declined
         // must leave no orphan intent line behind.
-        if(!this._recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
+        if(!this.recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
             for(let t of tokens) this.spendGuard.release(t);
             logger.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the publish for epoch ' + state.epoch +
@@ -861,7 +861,7 @@ class RollcallRound {
                 // epoch whose chunks never went out. A phase the loader does not know
                 // leaves the bare 'intent' standing, which would quarantine the epoch
                 // permanently for a hub the operator merely paused and resumed.
-                this._recordSpend({ phase: 'failed', epoch: state.epoch, kind,
+                this.recordSpend({ phase: 'failed', epoch: state.epoch, kind,
                                     delivered: state.sent.size, remaining: chunks.length - i,
                                     error: 'operator pause: ' + this.spendGuard.noteBlocked() });
                 logger.warn(this.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
@@ -884,7 +884,7 @@ class RollcallRound {
                     state.sent.add(p.pubkey);
                     if(p.pubkey === myPubkey) state.ownSigOnWire = true;
                 }
-                this._recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
+                this.recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
                                     rank: state.myRank });
                 logger.info('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
                             (txid ? ' txid=' + txid : '') +
@@ -898,7 +898,7 @@ class RollcallRound {
                     for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
                     // Keep the epoch committed and say so on disk, so an operator
                     // reconciling on chain has the epoch without stdout retention.
-                    this._recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
+                    this.recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
                                         error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                     logger.warn(nodeUtil.format('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
                                  '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
@@ -908,7 +908,7 @@ class RollcallRound {
                 // neither do the chunks after it. Keeping them reserved would make a
                 // failed send cost the window an allowance it never spent.
                 for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                this._recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
+                this.recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 logger.warn(nodeUtil.format('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
                              e && e.message ? e.message : e));
@@ -1052,7 +1052,7 @@ class RollcallRound {
         return this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
     }
 
-    _recordSpend(entry){
+    recordSpend(entry){
         return this.appendLine(this.spendLogPath,
             Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this.ownPubkey() || undefined }, entry));
     }

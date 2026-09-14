@@ -20,7 +20,7 @@
 //
 // The operator ruled on 2026-08-11 that this lands as a PARTIAL fix: NEW_VIEW
 // envelopes carry no block height and cannot lock a snapshot of their own, so
-// _handleNewView pins only when this hub still holds the round's context and
+// handleNewView pins only when this hub still holds the round's context and
 // falls back to the live set otherwise. The last describe() block below is the
 // executable record of that accepted residual window.
 
@@ -108,17 +108,17 @@ describe('Consensus: snapshot-pinned leader election', function () {
         });
     });
 
-    describe('_memberPubkeySet()', function () {
+    describe('memberPubkeySet()', function () {
         it('lowercases the snapshot pubkeys', function () {
-            let set = consensus._memberPubkeySet({ validators: [{ pubkey: 'AB'.repeat(32) }] });
+            let set = consensus.memberPubkeySet({ validators: [{ pubkey: 'AB'.repeat(32) }] });
             expect([...set]).to.deep.equal(['ab'.repeat(32)]);
         });
 
         it('returns null for a null, malformed or empty snapshot (legacy rotation)', function () {
-            expect(consensus._memberPubkeySet(null)).to.equal(null);
-            expect(consensus._memberPubkeySet({})).to.equal(null);
-            expect(consensus._memberPubkeySet({ validators: [] })).to.equal(null);
-            expect(consensus._memberPubkeySet({ validators: [{ amount: '1' }] })).to.equal(null);
+            expect(consensus.memberPubkeySet(null)).to.equal(null);
+            expect(consensus.memberPubkeySet({})).to.equal(null);
+            expect(consensus.memberPubkeySet({ validators: [] })).to.equal(null);
+            expect(consensus.memberPubkeySet({ validators: [{ amount: '1' }] })).to.equal(null);
         });
     });
 
@@ -289,7 +289,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
     // View change: the new leader comes from the same pinned population
     // -----------------------------------------------------------------
 
-    describe('_handleViewChange() / initiateViewChange()', function () {
+    describe('handleViewChange() / initiateViewChange()', function () {
 
         // (5 + 1) % 4 = 2 over the snapshot; (5 + 1) % 5 = 1 over the live set.
         const PINNED_NEW_LEADER = VALIDATORS_4[2];
@@ -309,8 +309,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             seedProposal();
             pm.validatorAddr = PINNED_NEW_LEADER.addr;
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: SEQ } });
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledWith('PBFT_NEW_VIEW', { view: 1, seq: SEQ }),
@@ -321,8 +321,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             seedProposal();
             pm.validatorAddr = DRIFTED_LIVE_SET[1].addr;   // (5 + 1) % 5 = 1
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: SEQ } });
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledWith('PBFT_NEW_VIEW', sinon.match.any)).to.be.false;
@@ -337,10 +337,10 @@ describe('Consensus: snapshot-pinned leader election', function () {
     });
 
     // -----------------------------------------------------------------
-    // _handleNewView(): the deliberately PARTIAL half (operator-accepted)
+    // handleNewView(): the deliberately PARTIAL half (operator-accepted)
     // -----------------------------------------------------------------
 
-    describe('_handleNewView() (partial pin, operator ruling)', function () {
+    describe('handleNewView() (partial pin, operator ruling)', function () {
 
         const PINNED_NEW_LEADER = VALIDATORS_4[2];     // (5 + 1) % 4 = 2
         const LIVE_NEW_LEADER   = DRIFTED_LIVE_SET[1]; // (5 + 1) % 5 = 1
@@ -349,7 +349,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.pendingProposals.set(SEQ, {
                 digest: 'd', timer: null, memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'the pinned leader announced its own view change').to.equal(1);
         });
 
@@ -357,7 +357,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.pendingProposals.set(SEQ, {
                 digest: 'd', timer: null, memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view).to.equal(0);
         });
 
@@ -365,7 +365,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.viewChangeQuorums.set(SEQ, {
                 quorum: 2, weighted: false, validators: [], memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view).to.equal(1);
         });
 
@@ -376,10 +376,10 @@ describe('Consensus: snapshot-pinned leader election', function () {
         it('ACCEPTED RESIDUAL: with no round context it falls back to the live set', function () {
             expect(consensus.memberPubkeysForSeq(SEQ)).to.equal(null);
 
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the snapshot leader is NOT recognized here').to.equal(0);
 
-            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
+            consensus.handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the live-set leader still is').to.equal(1);
         });
     });

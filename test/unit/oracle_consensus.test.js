@@ -619,45 +619,45 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
         it('N=1 → 0 (single node, no consensus needed)', function () {
             oc.setValidatorSet([{ pubkey: 'a', addr: 'a' }]);
-            expect(oc._getQuorum()).to.equal(0);
+            expect(oc.getQuorum()).to.equal(0);
         });
 
         it('N=3 → 2 (majority floor)', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._getQuorum()).to.equal(2);
+            expect(oc.getQuorum()).to.equal(2);
         });
 
         it('N=4 → 3', function () {
             oc.setValidatorSet(VALIDATORS_4);
-            expect(oc._getQuorum()).to.equal(3);
+            expect(oc.getQuorum()).to.equal(3);
         });
 
         it('N=7 → 5', function () {
             oc.setValidatorSet(VALIDATORS_7);
-            expect(oc._getQuorum()).to.equal(5);
+            expect(oc.getQuorum()).to.equal(5);
         });
 
         it('N=10 → 7', function () {
             oc.setValidatorSet(VALIDATORS_10);
-            expect(oc._getQuorum()).to.equal(7);
+            expect(oc.getQuorum()).to.equal(7);
         });
 
         it('N=13 → 9', function () {
             oc.setValidatorSet(VALIDATORS_13);
-            expect(oc._getQuorum()).to.equal(9);
+            expect(oc.getQuorum()).to.equal(9);
         });
 
         it('empty validator set falls back to peer count', function () {
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([{ state: 'open' }, { state: 'open' }]);
             // N = 2 peers + 1 self = 3 → quorum = 2 (majority floor)
-            expect(oc._getQuorum()).to.equal(2);
+            expect(oc.getQuorum()).to.equal(2);
         });
     });
 
@@ -692,13 +692,13 @@ describe('OracleConsensus', function () {
         });
 
         it('true for an empty snapshot when federated (>= 2 registered validators)', function () {
-            oc.setValidatorSet(VALIDATORS_3);   // _getQuorum() = 2
+            oc.setValidatorSet(VALIDATORS_3);   // getQuorum() = 2
             expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
         });
 
         it('false for an empty snapshot when single-node (no validators, no peers)', function () {
             oc.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);       // _getQuorum() = 0
+            pm.getPeerStatus.returns([]);       // getQuorum() = 0
             expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
         });
 
@@ -814,7 +814,7 @@ describe('OracleConsensus', function () {
         });
 
         it('federation with an empty price snapshot skips instead of self-finalizing', async function () {
-            // Federated: 3 registered validators -> _getQuorum() = 2 (> 0).
+            // Federated: 3 registered validators -> getQuorum() = 2 (> 0).
             oc.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[0].addr;   // even as leader, must skip
             // Indexer returned ZERO qualifying price validators at this block.
@@ -850,7 +850,7 @@ describe('OracleConsensus', function () {
         });
 
         it('single-node with an empty snapshot still self-finalizes (bootstrap preserved)', async function () {
-            // Not federated: no registered validators and no peers -> _getQuorum() = 0.
+            // Not federated: no registered validators and no peers -> getQuorum() = 0.
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
             let emptySnap = { validators: [], count: 0 };
@@ -1014,11 +1014,11 @@ describe('OracleConsensus', function () {
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
 
-        it('leaves a single-node hub (_getQuorum() === 0) off the bound entirely', async function () {
+        it('leaves a single-node hub (getQuorum() === 0) off the bound entirely', async function () {
             // Gated exactly like the #1225 guard beside it: a hub with no peers has
             // nothing to split from, so it keeps the bootstrap path and never pays a
             // tip resolve. Asserted on the resolver, which is the whole cost.
-            sinon.stub(oc, '_getQuorum').returns(0);
+            sinon.stub(oc, 'getQuorum').returns(0);
             hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
             await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
             expect(hub._resolveBtcLatestBlock.called).to.equal(false);
@@ -1052,7 +1052,7 @@ describe('OracleConsensus', function () {
                 finalized: false, timer: null
             });
 
-            oc._handlePrepare({
+            oc.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 1, digest }
@@ -1070,7 +1070,7 @@ describe('OracleConsensus', function () {
                 finalized: false, timer: null
             });
 
-            oc._handlePrepare({
+            oc.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 1, digest: 'wrong-digest' }
@@ -1093,7 +1093,7 @@ describe('OracleConsensus', function () {
             });
 
             // Third prepare → quorum met
-            oc._handlePrepare({
+            oc.handlePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { round: 1, digest }
@@ -1146,8 +1146,8 @@ describe('OracleConsensus', function () {
                 finalized: false, timer: null
             });
 
-            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
-            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
+            oc.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
+            oc.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
 
             expect(oc.pendingRounds.get(1).prepares.size).to.equal(1);
         });
@@ -1562,7 +1562,7 @@ describe('OracleConsensus', function () {
 
         it('_handleMessage routes PROPOSE / PREPARE / COMMIT and ignores unknown', function () {
             let prop = sinon.stub(oc, '_handlePropose').resolves();
-            let prep = sinon.spy(oc, '_handlePrepare');
+            let prep = sinon.spy(oc, 'handlePrepare');
             let com  = sinon.spy(oc, '_handleCommit');
             oc._handleMessage({ type: 'ORACLE_PROPOSE', data: { round: 1 } });
             oc._handleMessage({ type: 'ORACLE_PREPARE', data: { round: 1, digest: 'd' } });

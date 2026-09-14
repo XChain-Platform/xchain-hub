@@ -641,7 +641,7 @@ describe('Security Hardening', function () {
 
         const UNKNOWN = 'ws://attacker:9';
 
-        it('Consensus._handlePrepare does not count votes from unregistered senders', function () {
+        it('Consensus.handlePrepare does not count votes from unregistered senders', function () {
             let hub = hubWithRegistry();
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);
@@ -651,11 +651,11 @@ describe('Security Hardening', function () {
                 config, digest, prepares: new Set(), commits: new Set(),
                 quorum: 3, resolved: false, applied: false, timer: null
             });
-            consensus._handlePrepare({ sender: UNKNOWN, data: { seq: 1, configDigest: digest } });
+            consensus.handlePrepare({ sender: UNKNOWN, data: { seq: 1, configDigest: digest } });
             expect(consensus.pendingProposals.get(1).prepares.size).to.equal(0);
         });
 
-        it('OracleConsensus._handlePrepare does not count votes from unregistered senders', function () {
+        it('OracleConsensus.handlePrepare does not count votes from unregistered senders', function () {
             let hub = hubWithRegistry();
             let oc = new OracleConsensus(hub, { getSubmissions: sinon.stub() });
             oc.setValidatorSet(VALIDATORS_4);
@@ -665,11 +665,11 @@ describe('Security Hardening', function () {
                 prepares: new Set(), commits: new Set(), signatures: new Map(),
                 quorum: 3, finalized: false, timer: null
             });
-            oc._handlePrepare({ sender: UNKNOWN, data: { round: 1, digest } });
+            oc.handlePrepare({ sender: UNKNOWN, data: { round: 1, digest } });
             expect(oc.pendingRounds.get(1).prepares.size).to.equal(0);
         });
 
-        it('CrossChainEngine._handlePrepare does not count votes from unregistered senders', function () {
+        it('CrossChainEngine.handlePrepare does not count votes from unregistered senders', function () {
             let hub = hubWithRegistry();
             let engine = new CrossChainEngine(hub);
             engine.setValidatorSet(VALIDATORS_4);
@@ -679,11 +679,11 @@ describe('Security Hardening', function () {
                 attestationId, digest, prepares: new Set(), commits: new Set(),
                 quorum: 3, finalized: false, timer: null
             });
-            engine._handlePrepare({ sender: UNKNOWN, data: { attestationId, digest } });
+            engine.handlePrepare({ sender: UNKNOWN, data: { attestationId, digest } });
             expect(engine.pendingAttestations.get(attestationId).prepares.size).to.equal(0);
         });
 
-        it('Consensus._handlePrepare still counts votes from registered senders', function () {
+        it('Consensus.handlePrepare still counts votes from registered senders', function () {
             let hub = hubWithRegistry();
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);
@@ -693,7 +693,7 @@ describe('Security Hardening', function () {
                 config, digest, prepares: new Set(), commits: new Set(),
                 quorum: 3, resolved: false, applied: false, timer: null
             });
-            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 1, configDigest: digest } });
+            consensus.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 1, configDigest: digest } });
             expect(consensus.pendingProposals.get(1).prepares.has(VALIDATORS_4[1].addr)).to.be.true;
         });
     });

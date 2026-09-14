@@ -11,7 +11,7 @@
 // Stress-sweep #7 LOCALLY-SKIPPED DIVERGENCE: a hub whose gossip lagged below
 // minSubmissions at the block boundary stores the round as 'skipped'. That skip
 // must NOT land in `finalized` (which would make _handlePropose drop the
-// federation's legitimate PROPOSE and _handlePrepare/_handleCommit refuse to
+// federation's legitimate PROPOSE and handlePrepare/_handleCommit refuse to
 // buffer, permanently pinning a NULL price_snapshot for a round the rest of the
 // federation finalized). It must land in a separate `locallySkipped` set so a
 // later PROPOSE still processes and can upgrade the skipped rows to finalized.

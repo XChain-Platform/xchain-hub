@@ -106,7 +106,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                     resolve: null, reject: null
                 });
 
-                engine._handlePrepare({
+                engine.handlePrepare({
                     sender: VALIDATORS_4[2].addr,
                     sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }

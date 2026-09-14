@@ -115,7 +115,7 @@ const persist = (entry, db, cap) =>
 // The resolver on its own, so a reverted marker carry is named at its source rather than
 // only through a writer. The resolvers take the network as an argument or off `this`.
 const resolve = (entry, cap) =>
-    instance(entry, null, cap)._resolveCapabilityValidators(
+    instance(entry, null, cap).resolveCapabilityValidators(
         entry[2], BLOCK, ...(entry[3].length > 1 ? [NETWORK] : []));
 
 describe('capability_snapshots truncation parity (count mode)', function () {

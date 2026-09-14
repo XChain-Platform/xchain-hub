@@ -98,7 +98,7 @@ describe('Regression: ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         affectedChains: ['LTC', 'DOGE'], digest,
@@ -121,7 +121,7 @@ describe('Regression: ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         oldHash: OLD_HASH, newHash: NEW_HASH, digest: 'wrong' }

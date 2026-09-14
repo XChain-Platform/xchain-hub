@@ -15,7 +15,7 @@
 // `_archiveRound` guards only signature collection: `_checkArchiveQuorum` clears it the
 // instant quorum is met and only THEN awaits `_publishArchive`. That await is not
 // covered by flush()'s `_flushing` mutex either, because quorum can arrive on a peer
-// message (`_handleSign`), which runs outside flush entirely. And `_publishArchive`
+// message (`handleSign`), which runs outside flush entirely. And `_publishArchive`
 // does not arm its durable dedupe marker (`recordArchiveIntent`) until after the
 // publisher-attestation round, so the live-intent gate at the top of the publish reads
 // nothing for a publish already in flight: a timer or size flush landing in that window

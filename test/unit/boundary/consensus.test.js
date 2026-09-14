@@ -248,9 +248,9 @@ describe('Boundary: Consensus (PBFT)', function () {
                 resolve: null, reject: null
             });
 
-            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
-            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
-            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
 
             expect(consensus.pendingProposals.get(5).prepares.size).to.equal(1);
         });
@@ -297,27 +297,27 @@ describe('Boundary: Consensus (PBFT)', function () {
 
         it('VIEW_CHANGE below quorum does not advance view', function () {
             // N=4, quorum=3. Send only 2 VIEW_CHANGE votes
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
             // Need 3 votes, only have 2 → view unchanged
             expect(consensus.view).to.equal(0);
         });
 
         it('VIEW_CHANGE at quorum advances view', function () {
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(1);
         });
 
         it('NEW_VIEW with non-number view is ignored', function () {
             consensus.view = 0;
-            consensus._handleNewView({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 'abc' } });
+            consensus.handleNewView({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 'abc' } });
             expect(consensus.view).to.equal(0);
         });
 
         it('VIEW_CHANGE with non-number fields is ignored', function () {
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 'abc', seq: 'def' } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 'abc', seq: 'def' } });
             expect(consensus.pendingViewChanges.size).to.equal(0);
         });
     });

@@ -87,7 +87,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         it('asks for confirmed inputs only by default', async function () {
             const { pub, created } = buildPub([CONFIRMED, UNCONFIRMED]);
             expect(pub.allowUnconfirmedInputs).to.equal(false);
-            let res = await pub._defaultBroadcast('ANCHOR|5|payload');
+            let res = await pub.defaultBroadcast('ANCHOR|5|payload');
             expect(res.txid).to.equal('cc'.repeat(32));
             expect(created).to.have.length(1);
             expect(created[0].unconfirmed, 'the encoder must not fund from mempool change').to.equal(false);
@@ -96,12 +96,12 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             process.env.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS = 'true';
             const { pub, created } = buildPub([UNCONFIRMED]);
             expect(pub.allowUnconfirmedInputs).to.equal(true);
-            await pub._defaultBroadcast('ANCHOR|5|payload');
+            await pub.defaultBroadcast('ANCHOR|5|payload');
             expect(created[0].unconfirmed).to.equal(true);
         });
         it('a per-call allowUnconfirmed (archive chunks) overrides the default for that broadcast only', async function () {
             const { pub, created } = buildPub([UNCONFIRMED]);
-            await pub._defaultBroadcast('ANCHOR|2|chunk', null, { allowUnconfirmed: true });
+            await pub.defaultBroadcast('ANCHOR|2|chunk', null, { allowUnconfirmed: true });
             expect(created[0].unconfirmed).to.equal(true);
             expect(pub.allowUnconfirmedInputs, 'the default is untouched').to.equal(false);
         });
@@ -111,7 +111,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         it('is refused BEFORE anything is built or signed, with a typed deferral error', async function () {
             const { pub, created, signedCount } = buildPub([UNCONFIRMED, { ...UNCONFIRMED, vout: 2 }]);
             let err = null;
-            try { await pub._defaultBroadcast('ANCHOR|5|payload'); } catch (e) { err = e; }
+            try { await pub.defaultBroadcast('ANCHOR|5|payload'); } catch (e) { err = e; }
             expect(err, 'throws').to.not.equal(null);
             expect(err.anchorNoConfirmedUtxo).to.equal(true);
             expect(err.message).to.contain('NO_CONFIRMED_UTXO');
@@ -121,12 +121,12 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         });
         it('is NOT refused when the source serves no confirmations field (unknown is not unconfirmed)', async function () {
             const { pub, created } = buildPub([{ txid: 'dd'.repeat(32), vout: 0, value: '100000000' }]);
-            await pub._defaultBroadcast('ANCHOR|5|payload');
+            await pub.defaultBroadcast('ANCHOR|5|payload');
             expect(created).to.have.length(1);
         });
         it('defers the whole flush at the gate, arms the wake retry, and counts it', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
-            pub._checkBalance = async () => 152890;                       // above the floor: balance alone would pass
+            pub.checkBalance = async () => 152890;                       // above the floor: balance alone would pass
             let walked = false;
             pub._publishPendingCheckpoints = async () => { walked = true; return []; };
             pub._startArchiveRound         = async () => { walked = true; return 'none'; };
@@ -143,7 +143,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         });
         it('a normal flush that finds a confirmed output clears the retry and the wake returns to failover-only', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
-            pub._checkBalance = async () => 152890;
+            pub.checkBalance = async () => 152890;
             pub._publishPendingCheckpoints = async () => [];
             pub._startArchiveRound         = async () => 'none';
             await pub.flush();

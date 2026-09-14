@@ -79,7 +79,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
 
     it('buffers a PREPARE that arrives before any pending round exists', function () {
         let digest = oc._digest(ROUND, PRICES);
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
         expect(oc.earlyMessages.get(ROUND)).to.have.length(1);
     });
@@ -93,14 +93,14 @@ describe('OracleConsensus: early-message buffer for F7', function () {
     it('does NOT buffer for rounds already finalized', function () {
         let digest = oc._digest(ROUND, PRICES);
         oc.finalized.add(ROUND);
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
         expect(oc.earlyMessages.has(ROUND)).to.be.false;
     });
 
     it('caps the buffer per round', function () {
         let digest = oc._digest(ROUND, PRICES);
         for (let i = 0; i < oc.earlyMessageMaxPerRound + 10; i++) {
-            oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
+            oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
         }
         expect(oc.earlyMessages.get(ROUND)).to.have.length(oc.earlyMessageMaxPerRound);
     });
@@ -109,7 +109,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         let digest = oc._digest(ROUND, PRICES);
 
         // Votes from val-c beat the proposal (the F7 race).
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
         oc._handleCommit(voteEnvelope('ORACLE_COMMIT',  VALSET[2].addr, digest));
         expect(oc.earlyMessages.get(ROUND)).to.have.length(2);
 

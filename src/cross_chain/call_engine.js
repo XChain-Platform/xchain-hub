@@ -369,7 +369,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(this._inflight.has(roundId)) return;
         if(await this.rowExists(callId, 'dispatch')) return;
 
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
         let row = {
@@ -399,7 +399,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         if(!await this.stampAdmission(row)) return;
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -485,7 +485,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         let resultStatus = RESULT_STATUSES.includes(res.status) ? String(res.status) : 'error';
 
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
         let row = {
@@ -513,7 +513,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         if(!await this.stampAdmission(row)) return;
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -678,7 +678,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(!Number.isFinite(Number(row.effective_time)) ||
            Number(row.effective_time) - now > 3600 ||
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
-        let myBlock = await this._resolveSnapshotBlock();
+        let myBlock = await this.resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > 144) return false;
 
         // The admission map is a leader-choice field too, and above the activation it is
@@ -979,11 +979,11 @@ class CrossChainCallEngine extends EventEmitter {
     // Returns the number of capability rows resolved (and persisted) for this
     // (capability, block). A return of 0 means the set degraded to empty (an
     // indexer RPC error / auth mismatch surfaces as a null snapshot, which
-    // _resolveCapabilityValidators normalizes to []) or was refused as truncated,
+    // resolveCapabilityValidators normalizes to []) or was refused as truncated,
     // so money-path callers can fail closed rather than committing a row whose
     // signatures no mirror can verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
-        let validators = await this._resolveCapabilityValidators(capability, block, network);
+        let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. Mirroring the
         // capped rows would let the off-BTC cross_chain verifiers finalize over an
@@ -1021,8 +1021,8 @@ class CrossChainCallEngine extends EventEmitter {
     }
 
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM activation, legacy count set below
-    // it (source='' , weight=amount). Mirrors CrossChainDexEngine._resolveCapabilityValidators.
-    async _resolveCapabilityValidators(capability, block, network){
+    // it (source='' , weight=amount). Mirrors CrossChainDexEngine.resolveCapabilityValidators.
+    async resolveCapabilityValidators(capability, block, network){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
@@ -1122,7 +1122,7 @@ class CrossChainCallEngine extends EventEmitter {
         return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
     }
 
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;

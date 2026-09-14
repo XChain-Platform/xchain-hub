@@ -202,8 +202,8 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
 
         // Both blocks are real on the follower's own indexer, both carry the roots, both
         // sit at the same snapshot_block: every existing guard passes for each.
-        await follower.engine._handleSignReq(signReqFor(leader, SNAP, 500));
-        await follower.engine._handleSignReq(signReqFor(leader, SNAP, 499));
+        await follower.engine.handleSignReq(signReqFor(leader, SNAP, 500));
+        await follower.engine.handleSignReq(signReqFor(leader, SNAP, 499));
 
         expect(signs.length, 'exactly one signature left the hub for this sequence').to.equal(1);
         expect(follower.engine._seqDoubleSignRefusals, 'the second is counted').to.equal(1);
@@ -219,8 +219,8 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
         let follower = bus.nodes.find(nd => nd !== leader);
         let signs = watchCosign(follower);
 
-        await follower.engine._handleSignReq(signReqFor(leader, SNAP, 500));
-        await follower.engine._handleSignReq(signReqFor(leader, SNAP, 500));
+        await follower.engine.handleSignReq(signReqFor(leader, SNAP, 500));
+        await follower.engine.handleSignReq(signReqFor(leader, SNAP, 500));
 
         expect(signs.length, 'a duplicate gossip delivery is answered, not refused').to.equal(2);
         expect(follower.engine._seqDoubleSignRefusals, 'nothing is metered').to.equal(0);

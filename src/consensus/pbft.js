@@ -60,7 +60,7 @@ const MAX_VIEW_SKEW = 100;
 // AttestationConsensus buffers, finding F7).
 //
 // _handlePrePrepare is ASYNC (it locks the validator snapshot at the leader's
-// block boundary, an out-of-process call) while _handlePrepare/_handleCommit are
+// block boundary, an out-of-process call) while handlePrepare/_handleCommit are
 // synchronous and, before this buffer, dropped any vote for a seq this hub had
 // not opened yet. A leader whose own stake already meets the round's threshold
 // broadcasts PRE_PREPARE and COMMIT back to back, so on a busy host the COMMIT
@@ -246,7 +246,7 @@ class Consensus {
         // every hub in the federation computes the same quorum for this
         // config-change round. Whole-federation snapshot (not capability-
         // scoped) because config changes affect every staker equally.
-        // Falls back to live _getQuorum() when the indexer or BTC tip
+        // Falls back to live getQuorum() when the indexer or BTC tip
         // can't be resolved (graceful degradation; same behavior as before
         // the snapshot wiring landed).
         let { snapshot, weighted, requestedBlockIndex } = await this.lockSnapshot();
@@ -269,7 +269,7 @@ class Consensus {
         }
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
-            : this._getQuorum();
+            : this.getQuorum();
 
         // Single-node fallback: no peers connected -> apply directly. But a
         // present-but-empty federation snapshot also yields quorum 0; applying
@@ -300,7 +300,7 @@ class Consensus {
         // rotation, resolve the addr locally. Null memberPubkeys (no usable
         // snapshot, i.e. the single-node / graceful-degradation path) keeps the
         // legacy live-set rotation.
-        let memberPubkeys = this._memberPubkeySet(snapshot);
+        let memberPubkeys = this.memberPubkeySet(snapshot);
         // The proposal slot. Two rules keep the rotation live:
         //  1. Start past lastAppliedSeq, not just this.seq. Rounds applied as
         //     a follower advance lastAppliedSeq only, so a hub that has mostly
@@ -428,7 +428,7 @@ class Consensus {
     // the legacy path). `weighted` is gated on the BTC block boundary + network so
     // the hub and every other hub flip on the same anchor. Returns
     // { snapshot: null, weighted } when no snapshot can be acquired (the caller
-    // then falls back to live _getQuorum(), as before).
+    // then falls back to live getQuorum(), as before).
     //
     // `requestedBlockIndex` is the height this call ASKED for, before
     // CapabilitySnapshot buried it by HUB_SNAPSHOT_REORG_BUFFER; the returned
@@ -476,10 +476,10 @@ class Consensus {
                         (envelope && envelope.data && envelope.data.seq),
                         err && err.message ? err.message : err)));
                 break;
-            case PBFT_PREPARE:     this._handlePrepare(envelope);    break;
+            case PBFT_PREPARE:     this.handlePrepare(envelope);    break;
             case PBFT_COMMIT:      this._handleCommit(envelope);     break;
-            case PBFT_VIEW_CHANGE: this._handleViewChange(envelope); break;
-            case PBFT_NEW_VIEW:    this._handleNewView(envelope);    break;
+            case PBFT_VIEW_CHANGE: this.handleViewChange(envelope); break;
+            case PBFT_NEW_VIEW:    this.handleNewView(envelope);    break;
         }
     }
 
@@ -601,7 +601,7 @@ class Consensus {
             }
             let quorum = snapshot
                 ? this.hub.capabilitySnapshot.getQuorum(snapshot)
-                : this._getQuorum();
+                : this.getQuorum();
 
             // Decline to PREPARE over an empty federation snapshot: quorum would be
             // 0 and the count-mode quorum check (`size >= 0`) would let a single
@@ -622,7 +622,7 @@ class Consensus {
             // follower proposal is created, or an authenticated non-leader could
             // seed a proposal for an uncontested seq and drive every follower to
             // PREPARE/COMMIT its config.
-            if (!this.leaderIdentityOk(seq, view, envelope, this._memberPubkeySet(snapshot))) return;
+            if (!this.leaderIdentityOk(seq, view, envelope, this.memberPubkeySet(snapshot))) return;
 
             // Create a follower proposal (no resolve/reject; we didn't initiate it)
             let proposal = {
@@ -641,7 +641,7 @@ class Consensus {
                 btcBlockHeight: btcBlockHeight || null,
                 weighted:       !!weighted,
                 validators:     this.normalizeValidators(snapshot, weighted),
-                memberPubkeys:  this._memberPubkeySet(snapshot),
+                memberPubkeys:  this.memberPubkeySet(snapshot),
                 preparePubkeys: new Set(),
                 commitPubkeys:  new Set()
             };
@@ -768,7 +768,7 @@ class Consensus {
         return bucket.length;
     }
 
-    _handlePrepare(envelope) {
+    handlePrepare(envelope) {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
 
@@ -819,8 +819,8 @@ class Consensus {
     // election and quorum finally read one population instead of two. Returns
     // null when no usable snapshot exists (indexer down, single-node bootstrap),
     // which every caller reads as "fall back to legacy live-set rotation".
-    // Mirrors OracleConsensus._memberPubkeySet.
-    _memberPubkeySet(snapshot) {
+    // Mirrors OracleConsensus.memberPubkeySet.
+    memberPubkeySet(snapshot) {
         if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
         let set = new Set();
         for (let v of snapshot.validators) {
@@ -881,7 +881,7 @@ class Consensus {
 
     // Shared PRE_PREPARE leader-identity guard. A PRE_PREPARE must
     // come from the validator the rotation designates as leader for the CLAIMED
-    // (seq, view), mirroring the check _handleNewView applies to NEW_VIEW and
+    // (seq, view), mirroring the check handleNewView applies to NEW_VIEW and
     // OracleConsensus applies to PROPOSE: a Byzantine node can then only ever
     // propose in a (seq, view) for which it is already the legitimate leader.
     // The rotation is evaluated over `memberPubkeys` when the round has a pinned
@@ -970,7 +970,7 @@ class Consensus {
     quorumMet(ctx, addrSet, pubkeySet) {
         if (ctx.weighted)
             return swq.meetsStakeThreshold(ctx.validators, pubkeySet || new Set());
-        let quorum = (typeof ctx.quorum === 'number') ? ctx.quorum : this._getQuorum();
+        let quorum = (typeof ctx.quorum === 'number') ? ctx.quorum : this.getQuorum();
         // Count DISTINCT SIGNING KEYS, not sender addrs. Both are populated, but the
         // key set is the honest one: it dedupes a key that voted under several addrs
         // and it counts a chain-attributed validator that has no registry addr. The
@@ -1104,7 +1104,7 @@ class Consensus {
         await this.hub.applyConfig(config);
     }
 
-    _handleViewChange(envelope) {
+    handleViewChange(envelope) {
         let { view, seq } = envelope.data;
         if (typeof view !== 'number' || typeof seq !== 'number') return;
 
@@ -1145,7 +1145,7 @@ class Consensus {
         } else if (this.viewChangeQuorums.has(seq)) {
             vcCtx = this.viewChangeQuorums.get(seq);
         } else {
-            vcCtx = { quorum: this._getQuorum(), weighted: false, validators: [], memberPubkeys: null };
+            vcCtx = { quorum: this.getQuorum(), weighted: false, validators: [], memberPubkeys: null };
         }
         if (vcCtx.quorum === 0) return;
 
@@ -1205,12 +1205,12 @@ class Consensus {
     //      the legitimate leader; it can never point followers at another node.
     //
     // The 2f+1 VIEW_CHANGE quorum that authorizes the transition is enforced
-    // on the broadcasting side (_handleViewChange emits NEW_VIEW only after
+    // on the broadcasting side (handleViewChange emits NEW_VIEW only after
     // collecting quorum). NEW_VIEW envelopes carry no vote proofs, and a
     // lagging follower that missed the VIEW_CHANGE round legitimately relies on
     // the leader's announcement to catch up, so the quorum is not (and, given
     // the wire format, cannot be) re-verified here.
-    _handleNewView(envelope) {
+    handleNewView(envelope) {
         let { view, seq } = envelope.data;
         if (typeof view !== 'number' || typeof seq !== 'number') return;
 
@@ -1226,7 +1226,7 @@ class Consensus {
         // cannot be pinned the way the other sites are. It does the best it can
         // and reuses the round's pinned population when this hub still holds it
         // (a pending proposal for `seq`, or the view-change context the
-        // initiator stashed), because _handleViewChange now elects the new
+        // initiator stashed), because handleViewChange now elects the new
         // leader from exactly that set: without this, the pinned leader's own
         // NEW_VIEW would be rejected by every peer still checking the live set,
         // turning the fix into a liveness stall. When neither survives, the live
@@ -1255,7 +1255,7 @@ class Consensus {
         this.view++;
         logger.info('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
 
-        // Stash the round-locked quorum CONTEXT for this seq so _handleViewChange
+        // Stash the round-locked quorum CONTEXT for this seq so handleViewChange
         // tallies view-change votes against the proposal-creation snapshot. The
         // proposal is already gone from pendingProposals (the triggering timeout
         // removed it before calling us), so this is the only place the initiator
@@ -1335,7 +1335,7 @@ class Consensus {
     //   4. PREPARE/COMMIT checks use proposal.quorum (cached), not this.
     // Whole-federation snapshot (not capability-scoped) because config
     // changes affect every staker equally. See capability-staking-model.md §6.
-    _getQuorum() {
+    getQuorum() {
         // Use validator set if available, otherwise fall back to live peer count
         let N;
         if (this.validatorSet.length > 0) {

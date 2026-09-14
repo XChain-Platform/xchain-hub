@@ -870,13 +870,13 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _resolveCapabilityValidators ─────────────────────────────────────────
+    // ── resolveCapabilityValidators ─────────────────────────────────────────
 
-    describe('_resolveCapabilityValidators()', function () {
+    describe('resolveCapabilityValidators()', function () {
         it('returns snapshot validators when capSnapshot provides them', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             eng.capSnapshot = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: 'p1', amount: '9' }] }) };
-            let v = await eng._resolveCapabilityValidators('cross_chain', 100);
+            let v = await eng.resolveCapabilityValidators('cross_chain', 100);
             expect(v).to.have.length(1);
             expect(v[0].pubkey).to.equal('p1');
         });
@@ -884,7 +884,7 @@ describe('CrossChainDexEngine', function () {
         it('seeds this hub\'s pubkey when no snapshot and _seedLocalValidator=true', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             eng.capSnapshot = null; eng._seedLocalValidator = true;
-            let v = await eng._resolveCapabilityValidators('cross_chain', 100);
+            let v = await eng.resolveCapabilityValidators('cross_chain', 100);
             expect(v).to.have.length(1);
             expect(v[0].pubkey).to.equal(eng.identity.getPubkeyHex());
         });
@@ -892,17 +892,17 @@ describe('CrossChainDexEngine', function () {
         it('returns empty when no snapshot and _seedLocalValidator=false', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             eng.capSnapshot = null; eng._seedLocalValidator = false;
-            expect(await eng._resolveCapabilityValidators('cross_chain', 100)).to.have.length(0);
+            expect(await eng.resolveCapabilityValidators('cross_chain', 100)).to.have.length(0);
         });
     });
 
-    // ── _resolveSnapshotBlock ────────────────────────────────────────────────
+    // ── resolveSnapshotBlock ────────────────────────────────────────────────
 
-    describe('_resolveSnapshotBlock()', function () {
+    describe('resolveSnapshotBlock()', function () {
         it('delegates to hub._resolveBtcLatestBlock', async function () {
             let hub = makeDexHub();
             hub._resolveBtcLatestBlock = sinon.stub().resolves(500);
-            expect(await new CrossChainDexEngine(hub)._resolveSnapshotBlock()).to.equal(500);
+            expect(await new CrossChainDexEngine(hub).resolveSnapshotBlock()).to.equal(500);
         });
 
         it('falls back to XDEX_SNAPSHOT_BLOCK override when BTC tip is null', async function () {
@@ -910,7 +910,7 @@ describe('CrossChainDexEngine', function () {
             hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
             let eng = new CrossChainDexEngine(hub);
             eng._snapshotBlockOverride = 42;
-            expect(await eng._resolveSnapshotBlock()).to.equal(42);
+            expect(await eng.resolveSnapshotBlock()).to.equal(42);
         });
 
         it('returns null when no BTC tip and no override', async function () {
@@ -918,7 +918,7 @@ describe('CrossChainDexEngine', function () {
             hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
             let eng = new CrossChainDexEngine(hub);
             eng._snapshotBlockOverride = NaN;
-            expect(await eng._resolveSnapshotBlock()).to.be.null;
+            expect(await eng.resolveSnapshotBlock()).to.be.null;
         });
     });
 
@@ -979,7 +979,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             let capped = [{ pubkey: 'pub1', source: 'srcA', weight: '50000', amount: '50000' }];
             capped.truncated = true;
-            sinon.stub(eng, '_resolveCapabilityValidators').resolves(capped);
+            sinon.stub(eng, 'resolveCapabilityValidators').resolves(capped);
 
             let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
             expect(n, 'zero rows is the caller\'s fail-closed signal').to.equal(0);
@@ -992,7 +992,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             let full = [{ pubkey: 'pub1', source: 'srcA', weight: '50000', amount: '50000' }];
             full.truncated = false;
-            sinon.stub(eng, '_resolveCapabilityValidators').resolves(full);
+            sinon.stub(eng, 'resolveCapabilityValidators').resolves(full);
 
             let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
             expect(n).to.equal(1);

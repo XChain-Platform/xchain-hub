@@ -760,7 +760,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
         let WINNER  = Buffer.from('winner-body');
         let pending = seedWithWinner([p1, p2], WINNER);
         // p1's signature is valid, but over ITS OWN divergent body, not the winner.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('divergent-body')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('divergent-body')));
         expect(pending.signatures.has(pub(p1))).to.equal(false);
         expect(pending.signatures.size).to.equal(0);
         // The PREPARE participation is still recorded (mirrors _handleCommit).
@@ -770,7 +770,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
     it('DOES count a PREPARE signature taken over the winner body', function () {
         let WINNER  = Buffer.from('winner-body');
         let pending = seedWithWinner([p1, p2], WINNER);
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, WINNER));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, WINNER));
         expect(pending.signatures.has(pub(p2))).to.equal(true);
         expect(pending.signatures.size).to.equal(1);
         // And the stored signature actually verifies over the winner bytes.
@@ -796,7 +796,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
         expect(pending.signatures.size).to.equal(0);
 
         // The same peer's PREPARE over the winner is what actually counts it.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, WINNER));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, WINNER));
         expect(pending.signatures.has(pub(p1))).to.equal(true);
         let canon = buildCanonical(RID, 'http_get', WINNER, 'ok', '');
         expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(p1)), pub(p1))).to.equal(true);
@@ -1023,7 +1023,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // requires the follower to hold it so the winner can be hash-checked.
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));
         await flush();
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         expect(pending.winner.body.toString()).to.equal('leader-winning-body');
         // Our own vote is re-signed over the agreed (leader) bytes.
         expect(pending.signatures.has(pub(me))).to.equal(true);
@@ -1042,7 +1042,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // p2 (responsible but NOT the leader) races a divergent body in first.
         // It must be buffered, not adopted as the winner.
         let byzBody = Buffer.from('byzantine-divergent-body');
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, byzBody));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, byzBody));
         expect(pending.winner, 'a non-leader judge_model PREPARE must not set the winner').to.equal(null);
 
         // The leader's PREPARE establishes the real winner; the buffered Byzantine
@@ -1051,7 +1051,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         let leaderBody = Buffer.from('leader-winning-body');
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));   // PROPOSE precedes PREPARE (A-F1)
         await flush();
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         await flush();
         expect(pending.winner.body.toString(), 'winner is the leader body').to.equal('leader-winning-body');
 
@@ -1117,7 +1117,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
 
         // Leader's PREPARE arrives and is adopted as winner.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
         await flush();
 
         let prepBroadcasts = hub._peerManager.broadcast.getCalls()
@@ -1133,13 +1133,13 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         let pending = await seedFollowerRound();
 
         // Leader PREPARE (p1) arrives.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
         // Follower p2 adopts the leader PREPARE and re-broadcasts its own.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, P1_BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, P1_BODY));
         await flush();
 
         // Our own re-broadcast is counted locally (pending.prepares.add(myPubkey)
-        // runs in _handlePrepare), so all three workers' PREPAREs are now counted.
+        // runs in handlePrepare), so all three workers' PREPAREs are now counted.
         let needed = Math.max(pending.quorum, REDUNDANCY);
         expect(pending.prepares.size).to.be.at.least(needed);
     });
@@ -1148,10 +1148,10 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         let pending = await seedFollowerRound();
 
         // p2 (follower, not leader) races a PREPARE first.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.from('p2-early-body')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.from('p2-early-body')));
         expect(pending.winner, 'follower PREPARE must not set winner before leader').to.equal(null);
         // Leader arrives; winner must be the leader body, not p2's.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
         await flush();
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal(P1_BODY.toString());
@@ -1178,7 +1178,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
 
         // p1's PREPARE (byte-identical body) arrives first: adopted as winner.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         await flush();
 
         let prepBroadcasts = hub._peerManager.broadcast.getCalls()
@@ -1194,7 +1194,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
 
         // p2's PREPARE lands: prepares = {me, p1, p2} reaches max(quorum, REDUNDANCY)
         // and the COMMIT goes out - the round no longer deadlocks to expiry.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
         await flush();
         expect(pending.prepares.size).to.be.at.least(Math.max(pending.quorum, REDUNDANCY));
         expect(pending._commitSent, 'COMMIT sent after prepare-quorum').to.equal(true);
@@ -1202,7 +1202,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         // A further PREPARE re-delivery must NOT echo again (fires once per round).
         let prepAfterQuorum = hub._peerManager.broadcast.getCalls()
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         await flush();
         let prepFinal = hub._peerManager.broadcast.getCalls()
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
@@ -1217,7 +1217,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         let prepBefore = hub._peerManager.broadcast.getCalls()
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('winner-body')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('winner-body')));
         await flush();
 
         let prepAfter = hub._peerManager.broadcast.getCalls()
@@ -1393,7 +1393,7 @@ describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', f
     });
 });
 
-describe('AttestationConsensus: _handlePrepare adoption + guards', function () {
+describe('AttestationConsensus: handlePrepare adoption + guards', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -2005,7 +2005,7 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         let pending = await seedFullProposals();
         expect(pending.proposals.size).to.equal(3);
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('fabricated-never-proposed')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('fabricated-never-proposed')));
         await flush();
         expect(pending.winner, 'a fabricated leader body must not be adopted').to.equal(null);
         expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
@@ -2013,7 +2013,7 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
 
     it('rejects a leader PREPARE whose body matches a proposal but whose meta diverges', async function () {
         let pending = await seedFullProposals();
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'tampered-meta'));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'tampered-meta'));
         await flush();
         expect(pending.winner).to.equal(null);
     });
@@ -2027,7 +2027,7 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         await flush();
         let pending = c.pending.get(RID);
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body')));
         expect(pending.winner, 'not adopted before the proposal set can vouch').to.equal(null);
         expect(c.earlyMessages.get(RID), 'held for replay').to.have.lengthOf(1);
 
@@ -2056,7 +2056,7 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         let pending = c.pending.get(RID);
         expect(pending.proposals.size).to.equal(3);
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.alloc(0)));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.alloc(0)));
         await flush();
         expect(pending.winner, 'an empty-body ok winner vouched only by an error proposal must not latch').to.equal(null);
         expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
@@ -2085,7 +2085,7 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         await flush();
         let pending = c.pending.get(RID);
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('byzantine-body')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('byzantine-body')));
         await flush();
         expect(pending.winner, 'one uncorroborated divergent PREPARE must not wedge the round').to.equal(null);
         expect(pending.signatures.has(pub(p1)), 'its sig is held as a candidate, not credited').to.equal(false);
@@ -2097,9 +2097,9 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         let pending = c.pending.get(RID);
         const BODY = Buffer.from('agreed-body');
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         expect(pending.winner).to.equal(null);
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
         await flush();
 
         expect(pending.winner, 'corroborated by 2 responsible signers').to.not.equal(null);
@@ -2119,7 +2119,7 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         await flush();
         let pending = c.pending.get(RID);
 
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         await flush();
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('shared-body');
@@ -2132,7 +2132,7 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
 
         // p1 streams three distinct bodies: only the LAST may remain live.
         for (let i = 0; i < 3; i++) {
-            c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('spam-body-' + i)));
+            c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('spam-body-' + i)));
         }
         await flush();
         expect(pending.winner).to.equal(null);
@@ -2141,12 +2141,12 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         // The stale first body can no longer be corroborated into a winner:
         // p2 matching p1's ABANDONED body finds no partner (p1 moved on), so
         // it holds as p2's own single candidate instead of latching.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-0')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-0')));
         await flush();
         expect(pending.winner, 'an abandoned body must not latch off one remaining signer').to.equal(null);
 
         // Corroboration on a sender's CURRENT body still works.
-        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-2')));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-2')));
         await flush();
         expect(pending.winner, 'both senders currently on the same body latches').to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('spam-body-2');
@@ -2295,7 +2295,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         let errs = [];
         sinon.stub(console, 'error').callsFake((m) => errs.push(String(m)));
 
-        cc._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
+        cc.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
 
         let pending = cc.pending.get(RID);
         expect(pending.winner).to.equal(null);                    // not adopted on a truthy Promise

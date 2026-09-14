@@ -15,7 +15,7 @@
 // Both publishers call the encoder's createTx with encoding 'P2SH'. The encoder's
 // P2SH path runs bitcoin.address.fromBase58Check() on the `pubkey` field, so that
 // field MUST carry the base58check address, not the raw hex public key. The e2e
-// harness installs a custom broadcast hook that bypasses _defaultBroadcast, so this
+// harness installs a custom broadcast hook that bypasses defaultBroadcast, so this
 // path is otherwise untested; these tests exercise it directly with a mock encoder.
 
 const sinon              = require('sinon');
@@ -42,7 +42,7 @@ function makeMockEncoder() {
     };
 }
 
-describe('Publisher _defaultBroadcast: pubkey field carries base58check address', function () {
+describe('Publisher defaultBroadcast: pubkey field carries base58check address', function () {
 
     afterEach(function () {
         sinon.restore();
@@ -56,7 +56,7 @@ describe('Publisher _defaultBroadcast: pubkey field carries base58check address'
         pub.btcAddress   = '1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';  // base58check P2PKH
         pub.btcPubkeyHex = '02' + 'ab'.repeat(32);                  // 66-char hex pubkey
 
-        const result = await pub._defaultBroadcast('ATTEST|1|...');
+        const result = await pub.defaultBroadcast('ATTEST|1|...');
 
         expect(encoder.createTxArgs).to.be.an('object');
         expect(encoder.createTxArgs.encoding).to.equal('P2SH');
@@ -73,7 +73,7 @@ describe('Publisher _defaultBroadcast: pubkey field carries base58check address'
         pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';  // base58check DOGE address
         pub.dogePubkeyHex = '02' + 'cd'.repeat(32);                 // 66-char hex pubkey
 
-        const result = await pub._defaultBroadcast('PRICE|0|...');
+        const result = await pub.defaultBroadcast('PRICE|0|...');
 
         expect(encoder.createTxArgs).to.be.an('object');
         expect(encoder.createTxArgs.encoding).to.equal('P2SH');
@@ -88,7 +88,7 @@ describe('Publisher _defaultBroadcast: pubkey field carries base58check address'
 // exempts the set it fetches itself so a large wallet can still transact. The
 // fetch-then-forward shape always supplied an array, so it could never reach
 // that exemption and every publisher hard-failed past 500 outputs.
-describe('Publisher _defaultBroadcast: oversized UTXO sets route to the encoder self-fetch', function () {
+describe('Publisher defaultBroadcast: oversized UTXO sets route to the encoder self-fetch', function () {
 
     afterEach(function () {
         sinon.restore();
@@ -113,14 +113,14 @@ describe('Publisher _defaultBroadcast: oversized UTXO sets route to the encoder 
 
     it('forwards the array unchanged at the cap', async function () {
         const { pub, encoder } = oraclePublisherWith(utxoSet(500));
-        await pub._defaultBroadcast('PRICE|0|...');
+        await pub.defaultBroadcast('PRICE|0|...');
         expect(encoder.createTxArgs.utxos).to.be.an('array').with.lengthOf(500);
     });
 
     it('omits the utxos param past the cap so the encoder self-fetches', async function () {
         sinon.stub(console, 'warn');
         const { pub, encoder } = oraclePublisherWith(utxoSet(501));
-        await pub._defaultBroadcast('PRICE|0|...');
+        await pub.defaultBroadcast('PRICE|0|...');
         expect(encoder.createTxArgs.utxos).to.equal(undefined);
         // The wire body is what the encoder validates, and JSON.stringify drops an
         // undefined value, so the param is genuinely absent rather than null.
@@ -133,7 +133,7 @@ describe('Publisher _defaultBroadcast: oversized UTXO sets route to the encoder 
     it('still refuses an unfunded address before calling create_tx', async function () {
         const { pub, encoder } = oraclePublisherWith([]);
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
         expect(threw).to.be.an('error');
         expect(threw.message).to.contain('no UTXOs available');
         expect(encoder.createTxArgs).to.equal(null);
@@ -149,7 +149,7 @@ describe('Publisher _defaultBroadcast: oversized UTXO sets route to the encoder 
         pub.btcAddress   = '1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
         pub.btcPubkeyHex = '02' + 'ab'.repeat(32);
 
-        await pub._defaultBroadcast('ATTEST|1|...');
+        await pub.defaultBroadcast('ATTEST|1|...');
 
         expect(encoder.createTxArgs.utxos).to.equal(undefined);
         expect(encoder.createTxArgs.pubkey).to.equal(pub.btcAddress);
@@ -165,7 +165,7 @@ describe('Publisher _defaultBroadcast: oversized UTXO sets route to the encoder 
 // the reveal PSBT needs the SDK's signRevealPsbt finalizer, which walletSign is not.
 // So it must refuse, and refuse BEFORE the wallet hook runs: nothing signed, no fee
 // spent, no value stranded.
-describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction encoding', function () {
+describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encoding', function () {
 
     afterEach(function () {
         sinon.restore();
@@ -193,7 +193,7 @@ describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction enco
         pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw).to.be.an('error');
         expect(threw.message).to.contain('two-transaction');
@@ -212,7 +212,7 @@ describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction enco
         pub.btcPubkeyHex = '02' + 'ab'.repeat(32);
 
         let threw = null;
-        try { await pub._defaultBroadcast('ATTEST|1|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('ATTEST|1|...'); } catch (e) { threw = e; }
 
         expect(threw).to.be.an('error');
         expect(threw.message).to.contain('two-transaction');
@@ -234,7 +234,7 @@ describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction enco
         pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
         pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
 
-        const result = await pub._defaultBroadcast('PRICE|0|...');
+        const result = await pub.defaultBroadcast('PRICE|0|...');
         expect(result.txid).to.equal('broadcast-txid');
     });
 });
@@ -252,7 +252,7 @@ describe('Publisher _defaultBroadcast: refuses phase 1 of a two-transaction enco
 // The release is confined to the pre-broadcast section on purpose. Past the send, holding
 // the inputs is the protective behaviour: releasing there would invite a second build that
 // double-spends a transaction which may already have landed.
-describe('Publisher _defaultBroadcast: releases the encoder reservation of an abandoned build', function () {
+describe('Publisher defaultBroadcast: releases the encoder reservation of an abandoned build', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -284,7 +284,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const pub = oraclePub(encoder);
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw, 'the refusal must still surface').to.be.an('error');
         expect(threw.message).to.contain('two-transaction');
@@ -298,7 +298,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const pub = oraclePub(encoder, sinon.stub().rejects(new Error('signer offline')));
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw.message).to.contain('signer offline');
         expect(encoder.releaseInputs.calledOnce,
@@ -309,7 +309,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const encoder = reservingEncoder({ encoding: 'OP_RETURN' });
         const pub = oraclePub(encoder);
 
-        const result = await pub._defaultBroadcast('PRICE|0|...');
+        const result = await pub.defaultBroadcast('PRICE|0|...');
         expect(result.txid).to.equal('broadcast-txid');
         expect(encoder.releaseInputs.called,
                'the inputs a sent transaction spends must stay claimed').to.equal(false);
@@ -321,7 +321,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const pub = oraclePub(encoder);
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw, 'the send failure surfaces').to.be.an('error');
         expect(encoder.releaseInputs.called,
@@ -333,7 +333,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const pub = oraclePub(encoder);
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw.message).to.contain('two-transaction');
         expect(encoder.releaseInputs.called, 'nothing to release, nothing called').to.equal(false);
@@ -345,7 +345,7 @@ describe('Publisher _defaultBroadcast: releases the encoder reservation of an ab
         const pub = oraclePub(encoder);
 
         let threw = null;
-        try { await pub._defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
+        try { await pub.defaultBroadcast('PRICE|0|...'); } catch (e) { threw = e; }
 
         expect(threw.message, 'best effort: the TTL is the backstop').to.contain('two-transaction');
     });

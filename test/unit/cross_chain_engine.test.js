@@ -98,28 +98,28 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
         it('uses chain-pair validator count for per-pair quorum', function () {
             engine.chainPairValidators = new Map([
                 ['BTC-LTC', [makeValidator(1), makeValidator(2), makeValidator(3)]]
             ]);
             engine.setValidatorSet(VALIDATORS_7);
             // Per-pair: N=3 → 2f+1=1, floored at majority ceil((3+1)/2)=2
-            expect(engine._getQuorum('BTC', 'LTC')).to.equal(2);
+            expect(engine.getQuorum('BTC', 'LTC')).to.equal(2);
         });
 
         it('falls back to full set quorum without chain params', function () {
             engine.setValidatorSet(VALIDATORS_4);
             // N=4 → quorum=3
-            expect(engine._getQuorum()).to.equal(3);
+            expect(engine.getQuorum()).to.equal(3);
         });
 
         it('single validator → quorum 0', function () {
             engine.setValidatorSet([makeValidator(1)]);
-            expect(engine._getQuorum()).to.equal(0);
+            expect(engine.getQuorum()).to.equal(0);
         });
     });
 
@@ -140,7 +140,7 @@ describe('CrossChainEngine', function () {
         });
 
         it('single-node hub (live quorum 0) keeps the live fallback, no throw', async function () {
-            engine.setValidatorSet([makeValidator(1)]);   // N=1 -> _getQuorum()===0
+            engine.setValidatorSet([makeValidator(1)]);   // N=1 -> getQuorum()===0
             hub.capabilitySnapshot = null;
             let q = await engine._resolveQuorum('BTC', 'LTC', 100);
             expect(q).to.equal(0);
@@ -397,7 +397,7 @@ describe('CrossChainEngine', function () {
             });
 
             // Third prepare → quorum met
-            engine._handlePrepare({
+            engine.handlePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { attestationId, digest }
@@ -689,7 +689,7 @@ describe('CrossChainEngine', function () {
             let digest = await openRound();     // prepares = {self, MEMBERS[1]} = 2 members
             pm.broadcast.resetHistory();
 
-            engine._handlePrepare({ sender: OUTSIDER.addr, sig_pubkey: OUTSIDER.pubkey, data: { attestationId, digest } });
+            engine.handlePrepare({ sender: OUTSIDER.addr, sig_pubkey: OUTSIDER.pubkey, data: { attestationId, digest } });
 
             // The outsider's key is attributed (it is in the registry), so it lands in the
             // vote set, but it is not in the snapshot the quorum of 3 was sized from, so it
@@ -707,13 +707,13 @@ describe('CrossChainEngine', function () {
             // second addr bound to the SAME key. Addr-keyed that read as a third vote and
             // would tip the quorum of 3 on its own; keyed on the proven signing key it
             // collapses onto the vote MEMBERS[1] already cast.
-            engine._handlePrepare({ sender: ALT_ADDR, sig_pubkey: MEMBERS[1].pubkey, data: { attestationId, digest } });
+            engine.handlePrepare({ sender: ALT_ADDR, sig_pubkey: MEMBERS[1].pubkey, data: { attestationId, digest } });
             let pending = engine.pendingAttestations.get(attestationId);
             expect(pending.prepares.size).to.equal(2, 'one key is one vote, whatever addr it names');
             expect(pm.broadcast.called).to.be.false;
 
             // A genuinely distinct third member does tip it.
-            engine._handlePrepare({ sender: MEMBERS[3].addr, sig_pubkey: MEMBERS[3].pubkey,   data: { attestationId, digest } });
+            engine.handlePrepare({ sender: MEMBERS[3].addr, sig_pubkey: MEMBERS[3].pubkey,   data: { attestationId, digest } });
             expect(pm.broadcast.called).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
         });
@@ -721,7 +721,7 @@ describe('CrossChainEngine', function () {
         it('finalizes on three distinct snapshot members', async function () {
             let digest = await openRound();
             pm.broadcast.resetHistory();
-            engine._handlePrepare({ sender: MEMBERS[2].addr, sig_pubkey: MEMBERS[2].pubkey, data: { attestationId, digest } });
+            engine.handlePrepare({ sender: MEMBERS[2].addr, sig_pubkey: MEMBERS[2].pubkey, data: { attestationId, digest } });
             expect(pm.broadcast.called).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
         });
@@ -822,7 +822,7 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet(VALIDATORS_7);
 
             // Third prepare arrives → 3 prepares. Locked quorum=3 → COMMIT must fire.
-            engine._handlePrepare({
+            engine.handlePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { attestationId, digest }
@@ -852,7 +852,7 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet([makeValidator(0)]);
 
             // Third prepare → 3 prepares. Locked quorum=5 → still NOT met, no COMMIT.
-            engine._handlePrepare({
+            engine.handlePrepare({
                 sender: VALIDATORS_7[2].addr,
                 sig_pubkey: VALIDATORS_7[2].pubkey,
                 data: { attestationId, digest }

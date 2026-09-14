@@ -29,7 +29,7 @@ function makeDigest(config) {
 // validator set rather than the optional MIN_VALIDATORS, so a multi-member set
 // with a NULL snapshot now correctly refuses to propose. These experiments
 // inject a PARTITION, not an indexer outage, so they must clear that guard to
-// reach the behaviour they measure. Quorum is stubbed to what _getQuorum()
+// reach the behaviour they measure. Quorum is stubbed to what getQuorum()
 // returns for the set under test, leaving each experiment's arithmetic
 // unchanged; the genuinely peerless hub below keeps its empty validator set and
 // stays on the single-node path either way.

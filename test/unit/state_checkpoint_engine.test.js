@@ -339,7 +339,7 @@ describe('StateCheckpointEngine', function () {
             nd.db.checkpoints.push({ id: 1, chain: 'BTC', network: 'regtest', block_index: 1, block_hash: '', ledger_hash: '',
                                      actions_hash: '', contract_hash: '', checkpoint_seq: 101, snapshot_block: 101, validator_signatures: '[]' });
         }
-        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== leader), '_handleSignReq');
+        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== leader), 'handleSignReq');
         await tickAll(bus);
         await waitUntil(() => reqsHandled() === bus.nodes.length - 1, { label: 'every follower to finish judging the replayed SIGN_REQ' });
         // No follower signed → leader stuck below quorum → no new row on the leader.
@@ -360,7 +360,7 @@ describe('StateCheckpointEngine', function () {
             checkpoint_seq: 101, snapshot_block: 101
         };
         let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
-        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== impostor), '_handleSignReq');
+        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== impostor), 'handleSignReq');
         // Impostor broadcasts a well-formed, correctly signed REQ, but isn't the cadence leader.
         impostor.engine.peerManager.broadcast(StateCheckpointEngine.XCHK_SIGN_REQ, {
             checkpoint: cp, sig_pubkey: impostor.pubkey, sig: impostor.identity.sign(canon)
@@ -410,7 +410,7 @@ describe('StateCheckpointEngine', function () {
     });
 
     // ── XCHK-TRUNC-1: an over-cap (truncated) weighted oracle_publish snapshot must carry
-    // its .truncated flag through _resolveCapabilityValidators so meetsStakeThreshold fails
+    // its .truncated flag through resolveCapabilityValidators so meetsStakeThreshold fails
     // closed; otherwise the under-counted stake S lets a minority clear the 2/3 bar and
     // finalize a checkpoint a full snapshot would reject (the XHUB-TRUNC-1 root, missed here). ──
     describe('truncated-snapshot fail-closed (XCHK-TRUNC-1)', function () {
@@ -424,7 +424,7 @@ describe('StateCheckpointEngine', function () {
 
         it('carries truncated=true through the weighted resolver, so meetsStakeThreshold fails closed', async function () {
             let eng = makeEngine({ validators: [{ pubkey: 'aa', source: 's1', weight: '100' }], truncated: true });
-            let validators = await eng._resolveCapabilityValidators('oracle_publish', 100);
+            let validators = await eng.resolveCapabilityValidators('oracle_publish', 100);
             expect(validators.truncated).to.be.true;
             // The exact computation handleFinalized runs (weighted path) now refuses.
             expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.false;
@@ -432,7 +432,7 @@ describe('StateCheckpointEngine', function () {
 
         it('leaves the flag unset for a non-truncated snapshot (quorum proceeds normally)', async function () {
             let eng = makeEngine({ validators: [{ pubkey: 'aa', source: 's1', weight: '100' }], truncated: false });
-            let validators = await eng._resolveCapabilityValidators('oracle_publish', 100);
+            let validators = await eng.resolveCapabilityValidators('oracle_publish', 100);
             expect(validators.truncated).to.be.undefined;
             expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.true;
         });
@@ -483,7 +483,7 @@ describe('StateCheckpointEngine', function () {
             let { env, follower } = makeSignReq(bus, SNAP);
             follower.hub._resolveBtcLatestBlock = async () => SNAP;   // exactly fresh
             let signs = watchCosign(follower);
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'follower co-signed a fresh snapshot_block').to.equal(1);
         });
 
@@ -495,7 +495,7 @@ describe('StateCheckpointEngine', function () {
             follower.hub._resolveBtcLatestBlock = async () => SNAP + 200;
             expect(200).to.be.greaterThan(follower.engine.cosignToleranceBlocks);
             let signs = watchCosign(follower);
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'stale snapshot_block declined').to.equal(0);
         });
 
@@ -505,7 +505,7 @@ describe('StateCheckpointEngine', function () {
             let { env, follower } = makeSignReq(bus, SNAP);
             follower.hub._resolveBtcLatestBlock = async () => null;   // no own tip
             let signs = watchCosign(follower);
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'missing own tip fails closed').to.equal(0);
         });
 
@@ -523,7 +523,7 @@ describe('StateCheckpointEngine', function () {
                    'a nonnumeric value must not become NaN').to.equal(144);
             follower.hub._resolveBtcLatestBlock = async () => SNAP + 9900;
             let signs = watchCosign(follower);
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'a 9,900-block-stale snapshot_block must be declined').to.equal(0);
         });
 
@@ -534,14 +534,14 @@ describe('StateCheckpointEngine', function () {
             expect(follower.engine.cosignToleranceBlocks).to.equal(10);
             follower.hub._resolveBtcLatestBlock = async () => SNAP + 5;   // inside the window
             let signs = watchCosign(follower);
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'a value the default would also accept is co-signed').to.equal(1);
 
             let bus2 = buildMesh(2, { btcBlock: SNAP, confirmations: 0, cosignTolerance: '10' });
             let second = makeSignReq(bus2, SNAP);
             second.follower.hub._resolveBtcLatestBlock = async () => SNAP + 50;   // outside 10, inside 144
             let signs2 = watchCosign(second.follower);
-            await second.follower.engine._handleSignReq(second.env);
+            await second.follower.engine.handleSignReq(second.env);
             expect(signs2.length, 'a tightened window is actually enforced').to.equal(0);
         });
     });
@@ -593,7 +593,7 @@ describe('StateCheckpointEngine', function () {
             let signs = [];
             let pm = follower.engine.peerManager, orig = pm.broadcast.bind(pm);
             pm.broadcast = (type, data) => { if (type === 'XCHK_SIGN') signs.push(data); return orig(type, data); };
-            await follower.engine._handleSignReq(env);
+            await follower.engine.handleSignReq(env);
             expect(signs.length, 'ground seq refused').to.equal(0);
         });
 
@@ -727,7 +727,7 @@ describe('StateCheckpointEngine', function () {
         });
 
         // Third call site of the same predicate. The indexer byte-match further down
-        // _handleSignReq rebuilds the canonical with the network OUR OWN indexer reports,
+        // handleSignReq rebuilds the canonical with the network OUR OWN indexer reports,
         // so it sees record-vs-indexer drift and is blind to record-vs-DEPLOYMENT drift:
         // co-sign membership resolves the SWQ gate on this.network, so without this the
         // follower contributes a signature under one plane and then refuses the finalized
@@ -743,7 +743,7 @@ describe('StateCheckpointEngine', function () {
             pm.broadcast = (type, data) => { types.push(type); return orig(type, data); };
             let threw = null;
             try {
-                await nd.engine._handleSignReq({
+                await nd.engine.handleSignReq({
                     type: 'XCHK_SIGN_REQ', sender: other.pubkey,
                     data: { checkpoint: cp(Object.assign({}, ROOTED, { network: 'regtest' })),
                             sig_pubkey: other.pubkey, sig: 'a' }

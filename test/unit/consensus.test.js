@@ -60,10 +60,10 @@ describe('Consensus (PBFT)', function () {
     }
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
         // Quorum = max(2f+1, ceil((N+1)/2)) where f = floor((N-1)/3). The
         // majority floor stops 2f+1 degenerating to 1 at N=3. N<=1 returns 0.
         let cases = [
@@ -80,7 +80,7 @@ describe('Consensus (PBFT)', function () {
             it(c.label, function () {
                 let validators = Array.from({ length: c.N }, (_, i) => makeValidator(i + 1));
                 consensus.setValidatorSet(validators);
-                expect(consensus._getQuorum()).to.equal(c.expected);
+                expect(consensus.getQuorum()).to.equal(c.expected);
             });
         }
 
@@ -91,13 +91,13 @@ describe('Consensus (PBFT)', function () {
                 { state: 'open' }, { state: 'open' }, { state: 'open' }
             ]);
             // N = 6 peers + 1 self = 7 → f = 2, quorum = 5
-            expect(consensus._getQuorum()).to.equal(5);
+            expect(consensus.getQuorum()).to.equal(5);
         });
 
         it('returns 0 when no peers and no validators', function () {
             consensus.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            expect(consensus._getQuorum()).to.equal(0);
+            expect(consensus.getQuorum()).to.equal(0);
         });
     });
 
@@ -162,7 +162,7 @@ describe('Consensus (PBFT)', function () {
             const set = buildSet(7);
             const a = freshConsensus(); a.setValidatorSet(set.slice());
             const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
-            expect(a._getQuorum()).to.equal(b._getQuorum());
+            expect(a.getQuorum()).to.equal(b.getQuorum());
         });
 
         // (was: "leader election is order-sensitive"). setValidatorSet now
@@ -583,7 +583,7 @@ describe('Consensus (PBFT)', function () {
             });
 
             // Third prepare → quorum met
-            consensus._handlePrepare({
+            consensus.handlePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
@@ -681,17 +681,17 @@ describe('Consensus (PBFT)', function () {
         it('VIEW_CHANGE quorum updates view', function () {
             consensus.view = 0;
             // N=4, quorum=3. Need 3 VIEW_CHANGE votes
-            consensus._handleViewChange({
+            consensus.handleViewChange({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { view: 1, seq: 5 }
             });
-            consensus._handleViewChange({
+            consensus.handleViewChange({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { view: 1, seq: 5 }
             });
-            consensus._handleViewChange({
+            consensus.handleViewChange({
                 sender: VALIDATORS_4[3].addr,
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { view: 1, seq: 5 }
@@ -702,7 +702,7 @@ describe('Consensus (PBFT)', function () {
 
         // -------------------------------------------------------------
         // NEW_VIEW authenticity guards.
-        // _handleNewView must not advance the view on any peer's say-so:
+        // handleNewView must not advance the view on any peer's say-so:
         // it only accepts a NEW_VIEW from the rotation-designated leader for
         // the claimed (seq, view), and only when it moves the view forward.
         // Without this a single Byzantine validator can steer leader
@@ -713,7 +713,7 @@ describe('Consensus (PBFT)', function () {
             consensus.view = 0;
             // Leader for (seq=5, view=1): validators[(5+1) % 4] = validators[2].
             // A NEW_VIEW from any other validator must be ignored.
-            consensus._handleNewView({
+            consensus.handleNewView({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { view: 1, seq: 5 }
@@ -724,7 +724,7 @@ describe('Consensus (PBFT)', function () {
         it('NEW_VIEW from the designated leader advances the view', function () {
             consensus.view = 0;
             // validators[(5+1) % 4] = validators[2], the leader for (5, 1).
-            consensus._handleNewView({
+            consensus.handleNewView({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { view: 1, seq: 5 }
@@ -737,7 +737,7 @@ describe('Consensus (PBFT)', function () {
             // Even from the correct leader for the lower view, a regression
             // is rejected. NEW_VIEW only moves the view forward.
             let idx = (5 + 2) % VALIDATORS_4.length;
-            consensus._handleNewView({
+            consensus.handleNewView({
                 sender: VALIDATORS_4[idx].addr,
                 sig_pubkey: VALIDATORS_4[idx].pubkey,
                 data: { view: 2, seq: 5 }
@@ -770,14 +770,14 @@ describe('Consensus (PBFT)', function () {
 
             // Churn: set grows to N=7. Live quorum would be 5.
             consensus.setValidatorSet(VALIDATORS_7);
-            expect(consensus._getQuorum()).to.equal(5);
+            expect(consensus.getQuorum()).to.equal(5);
 
             // Three distinct view-change votes, meets the locked quorum (3),
             // below the live one (5). Must accept on the locked value.
-            consensus._handleViewChange({ sender: VALIDATORS_7[1].addr, sig_pubkey: VALIDATORS_7[1].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_7[2].addr, sig_pubkey: VALIDATORS_7[2].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_7[1].addr, sig_pubkey: VALIDATORS_7[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_7[2].addr, sig_pubkey: VALIDATORS_7[2].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0); // 2 votes < 3, not yet
-            consensus._handleViewChange({ sender: VALIDATORS_7[3].addr, sig_pubkey: VALIDATORS_7[3].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_7[3].addr, sig_pubkey: VALIDATORS_7[3].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(1); // 3 votes == locked quorum → accepted
         });
 
@@ -797,12 +797,12 @@ describe('Consensus (PBFT)', function () {
             // Churn: set shrinks to N=3. Live quorum would be 2 (majority
             // floor). The locked quorum is still 5.
             consensus.setValidatorSet(VALIDATORS_3);
-            expect(consensus._getQuorum()).to.equal(2);
+            expect(consensus.getQuorum()).to.equal(2);
 
             // Two distinct votes would clear the live quorum (2), but must
             // NOT clear the locked quorum (5).
-            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, sig_pubkey: VALIDATORS_3[2].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_3[2].addr, sig_pubkey: VALIDATORS_3[2].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);                 // not promoted
             expect(pm.broadcast.called).to.be.false;            // no NEW_VIEW broadcast
         });
@@ -829,7 +829,7 @@ describe('Consensus (PBFT)', function () {
             consensus.setValidatorSet(VALIDATORS_3);
 
             // Own vote was added by initiateViewChange; add one more (size 2).
-            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.pendingViewChanges.get(1).size).to.equal(2);
             expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW: 2 < locked 5
         });
@@ -945,10 +945,10 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('routes PREPARE / COMMIT / VIEW_CHANGE / NEW_VIEW and ignores unknown types', function () {
-            let prepare = sinon.spy(consensus, '_handlePrepare');
+            let prepare = sinon.spy(consensus, 'handlePrepare');
             let commit  = sinon.spy(consensus, '_handleCommit');
-            let vc      = sinon.spy(consensus, '_handleViewChange');
-            let nv      = sinon.spy(consensus, '_handleNewView');
+            let vc      = sinon.spy(consensus, 'handleViewChange');
+            let nv      = sinon.spy(consensus, 'handleNewView');
 
             consensus._handleMessage({ type: 'PBFT_PREPARE',     data: { seq: 1, configDigest: 'd' } });
             consensus._handleMessage({ type: 'PBFT_COMMIT',      data: { seq: 1, configDigest: 'd' } });
@@ -1250,14 +1250,14 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores VIEW_CHANGE with non-numeric fields', function () {
-            consensus._handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 'x', seq: 5 } });
+            consensus.handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 'x', seq: 5 } });
             expect(consensus.pendingViewChanges.size).to.equal(0);
         });
 
         it('ignores VIEW_CHANGE when the computed quorum is 0', function () {
             consensus.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            consensus._handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
 
@@ -1266,9 +1266,9 @@ describe('Consensus (PBFT)', function () {
             consensus.view = 0;
             consensus.pendingViewChanges.set(0, new Set(['stale'])); // lower view to prune
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
+            consensus.handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: 5 } });
 
             expect(consensus.view).to.equal(1);
             let nv = pm.broadcast.getCalls().find(c => c.args[0] === 'PBFT_NEW_VIEW');
@@ -1278,13 +1278,13 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores NEW_VIEW with non-numeric fields', function () {
-            consensus._handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: null, seq: 5 } });
+            consensus.handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: null, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
 
         it('ignores NEW_VIEW when the validator set is empty', function () {
             consensus.setValidatorSet([]);
-            consensus._handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
+            consensus.handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
     });
@@ -1328,12 +1328,12 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores a PREPARE with no configDigest', function () {
-            expect(() => consensus._handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
+            expect(() => consensus.handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
         });
 
         it('ignores a PREPARE whose digest does not match the proposal', function () {
             consensus.pendingProposals.set(5, { digest: 'right', prepares: new Set(), resolved: false, quorum: 3 });
-            consensus._handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
+            consensus.handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
             expect(consensus.pendingProposals.get(5).prepares.size).to.equal(0);
         });
 
@@ -1399,10 +1399,10 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.get(5).applied).to.be.false;
         });
 
-        it('_getQuorum returns 0 with neither validators nor a peer manager', function () {
+        it('getQuorum returns 0 with neither validators nor a peer manager', function () {
             consensus.setValidatorSet([]);
             consensus.peerManager = null;
-            expect(consensus._getQuorum()).to.equal(0);
+            expect(consensus.getQuorum()).to.equal(0);
         });
 
         it('loadSeq treats a non-numeric stored value as 0', async function () {
@@ -1586,14 +1586,14 @@ describe('Consensus (PBFT)', function () {
             it('whale view-change vote alone promotes the view (proposal gone, initiator path)', function () {
                 // No proposal in pendingProposals. Context recovered from the stash.
                 consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: true, validators: normValidators() });
-                consensus._handleViewChange({ sender: WHALE.addr, sig_pubkey: WHALE.pubkey, data: { view: 1, seq: 5 } });
+                consensus.handleViewChange({ sender: WHALE.addr, sig_pubkey: WHALE.pubkey, data: { view: 1, seq: 5 } });
                 expect(consensus.view).to.equal(1);
             });
 
             it('a small-stake COUNT majority view-change does NOT promote the view', function () {
                 consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: true, validators: normValidators() });
                 for (let v of SMALL)
-                    consensus._handleViewChange({ sender: v.addr, sig_pubkey: v.pubkey, data: { view: 1, seq: 5 } });
+                    consensus.handleViewChange({ sender: v.addr, sig_pubkey: v.pubkey, data: { view: 1, seq: 5 } });
                 expect(consensus.view).to.equal(0);
             });
         });
@@ -1626,7 +1626,7 @@ describe('Consensus (PBFT)', function () {
 
         it('(a) propose() throws when minValidators>1 and snapshot is null', async function () {
             // Snapshot resolves to null (indexer unavailable). The leader must
-            // refuse rather than fall back to _getQuorum() over its local set.
+            // refuse rather than fall back to getQuorum() over its local set.
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
             consensus.minValidators = 4;

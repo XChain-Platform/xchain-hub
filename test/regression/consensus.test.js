@@ -82,7 +82,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // #4168: a 4-member validator set is a federation regardless of
             // MIN_VALIDATORS now, so a follower fails closed without the
             // deterministic snapshot a real hub locks each round. Supply it;
-            // quorum 3 is what _getQuorum() returns for N=4, so what this
+            // quorum 3 is what getQuorum() returns for N=4, so what this
             // regression measures is unchanged.
             hub.capabilitySnapshot = {
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
@@ -102,7 +102,7 @@ describe('Regression: Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.has(5)).to.be.true;
 
             // Step 2: Third PREPARE reaches quorum → COMMIT broadcast
-            consensus._handlePrepare({
+            consensus.handlePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
@@ -156,7 +156,7 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // #4168: supply the deterministic snapshot the federation guard now
-            // requires for a multi-member set (quorum 3 = _getQuorum() at N=4).
+            // requires for a multi-member set (quorum 3 = getQuorum() at N=4).
             hub.capabilitySnapshot = {
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
@@ -460,7 +460,7 @@ describe('Regression: Consensus (PBFT)', function () {
             it('N=' + c.N + ' → quorum=' + c.expected + ' @regression-p0', function () {
                 let validators = Array.from({ length: c.N }, (_, i) => makeValidator(i + 1));
                 consensus.setValidatorSet(validators);
-                expect(consensus._getQuorum()).to.equal(c.expected);
+                expect(consensus.getQuorum()).to.equal(c.expected);
             });
         }
     });

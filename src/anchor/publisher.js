@@ -314,7 +314,7 @@ class StateAnchorPublisher {
         // buys duplicate spends. A meaningful bundle ladder must measure time or
         // flush attempts, not BTC-block age against a tip-tracking snapshot.
         // The same value also bounds how far a peer's claimed election_block may
-        // sit from our own BTC tip in _handleSignReq (anti-spam only; the security
+        // sit from our own BTC tip in handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
         this.electionToleranceBlocks = parseInt(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         // Failover wake. The ladder above only unlocks a rank when
@@ -446,7 +446,7 @@ class StateAnchorPublisher {
         this._archiveRound     = null;  // leader-side archive signing round (one at a time)
         // The round whose _publishArchive is IN FLIGHT. _archiveRound covers only the
         // signature-collection phase and is cleared the moment quorum is met, which leaves
-        // the whole publish unguarded: quorum can arrive on a peer message (_handleSign),
+        // the whole publish unguarded: quorum can arrive on a peer message (handleSign),
         // outside flush()'s _flushing mutex, and _publishArchive does not arm its durable
         // dedupe marker (recordArchiveIntent) until AFTER the publisher-attestation round,
         // so a timer flush in that window rebuilds the same still-pending rows and spends
@@ -508,7 +508,7 @@ class StateAnchorPublisher {
         // many pending checkpoints did this flush stand down from".
         this._skippedNotOurElection = 0;
         this._skippedLeaderOnWake   = 0;
-        // Last DOGE balance observed by _checkBalance (refreshed each flush) and
+        // Last DOGE balance observed by checkBalance (refreshed each flush) and
         // when, surfaced via getAnchorStats so an operator/monitor can watch the
         // publisher wallet's runway (it spends real DOGE on every anchor cycle)
         // without log-grepping the low-balance warning. null until the first
@@ -516,7 +516,7 @@ class StateAnchorPublisher {
         this._lastBalance   = null;
         this._lastBalanceAt = null;
         // Locally-observed archive-round leaders: batch_seq -> Set(elected leader
-        // pubkeys). Populated in _handleSignReq once a SIGN_REQ sender has validated
+        // pubkeys). Populated in handleSignReq once a SIGN_REQ sender has validated
         // as the (rank-unlocked) elected archive leader for that batch_seq AND its
         // signature over the archive canonical verifies (the rank ladder alone is
         // wire-keyed, so the signature is what proves the sender holds the key it
@@ -922,7 +922,7 @@ class StateAnchorPublisher {
             // Now a balance below the floor, or an unreadable balance (null; fail-closed),
             // skips this flush's publishing. The scheduler keeps running and retries on
             // the next flush once the wallet is topped up / the balance source recovers.
-            let balance = await this._checkBalance(signer);
+            let balance = await this.checkBalance(signer);
             // The gate is only meaningful when a balance source is actually wired
             // (a getBalanceFn hook, or an encoder + address to sum UTXOs). With no
             // source, balance is always null and there is nothing to enforce, so we
@@ -1283,7 +1283,7 @@ class StateAnchorPublisher {
             }
 
             let broadcaster = signer && signer.broadcastFn
-                ? signer.broadcastFn : ((p) => this._defaultBroadcast(p, signer));
+                ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer));
             for(let s of group) await this.recordAnchorIntent(s);
             // The existence check makes a lost ACK (this flush OR a previous one) adopt
             // the already-mined bundle instead of paying for a second one.
@@ -2429,7 +2429,7 @@ class StateAnchorPublisher {
         // own contract scopes it to the coarse BUNDLE_DONE / FINALIZED sender pre-filter: it
         // answers from the per-hub, gossip-driven capabilityRegistry, so two hubs would
         // elect over different member lists on a path that spends real DOGE. The follower
-        // side already refuses this round (_handleSignReq bounds election_block to its own
+        // side already refuses this round (handleSignReq bounds election_block to its own
         // tip), so the leader-side defer costs a stalled multi-hub round it was never going
         // to complete, and closes the single-member case that self-quorums today. Same
         // fail-closed idiom as the empty-set defer below; rows stay pending for the next
@@ -3027,8 +3027,8 @@ class StateAnchorPublisher {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
-            case XANC_SIGN:      this._handleSign(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
+            case XANC_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
+            case XANC_SIGN:      this.handleSign(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
             case XANC_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
             case XANC_BUNDLE_DONE:   this.handleBundleDone(envelope).catch(e => logger.error('StateAnchorPublisher: BUNDLE_DONE error: ' + (e && e.message)));     break;
             case XANCPUB_SIGN_REQ: this.handleAttestSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
@@ -3359,7 +3359,7 @@ class StateAnchorPublisher {
     }
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
-    async _handleSignReq(envelope){
+    async handleSignReq(envelope){
         let d = envelope.data;
         if(!this.identity || !d || !d.checkpoint) return;
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
@@ -3775,7 +3775,7 @@ class StateAnchorPublisher {
     // Answer a SIGN_REQ we refuse on stale-seq grounds. Deliberately rides the EXISTING
     // XANC_SIGN message as optional fields (`consumed_seq` + `refusal_sig`, with `sig`
     // empty) rather than introducing a new p2p type: an un-upgraded leader runs this
-    // through _handleSign's `ValidatorIdentity.verify(round.canonical, '')`, which is
+    // through handleSign's `ValidatorIdentity.verify(round.canonical, '')`, which is
     // false, so it drops the message exactly as it drops any other unusable co-signature.
     // The refusal is signed because it can abandon a live round: unsigned, any peer could
     // stall archiving federation-wide.
@@ -3790,7 +3790,7 @@ class StateAnchorPublisher {
         });
     }
 
-    async _handleSign(envelope){
+    async handleSign(envelope){
         let d = envelope.data;
         let round = this._archiveRound;
         if(!round || round.done || Number(d.batch_seq) !== round.batchSeq) return;
@@ -3842,7 +3842,7 @@ class StateAnchorPublisher {
         round.done = true;
         if(round.timer){ clearTimeout(round.timer); round.timer = null; }
         // Hand the guard over BEFORE releasing _archiveRound, so no window exists in
-        // which neither field is set. This runs from _handleSign, outside flush()'s
+        // which neither field is set. This runs from handleSign, outside flush()'s
         // mutex, and the publish below awaits a peer round wide enough for several
         // flush ticks to fire inside it.
         this._archivePublishing = round;
@@ -3923,14 +3923,14 @@ class StateAnchorPublisher {
         for(let s of attestSigs) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
         let v1Payload = parts.join('|');
 
-        let broadcaster = round.signer.broadcastFn || ((p) => this._defaultBroadcast(p, round.signer));
+        let broadcaster = round.signer.broadcastFn || ((p) => this.defaultBroadcast(p, round.signer));
         // Chunks descend from the head by design: they go out back-to-back from the
         // same wallet and there is no confirmed output between them, so they are the
         // one broadcast that may spend unconfirmed change. A chunk paying the target
         // rate mines right behind a head that mines; a head that does not mine is
         // caught by the confirmation watchdog, not by starving its chunks.
         let chunkBroadcaster = round.signer.broadcastFn ||
-            ((p) => this._defaultBroadcast(p, round.signer, { allowUnconfirmed: true }));
+            ((p) => this.defaultBroadcast(p, round.signer, { allowUnconfirmed: true }));
 
         // Armed BEFORE the send, so the window this marker covers starts at the earliest
         // moment DOGE could have moved, and stays armed across the whole v2 chunk loop:
@@ -4034,7 +4034,7 @@ class StateAnchorPublisher {
         // re-archive must get a FRESH seq; two v1 anchors sharing one seq would
         // corrupt chunk reassembly) while `archived_status <> status` keeps every
         // row eligible, so the next flush re-archives the whole batch.
-        // A null txid is a false/incomplete broadcast success (_defaultBroadcast falls
+        // A null txid is a false/incomplete broadcast success (defaultBroadcast falls
         // back to { txid: null }); the v1 never landed on-chain, so dequeuing the rows
         // with their final status would strand them in an unrecoverable hole and the
         // archive reward would be credited for an anchor that was never published. Treat
@@ -4139,7 +4139,7 @@ class StateAnchorPublisher {
         // round. Recording the floor stamps no rows, so it cannot suppress anything.
         this.noteConsumedBatchSeq(Number(d.batch_seq), 'XANC_FINALIZED from ' + sender.substring(0, 12) + '...');
         // Authenticate the FINALIZED sender as an archive leader we actually
-        // observed getting elected for THIS batch_seq (via _handleSignReq). The
+        // observed getting elected for THIS batch_seq (via handleSignReq). The
         // archive election is keyed on election_block, which the FINALIZED
         // canonical does NOT carry, so membership + signature alone let ANY
         // oracle_publish member forge a FINALIZED that (a) marks settled rows
@@ -4477,7 +4477,7 @@ class StateAnchorPublisher {
     }
 
     // Record that `pubkey` validated as the elected archive leader for `batchSeq`
-    // (called from _handleSignReq after the election/rank check passes). Stored as
+    // (called from handleSignReq after the election/rank check passes). Stored as
     // a SET because the failover ladder can legitimately unlock more than one rank
     // for the same batch_seq, and this hub may observe successive proposers.
     recordObservedArchiveLeader(batchSeq, pubkey, cpIdentity){
@@ -4521,7 +4521,7 @@ class StateAnchorPublisher {
     }
 
     // Record the member ids of an archive body this hub verified against its own rows
-    // (called from _handleSignReq once verifyArchiveAgainstLocal passes, so the parse
+    // (called from handleSignReq once verifyArchiveAgainstLocal passes, so the parse
     // is already paid for). Keyed by PROPOSER, because the failover ladder legitimately
     // unlocks several ranks for one batch_seq and each proposes its own body. UNIONED
     // across proposals from the same proposer: a round that times out stamps nothing, so
@@ -4930,7 +4930,7 @@ class StateAnchorPublisher {
     // Rules:
     //   - existsCheck says exists        -> adopt it; never re-broadcast.
     //   - definitive pre-send/reject err -> safe: retry with a fresh PSBT.
-    //   - ambiguous send err (tagged `anchorAmbiguousSend` by _defaultBroadcast)
+    //   - ambiguous send err (tagged `anchorAmbiguousSend` by defaultBroadcast)
     //     -> the tx may sit in the DOGE mempool where the indexer cannot see it
     //     yet; poll existsCheck briefly, then DEFER (throw) instead of
     //     re-broadcasting. The row stays pending; the next flush's pre-broadcast
@@ -5194,7 +5194,7 @@ class StateAnchorPublisher {
         return isAmbiguousSendError(e);
     }
 
-    async _defaultBroadcast(payload, signer, opts){
+    async defaultBroadcast(payload, signer, opts){
         signer = signer || this.resolveSigner();
         if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
@@ -5686,7 +5686,7 @@ class StateAnchorPublisher {
             });
     }
 
-    async _checkBalance(signer){
+    async checkBalance(signer){
         let balance = null;
         try {
             if(signer.getBalanceFn) balance = await signer.getBalanceFn();

@@ -78,7 +78,7 @@ const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 // Durable spend audit
 //
 // Every billed dispatch leaves a record on disk, the same append-only, fsync'd
-// audit AttestationPublisher._recordSpend keeps for BTC fees, applied to the
+// audit AttestationPublisher.recordSpend keeps for BTC fees, applied to the
 // other money path: an `intent` line lands BEFORE the vendor is dialed and a
 // `settle` line after, so an intent with no settle is exactly the operator's
 // post-crash reconciliation list. The in-memory _tokenUsage cannot serve as

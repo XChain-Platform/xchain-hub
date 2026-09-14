@@ -115,7 +115,7 @@ describe('follower bounds on a leader-chosen effective_time', function () {
         let pending = await openRound(f);
         let ownStamp = pending.effectiveTime;
         let threw = null;
-        try { f.engine._handlePrepare(leaderPrepare(f, wireEt, signOver)); }
+        try { f.engine.handlePrepare(leaderPrepare(f, wireEt, signOver)); }
         catch (e) { threw = e; }
         let out = { f, pending, ownStamp, threw };
         if (pending.timer) clearTimeout(pending.timer);
@@ -195,7 +195,7 @@ describe('follower bounds on a leader-chosen effective_time', function () {
         let pending = await openRound(f);
         let env = leaderPrepare(f, EXPECTED);
         delete env.data.effective_time;
-        f.engine._handlePrepare(env);
+        f.engine.handlePrepare(env);
         expect(pending.winner, 'a mirror-era round cannot adopt a legacy PREPARE').to.equal(null);
         if (pending.timer) clearTimeout(pending.timer);
     });
@@ -213,7 +213,7 @@ describe('follower bounds on a leader-chosen effective_time', function () {
         // In-window, so the bounds guard passes and only the derivation gate refuses.
         let wireEt = EXPECTED + 900;
         let canonical = f.engine._buildCanonical(RID, PROVIDER, Buffer.alloc(0), 'no_quorum', '', BLK, wireEt).toString('utf8');
-        f.engine._handlePrepare({
+        f.engine.handlePrepare({
             type: 'ATTEST_PREPARE',
             data: { requestId: RID, providerId: PROVIDER, body_b64: '', meta: '', status: 'no_quorum',
                     sig_pubkey: f.leaderKey, sig: f.leader.sign(canonical), effective_time: wireEt }

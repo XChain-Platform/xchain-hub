@@ -333,7 +333,7 @@ class FullNodeChallengeRound {
         // timeout each, against a 30s poll: under a slow indexer the next interval
         // fires while this one is still awaiting. Two overlapping ticks would both
         // pass the rounds.has(epoch) test below before either reached the
-        // rounds.set() inside _runEpoch (two more awaits later), starting one epoch
+        // rounds.set() inside runEpoch (two more awaits later), starting one epoch
         // twice: duplicate XNODE_ANSWER broadcasts and a second rounds.set that
         // clobbers the first run's accumulated answers/signatures. The finally is
         // load-bearing: a rejected indexer call must not wedge the flag forever.
@@ -368,13 +368,13 @@ class FullNodeChallengeRound {
             if(epoch < this.confirmDepth) return;                 // target would be < genesis
             if((tipBlock - epoch) > this.acceptWindow) return;    // too late to land a verdict this epoch
             if(this.rounds.has(epoch)) return;                    // already running/finalized
-            await this._runEpoch(epoch, tipBlock);
+            await this.runEpoch(epoch, tipBlock);
         } finally {
             this._ticking = false;
         }
     }
 
-    async _runEpoch(epoch, tipBlock){
+    async runEpoch(epoch, tipBlock){
         let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
         if(!bh || !bh.ledger_hash){ return; }
         let seed   = String(bh.ledger_hash);
@@ -689,7 +689,7 @@ class FullNodeChallengeRound {
         // durable append: an unwritable audit path must not let a real BTC fee be
         // spent with no recoverable trace. Failing here reverts the finalize lock, so
         // this defers the verdict to a later tick rather than losing the round.
-        if(!this._recordSpend({ phase: 'intent', epoch, challengeId: state.challengeId,
+        if(!this.recordSpend({ phase: 'intent', epoch, challengeId: state.challengeId,
                                 pass: state.passList.length, sigs: state.sigs.size, quorum })){
             state.finalized = false;
             // Nothing was broadcast, so the reservation goes back; keeping it would
@@ -716,7 +716,7 @@ class FullNodeChallengeRound {
             // ladder absorbs its rounds. Same marker StateAnchorPublisher carries at
             // its own anchor publish.
             let leadRank = Number(state.leadRank) || 0;
-            this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid, leadRank });
+            this.recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid, leadRank });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             logger.info('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : '') +
@@ -742,7 +742,7 @@ class FullNodeChallengeRound {
                 // Releasing here is what let a later epoch spend an allowance this
                 // possibly-paid fee had already consumed.
                 this.spendGuard.commit(spendToken);
-                this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
+                this.recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 logger.warn(nodeUtil.format('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
                              '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
@@ -750,7 +750,7 @@ class FullNodeChallengeRound {
                 // Definitive: nothing left this process, so the budget goes back and a
                 // later tick can retry inside the same window.
                 this.spendGuard.release(spendToken);
-                this._recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
+                this.recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 state.finalized = false;   // definitive failure; unlock so a later sig/tick retries
                 logger.warn(nodeUtil.format('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e));
@@ -761,10 +761,10 @@ class FullNodeChallengeRound {
     // Append one fsync'd spend-audit line. Returns true only on a
     // confirmed durable write; the intent call SITES the gate on that result, the
     // outcome calls are best-effort (the fee is already committed by then, so
-    // refusing to proceed would help nobody). Mirrors AttestationPublisher._recordSpend,
+    // refusing to proceed would help nobody). Mirrors AttestationPublisher.recordSpend,
     // including creating the directory lazily so a fresh hub does not need it
     // provisioned ahead of its first verdict.
-    _recordSpend(entry){
+    recordSpend(entry){
         let line = JSON.stringify({ ts: Date.now(), effector: 'FULLNODE_VERDICT', ...entry }) + '\n';
         try {
             fs.mkdirSync(path.dirname(this.spendLogPath), { recursive: true });

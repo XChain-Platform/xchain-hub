@@ -13,7 +13,7 @@
 // Regression for the lost-COMMIT / late-PREPARE stall: after this node has
 // broadcast its COMMIT (_commitSent=true), a late PREPARE whose signature
 // crosses the commit quorum must finalize the round. Before the fix,
-// _handlePrepare stored the sig but only called checkPrepareQuorum (which
+// handlePrepare stored the sig but only called checkPrepareQuorum (which
 // short-circuits on _commitSent), so checkCommitQuorum never re-ran and a
 // fully-quorate round sat until the round timeout discarded the work.
 
@@ -95,7 +95,7 @@ describe('AttestationConsensus: late PREPARE completes commit quorum after COMMI
 
         // Peer C's COMMIT never arrived (lost on best-effort gossip); its
         // PREPARE arrives after this node already sent COMMIT.
-        consensus._handlePrepare({
+        consensus.handlePrepare({
             type: 'ATTEST_PREPARE',
             data: {
                 requestId:  RID,

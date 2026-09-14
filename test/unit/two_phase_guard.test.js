@@ -9,7 +9,7 @@
  *
  * Unit tests: src/lib/two_phase_guard.js
  *
- * The built-in _defaultBroadcast pipelines do one create_tx, one walletSign and
+ * The built-in defaultBroadcast pipelines do one create_tx, one walletSign and
  * one broadcastTx. On the encoder's P2SH/P2WSH lane that answer is the FUNDING
  * transaction of a two-transaction contract: the payload only becomes readable
  * once a reveal spends those outputs, and the hub has no reveal. Broadcasting it

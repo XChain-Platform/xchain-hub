@@ -338,10 +338,10 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         expect(round, 'a round is open to attack').to.not.equal(null);
 
         let outsider = new ValidatorIdentity('99'.repeat(32));
-        await laggy.pub._handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: leader.pubkey,
+        await laggy.pub.handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: leader.pubkey,
                                               sig: '', consumed_seq: 99 } });                        // unsigned
         expect(laggy.pub._archiveRound, 'an unsigned refusal is ignored').to.equal(round);
-        await laggy.pub._handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: outsider.getPubkeyHex().toLowerCase(),
+        await laggy.pub.handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: outsider.getPubkeyHex().toLowerCase(),
                                               sig: '', consumed_seq: 99,
                                               refusal_sig: outsider.sign(laggy.pub.seqRefusalCanonical(round.batchSeq, 99)) } });
         expect(laggy.pub._archiveRound, 'a non-member refusal is ignored').to.equal(round);
@@ -350,7 +350,7 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         // Positive control: the SAME shape, signed by the member that really holds the
         // seq, does close the round. Without this, the two refusals above could be
         // ignored for any reason at all.
-        await laggy.pub._handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: leader.pubkey,
+        await laggy.pub.handleSign({ data: { batch_seq: round.batchSeq, sig_pubkey: leader.pubkey,
                                               sig: '', consumed_seq: round.batchSeq,
                                               refusal_sig: leader.identity.sign(
                                                   laggy.pub.seqRefusalCanonical(round.batchSeq, round.batchSeq)) } });

@@ -174,7 +174,7 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
         expect([...pending.memberPubkeys]).to.have.members(
             [VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey]);
         // A non-member PREPARE must not advance the round to COMMIT quorum.
-        oc._handlePrepare({ sender: NONMEMBER.addr, sig_pubkey: NONMEMBER.pubkey, data: { round: ROUND, digest: pending.digest } });
+        oc.handlePrepare({ sender: NONMEMBER.addr, sig_pubkey: NONMEMBER.pubkey, data: { round: ROUND, digest: pending.digest } });
         expect(pending.finalized).to.be.false;
     });
 });

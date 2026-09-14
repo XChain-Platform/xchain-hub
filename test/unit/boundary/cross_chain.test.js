@@ -246,7 +246,7 @@ describe('Boundary: CrossChainEngine', function () {
                 finalized: false, timer: null
             });
 
-            cc._handlePrepare({
+            cc.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId: 'BTC:1:LTC', digest: 'wrong' }
             });

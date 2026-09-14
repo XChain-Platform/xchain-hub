@@ -345,15 +345,15 @@ describe('OracleBatchSigner (XPRICEB batch-signing round)', function () {
         let pending = leader.signer.collectBatchSignatures(100, 105, 5005, rounds);
 
         // Not in the price set at the anchor: a perfectly valid signature, ignored.
-        await leader.signer._handleSign({ type: 'XPRICEB_SIGN', data: {
+        await leader.signer.handleSign({ type: 'XPRICEB_SIGN', data: {
             first_round: 100, last_round: 105,
             pubkey: outsider.getPubkeyHex().toLowerCase(), sig: outsider.sign(canonical) } });
         // A member, but the signature is over other bytes.
-        await leader.signer._handleSign({ type: 'XPRICEB_SIGN', data: {
+        await leader.signer.handleSign({ type: 'XPRICEB_SIGN', data: {
             first_round: 100, last_round: 105,
             pubkey: mesh.pubkeys[1], sig: mesh.nodes[1].identity.sign(canonical + 'x') } });
         // A member signing a DIFFERENT window: wrong round, ignored.
-        await leader.signer._handleSign({ type: 'XPRICEB_SIGN', data: {
+        await leader.signer.handleSign({ type: 'XPRICEB_SIGN', data: {
             first_round: 100, last_round: 104,
             pubkey: mesh.pubkeys[2], sig: mesh.nodes[2].identity.sign(canonical) } });
 

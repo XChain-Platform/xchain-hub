@@ -1867,7 +1867,7 @@ class PriceAggregator extends EventEmitter {
     // Resolve the qualifying validator set for `capability` at a BTC block, normalized to
     // { pubkey, source, weight, amount }.
     //
-    // The resolution is OracleConsensus._resolveCapabilityValidators verbatim (same
+    // The resolution is OracleConsensus.resolveCapabilityValidators verbatim (same
     // activation key, same two RPCs, same normalization, same truncation marker), with
     // ONE deliberate difference: a degraded read returns null here instead of collapsing
     // to []. Both refuse to write, but only the null tells the caller the Bitcoin view

@@ -96,7 +96,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         await oc._handlePropose(proposeEnvelope(digest));
         expect(oc.pendingRounds.has(ROUND)).to.equal(true);
 
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));
 
         expect(drops('digest_mismatch')).to.have.lengthOf(1);
         expect(drops('digest_mismatch')[0]).to.include('phase=prepare');
@@ -116,7 +116,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         // an authorization floor loaded. Populate it, then sign as an outsider.
         hub._peerManager.validatorPubkeys = new Map(VALSET.map(v => [v.addr, v.pubkey]));
 
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', 'a'.repeat(64)));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', 'a'.repeat(64)));
 
         expect(drops('unknown_sender')).to.have.lengthOf(1);
         expect(counterValue('unknown_sender', 'prepare')).to.equal(1);
@@ -124,7 +124,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
 
     it('records an early-buffer entry that ages out unread, with how many votes were lost', function () {
         const digest = oc._digest(ROUND, PRICES);
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
         expect(oc.earlyMessages.get(ROUND)).to.have.length(1);
 
         // A round that assembles drains its buffer, so anything still parked at
@@ -140,7 +140,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
     it('records the per-round buffer ceiling turning votes away', function () {
         const digest = oc._digest(ROUND, PRICES);
         for (let i = 0; i < oc.earlyMessageMaxPerRound + 3; i++) {
-            oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
+            oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
         }
         expect(oc.earlyMessages.get(ROUND)).to.have.length(oc.earlyMessageMaxPerRound);
         expect(drops('early_capacity')).to.have.lengthOf(3);
@@ -152,8 +152,8 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         const digest = oc._digest(ROUND, PRICES);
         await oc._handlePropose(proposeEnvelope(digest));
 
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));   // digest_mismatch
-        oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', digest));        // unknown_sender
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));   // digest_mismatch
+        oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', digest));        // unknown_sender
         oc.earlyMessages.set(999, [voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest)]);
         oc.earlyMessageTtl.set(999, Date.now() - 1);
         oc.pruneEarlyMessages(Date.now());                                                  // early_ttl

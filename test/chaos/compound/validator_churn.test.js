@@ -29,7 +29,7 @@ function makeDigest(config) {
 // validator set rather than the optional MIN_VALIDATORS, so a multi-member set
 // with a NULL snapshot now correctly refuses to propose. These experiments
 // inject validator CHURN, not an indexer outage, so they must clear that guard
-// to reach the behaviour they measure. Quorum is stubbed to what _getQuorum()
+// to reach the behaviour they measure. Quorum is stubbed to what getQuorum()
 // returns for the set under test, leaving each experiment's arithmetic
 // unchanged.
 function wireFederationSnapshot(hub, quorum) {
@@ -167,20 +167,20 @@ describe('Chaos: Validator Churn During Consensus', function () {
 
         // N=4: f=1, quorum=3
         con.validatorSet = [...VALIDATORS_4];
-        expect(con._getQuorum()).to.equal(3);
+        expect(con.getQuorum()).to.equal(3);
 
         // N=5: f=1, quorum=3
         con.validatorSet.push(makeValidator(5));
-        expect(con._getQuorum()).to.equal(3);
+        expect(con.getQuorum()).to.equal(3);
 
         // N=7: f=2, quorum=5
         con.validatorSet.push(makeValidator(6));
         con.validatorSet.push(makeValidator(7));
-        expect(con._getQuorum()).to.equal(5);
+        expect(con.getQuorum()).to.equal(5);
 
         // N=1: quorum=0 (single-node)
         con.validatorSet = [VALIDATORS_4[0]];
-        expect(con._getQuorum()).to.equal(0);
+        expect(con.getQuorum()).to.equal(0);
     });
 
     it('oracle leader changes when validator set changes between rounds', function () {
@@ -255,19 +255,19 @@ describe('Chaos: Validator Churn During Consensus', function () {
         for (let i = 5; i <= 15; i++) {
             con.validatorSet.push(makeValidator(i));
         }
-        expect(con._getQuorum()).to.be.gt(0);
+        expect(con.getQuorum()).to.be.gt(0);
 
         // Remove most validators
         con.validatorSet = [VALIDATORS_4[0], VALIDATORS_4[1]];
         // N=2: f = floor((2-1)/3) = 0, quorum = 2*0+1 = 1
-        expect(con._getQuorum()).to.equal(1);
+        expect(con.getQuorum()).to.equal(1);
 
         // Single validator
         con.validatorSet = [VALIDATORS_4[0]];
-        expect(con._getQuorum()).to.equal(0);
+        expect(con.getQuorum()).to.equal(0);
 
         // Back to normal
         con.validatorSet = [...VALIDATORS_4];
-        expect(con._getQuorum()).to.equal(3);
+        expect(con.getQuorum()).to.equal(3);
     });
 });

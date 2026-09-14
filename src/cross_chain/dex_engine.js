@@ -313,7 +313,7 @@ class CrossChainDexEngine extends EventEmitter {
         // that moved between the passes gives the second one a DIFFERENT matchId for the
         // same offers anyway. Result: the same offer proposed into two PBFT rounds and
         // double-committed against a single escrow. The finally is load-bearing: a rejected
-        // _fetchOpenOffers or _resolveSnapshotBlock must not wedge matching forever.
+        // _fetchOpenOffers or resolveSnapshotBlock must not wedge matching forever.
         if(this._matching) return;
         this._matching = true;
         try {
@@ -613,7 +613,7 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     async _finalizeMatch(desc){
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
         let lo = desc.lo, hi = desc.hi;
@@ -698,7 +698,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Resolve the cross_chain validator set at snapshot_block (deterministic,
         // BTC-anchored) so every node computes the same quorum. The leader of the
         // round persists + mirrors these rows to indexers (in consensus PROPOSE).
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
 
         // Reserve this fill in-flight so a later poll doesn't re-propose it before the
         // committed ledger is updated by writeFinalizedMatch.
@@ -1000,7 +1000,7 @@ class CrossChainDexEngine extends EventEmitter {
     // network) this fetches the SOURCE-KEYED weights; below it, the legacy count set
     // (source='' , weight=amount): byte-for-byte the old membership/values, so the
     // pre-activation path and mirror rows are unchanged.
-    async _resolveCapabilityValidators(capability, block, network){
+    async resolveCapabilityValidators(capability, block, network){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
@@ -1039,11 +1039,11 @@ class CrossChainDexEngine extends EventEmitter {
     // Returns the number of capability rows resolved (and persisted) for this
     // (capability, block). A return of 0 means the snapshot degraded to an empty
     // set (indexer RPC error / auth mismatch surfaces as a null snapshot, which
-    // _resolveCapabilityValidators normalizes to []), so callers on the money path
+    // resolveCapabilityValidators normalizes to []), so callers on the money path
     // can fail closed rather than committing a match whose signatures no mirror can
     // verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
-        let validators = await this._resolveCapabilityValidators(capability, block, network);
+        let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored. The `.truncated`
         // marker fails this hub's own meetsStakeThreshold closed, but it is a JS array
         // property with no capability_snapshots column behind it, so persisting the capped
@@ -1196,7 +1196,7 @@ class CrossChainDexEngine extends EventEmitter {
     // Resolve the BTC-anchored snapshot block. In a no-BTC regtest, fall back to a fixed
     // deterministic override (XDEX_SNAPSHOT_BLOCK) so the match + capability snapshot share
     // a consistent anchor. Production always resolves the live BTC tip (override unset).
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;

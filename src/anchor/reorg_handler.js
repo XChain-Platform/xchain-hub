@@ -287,7 +287,7 @@ class ReorgHandler extends EventEmitter {
         this.reorgRateTracker.set(chain, now);
 
         // Single-node fallback
-        let quorum = this._getQuorum();
+        let quorum = this.getQuorum();
         if (quorum === 0) {
             await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, '[]', observedBlockTimeMs);
             return;
@@ -340,7 +340,7 @@ class ReorgHandler extends EventEmitter {
     async _handleMessage(envelope) {
         switch (envelope.type) {
             case REORG_ALERT:          await this.handleAlert(envelope);   break;
-            case XCHAIN_REORG_PREPARE: await this._handlePrepare(envelope); break;
+            case XCHAIN_REORG_PREPARE: await this.handlePrepare(envelope); break;
             case XCHAIN_REORG_COMMIT:  this._handleCommit(envelope);        break;
         }
     }
@@ -408,7 +408,7 @@ class ReorgHandler extends EventEmitter {
             // Lock quorum at round start so the threshold can't shift between
             // PREPARE and COMMIT (validator set / peer count may change during
             // the 60s window), keeping every hub in lockstep across the round.
-            quorum:   this._getQuorum(),
+            quorum:   this.getQuorum(),
             prepares: new Set(),
             commits:  new Set(),
             finalized: false,
@@ -448,7 +448,7 @@ class ReorgHandler extends EventEmitter {
         this.checkPrepareQuorum(reorgId);
     }
 
-    async _handlePrepare(envelope) {
+    async handlePrepare(envelope) {
         if (!this._isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_prepare', sender: envelope.sender, envelope });
             return;
@@ -505,7 +505,7 @@ class ReorgHandler extends EventEmitter {
                     observedBlockTimeMs,
                     selfVerified: true,
                     // Lock quorum at round start (see initiateReorgConsensus).
-                    quorum:   this._getQuorum(),
+                    quorum:   this.getQuorum(),
                     prepares: new Set(),
                     commits:  new Set(),
                     finalized: false,
@@ -562,7 +562,7 @@ class ReorgHandler extends EventEmitter {
         // creation path sets this after verification; this guard is the invariant.
         if (pending.selfVerified !== true) return;
 
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         if (pending.prepares.size >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
@@ -583,7 +583,7 @@ class ReorgHandler extends EventEmitter {
         // executes a rollback on this hub, no matter how many commits arrive.
         if (pending.selfVerified !== true) return;
 
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
@@ -783,7 +783,7 @@ class ReorgHandler extends EventEmitter {
         return allChains.filter(c => c !== sourceChain);
     }
 
-    _getQuorum() {
+    getQuorum() {
         let N = this.validatorSet.length;
         if (N <= 0) {
             // No authoritative validator set yet (startup, before the hub propagates

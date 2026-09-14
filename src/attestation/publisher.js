@@ -498,7 +498,7 @@ class AttestationPublisher {
             this._broadcastSucceeded++;
             this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
             this._ambiguousSends.delete(rid);
-            this._recordSpend(rid, result && result.txid, 'live');   // durable spend audit
+            this.recordSpend(rid, result && result.txid, 'live');   // durable spend audit
             this._publishedRequests.mark(this._publicationKey(rid, responseStatus));
             await this.markPublished(rid, result && result.txid, responseStatus);   // restart-surviving marker
             this.removeFromQueue(new Set([rid]));
@@ -557,7 +557,7 @@ class AttestationPublisher {
     // is post-incident reconstruction of what BTC fee was spent, independent of
     // stdout retention. The WAL queue entry is removed on success, so without this
     // there is no durable trace of a completed spend.
-    _recordSpend(rid, txid, kind){
+    recordSpend(rid, txid, kind){
         let record = JSON.stringify({ ts: Date.now(), requestId: rid, txid: txid || null, kind: kind || 'live' }) + '\n';
         try {
             let fd = fs.openSync(this.spendLogPath, 'a');
@@ -958,7 +958,7 @@ class AttestationPublisher {
     getBroadcaster(){
         if (this.broadcastFn) return (payload, ev) => this.broadcastFn(payload, ev);
         if (this.encoder && this.walletSignFn && this.btcAddress && this.btcPubkeyHex){
-            return (payload) => this._defaultBroadcast(payload);
+            return (payload) => this.defaultBroadcast(payload);
         }
         return null;
     }
@@ -1245,7 +1245,7 @@ class AttestationPublisher {
                 this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
                 this._ambiguousSends.delete(rid);
                 await this.markPublished(rid, result && result.txid, entryStatus);   // restart-surviving marker
-                this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');
+                this.recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');
                 replayed++;
                 drop.add(rid);
                 logger.info('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
@@ -1355,7 +1355,7 @@ class AttestationPublisher {
         return parts.join('|');
     }
 
-    async _defaultBroadcast(payload){
+    async defaultBroadcast(payload){
         if (!this.encoder)       throw new Error('no encoder configured');
         if (!this.walletSignFn)  throw new Error('no wallet sign hook configured');
         if (!this.btcAddress)    throw new Error('no BTC_ADDRESS configured');

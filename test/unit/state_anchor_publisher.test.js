@@ -2014,7 +2014,7 @@ describe('StateAnchorPublisher', function () {
 
         // This test drives handleFinalized directly (bypassing the SIGN_REQ round
         // that normally binds the elected leader), so seed the observed-leader
-        // binding AND the batch's checkpoint identity the same way _handleSignReq
+        // binding AND the batch's checkpoint identity the same way handleSignReq
         // would after validating the election. The checkpoint (CP_ROW, in the mesh
         // DB) then verifies on-chain via the harness getanchoraction oracle, so the
         // COMPLETE control reaches the reward mirror.
@@ -2171,7 +2171,7 @@ describe('StateAnchorPublisher', function () {
         expect(follower.pub.network).to.equal('');              // unscoped hub: the drift precondition
         bus.anchorVersions.set('dogetx_scoped', 1);             // real v1 head, so the flag-day gate is what decides
         // Observe the leader AND stash the batch's checkpoint identity (regtest), the
-        // same way _handleSignReq would. The checkpoint verifies on-chain via the
+        // same way handleSignReq would. The checkpoint verifies on-chain via the
         // default honest oracle, so the ONLY thing keeping the mirror from firing is
         // the corrected flag-day gate reading the checkpoint's network.
         follower.pub.recordObservedArchiveLeader(3, leader.pubkey, CP_ROW);
@@ -2325,7 +2325,7 @@ describe('StateAnchorPublisher', function () {
         expect(nd.db.rewardRows[0].batch_seq, 'already-archived reward row keeps its batch').to.equal(2);
     });
 
-    it('_handleSignReq binds the elected archive leader locally (the FINALIZED gate source)', async function () {
+    it('handleSignReq binds the elected archive leader locally (the FINALIZED gate source)', async function () {
         let bus = buildMesh(3);
         let batchSeq = 0;
         let leader   = archiveLeader(bus, batchSeq);
@@ -2335,7 +2335,7 @@ describe('StateAnchorPublisher', function () {
         // but carries no usable archive (empty archive_b64) still binds the leader,
         // because the bind happens before the co-sign eligibility + archive checks.
         let canonical = follower.pub.archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
-        await follower.pub._handleSignReq({ data: {
+        await follower.pub.handleSignReq({ data: {
             checkpoint: cp, election_block: 100, batch_seq: batchSeq,
             match_count: 1, batch_crc32: 'deadbeef', total_chunks: 1, archive_b64: '',
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(canonical)
@@ -2385,7 +2385,7 @@ describe('StateAnchorPublisher', function () {
         expect(nd.db.matches.find(m => m.match_id === 'm1').anchor_txid, 'back-fill still applied').to.equal('dogetx_x');
     });
 
-    it('_handleSignReq bails on a stale tip (election_block far from our BTC view) before any election work', async function () {
+    it('handleSignReq bails on a stale tip (election_block far from our BTC view) before any election work', async function () {
         let bus = buildMesh(2, { btcBlock: 1000 });    // follower's BTC tip = 1000
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
@@ -2401,12 +2401,12 @@ describe('StateAnchorPublisher', function () {
         }});
 
         // election_block well outside tolerance → bail at the stale-tip guard, no election lookup.
-        await follower.pub._handleSignReq(mkReq(1000 + tol + 50));
+        await follower.pub.handleSignReq(mkReq(1000 + tol + 50));
         expect(lookups.length, 'no election lookup when the tip is stale').to.equal(0);
 
         // election_block within tolerance → proceeds past the guard into the election lookup
         // (which returns [] here, so the rest of the handler short-circuits harmlessly).
-        await follower.pub._handleSignReq(mkReq(1000 + Math.floor(tol / 2)));
+        await follower.pub.handleSignReq(mkReq(1000 + Math.floor(tol / 2)));
         expect(lookups.length, 'election lookup runs once the tip is within tolerance').to.be.greaterThan(0);
     });
 
@@ -2448,7 +2448,7 @@ describe('StateAnchorPublisher', function () {
         expect(set.truncated).to.equal(true);
     });
 
-    it('_handleSignReq: a follower NOT in the snapshot_block signing set does not co-sign', async function () {
+    it('handleSignReq: a follower NOT in the snapshot_block signing set does not co-sign', async function () {
         let bus = buildMesh(2, { btcBlock: 500 });
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
@@ -2483,7 +2483,7 @@ describe('StateAnchorPublisher', function () {
         // gate, never reads its own checkpoint row and never co-signs.
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [leader.pubkey];
-        await follower.pub._handleSignReq(mkReq());
+        await follower.pub.handleSignReq(mkReq());
         expect(selects, 'excluded follower stops before the local checkpoint read').to.equal(0);
 
         // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds past the gate to the
@@ -2491,11 +2491,11 @@ describe('StateAnchorPublisher', function () {
         // Proves the membership gate is what stops case (1).
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [leader.pubkey];
-        await follower.pub._handleSignReq(mkReq());
+        await follower.pub.handleSignReq(mkReq());
         expect(selects, 'included follower reads its own checkpoint row').to.equal(1);
     });
 
-    it('_handleSignReq: an UNSIGNED SIGN_REQ never records an observed archive leader', async function () {
+    it('handleSignReq: an UNSIGNED SIGN_REQ never records an observed archive leader', async function () {
         // PeerManager authenticates the envelope RELAYER; d.sig_pubkey is a separate
         // application-level field, so any member can name another member there. The rank
         // ladder is no gate either: it is keyed on the WIRE checkpoint, so the sender
@@ -2517,7 +2517,7 @@ describe('StateAnchorPublisher', function () {
         }});
 
         // Spoof: the leader's pubkey with a signature its key never produced.
-        await follower.pub._handleSignReq(mkReq('deadbeef'));
+        await follower.pub.handleSignReq(mkReq('deadbeef'));
         expect(follower.pub.isObservedArchiveLeader(SEQ, leader.pubkey),
                'an unsigned SIGN_REQ must not bind the named leader').to.equal(false);
         expect(follower.pub.observedArchiveCheckpoint(SEQ),
@@ -2526,12 +2526,12 @@ describe('StateAnchorPublisher', function () {
         // CONTROL: the same REQ carrying the leader's real signature still records, so
         // the guard is the signature and not some other gate.
         let canonical = leader.pub.archiveCanonical(cp, SEQ, 1, '0', 1);
-        await follower.pub._handleSignReq(mkReq(leader.identity.sign(canonical)));
+        await follower.pub.handleSignReq(mkReq(leader.identity.sign(canonical)));
         expect(follower.pub.isObservedArchiveLeader(SEQ, leader.pubkey)).to.equal(true);
         expect(follower.pub.observedArchiveCheckpoint(SEQ).checkpoint_seq).to.equal(Number(cp.checkpoint_seq));
     });
 
-    it('_handleSignReq: an UNRESOLVED election set fails closed instead of skipping the ladder (#4184)', async function () {
+    it('handleSignReq: an UNRESOLVED election set fails closed instead of skipping the ladder (#4184)', async function () {
         // The leader path already defers on an empty oracle_publish election set; the
         // follower fell through it, so during an unresolved window a NON-MEMBER could
         // solicit co-signatures from the historical wrapper set and assemble a duplicate
@@ -2555,14 +2555,14 @@ describe('StateAnchorPublisher', function () {
         // set - the exact combination the old fall-through admitted.
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [];
-        await follower.pub._handleSignReq(mkReq());
+        await follower.pub.handleSignReq(mkReq());
         expect(canonCalls, 'an unresolved election set may not reach the co-sign path').to.equal(0);
 
         // (2) CONTROL - the SAME request with a resolved election set naming the sender
         // (rank 0) proceeds to the canonical, proving the empty-set gate stopped (1).
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [outsider];
-        await follower.pub._handleSignReq(mkReq());
+        await follower.pub.handleSignReq(mkReq());
         expect(canonCalls, 'a resolved election set naming the sender still co-signs').to.equal(1);
     });
 
@@ -2932,7 +2932,7 @@ describe('StateAnchorPublisher', function () {
     });
 });
 
-// Publisher-wallet runway stats (#5443): _checkBalance records the last-observed
+// Publisher-wallet runway stats (#5443): checkBalance records the last-observed
 // DOGE balance and getAnchorStats surfaces it for the monitor/operator.
 describe('StateAnchorPublisher getAnchorStats balance', function () {
     function newPub(cfg) {
@@ -2945,9 +2945,9 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
         expect(s.dogeAddress).to.equal('Dpub1');
         expect(s.lowBalanceThreshold).to.equal(10);
     });
-    it('_checkBalance records the observed balance into getAnchorStats', async function () {
+    it('checkBalance records the observed balance into getAnchorStats', async function () {
         let pub = newPub();
-        let bal = await pub._checkBalance({ getBalanceFn: async () => 42.5 });
+        let bal = await pub.checkBalance({ getBalanceFn: async () => 42.5 });
         expect(bal).to.equal(42.5);
         let s = pub.getAnchorStats();
         expect(s.dogeBalance).to.equal(42.5);
@@ -2955,8 +2955,8 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
     });
     it('a failed balance read leaves the last-observed value untouched', async function () {
         let pub = newPub();
-        await pub._checkBalance({ getBalanceFn: async () => 5 });
-        await pub._checkBalance({ getBalanceFn: async () => { throw new Error('node down'); } });
+        await pub.checkBalance({ getBalanceFn: async () => 5 });
+        await pub.checkBalance({ getBalanceFn: async () => { throw new Error('node down'); } });
         expect(pub.getAnchorStats().dogeBalance).to.equal(5);   // not clobbered to null
     });
     // The encoder branch reports get_utxos `value` in satoshis, while
@@ -2968,7 +2968,7 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
             { value: '500000000', amount: '5.00000000' },
             { value: '350000000', amount: '3.50000000' }
         ] } };
-        let bal = await pub._checkBalance(signer);
+        let bal = await pub.checkBalance(signer);
         expect(bal).to.equal(8.5);
         expect(bal).to.be.below(pub.lowBalanceThreshold);   // 8.5 DOGE is low; 8.5e8 never was
         expect(pub.getAnchorStats().dogeBalance).to.equal(8.5);
@@ -2976,7 +2976,7 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
     it('converts an encoder UTXO carrying only the satoshi value field', async function () {
         let pub = newPub();
         let signer = { encoder: { getUtxos: async () => [{ value: '1500000000' }] } };
-        expect(await pub._checkBalance(signer)).to.equal(15);
+        expect(await pub.checkBalance(signer)).to.equal(15);
     });
 });
 

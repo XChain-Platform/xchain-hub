@@ -444,7 +444,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(this.observerHold()) return;
         this._ticking = true;
         try {
-            let btcBlock = await this._resolveSnapshotBlock();
+            let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
                 // On schedule: the cadence simply has not come round yet.
@@ -453,7 +453,7 @@ class StateCheckpointEngine extends EventEmitter {
                 return;
             }
 
-            let validators = await this._resolveCapabilityValidators('oracle_publish', btcBlock);
+            let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
             // Dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
             // Set at handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted
             // snapshot is one row per (source, pubkey), so a key delegated by two sources
@@ -548,7 +548,7 @@ class StateCheckpointEngine extends EventEmitter {
         // leaders read the same MAX and mint the SAME seq for DIFFERENT blocks; every
         // honest leader now derives its seq from the (per-hub-unique-at-a-given-tip)
         // snapshot_block, so a shared seq implies a shared snapshot_block implies one
-        // payload. Followers re-derive and refuse a mismatch (_handleSignReq).
+        // payload. Followers re-derive and refuse a mismatch (handleSignReq).
         let seq = StateCheckpointEngine.deriveCheckpointSeq(snapshotBlock);
 
         let cp = {
@@ -639,15 +639,15 @@ class StateCheckpointEngine extends EventEmitter {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XCHK_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
-            case XCHK_SIGN:      this._handleSign(envelope);      break;
+            case XCHK_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
+            case XCHK_SIGN:      this.handleSign(envelope);      break;
             case XCHK_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('StateCheckpointEngine: FINALIZED error: ' + (e && e.message))); break;
         }
     }
 
     // Follower: independently confirm the proposed checkpoint against OUR OWN
     // indexer before signing (never sign state we don't hold ourselves).
-    async _handleSignReq(envelope){
+    async handleSignReq(envelope){
         let d  = envelope.data;
         let cp = this.normalizeCheckpoint(d.checkpoint);
         if(!cp || !this.identity) return;
@@ -658,7 +658,7 @@ class StateCheckpointEngine extends EventEmitter {
         // Third of the guard's three call sites (propose, co-sign, persist). The
         // indexer byte-match further down rebuilds `mine` with the network OUR OWN
         // indexer reports, so it catches record-vs-indexer drift and is blind to the
-        // record-vs-DEPLOYMENT drift this predicate exists for: _resolveCapabilityValidators
+        // record-vs-DEPLOYMENT drift this predicate exists for: resolveCapabilityValidators
         // resolves the stake-weighted-quorum gate on `this.network`, so a hub whose
         // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
         // then refuse the finalized checkpoint under the other. Placed before the tip
@@ -673,7 +673,7 @@ class StateCheckpointEngine extends EventEmitter {
         // reach leader-selection (grinding), the validator-set resolve, or the flag-
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
-        let myBtc = await this._resolveSnapshotBlock();
+        let myBtc = await this.resolveSnapshotBlock();
         if(!Number.isFinite(myBtc)) return;                        // no own tip -> fail closed
         if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks) return;
 
@@ -684,7 +684,7 @@ class StateCheckpointEngine extends EventEmitter {
         // tightened (chain, network, checkpoint_seq) unique key a true split-brain fence.
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
 
-        let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
+        let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         // Dedupe to DISTINCT pubkeys before ranking, in lockstep with the leader
         // site in _tick (see the rationale there). Both MUST rank the same list or leader
         // and follower disagree on the cadence slot (split-brain). Inert below SWQ.
@@ -748,7 +748,7 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     // Leader: collect follower signatures.
-    _handleSign(envelope){
+    handleSign(envelope){
         let d  = envelope.data;
         let id = String(d.id || '');
         let pending = this.pending.get(id);
@@ -798,7 +798,7 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
-        let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
+        let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
         // Size the quorum from the RAW row count (item 2651), matching the propose
         // path (runRound) and the on-chain authority (anchor.js:336). The deduped
@@ -1155,11 +1155,11 @@ class StateCheckpointEngine extends EventEmitter {
                hx(row.contract_hash, cp.contract_hash);
     }
 
-    // Mirror CrossChainDexEngine._resolveCapabilityValidators (incl. regtest seam).
+    // Mirror CrossChainDexEngine.resolveCapabilityValidators (incl. regtest seam).
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM (this.network + block), else legacy
     // count set (source='' , weight=amount). Uses the deployment network so the set is
     // resolved correctly at _tick, before the per-chain network is known.
-    async _resolveCapabilityValidators(capability, block){
+    async resolveCapabilityValidators(capability, block){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, this.network);
         if(this.capSnapshot){
@@ -1196,9 +1196,9 @@ class StateCheckpointEngine extends EventEmitter {
     // Mirror CrossChainDexEngine._persistCapabilitySnapshot: the ANCHOR verifier
     // on the DOGE indexer resolves oracle_publish from the mirrored snapshots.
     async _persistCapabilitySnapshot(capability, block){
-        let validators = await this._resolveCapabilityValidators(capability, block);
+        let validators = await this.resolveCapabilityValidators(capability, block);
         // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated`
-        // marker _resolveCapabilityValidators carries is what makes this hub's own
+        // marker resolveCapabilityValidators carries is what makes this hub's own
         // meetsStakeThreshold fail closed on an over-cap snapshot, but it is a JS array
         // property and capability_snapshots has no column for it, so persisting the capped
         // rows hands the off-BTC (DOGE/LTC) indexer verifiers a partial set they read back
@@ -1277,7 +1277,7 @@ class StateCheckpointEngine extends EventEmitter {
         catch(_e){ /* the repair itself must never fail a committed checkpoint */ }
     }
 
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;

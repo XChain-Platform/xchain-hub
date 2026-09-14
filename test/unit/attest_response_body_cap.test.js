@@ -231,7 +231,7 @@ describe('FOLLOWER: _handlePropose refuses an over-cap peer proposal (legacy era
     });
 });
 
-describe('FOLLOWER: _handlePrepare refuses to adopt/co-sign an over-cap leader body (legacy era)', function () {
+describe('FOLLOWER: handlePrepare refuses to adopt/co-sign an over-cap leader body (legacy era)', function () {
 
     async function openRound(e) {
         await e.engine.propose(RID, {
@@ -270,7 +270,7 @@ describe('FOLLOWER: _handlePrepare refuses to adopt/co-sign an over-cap leader b
     it('adopts and co-signs a leader body exactly at the cap', function () {
         let e = makeEngine('testnet');
         return openRound(e).then((pending) => {
-            e.engine._handlePrepare(leaderPrepareEnvelope(e, AT_CAP_BODY));
+            e.engine.handlePrepare(leaderPrepareEnvelope(e, AT_CAP_BODY));
             expect(pending.winner, 'winner established').to.not.equal(null);
             expect(pending.signatures.has(e.peerKey), 'leader sig counted').to.equal(true);
             expect(pending.signatures.has(e.me), 'this hub co-signed').to.equal(true);
@@ -282,7 +282,7 @@ describe('FOLLOWER: _handlePrepare refuses to adopt/co-sign an over-cap leader b
     it('refuses a leader body one byte over the cap: no winner, no signature', function () {
         let e = makeEngine('testnet');
         return openRound(e).then((pending) => {
-            e.engine._handlePrepare(leaderPrepareEnvelope(e, OVER_CAP_BODY));
+            e.engine.handlePrepare(leaderPrepareEnvelope(e, OVER_CAP_BODY));
             expect(pending.winner, 'must not establish a winner over cap').to.equal(null);
             expect(pending.signatures.has(e.peerKey)).to.equal(false);
             expect(pending.signatures.has(e.me)).to.equal(false);

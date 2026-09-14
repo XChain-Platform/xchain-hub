@@ -241,31 +241,31 @@ describe('Fuzz: OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
 
         it('is always >= 1 for N >= 4', function () {
             fc.assert(fc.property(fc.integer({ min: 4, max: 100 }), function (N) {
                 oc.setValidatorSet(gen.fc_validatorSet(N));
-                expect(oc._getQuorum()).to.be.at.least(1);
+                expect(oc.getQuorum()).to.be.at.least(1);
             }), { numRuns: 100 });
         });
 
         it('is always <= N', function () {
             fc.assert(fc.property(fc.integer({ min: 1, max: 100 }), function (N) {
                 oc.setValidatorSet(gen.fc_validatorSet(N));
-                expect(oc._getQuorum()).to.be.at.most(N);
+                expect(oc.getQuorum()).to.be.at.most(N);
             }), { numRuns: 100 });
         });
 
         it('is monotonically non-decreasing as N increases', function () {
             fc.assert(fc.property(fc.integer({ min: 2, max: 99 }), function (N) {
                 oc.setValidatorSet(gen.fc_validatorSet(N));
-                let q1 = oc._getQuorum();
+                let q1 = oc.getQuorum();
                 oc.setValidatorSet(gen.fc_validatorSet(N + 1));
-                let q2 = oc._getQuorum();
+                let q2 = oc.getQuorum();
                 expect(q2).to.be.at.least(q1);
             }), { numRuns: 100 });
         });

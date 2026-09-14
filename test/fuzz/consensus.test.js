@@ -103,24 +103,24 @@ describe('Fuzz: Consensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
 
         it('never exceeds N', function () {
             fc.assert(fc.property(fc.integer({ min: 1, max: 100 }), function (N) {
                 consensus.setValidatorSet(gen.fc_validatorSet(N));
-                expect(consensus._getQuorum()).to.be.at.most(N);
+                expect(consensus.getQuorum()).to.be.at.most(N);
             }), { numRuns: 100 });
         });
 
         it('is monotonically non-decreasing as N increases', function () {
             fc.assert(fc.property(fc.integer({ min: 2, max: 99 }), function (N) {
                 consensus.setValidatorSet(gen.fc_validatorSet(N));
-                let q1 = consensus._getQuorum();
+                let q1 = consensus.getQuorum();
                 consensus.setValidatorSet(gen.fc_validatorSet(N + 1));
-                let q2 = consensus._getQuorum();
+                let q2 = consensus.getQuorum();
                 expect(q2).to.be.at.least(q1);
             }), { numRuns: 100 });
         });
@@ -128,13 +128,13 @@ describe('Fuzz: Consensus', function () {
         it('is always >= 1 for N >= 4', function () {
             fc.assert(fc.property(fc.integer({ min: 4, max: 100 }), function (N) {
                 consensus.setValidatorSet(gen.fc_validatorSet(N));
-                expect(consensus._getQuorum()).to.be.at.least(1);
+                expect(consensus.getQuorum()).to.be.at.least(1);
             }), { numRuns: 100 });
         });
 
         it('returns 0 for N <= 1 (single-node fallback)', function () {
             consensus.setValidatorSet(gen.fc_validatorSet(1));
-            expect(consensus._getQuorum()).to.equal(0);
+            expect(consensus.getQuorum()).to.equal(0);
         });
     });
 

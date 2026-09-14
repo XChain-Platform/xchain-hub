@@ -639,7 +639,7 @@ class OraclePublisher {
     // Default broadcast pipeline: uses the EncoderClient + walletSignFn to construct, sign, and broadcast
     // a PRICE v0 transaction to the DOGE chain. Returns { txid } on success.
     // This is used automatically when no custom broadcastFn is set but encoder + walletSignFn are configured.
-    async _defaultBroadcast(payload) {
+    async defaultBroadcast(payload) {
         // Everything down to step 4 builds and signs: no money has moved and nothing has
         // left this process, so every failure here is DEFINITIVELY never-sent whatever it
         // looks like on the socket. Tag them, because the shared classifier answers
@@ -724,7 +724,7 @@ class OraclePublisher {
         // A SUCCESSFUL create_tx reserved every input it selected and handed back the
         // receipt on psbtResult.reservation; the encoder's selection skips those outpoints
         // until its own 5-minute TTL. Every exit below abandons the build BEFORE
-        // broadcast_tx (the send lives in _defaultBroadcast, one frame up), so each one
+        // broadcast_tx (the send lives in defaultBroadcast, one frame up), so each one
         // must hand the claims back or this publishing address is unavailable to the other
         // publishers and to wallet operations for the rest of that window - and a pass that
         // keeps retrying reserves a fresh set of outputs each time without ever sending.
@@ -1232,7 +1232,7 @@ class OraclePublisher {
     // Best-effort: a write failure is logged but does not keep the entry looping
     // forever on the main queue. Records the original entry plus when and why it
     // was abandoned so an operator can replay the round manually.
-    _deadLetter(entry, reason) {
+    deadLetter(entry, reason) {
         this.abandonedCount++;
         let record = Object.assign({}, entry, { deadLetteredAt: Date.now(), reason: reason });
         let line   = JSON.stringify(record) + '\n';
@@ -2568,7 +2568,7 @@ class OraclePublisher {
                     bound + ', over the ' + PRICE_WIRE_MAX_BYTES + '-byte limit. No split can fit ' +
                     'it: this federation has outgrown the PRICE wire. The round is dead-lettered to ' +
                     this.deadLetterPath + ' and NOTHING publishes for it.');
-                this._deadLetter({
+                this.deadLetter({
                     round:          first,
                     batchFirstRound: first,
                     batchLastRound:  last,
@@ -2905,7 +2905,7 @@ class OraclePublisher {
         // skip the whole publish pass rather than spend blind. Below the floor, skip
         // too; entries stay queued and retry once the wallet is topped up. This bounds
         // total drain to the floor no matter which failure mode is driving the spend.
-        let balance = await this._checkBalance();
+        let balance = await this.checkBalance();
         // Only enforce when a balance source is actually wired (a getBalanceFn hook,
         // or an encoder + address to sum UTXOs). With no source, balance is always
         // null and there is nothing to enforce, so preserve prior behavior rather
@@ -2959,7 +2959,7 @@ class OraclePublisher {
             if (entry.attempts >= this.maxAttempts) {
                 logger.error('OraclePublisher: round ' + entry.round + ' exceeded max attempts (' +
                     this.maxAttempts + '), moving to dead-letter file ' + this.deadLetterPath);
-                this._deadLetter(entry, 'exceeded max attempts (' + this.maxAttempts + ')');
+                this.deadLetter(entry, 'exceeded max attempts (' + this.maxAttempts + ')');
                 continue;
             }
 
@@ -3028,7 +3028,7 @@ class OraclePublisher {
                 : this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
             // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
-            let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
+            let broadcaster = this.broadcastFn || ((p) => this.defaultBroadcast(p));
             let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
 
             // Decline an unwired pipeline BEFORE any budget is claimed and before any
@@ -3159,7 +3159,7 @@ class OraclePublisher {
                     logger.error(nodeUtil.format('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
                         ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
                         'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err));
-                    this._deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
+                    this.deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
                     // The same tx that must not be auto-retried here must not
                     // be re-published by this hub's own takeover of the window either.
                     if (entry.batch) this.noteAmbiguousWindow(parseInt(entry.batch.windowIndex));
@@ -3405,7 +3405,7 @@ class OraclePublisher {
     // Check DOGE balance and log warnings if below threshold
     // Uses the operator's getBalanceFn if set, otherwise falls back to summing UTXOs from the encoder.
     // Returns the balance (in DOGE) or null if no source is available.
-    async _checkBalance() {
+    async checkBalance() {
         let balance = null;
         if (this.getBalanceFn) {
             try {

@@ -246,7 +246,7 @@ describe('Regression: Oracle Pipeline', function () {
                     signatures: new Map()
                 });
 
-                oc._handlePrepare({
+                oc.handlePrepare({
                     sender: VALIDATORS_4[2].addr,
                     sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { round: 1, digest }
@@ -297,7 +297,7 @@ describe('Regression: Oracle Pipeline', function () {
                     signatures: new Map()
                 });
 
-                oc._handlePrepare({
+                oc.handlePrepare({
                     sender: VALIDATORS_4[1].addr,
                     sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { round: 1, digest: 'wrong-digest' }
@@ -316,8 +316,8 @@ describe('Regression: Oracle Pipeline', function () {
                     signatures: new Map()
                 });
 
-                oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
-                oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
+                oc.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
+                oc.handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
 
                 expect(oc.pendingRounds.get(1).prepares.size).to.equal(1);
             });
@@ -412,7 +412,7 @@ describe('Regression: Oracle Pipeline', function () {
                         addr: 'ws://v-' + i + ':10001'
                     }));
                     oc.setValidatorSet(validators);
-                    expect(oc._getQuorum()).to.equal(c.expected);
+                    expect(oc.getQuorum()).to.equal(c.expected);
                 });
             }
         });

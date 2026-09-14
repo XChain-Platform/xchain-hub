@@ -392,8 +392,8 @@ describe('FullNodeChallengeRound', function () {
             await eng._eligibleVerifiers(288);
             expect(logged.calledWithMatch('TRUNCATED')).to.equal(false);
         });
-        it('_runEpoch abstains (creates no round, emits no verdict) when the verifier set is unresolved', async function () {
-            // RPC-failure abstain regression: getblockhashes succeeds (so _runEpoch is
+        it('runEpoch abstains (creates no round, emits no verdict) when the verifier set is unresolved', async function () {
+            // RPC-failure abstain regression: getblockhashes succeeds (so runEpoch is
             // reached) but getfullnodeverifiers fails. The hub must skip the epoch:
             // no round state, no leadership, no sign request, no verdict broadcast.
             const block = { tx: [{ vout: [{ scriptPubKey: { hex: 'deadbeef' } }] }] };
@@ -408,7 +408,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             const eng = new FullNodeChallengeRound(hub);
             eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
-            await eng._runEpoch(288, 300);
+            await eng.runEpoch(288, 300);
             expect(eng.rounds.has(288), 'no round state created on abstain').to.equal(false);
             expect(eng.broadcastFn.called, 'no verdict broadcast on abstain').to.equal(false);
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
@@ -446,7 +446,7 @@ describe('FullNodeChallengeRound', function () {
             expect(set).to.be.instanceOf(Set);
             expect(set.size).to.equal(0);
         });
-        it('_runEpoch abstains (no round, no verdict) when the claimant snapshot is unresolved', async function () {
+        it('runEpoch abstains (no round, no verdict) when the claimant snapshot is unresolved', async function () {
             // #2646: eligible set resolves, but the full_node capability snapshot is
             // null. The hub must abstain rather than lock an empty claimant set that
             // diverges from hubs whose snapshot resolved.
@@ -455,7 +455,7 @@ describe('FullNodeChallengeRound', function () {
             hub.capabilitySnapshot.getSnapshot.resolves(null);
             const eng = new FullNodeChallengeRound(hub);
             eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
-            await eng._runEpoch(288, 300);
+            await eng.runEpoch(288, 300);
             expect(eng.rounds.has(288), 'no round state created on claimant abstain').to.equal(false);
             expect(eng.broadcastFn.called, 'no verdict broadcast on claimant abstain').to.equal(false);
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
@@ -479,7 +479,7 @@ describe('FullNodeChallengeRound', function () {
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }, { pubkey: P1 }] });
             const eng = new FullNodeChallengeRound(hub);
             eng.broadcastFn = sinon.stub().resolves({ txid: 'TX123' });
-            await eng._runEpoch(288, 300);
+            await eng.runEpoch(288, 300);
             return eng;
         }
 
@@ -549,7 +549,7 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             let seen = [], sawIntentBeforeSpend = false;
-            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.recordSpend = (entry) => { seen.push(entry); return true; };
             eng.broadcastFn = () => {
                 sawIntentBeforeSpend = seen.some(e => e.phase === 'intent');
                 return Promise.resolve({ txid: 'TX' });
@@ -567,7 +567,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            eng._recordSpend = () => false;              // disk full / bad permissions
+            eng.recordSpend = () => false;              // disk full / bad permissions
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng.closeCollection(288);
             expect(eng.broadcastFn.called, 'no BTC fee without a durable record').to.equal(false);
@@ -580,7 +580,7 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             let seen = [];
-            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.recordSpend = (entry) => { seen.push(entry); return true; };
             eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng.closeCollection(288);
@@ -598,7 +598,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            eng._recordSpend = () => true;
+            eng.recordSpend = () => true;
             eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng.closeCollection(288);
@@ -612,7 +612,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            eng._recordSpend = () => true;
+            eng.recordSpend = () => true;
             eng.broadcastFn = () => Promise.reject(new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng.closeCollection(288);
@@ -631,7 +631,7 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             let seen = [];
-            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.recordSpend = (entry) => { seen.push(entry); return true; };
             st.leadRank = 2;                   // _tick promoted rank 2: nothing landed at 0 or 1
             const logged = sinon.stub(console, 'log');
             try {
@@ -651,7 +651,7 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             let seen = [];
-            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.recordSpend = (entry) => { seen.push(entry); return true; };
             const logged = sinon.stub(console, 'log');
             try {
                 eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
@@ -814,7 +814,7 @@ describe('FullNodeChallengeRound', function () {
                 const hub = makeHub();
                 const eng = await startEpoch(hub);
                 const st  = eng.rounds.get(288);
-                eng._recordSpend = () => true;
+                eng.recordSpend = () => true;
                 eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
                 await eng.closeCollection(288);
                 expect(eng._committedEpochs.has(288)).to.equal(true);
@@ -858,7 +858,7 @@ describe('FullNodeChallengeRound', function () {
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: P1 }, { pubkey: P2 }] });
             const eng = new FullNodeChallengeRound(hub);
             eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
-            await eng._runEpoch(288, 300);
+            await eng.runEpoch(288, 300);
             return eng;
         }
 
@@ -986,7 +986,7 @@ describe('FullNodeChallengeRound', function () {
         // The poll is a plain setInterval, so a tick that outruns pollMs (three
         // sequential indexer calls at a 15s timeout each, against a 30s poll) would
         // otherwise overlap: both runs pass the rounds.has(epoch) test before either
-        // reaches rounds.set inside _runEpoch, starting one epoch twice.
+        // reaches rounds.set inside runEpoch, starting one epoch twice.
         it('a second overlapping tick returns instead of starting the epoch twice', async function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }] });
@@ -1003,7 +1003,7 @@ describe('FullNodeChallengeRound', function () {
                 if (first) { first = false; await gate; }
                 return realCall(m, p);
             };
-            const runEpoch = sinon.spy(eng, '_runEpoch');
+            const runEpoch = sinon.spy(eng, 'runEpoch');
 
             const a = eng._tick();
             const b = eng._tick();      // fires while a is parked on the gate

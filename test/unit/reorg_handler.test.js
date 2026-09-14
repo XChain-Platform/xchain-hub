@@ -63,20 +63,20 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getQuorum()
+    // getQuorum()
     // -----------------------------------------------------------------
 
-    describe('_getQuorum()', function () {
+    describe('getQuorum()', function () {
         it('N=3 → 2 (majority floor)', function () {
             rh.setValidatorSet(VALIDATORS_3);
             // f=floor(2/3)=0 → 2f+1=1, floored at ceil((3+1)/2)=2
-            expect(rh._getQuorum()).to.equal(2);
+            expect(rh.getQuorum()).to.equal(2);
         });
 
         it('single node → 0', function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            expect(rh._getQuorum()).to.equal(0);
+            expect(rh.getQuorum()).to.equal(0);
         });
 
         // REORG-QUORUM-PEER-FALLBACK-1: with no authoritative validator set the
@@ -88,21 +88,21 @@ describe('ReorgHandler', function () {
             pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
             // A flood of extra open sockets must NOT move N off the registry count of 3.
             pm.getPeerStatus.returns(Array.from({ length: 9 }, () => ({ state: 'open' })));
-            expect(rh._getQuorum()).to.equal(2); // N=3 → majority floor ceil(4/2)=2
+            expect(rh.getQuorum()).to.equal(2); // N=3 → majority floor ceil(4/2)=2
         });
 
         it('adds 1 for self when this node is not yet in the registry', function () {
             rh.setValidatorSet([]);
             pm.validatorAddr    = 'ws://self-not-registered:10001';
             pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
-            expect(rh._getQuorum()).to.equal(3); // N=3+1=4 → 2f+1=3
+            expect(rh.getQuorum()).to.equal(3); // N=3+1=4 → 2f+1=3
         });
 
         it('falls back to the peer-socket count only when the registry is empty (bootstrap)', function () {
             rh.setValidatorSet([]);
             pm.validatorPubkeys = new Map();
             pm.getPeerStatus.returns([{ state: 'open' }, { state: 'open' }]);
-            expect(rh._getQuorum()).to.equal(2); // N=2 peers + 1 self = 3 → majority floor 2
+            expect(rh.getQuorum()).to.equal(2); // N=2 peers + 1 self = 3 → majority floor 2
         });
     });
 
@@ -330,7 +330,7 @@ describe('ReorgHandler', function () {
             expect(pm.broadcast.called).to.be.false;
         });
 
-        it('_handlePrepare (leader-bypass) abstains when the timestamp predates the observed block_time', async function () {
+        it('handlePrepare (leader-bypass) abstains when the timestamp predates the observed block_time', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let blockTime = Date.now() - 60000;
@@ -339,7 +339,7 @@ describe('ReorgHandler', function () {
             let ts = blockTime - rh.timestampSkewToleranceMs - 60000;
             let reorgId = 'BTC:500:' + ts;
             let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         affectedChains: ['LTC', 'DOGE'], digest,
@@ -414,14 +414,14 @@ describe('ReorgHandler', function () {
             expect(verify.called, 'cap checked before the indexer probe').to.be.false;
         });
 
-        it('_handlePrepare drops a PREPARE whose reorgId is not canonical (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+        it('handlePrepare drops a PREPARE whose reorgId is not canonical (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let verify = stubVerified(true);
             let ts = Date.now();
             let reorgId = 'FORGED:' + ts;
             let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
                         affectedChains: ['BTC', 'DOGE'], digest, oldHash: OLD_HASH, newHash: NEW_HASH }
@@ -450,7 +450,7 @@ describe('ReorgHandler', function () {
                 'the genuine retry is not blocked by the rate limit').to.be.true;
         });
 
-        it('_handlePrepare (leader-bypass path) abstains when verification fails', async function () {
+        it('handlePrepare (leader-bypass path) abstains when verification fails', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             stubVerified(false);
@@ -458,7 +458,7 @@ describe('ReorgHandler', function () {
             let ts = Date.now();
             let reorgId = 'LTC:300:' + ts;
             let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
                         affectedChains: ['BTC', 'DOGE'], digest,
@@ -467,7 +467,7 @@ describe('ReorgHandler', function () {
             expect(rh.pendingReorgs.has(reorgId)).to.be.false;
         });
 
-        it('_handlePrepare recomputes the digest and drops a wire digest that does not match the fields', async function () {
+        it('handlePrepare recomputes the digest and drops a wire digest that does not match the fields', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             let verify = stubVerified(true);
 
@@ -475,7 +475,7 @@ describe('ReorgHandler', function () {
             let reorgId = 'LTC:300:' + ts;
             // Digest computed over a DIFFERENT newHash than the wire fields carry.
             let poisoned = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, 'c'.repeat(64));
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
                         affectedChains: ['BTC', 'DOGE'], digest: poisoned,
@@ -799,7 +799,7 @@ describe('ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         affectedChains: ['LTC', 'DOGE'], digest,
@@ -821,10 +821,10 @@ describe('ReorgHandler', function () {
             expect(pm.broadcast.called, 'no PREPARE broadcast for a stale reorg').to.be.false;
         });
 
-        it('_handlePrepare refuses to co-sign an out-of-window (old) timestamp', async function () {
+        it('handlePrepare refuses to co-sign an out-of-window (old) timestamp', async function () {
             let ts = 1700000000000;
             let reorgId = 'BTC:500:' + ts;
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         affectedChains: ['LTC', 'DOGE'],
@@ -847,7 +847,7 @@ describe('ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         oldHash: OLD_HASH, newHash: NEW_HASH, digest: 'wrong' }
@@ -945,7 +945,7 @@ describe('ReorgHandler', function () {
             rh.on('reorg:timeout', (d) => { emitted = d; });
 
             // A peer's PREPARE creates the pending round locally.
-            await rh._handlePrepare({
+            await rh.handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: 1700000000000,
                         affectedChains: ['BTC', 'DOGE'], digest,
@@ -1014,7 +1014,7 @@ describe('ReorgHandler', function () {
     describe('_handleMessage dispatch', function () {
         it('routes alert / prepare / commit and ignores unknown types', async function () {
             let a = sinon.spy(rh, 'handleAlert');
-            let p = sinon.spy(rh, '_handlePrepare');
+            let p = sinon.spy(rh, 'handlePrepare');
             let c = sinon.spy(rh, '_handleCommit');
             await rh._handleMessage({ type: 'REORG_ALERT', data: {} });
             await rh._handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });

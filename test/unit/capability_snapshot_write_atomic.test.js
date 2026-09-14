@@ -122,7 +122,7 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
         let db  = memDb(1);
         let eng = new StateCheckpointEngine({ db, network: 'regtest', p2pConfig: {},
                                               getPeerManager: () => ({ on(){}, broadcast(){} }) });
-        eng._resolveCapabilityValidators = async () => VALIDATORS.slice();
+        eng.resolveCapabilityValidators = async () => VALIDATORS.slice();
         let threw = false;
         try { await eng._persistCapabilitySnapshot(CAPABILITY, BLOCK); }
         catch (e) { threw = true; }

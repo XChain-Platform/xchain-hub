@@ -170,11 +170,11 @@ class RetractionConsensus {
         if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this.broadcastUnsigned(evt);
         if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
 
-        let snapshotBlock = await this._resolveSnapshotBlock();
+        let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null || !isRetractionSigningActive(snapshotBlock, this.network))
             return this.broadcastUnsigned(evt);
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);
         if(!validators.length) return this.broadcastUnsigned(evt);
 
         let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
@@ -234,8 +234,8 @@ class RetractionConsensus {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XRETRACT_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
-            case XRETRACT_SIGN:      this._handleSign(envelope); break;
+            case XRETRACT_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
+            case XRETRACT_SIGN:      this.handleSign(envelope); break;
             case XRETRACT_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
         }
     }
@@ -264,7 +264,7 @@ class RetractionConsensus {
 
     // Follower: co-sign ONLY a retraction our own source-chain indexer
     // independently pushed to this hub (never adopt the initiator's claim).
-    async _handleSignReq(envelope){
+    async handleSignReq(envelope){
         let d   = envelope.data;
         let evt = this.normalizeRetraction(d.retraction);
         if(!evt || !this.identity) return;
@@ -276,11 +276,11 @@ class RetractionConsensus {
 
         // Freshness (fail-closed): bound the initiator-chosen snapshot_block
         // against our own tip view before it can select the validator set.
-        let myBlock = await this._resolveSnapshotBlock();
+        let myBlock = await this.resolveSnapshotBlock();
         if(myBlock == null || !Number.isFinite(Number(myBlock))) return;
         if(Math.abs(Number(evt.snapshot_block) - Number(myBlock)) > SNAPSHOT_DRIFT_BLOCKS) return;
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         if(!pubkeys.has(myPubkey) || !pubkeys.has(sender)) return;
 
@@ -300,7 +300,7 @@ class RetractionConsensus {
     }
 
     // Initiator: collect follower signatures.
-    _handleSign(envelope){
+    handleSign(envelope){
         let d  = envelope.data;
         let id = String(d.id || '');
         let pending = this.pending.get(id);
@@ -343,7 +343,7 @@ class RetractionConsensus {
         let id        = this._roundId(canonical);
         if(this.finalized.has(id)) return;                         // already streamed (we initiated it)
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
+        let validators = await this.resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
         let weighted   = swq.isStakeWeightedQuorumActive(evt.snapshot_block, this.network);
@@ -428,12 +428,12 @@ class RetractionConsensus {
     // Returns the number of capability rows resolved (and persisted) for this
     // (capability, block). A return of 0 means there was no DB mirror to write to,
     // the set degraded to empty (an indexer RPC error / auth mismatch surfaces as a
-    // null snapshot, which _resolveCapabilityValidators normalizes to []), or the set
+    // null snapshot, which resolveCapabilityValidators normalizes to []), or the set
     // was refused as truncated - so finalize can fail closed rather than streaming a
     // signed deletion whose signatures no mirror can verify.
     async _persistCapabilitySnapshot(capability, block){
         if(!this.db) return 0;
-        let validators = await this._resolveCapabilityValidators(capability, block, this.network);
+        let validators = await this.resolveCapabilityValidators(capability, block, this.network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. The retraction
         // rail is a fourth writer into the SAME shared capability_snapshots mirror, so an
@@ -469,8 +469,8 @@ class RetractionConsensus {
     }
 
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM activation, legacy count set
-    // below it (mirrors CrossChainCallEngine._resolveCapabilityValidators).
-    async _resolveCapabilityValidators(capability, block, network){
+    // below it (mirrors CrossChainCallEngine.resolveCapabilityValidators).
+    async resolveCapabilityValidators(capability, block, network){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
@@ -494,7 +494,7 @@ class RetractionConsensus {
         return validators;
     }
 
-    async _resolveSnapshotBlock(){
+    async resolveSnapshotBlock(){
         let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;

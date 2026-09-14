@@ -14,7 +14,7 @@
 // mempool-accepted DOGE anchor must never lead to a rebuilt-PSBT re-broadcast
 // (a double-spend: fresh UTXOs mean both txs can confirm). Covers the
 // pre-broadcast existence check, the ambiguous-send error classification in
-// _defaultBroadcast, the bounded post-ambiguous existence poll, and the
+// defaultBroadcast, the bounded post-ambiguous existence poll, and the
 // defer-over-risk rule; also pins that safe pre-send failures keep the
 // original fresh-PSBT retry behavior (the live multi-chain conflict fix).
 
@@ -287,7 +287,7 @@ describe('StateAnchorPublisher: isAmbiguousSendError classification', function (
     });
 });
 
-describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
+describe('StateAnchorPublisher: defaultBroadcast tagging', function () {
 
     function mkSigner(overrides){
         return Object.assign({
@@ -307,7 +307,7 @@ describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
             const e = new Error('timeout'); e.code = 'ECONNABORTED'; throw e;
         };
         let err = null;
-        try { await pub._defaultBroadcast('P', signer); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
         expect(err.anchorAmbiguousSend).to.equal(true);
     });
 
@@ -316,7 +316,7 @@ describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
         const signer = mkSigner();
         signer.encoder.broadcastTx = async () => { throw new Error('Encoder RPC error: bad-txns'); };
         let err = null;
-        try { await pub._defaultBroadcast('P', signer); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
         expect(err.anchorAmbiguousSend).to.be.undefined;
     });
 
@@ -327,19 +327,19 @@ describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
             const e = new Error('timeout'); e.code = 'ECONNABORTED'; throw e;
         };
         let err = null;
-        try { await pub._defaultBroadcast('P', signer); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
         expect(err.anchorAmbiguousSend).to.be.undefined;
 
         const signer2 = mkSigner();
         signer2.encoder.getUtxos = async () => [];
         err = null;
-        try { await pub._defaultBroadcast('P', signer2); } catch (e) { err = e; }
+        try { await pub.defaultBroadcast('P', signer2); } catch (e) { err = e; }
         expect(err.anchorAmbiguousSend).to.be.undefined;
     });
 
     it('still returns the broadcast result on success', async function () {
         const pub = mkPub();
-        const res = await pub._defaultBroadcast('P', mkSigner());
+        const res = await pub.defaultBroadcast('P', mkSigner());
         expect(res.txid).to.equal('tx1');
     });
 });

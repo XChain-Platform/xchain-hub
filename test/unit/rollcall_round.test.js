@@ -368,7 +368,7 @@ describe('RollcallRound', function () {
             assert.ok(eng._committed.has('90:self'));
 
             // And what this hub writes from now on names it.
-            eng._recordSpend({ phase: 'intent', epoch: 120, kind: 'sweep' });
+            eng.recordSpend({ phase: 'intent', epoch: 120, kind: 'sweep' });
             const last = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8').trim().split('\n').pop();
             assert.strictEqual(JSON.parse(last).pubkey, mine);
         });
@@ -827,7 +827,7 @@ describe('RollcallRound', function () {
         it('defers the publish when the spend-audit path is unwritable', async function () {
             wireRpc({ tip: 38 });
             const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            sinon.stub(eng, '_recordSpend').returns(false);
+            sinon.stub(eng, 'recordSpend').returns(false);
             await eng._tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'a real DOGE fee must never be spent with no recoverable trace');

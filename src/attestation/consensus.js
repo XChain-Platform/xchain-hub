@@ -265,7 +265,7 @@ class AttestationConsensus extends EventEmitter {
         // is permanently dropped, costing the round that peer's vote and
         // stalling finalization in quorum>1 federations until a re-broadcast or
         // round timeout. Hold these per-request and drain them the instant a
-        // winner is set (in maybeAdvanceFromProposals / _handlePrepare).
+        // winner is set (in maybeAdvanceFromProposals / handlePrepare).
         // Map<rid, Array<envelope>>
         this.earlyCommits = new Map();
         this.earlyCommitMaxPerRid = 32;
@@ -806,7 +806,7 @@ class AttestationConsensus extends EventEmitter {
     _handleMessage(envelope){
         switch(envelope.type){
             case ATTEST_PROPOSE: this._handlePropose(envelope); break;
-            case ATTEST_PREPARE: this._handlePrepare(envelope); break;
+            case ATTEST_PREPARE: this.handlePrepare(envelope); break;
             case ATTEST_COMMIT:  this._handleCommit(envelope);  break;
         }
     }
@@ -935,7 +935,7 @@ class AttestationConsensus extends EventEmitter {
             pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok'), effectiveTime: wireEffective });
             // A-F1 liveness: a judge_model leader PREPARE that arrived before this
             // follower had collected `need` proposals was buffered (see
-            // _handlePrepare) so it could be hash-checked against real proposals
+            // handlePrepare) so it could be hash-checked against real proposals
             // instead of adopted on faith. Nothing else replays that buffer before
             // a winner exists, so drain it here the moment the proposal count
             // crosses the check threshold; a still-early replay just re-buffers.
@@ -1005,7 +1005,7 @@ class AttestationConsensus extends EventEmitter {
         // whichever arrived first and the federation could never converge on one
         // canonical body. So for judge_model only the elected leader runs agree()
         // and broadcasts the canonical winner; followers adopt + re-sign it via
-        // the leader's PREPARE (see _handlePrepare). If the leader never resolves
+        // the leader's PREPARE (see handlePrepare). If the leader never resolves
         // (offline / failed self-test), the round falls through to deadline
         // expiry rather than finalizing divergent bodies. byte_equality stays
         // deterministic (the agreed body is the common one) so every hub resolves
@@ -1109,7 +1109,7 @@ class AttestationConsensus extends EventEmitter {
         // was verified in _handlePropose over the sender's own wire status. A proposer
         // can match the winner body+meta yet have signed over status='fail', so its sig
         // does NOT verify over the winner canonical. Re-verify here before counting it,
-        // mirroring _handlePrepare (614) and _handleCommit; an unverifiable sig inflates
+        // mirroring handlePrepare (614) and _handleCommit; an unverifiable sig inflates
         // signatures.size and the indexer would deterministically reject the response.
         let winnerCanonical = this._buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
@@ -1321,7 +1321,7 @@ class AttestationConsensus extends EventEmitter {
         set.add(status);
     }
 
-    _handlePrepare(envelope){
+    handlePrepare(envelope){
         let d = envelope.data;
         if(!d || !d.requestId) return;
         let rid = String(d.requestId).toLowerCase();
@@ -1866,7 +1866,7 @@ class AttestationConsensus extends EventEmitter {
 
         if(d.sig && d.sig_pubkey){
             // Over the round's settled canonical, stamp included (see the matching
-            // note in the later-PREPARE branch of _handlePrepare).
+            // note in the later-PREPARE branch of handlePrepare).
             let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
@@ -2207,7 +2207,7 @@ class AttestationConsensus extends EventEmitter {
     // trip is one that is already on the wire - which is the whole argument in
     // resolveRoundEffectiveTime's header, unchanged. Under judge_model only the
     // elected leader establishes a winner and every follower adopts the stamp off
-    // the leader's PREPARE (_handlePrepare's winner-establishing blocks), so the
+    // the leader's PREPARE (handlePrepare's winner-establishing blocks), so the
     // leader is free to pick a fresh value here, and has to: agree() is an LLM
     // round trip that runs for as long as it runs, and a stamp chosen back at
     // proposal time has aged by that whole latency before any follower sees it.

@@ -475,7 +475,7 @@ class AttestationBatchPublisher {
         // overflow would publish a head whose coverage claim is false. So the window is
         // recorded loudly and left for an operator, and the rows stay in the mirror.
         if(rows.length > abw.ATTEST_BATCH_MAX_ROWS){
-            this._deadLetter({ window_start: windowStart, window_end: windowEnd, row_count: rows.length },
+            this.deadLetter({ window_start: windowStart, window_end: windowEnd, row_count: rows.length },
                 'row count ' + rows.length + ' exceeds ATTEST_BATCH_MAX_ROWS (' + abw.ATTEST_BATCH_MAX_ROWS + ')');
             logger.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
                 ' holds ' + rows.length + ' terminal responses, over the ' + abw.ATTEST_BATCH_MAX_ROWS +
@@ -538,7 +538,7 @@ class AttestationBatchPublisher {
 
         let encoded = abw.encodeAttestBatch(window);
         if(!encoded.ok){
-            this._deadLetter({ window_start: windowStart, window_end: windowEnd,
+            this.deadLetter({ window_start: windowStart, window_end: windowEnd,
                                row_count: rows.length, reason: encoded.reason },
                 'wire encoding refused the window: ' + encoded.status);
             logger.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
@@ -890,11 +890,11 @@ class AttestationBatchPublisher {
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XATTESTB_SIGN_REQ:
-                this._handleSignReq(envelope).catch(e =>
+                this.handleSignReq(envelope).catch(e =>
                     logger.error('AttestationBatchPublisher: XATTESTB_SIGN_REQ error: ' + (e && e.message)));
                 break;
             case XATTESTB_SIGN:
-                this._handleSign(envelope).catch(e =>
+                this.handleSign(envelope).catch(e =>
                     logger.error('AttestationBatchPublisher: XATTESTB_SIGN error: ' + (e && e.message)));
                 break;
         }
@@ -904,7 +904,7 @@ class AttestationBatchPublisher {
     // rows. Every refusal is silent on the wire (logged locally, nothing sent): the only
     // honest answer to "I cannot reproduce that" is to withhold a signature, and a NACK
     // would be an unauthenticated claim about someone else's state.
-    async _handleSignReq(envelope){
+    async handleSignReq(envelope){
         let d = envelope.data;
         if(!this.identity || !this._db()) return;
         let pm = this._peerManager();
@@ -1036,7 +1036,7 @@ class AttestationBatchPublisher {
         return { ok: true, why: null };
     }
 
-    async _handleSign(envelope){
+    async handleSign(envelope){
         let d = envelope.data;
         let round = this._signRound;
         if(!round || round.done || !d) return;
@@ -1113,7 +1113,7 @@ class AttestationBatchPublisher {
 
         this.bufferWindow(window, batchKey, encoded);
 
-        let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
+        let broadcaster = this.broadcastFn || ((p) => this.defaultBroadcast(p));
         let headTxid = null;
         for(let i = 0; i < encoded.wires.length; i++){
             let result;
@@ -1232,7 +1232,7 @@ class AttestationBatchPublisher {
 
     // The default pipeline: the same encoder, address and wallet hook the PRICE rail
     // uses, because there is one operator wallet. Only the payload differs.
-    async _defaultBroadcast(payload){
+    async defaultBroadcast(payload){
         if(!this.encoder)       throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!this.walletSignFn)  throw new Error('no wallet sign hook configured (call setWalletSignHook)');
         if(!this.dogeAddress)   throw new Error('no DOGE_ADDRESS configured');
@@ -1357,7 +1357,7 @@ class AttestationBatchPublisher {
 
     // Append-only give-up sink, never truncated. Best-effort: a write failure here must
     // not stop the CRITICAL log or the durable marker that keeps the window from looping.
-    _deadLetter(record, reason){
+    deadLetter(record, reason){
         this.append(this.deadLetterPath, Object.assign({}, record,
             { deadLetteredAt: Date.now(), reason: reason }));
     }
