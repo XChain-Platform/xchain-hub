@@ -52,30 +52,23 @@
  * compromised indexer could fill with anything; parseability, positivity and the
  * PRICE_MAX bound are enforced before any value leaves this file.
  *
+ * Parts live beside this file in xchain_price_source/: pairs.js (the pair and
+ * ticker names), derivation_params.js (the regtest-only overrides) and
+ * derive_steps.js (the ordered steps of derive, mixed onto the prototype).
+ *
  ********************************************************************/
 
 'use strict';
 
 const Database = require('../db');
 const bcmath   = require('../bcmath.js');
-const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('../xchainPrice.js');
-const { getWindowFills } = require('../xchainPriceQuery.js');
+const { referenceRateFromUsd } = require('../xchainPrice.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
-const { PRICE_MAX, XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
-        XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC, XCHAIN_PRICE_MIN_BTC_VOLUME,
-        DERIVED_PAIRS } = require('../constants.js');
-
-// The pair this source produces. Taken from DERIVED_PAIRS rather than re-spelled, so
-// the producer and the admission allow-list cannot drift into a pair that is
-// computed but never accepted (or vice versa).
-const XCHAIN_PAIR = DERIVED_PAIRS[0];
-const BTC_PAIR    = 'BTC/USD';
-
-// The gas token's reserved ticker. Canonical source is
-// xchain-documentation/protocol/constants.js GAS_TICK; spelled here because the hub
-// does not vendor that file, and pinned by test against the pair name above.
-const GAS_TICK = 'XCHAIN';
+const { PRICE_MAX } = require('../constants.js');
+const { XCHAIN_PAIR, BTC_PAIR, GAS_TICK } = require('./xchain_price_source/pairs.js');
+const { resolveDerivationParams } = require('./xchain_price_source/derivation_params.js');
+const deriveSteps = require('./xchain_price_source/derive_steps.js');
 
 class XchainPriceSource {
 
@@ -88,8 +81,8 @@ class XchainPriceSource {
      *   INDEXER_COIN - reference chain, 'BTC'. XCHAIN is BTC-only as a
      *     balance-bearing token, so this is not expected to vary.
      *   HUB_NETWORK - the api.js-validated deployment network. It gates the four
-     *     CONSENSUS-UNIFORM derivation overrides below: they are honored only on
-     *     regtest, and set-but-IGNORED (with a warning) anywhere else.
+     *     CONSENSUS-UNIFORM derivation overrides (xchain_price_source/derivation_params.js):
+     *     they are honored only on regtest, and set-but-IGNORED (with a warning) anywhere else.
      *   XCHAIN_PRICE_WINDOW_BLOCKS / _CONFIRMATION_BUFFER / _BOOTSTRAP_SATS /
      *     _MIN_BTC_VOLUME - regtest and e2e-drill overrides of the constants.js pins.
      * @param {object} hubDb  the hub's own Database, for the finalized-price reads
@@ -103,85 +96,13 @@ class XchainPriceSource {
         this.user   = config.XCHAIN_PRICE_INDEXER_DB_USER || '';
         this.pass   = config.XCHAIN_PRICE_INDEXER_DB_PASS || '';
 
-        // Network gate for the four CONSENSUS-UNIFORM derivation parameters below.
-        //
-        // constants.js declares them fleet-uniform: every validator must compute the
-        // same window over the same fills, so a hub honoring a local override produces a
-        // different XCHAIN/BTC leg and lands outside the co-sign deviation band, which
-        // this file calls a slashing lottery. The overrides are for regtest and e2e
-        // drills only, and that restriction is enforced HERE rather than stated in a
-        // comment elsewhere, because a comment leaves one stray env var on a validator
-        // enough to diverge it. Retuning these for real is a coordinated flag-day
-        // change to constants.js, never an operator env var.
-        //
-        // Same rule and warning shape as the platform's other consensus-adjacent seams
-        // (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub.oracleMaxAgeSeconds,
-        // coins/index.js resolveFeeDestination): honored on regtest, set-but-IGNORED and
-        // warned everywhere else, with standalone mode (network '') failing closed to the
-        // pin for the same reason those do. The per-operator INDEXER_DB_* keys above stay
-        // ungated: they are per-validator by design and gating them would take every
-        // non-regtest hub off the pair entirely.
-        let network = String(config.HUB_NETWORK || '').toLowerCase();
-        let regtest = network === 'regtest';
-        // Returns the override's value on regtest, the pin everywhere else; warns only on
-        // a real divergence, since ConfigService bakes the host shell's XCHAIN_PRICE_*
-        // into the container on every regenerate and a hub carrying the pinned value has
-        // drifted from nothing.
-        // `diverges` is decided per key by the caller rather than by a generic compare:
-        // the honored bootstrap is a bcmath BigNumber against a fixed-8dp string pin, and
-        // the honored threshold is a string against a null (DISABLED) pin, so one shared
-        // comparison would either warn on every equal value or swallow a real divergence.
-        let pinOffRegtest = (key, honored, pinned, diverges) => {
-            if (regtest) return honored;
-            let raw = config[key];
-            let isSet = raw !== undefined && raw !== null && String(raw) !== '';
-            if (isSet && diverges) {
-                logger.info('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
-                    (network || '<unset>') + '; using the consensus-pinned value (' +
-                    (pinned === null ? 'DISABLED' : pinned) +
-                    '). The XCHAIN/USD derivation parameters are consensus-uniform and move ' +
-                    'only by a coordinated flag-day, never by a local override.');
-            }
-            return pinned;
-        };
-
-        let windowHonored = parseInt(config.XCHAIN_PRICE_WINDOW_BLOCKS) || XCHAIN_PRICE_WINDOW_BLOCKS;
-        this.windowBlocks = pinOffRegtest('XCHAIN_PRICE_WINDOW_BLOCKS', windowHonored,
-            XCHAIN_PRICE_WINDOW_BLOCKS, windowHonored !== XCHAIN_PRICE_WINDOW_BLOCKS);
-
-        let bufferHonored = Number.isFinite(parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER))
-            ? parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER) : XCHAIN_PRICE_CONFIRMATION_BUFFER;
-        this.confirmationBuffer = pinOffRegtest('XCHAIN_PRICE_CONFIRMATION_BUFFER', bufferHonored,
-            XCHAIN_PRICE_CONFIRMATION_BUFFER, bufferHonored !== XCHAIN_PRICE_CONFIRMATION_BUFFER);
-
-        // Satoshi-denominated (D2, 2026-08-03). Stored as the BTC-denominated rate
-        // because that is the unit `toUsd` and the fill pipeline both expect.
-        let bootstrapHonored = config.XCHAIN_PRICE_BOOTSTRAP_SATS
-            ? bcmath.bcdiv(String(config.XCHAIN_PRICE_BOOTSTRAP_SATS), '100000000', 8)
-            : XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC;
-        this.bootstrapXchainBtc = pinOffRegtest('XCHAIN_PRICE_BOOTSTRAP_SATS', bootstrapHonored,
-            XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC,
-            Number(String(bootstrapHonored)) !== Number(XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC));
-
-        // D2 supersession threshold: the BTC-side notional a window must carry before
-        // the derived VWAP replaces the carry-forward. null = DISABLED, which is how
-        // the constant ships (the value is an open operator decision), and disabled
-        // means the pair publishes carry-forward every round no matter what trades.
-        //
-        // The override exists for regtest and e2e drills, which need supersession ON
-        // at drill scale to prove the derived branch at all - a proof that silently
-        // matched the carry-forward would prove nothing (§10 step 7). An empty or
-        // unparseable override reads as "not set" and leaves the constant in force;
-        // an explicit '0' is a real value meaning "any volume supersedes", which is a
-        // deliberate drill setting and NOT the same as disabled.
-        let volOverride  = config.XCHAIN_PRICE_MIN_BTC_VOLUME;
-        let volumeHonored = XCHAIN_PRICE_MIN_BTC_VOLUME;
-        if (volOverride !== undefined && volOverride !== null && String(volOverride) !== '') {
-            let parsed = Number(volOverride);
-            if (Number.isFinite(parsed) && parsed >= 0) volumeHonored = String(volOverride);
-        }
-        this.minBtcVolume = pinOffRegtest('XCHAIN_PRICE_MIN_BTC_VOLUME', volumeHonored,
-            XCHAIN_PRICE_MIN_BTC_VOLUME, volumeHonored !== XCHAIN_PRICE_MIN_BTC_VOLUME);
+        // The four CONSENSUS-UNIFORM derivation parameters: the constants.js pins,
+        // or an override honored on regtest only (rationale in derivation_params.js).
+        let params = resolveDerivationParams(config);
+        this.windowBlocks       = params.windowBlocks;
+        this.confirmationBuffer = params.confirmationBuffer;
+        this.bootstrapXchainBtc = params.bootstrapXchainBtc;
+        this.minBtcVolume       = params.minBtcVolume;
 
         // Lazily opened: constructing a pool for a hub that will never derive the
         // pair would hold idle connections against the indexer for nothing.
@@ -235,29 +156,10 @@ class XchainPriceSource {
         try {
             if (!this.isConfigured()) return null;
 
-            // The anchor must be a real height. OracleRound falls back to
-            // `currentBtcBlockHeight = currentRound` when the BTC tip is unavailable,
-            // and a round number is a small integer that would silently window over an
-            // arbitrary early block range. Deriving a fee input off that is worse than
-            // publishing nothing, so an unreliable anchor is a LOCAL failure.
-            if (ctx.chainTipReliable === false) {
-                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
-                    ' - BTC chain-tip fallback active, reference height is not a real height');
-                return null;
-            }
-            let referenceHeight = Number(ctx.referenceHeight);
-            if (!Number.isInteger(referenceHeight) || referenceHeight < 0) return null;
-
-            let round = Number(ctx.round);
-            if (!Number.isInteger(round) || round < 0) return null;
-
-            // This round's own BTC/USD converts the on-chain rate into USD. Without it
-            // there is nothing to multiply by, so abstain rather than invent one.
-            let btcUsd = ctx.btcUsdPrice ? String(ctx.btcUsdPrice) : null;
-            if (!btcUsd || !bcmath.bcgt(btcUsd, '0')) {
-                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - no local ' + BTC_PAIR + ' this round');
-                return null;
-            }
+            // Anchor height, round number and local BTC/USD; null means abstain.
+            let inputs = this.readDeriveContext(ctx);
+            if (!inputs) return null;
+            let { referenceHeight, round, btcUsd } = inputs;
 
             // Carry-forward value and winsorization anchor, both from rounds strictly
             // below this one so every validator resolves the same reference.
@@ -282,112 +184,20 @@ class XchainPriceSource {
             // arises before the federation's first BTC/USD finalization.
             let refBtcUsd = await this.lastFinalized(BTC_PAIR, round);
 
-            // D2 (redecided 2026-08-03): the bootstrap is denominated in SATOSHIS, so
-            // before it can be carried forward as a USD price it has to be converted,
-            // and the multiplier has to be the CONSENSUS BTC/USD - the same
-            // `refBtcUsd` the band anchor uses, never `btcUsd` from this round's local
-            // submission. The reasoning is the paragraph above, applied one step
-            // earlier: if each validator converted the bootstrap with its own API
-            // price, the very first XCHAIN/USD round would be a different number on
-            // every hub, and they would publish those differences straight into
-            // deviation slashing.
-            //
-            // Consequence, and it is deliberate: with NO finalized BTC/USD below this
-            // round there is nothing consensus-safe to convert with, so the pair
-            // abstains for that round instead of inventing a value. Deterministic for
-            // everyone ("has any BTC/USD finalized below R" is consensus data), and it
-            // resolves itself the moment the federation finalizes its first BTC/USD.
-            // The old USD-denominated bootstrap needed no conversion and so could
-            // publish through that gap; a satoshi-denominated one cannot, and paying
-            // one round of silence is the correct price for not forking.
-            let carryForward = lastXchainUsd;
-            if (!carryForward) {
-                carryForward = toUsd(bcmath, this.bootstrapXchainBtc, refBtcUsd);
-                if (!carryForward) {
-                    logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
-                        ' - bootstrap is satoshi-denominated and no finalized ' + BTC_PAIR +
-                        ' exists below round ' + round + ' to convert it with');
-                    return null;
-                }
-            }
+            let carryForward = this.resolveCarryForward(lastXchainUsd, refBtcUsd, round);
+            if (!carryForward) return null;
 
             let refRate = referenceRateFromUsd(bcmath, carryForward, refBtcUsd);
 
-            let selection = await getWindowFills(this._db(), {
-                referenceHeight:    referenceHeight,
-                confirmationBuffer: this.confirmationBuffer,
-                windowLength:       this.windowBlocks,
-                gasTick:            GAS_TICK,
-                coin:               this.coin,
+            let selection = await this.findWindowFills(referenceHeight);
+            if (!selection) return null;
+
+            return this.entryFromWindow(selection, {
+                carryForward:  carryForward,
+                lastXchainUsd: lastXchainUsd,
+                refRate:       refRate,
+                btcUsd:        btcUsd,
             });
-
-            // A selection failure is LOCAL (unreachable DB, unresolvable ticker or
-            // coin). Abstain: publishing carry-forward here would assert "I looked and
-            // the market was quiet" when in fact this hub could not look at all.
-            if (!selection.ok) {
-                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' + selection.error);
-                return null;
-            }
-
-            let meta = {
-                window:      selection.window,
-                fillCount:   selection.fills.length,
-                carriedFrom: lastXchainUsd ? 'last-finalized' : 'bootstrap',
-            };
-
-            // An EMPTY window is a defined state, not a failure: publish carry-forward
-            // (§7). Suppressing the pair on a quiet market would age it past the 1800s
-            // staleness bound and re-brick LTC/DOGE fees within a few rounds.
-            let derived = selection.fills.length ? deriveXchainRate(bcmath, selection.fills, refRate) : null;
-            if (!derived) {
-                return this.entry(carryForward, Object.assign(meta, { derived: false }));
-            }
-
-            // D2 supersession gate. Below the threshold the window's trades are real
-            // but too thin to be called a market, so the carry-forward stands.
-            //
-            // Stateless by design (§7): this is a pure function of THIS round's window,
-            // with nothing persisted about previous rounds. A consecutive-rounds streak
-            // requirement was considered and cut - the ~week-long window slides by about
-            // one block per round, so any burst that clears the bar keeps clearing it for
-            // roughly W blocks anyway, and persisted state is something restarts and
-            // skipped rounds can split the fleet on.
-            //
-            // Measured pre-winsorize (totalCoin), so a clamped print cannot inflate the
-            // evidence for its own admission.
-            if (!this.volumeSupersedes(derived.totalCoin)) {
-                return this.entry(carryForward, Object.assign(meta, {
-                    derived:        false,
-                    reason:         this.minBtcVolume === null
-                        ? 'supersession disabled (D2 threshold undecided)'
-                        : 'window volume below the supersession threshold',
-                    btcVolume:      derived.totalCoin,
-                    minBtcVolume:   this.minBtcVolume,
-                    wouldHaveBeen:  derived.rate,
-                }));
-            }
-
-            let usd = toUsd(bcmath, derived.rate, btcUsd);
-            if (!usd) return this.entry(carryForward, Object.assign(meta, { derived: false, reason: 'usd leg unusable' }));
-
-            // §10 step 6: everything needed to re-derive and audit this print after the
-            // fact. §5's claim that manipulation is "visible" is only true if these are
-            // recorded - rawXchainBtc beside xchainBtc is what makes a winsorized round
-            // distinguishable from a quiet one, and btcVolume is what makes the
-            // supersession decision reviewable rather than a bare yes/no.
-            Object.assign(meta, {
-                derived:      true,
-                xchainBtc:    derived.rate,
-                rawXchainBtc: derived.rawRate,
-                usedFills:    derived.usedCount,
-                clampedFills: derived.clampedCount,
-                droppedFills: derived.droppedCount,
-                totalXchain:  derived.totalXchain,
-                btcVolume:    derived.totalCoin,
-                minBtcVolume: this.minBtcVolume,
-                refRate:      derived.refRate,
-            });
-            return this.entry(usd, meta);
         } catch (err) {
             // Never propagate: this pair is appended to a submission carrying 36
             // others, and a throw here would take the whole round's fetch down.
@@ -436,6 +246,10 @@ class XchainPriceSource {
         return { coinPair: XCHAIN_PAIR, price: value, sources: 1, meta: meta };
     }
 }
+
+// The ordered steps of derive, mixed onto the prototype so the class keeps one
+// method surface for callers and prototype reads.
+Object.assign(XchainPriceSource.prototype, deriveSteps);
 
 module.exports = Object.assign(XchainPriceSource, {
     XCHAIN_PAIR,
