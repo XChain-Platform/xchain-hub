@@ -80,45 +80,29 @@
 
 'use strict';
 
-const fs    = require('fs');
-const path  = require('path');
 const axios = require('axios');
 
-const ValidatorIdentity          = require('../validators/identity.js');
 const EncoderClient              = require('../peers/encoder_client.js');
 const SpendGuard                 = require('../lib/spend_guard.js');
-const StateAnchorPublisher       = require('../anchor/publisher.js');
-const { isAmbiguousSendError }   = require('../lib/idempotent_broadcast.js');
-const { forwardableUtxos }       = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 const rca                        = require('../rollcall_activation.js');
 const rga                        = require('../rollcall_gates_activation.js');
 const { knownGateKeys }          = require('../consensus_rules_digest.js');
-const { buildRollcallCanonical } = require('./rollcall_canonical.js');
-const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
-// The one gossip type this engine adds. PeerManager.broadcast has no type
-// registry, so a new type is this constant plus one `case` in _handleMessage.
-const XROLLCALL_SIGN = 'XROLLCALL_SIGN';
-// How many not-yet-opened epochs' gossip a hub holds. One is the normal case
-// (peers a poll ahead); a few more covers a hub catching up after a stall.
-const EARLY_SIG_EPOCHS = 4;
-
-// Wire chunking bound for a v0 roll call, from the frozen test vector's size
-// budget: a 7-digit epoch header costs 152 bytes and each (PUBKEY, SIG) pair 194,
-// against the protocol's 8189-byte action-data ceiling. A federation larger than
-// this is rolled in several actions per epoch, which the union rule makes free.
-const MAX_PAIRS_PER_ACTION = 41;
-// The protocol's action-data ceiling and the exact cost of one (PUBKEY, SIG)
-// pair on the wire: '|' + 64 hex + '|' + 128 hex. An action past the ceiling is
-// DROPPED by the decoder with no error anywhere, so both numbers are asserted
-// against the frozen vector's size_budget block by the canonical suite.
-const ACTION_DATA_CEILING = 8189;
-const BYTES_PER_PAIR      = 194;
+// One part per job, each an object of methods installed on
+// RollcallRound.prototype below. The class file keeps the construction, the
+// lifecycle, the GATES field and the two indexer transports.
+const wirePart     = require('./round/wire.js');
+const epochPart    = require('./round/epoch.js');
+const gossipPart   = require('./round/gossip.js');
+const electionPart = require('./round/election.js');
+const publishPart  = require('./round/publish.js');
+const railPart     = require('./round/doge_rail.js');
+const recordsPart  = require('./round/records.js');
+const { MAX_PAIRS_PER_ACTION, ACTION_DATA_CEILING, BYTES_PER_PAIR, XROLLCALL_SIGN } = wirePart;
 
 // Per-network defaults for the three publish tunables. These are hub POLICY, not
 // consensus: no §3.3/§3.4 chain rule reads any of them, which is why they live
@@ -147,10 +131,6 @@ const ELECTION_TOLERANCE_DEFAULTS = { mainnet: 36,  testnet: 36,  regtest: 3 };
 // out, so sweep happens first and self-publish is the fallback it is meant to
 // be. These are hub policy, not consensus: no chain rule reads them.
 const SELF_PUBLISH_DEFAULTS       = { mainnet: 100, testnet: 100, regtest: 9 };
-
-// How far past the accept window a finished round is kept in memory, so a late
-// gossiped signature or a status read still finds it before it is pruned.
-const ROUND_RETENTION_BLOCKS = 24;
 
 class RollcallRound {
 
@@ -186,50 +166,9 @@ class RollcallRound {
                               cfg.DOGE_INDEXER_URL || '';
         this.dogeIndexerKey = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
 
-        // DOGE publish rail, identical to the anchor rail's: same address, same
-        // encoder, same balance floor. Hooks left null here are borrowed from the
-        // price publisher at send time (resolveSigner).
-        this.dogeAddress = hubConfig.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
-        let encoderUrl   = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
-        let encoderKey   = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
-        this.encoder     = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
-        this.broadcastFn  = null;
-        this.walletSignFn = null;
-        this.getBalanceFn = null;
 
-        this.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
-        this.spendGuard = new SpendGuard('ROLLCALL', cfg, 'RollcallRound');
-        this.spendGuard.minBalance = this.lowBalanceThreshold;
-
-        // Durable spend audit for the fee-bearing publish, the shape every other
-        // hub effector uses. The intent line is written and fsync'd BEFORE the
-        // money moves and the broadcast is gated on it, so a crash mid-flight
-        // still leaves a recoverable trace that DOGE may have been spent.
-        this.spendLogPath = hubConfig.ROLLCALL_SPEND_LOG_PATH || cfg.ROLLCALL_SPEND_LOG_PATH ||
-                            './data/rollcall-publish.spend.jsonl';
-        // Durable signature store. A restart inside the accept window must
-        // re-emit the SAME signature rather than mint a second one: the epoch's
-        // ledger_hash is fixed, so a fresh signature would be redundant gossip,
-        // and a hub whose indexer has gone dark since would otherwise fall silent
-        // for an epoch it had already answered.
-        this.signLogPath = hubConfig.ROLLCALL_SIGN_LOG_PATH || cfg.ROLLCALL_SIGN_LOG_PATH ||
-                           './data/rollcall-signatures.jsonl';
-
-        this.rounds       = new Map();   // epoch -> round state
-        this._signatures  = new Map();   // epoch -> { ledgerHash, sig } recovered from disk
-        // Gossip that arrived for an epoch this hub has not opened yet. A peer
-        // broadcasts its signature ONCE, when it signs, and never again; a hub
-        // that ticks later would otherwise lose every earlier signer for good
-        // and lead with a partial set. Drained into the round when it opens.
-        this._earlySigs   = new Map();   // epoch -> Map(pubkey -> sig)
-        // Epochs whose publish fee a PRIOR process already committed, and the
-        // separate self-publish commitments. The rounds map is empty after a
-        // restart, so it cannot answer either question.
-        this._committed     = new Set();  // key: <epoch> | <epoch>:self
-        this._timer         = null;
-        this._ticking       = false;
-        this._loggedNoBroadcast = false;
-        this._handler       = (env) => this._handleMessage(env);
+        initPublishRail(this, cfg);
+        initRoundState(this);
     }
 
     // Env, then p2pConfig, then the per-network default. Garbage or a negative
@@ -317,81 +256,6 @@ class RollcallRound {
         return knownGateKeys().join(',');
     }
 
-    // CONSENSUS-CRITICAL: must byte-match what xchain-indexer's actions/rollcall/index.js
-    // rebuilds from the carried fields and what the BTC close rebuilds from its own
-    // ledger_hash. Frozen by xchain-documentation/protocol/test-vectors/rollcall_canonical.json.
-    //
-    // The spelling itself lives in rollcall_canonical.js, called rather than
-    // repeated: with two forms (v0, and v1 appending sha256(GATES)) three sites
-    // rebuilding these bytes by hand is three places to drift, and a drift drops
-    // real presence proofs and evicts live validators with nothing going red.
-    // Omitting `gates` is the v0 form, byte-identical to what this method built
-    // before v1 existed.
-    _canonical(epochHeight, ledgerHash, gates){
-        return buildRollcallCanonical({ network: this.network, epochHeight, ledgerHash, gates });
-    }
-
-    // v0: ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
-    // v1: ROLLCALL|1|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|GATES|SIG_COUNT|PUBKEY_1|SIG_1|...
-    //
-    // The version is a function of `gates` alone, so the wire and the canonical
-    // this hub signed cannot disagree about which form the epoch is.
-    //
-    // PUBLISHER carries no signature of its own; it is the key the publish reward
-    // attaches to, and the chain pays only the ELECTED leader, so naming a key
-    // here is a claim the close checks rather than a race anyone can win.
-    buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
-        let v1    = (gates !== undefined && gates !== null);
-        let parts = ['ROLLCALL', v1 ? '1' : '0', String(Number(epochHeight)),
-                     String(ledgerHash).toLowerCase(), String(publisher).toLowerCase()];
-        if(v1) parts.push(String(gates));
-        parts.push(String(pairs.length));
-        for(let p of pairs) parts.push(String(p.pubkey).toLowerCase(), String(p.sig).toLowerCase());
-        return parts.join('|');
-    }
-
-    // The v1 wire prefix ahead of the first pair, in bytes, measured from the REAL
-    // GATES string rather than remembered as a number: every '|' between header
-    // fields is counted here and the separator BEFORE each pair is counted in that
-    // pair's 194, so header + 194 * pairs is the exact payload size. A 7-digit
-    // epoch and a 2-digit SIG_COUNT are the widest fields any v1 action can carry
-    // (the cap below is under 100), which is the same basis the frozen vector
-    // measured v0's 152-byte header on.
-    static v1HeaderBytes(gates){
-        return Buffer.byteLength(['ROLLCALL', '1', '1008000', 'a'.repeat(64), 'b'.repeat(64),
-                                  String(gates), '00'].join('|'), 'utf8');
-    }
-
-    // Pairs per action for an epoch publishing `gates`: floor((8189 - header) / 194).
-    //
-    // v0 keeps the frozen 41 (header 152). v1 is DERIVED, never hardcoded: GATES is
-    // knownGateKeys().join(',') and grows every time a gate is appended to
-    // SHARED_GATES, so a hardcoded cap would go stale silently and the first
-    // oversize action would be dropped by the decoder with nothing going red.
-    // Today that is 33 keys / 1790 bytes, header 1942, cap 32, re-derived after the bridge
-    // gate and this family's three entries both landed (D88 recorded 19 / 1076 / 1228 / 35).
-    // The cap really does move with the list, which is the point of deriving it: a v1 action
-    // now carries 32 pairs where it carried 35, and the ceiling is still far away.
-    //
-    // Zero means no pair fits at all, which a GATES list longer than the ceiling
-    // would produce; the publish path refuses rather than building an action the
-    // decoder would drop.
-    static maxPairsForGates(gates){
-        if(gates === undefined || gates === null) return MAX_PAIRS_PER_ACTION;
-        let cap = Math.floor((ACTION_DATA_CEILING - RollcallRound.v1HeaderBytes(gates)) / BYTES_PER_PAIR);
-        return cap > 0 ? cap : 0;
-    }
-
-    // Split a pair list into per-action chunks. Any number of ROLLCALLs may land
-    // for one epoch and the present set is their UNION, so a split costs a second
-    // fee and nothing else.
-    static chunkPairs(pairs, max){
-        let size = Number.isFinite(max) && max > 0 ? max : MAX_PAIRS_PER_ACTION;
-        let out = [];
-        for(let i = 0; i < pairs.length; i += size) out.push(pairs.slice(i, i + size));
-        return out;
-    }
-
     // ── indexer transports ───────────────────────────────────────────────────
 
     async _indexerCall(method, params){
@@ -424,733 +288,85 @@ class RollcallRound {
         if(result && result.error) throw new Error('indexer in-band error: ' + JSON.stringify(result.error));
         return result;
     }
+}
 
-    // ── the tick ─────────────────────────────────────────────────────────────
+// The DOGE publish rail and the two durable logs, in a function rather than
+// constructor lines so the constructor stays inside the readability limit.
+function initPublishRail(self, cfg){
+    // DOGE publish rail, identical to the anchor rail's: same address, same
+    // encoder, same balance floor. Hooks left null here are borrowed from the
+    // price publisher at send time (resolveSigner).
+    self.dogeAddress = hubConfig.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
+    let encoderUrl   = hubConfig.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
+    let encoderKey   = hubConfig.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
+    self.encoder     = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
+    self.broadcastFn  = null;
+    self.walletSignFn = null;
+    self.getBalanceFn = null;
 
-    async _tick(){
-        // In-flight guard, the house convention: a tick makes several sequential
-        // RPC round trips at a 15s timeout against a 30s poll, so under a slow
-        // indexer the next interval fires while this one is still awaiting, and
-        // two overlapping ticks would both pass the rounds.has() test before
-        // either reached rounds.set().
-        if(this._ticking) return;
-        this._ticking = true;
-        try {
-            let tip = await this._indexerCall('getblockhashes', {});
-            let tipBlock = (tip && tip.block_index != null) ? Number(tip.block_index) : null;
-            if(!Number.isFinite(tipBlock)) return;
-            this.lastTip = tipBlock;
+    self.lowBalanceThreshold = parseFloat(hubConfig.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
+    self.spendGuard = new SpendGuard('ROLLCALL', cfg, 'RollcallRound');
+    self.spendGuard.minBalance = self.lowBalanceThreshold;
 
-            let epoch = this.newestSignableEpoch(tipBlock);
-            if(epoch !== null && !this.rounds.has(epoch)) await this.runEpoch(epoch, tipBlock);
+    // Durable spend audit for the fee-bearing publish, the shape every other
+    // hub effector uses. The intent line is written and fsync'd BEFORE the
+    // money moves and the broadcast is gated on it, so a crash mid-flight
+    // still leaves a recoverable trace that DOGE may have been spent.
+    self.spendLogPath = hubConfig.ROLLCALL_SPEND_LOG_PATH || cfg.ROLLCALL_SPEND_LOG_PATH ||
+                        './data/rollcall-publish.spend.jsonl';
+    // Durable signature store. A restart inside the accept window must
+    // re-emit the SAME signature rather than mint a second one: the epoch's
+    // ledger_hash is fixed, so a fresh signature would be redundant gossip,
+    // and a hub whose indexer has gone dark since would otherwise fall silent
+    // for an epoch it had already answered.
+    self.signLogPath = hubConfig.ROLLCALL_SIGN_LOG_PATH || cfg.ROLLCALL_SIGN_LOG_PATH ||
+                       './data/rollcall-signatures.jsonl';
+}
 
-            // Every open round advances on every tick, not just the newest: the
-            // sweeper ladder and the self-publish escape hatch both unlock on the
-            // tip moving away from an epoch that was created blocks ago.
-            for(let [e, state] of this.rounds){
-                if(tipBlock - e > this.acceptWindow + ROUND_RETENTION_BLOCKS){ this.rounds.delete(e); continue; }
-                try { await this.advance(state, tipBlock); }
-                catch(err){ logger.warn(nodeUtil.format('RollcallRound: epoch ' + e + ' advance failed:', err && err.message ? err.message : err)); }
-            }
-        } finally {
-            this._ticking = false;
+// The empty round state a fresh engine starts from, and the one gossip handler
+// binding the peer manager is given at start().
+function initRoundState(self){
+    self.rounds       = new Map();   // epoch -> round state
+    self._signatures  = new Map();   // epoch -> { ledgerHash, sig } recovered from disk
+    // Gossip that arrived for an epoch this hub has not opened yet. A peer
+    // broadcasts its signature ONCE, when it signs, and never again; a hub
+    // that ticks later would otherwise lose every earlier signer for good
+    // and lead with a partial set. Drained into the round when it opens.
+    self._earlySigs   = new Map();   // epoch -> Map(pubkey -> sig)
+    // Epochs whose publish fee a PRIOR process already committed, and the
+    // separate self-publish commitments. The rounds map is empty after a
+    // restart, so it cannot answer either question.
+    self._committed     = new Set();  // key: <epoch> | <epoch>:self
+    self._timer         = null;
+    self._ticking       = false;
+    self._loggedNoBroadcast = false;
+    self._handler       = (env) => self._handleMessage(env);
+}
+
+
+// The parts go on with enumerable false, NOT Object.assign, for the reason
+// src/db/index.js gives at its own install: class methods are non-enumerable, so
+// assigned members would be the only ones for...in and Object.keys(prototype) can
+// see, which changes what the prototype enumerates. writable and configurable stay
+// true so a test can still stub and restore a moved method. The size statics go on
+// the class the same way, where they have always been read from.
+function installParts(target, parts) {
+    for(const part of parts) {
+        const descriptors = {};
+        for(const name of Object.keys(part)) {
+            if(Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate rollcall method: ' + name + ' is already defined on ' +
+                    'RollcallRound. Two parts, or a part and the class, claim the same name.');
+            descriptors[name] = { value: part[name], enumerable: false, writable: true, configurable: true };
         }
-    }
-
-    // The newest epoch boundary this hub may sign for at `tipBlock`: buried by
-    // CANONICAL_REORG_BUFFER (signing for a block that can still be reorged out
-    // would produce a signature over a ledger_hash nobody else ever sees) and
-    // still inside the accept window (past it, no signature can land). Null when
-    // no such epoch exists.
-    //
-    // Epoch 0 is a REAL epoch on regtest, so a falsy check on the height is a bug.
-    newestSignableEpoch(tipBlock){
-        if(!Number.isFinite(this.interval) || this.interval <= 0) return null;
-        let epoch = Math.floor(tipBlock / this.interval) * this.interval;
-        // The newest boundary may not be buried yet; step back one interval.
-        if(tipBlock - epoch < CANONICAL_REORG_BUFFER) epoch -= this.interval;
-        if(epoch < 0) return null;
-        if(!rca.isRollcallEpoch(epoch, this.network)) return null;
-        if(!rca.isRollcallActive(epoch, this.network)) return null;
-        if(tipBlock - epoch > this.acceptWindow) return null;
-        return epoch;
-    }
-
-    // ── sign + gossip ────────────────────────────────────────────────────────
-
-    async runEpoch(epoch, tipBlock){
-        let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
-        let ledgerHash = (bh && bh.ledger_hash) ? String(bh.ledger_hash).toLowerCase() : '';
-        if(!/^[0-9a-f]{64}$/.test(ledgerHash)){
-            logger.warn('RollcallRound: epoch=' + epoch + ' skipped (no ledger_hash from the BTC indexer)');
-            return;
-        }
-
-        // The advisory member set: every staker with any active stake at the
-        // epoch (CapabilitySnapshot buries the height itself, landing on the same
-        // block the chain's responsible set resolves at). UNFLOORED and
-        // capability-free on purpose, so it is a superset of the chain's R(E):
-        // the chain decides membership, and a hub-side floor could only ever
-        // discard a signature the chain would have counted.
-        //
-        // An unresolved snapshot (any indexer failure) makes this hub ABSTAIN for
-        // the epoch rather than degrade to a partial set. A partial set is not a
-        // smaller answer, it is a different one: this hub would drop honest peers'
-        // signatures as outsiders and publish a roll call missing them, and an
-        // absence is an eviction.
-        let snap = await this.capabilitySnapshot.getActiveWeightSnapshot(epoch);
-        if(!snap || !Array.isArray(snap.validators)){
-            logger.warn('RollcallRound: epoch=' + epoch + ' skipped (whole-federation snapshot unresolved; ' +
-                         'ABSTAINING rather than collecting against a partial member set)');
-            return;
-        }
-        let members = new Set();
-        for(let v of snap.validators){
-            let pk = String((v && v.pubkey) || v || '').toLowerCase();
-            if(/^[0-9a-f]{64}$/.test(pk)) members.add(pk);
-        }
-
-        // Resolved ONCE per epoch and carried on the round state: the canonical this
-        // hub signs, the canonical it verifies every peer's signature against
-        // (onSign reads state.canonical) and the wire it publishes must all be the
-        // same form, and re-deriving the form at each of those sites is how they
-        // would come to disagree mid-epoch.
-        let gates     = this.gatesFor(epoch);
-        let canonical = this._canonical(epoch, ledgerHash, gates);
-        let myPubkey  = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-
-        let state = {
-            epoch, ledgerHash, canonical, members, gates,
-            sigs:         new Map(),   // pubkey -> sig, deduped, verified
-            signed:       false,
-            order:        null,        // election order, resolved lazily at publish time
-            leader:       null,
-            myRank:       -1,
-            published:    false,       // this hub has spent its per-epoch sweep publish
-            selfPublished:false,
-            ownSigOnWire: false,       // our own signature rode one of OUR broadcasts
-            // Pubkeys this hub has actually put on the wire for this epoch, marked
-            // per CHUNK rather than per batch. A multi-action publish that fails
-            // half way releases its slot, and without this the retry rebuilds the
-            // whole set and pays a second fee for signatures already broadcast.
-            sent:         new Set(),
-            onChainCount: null,        // last observed count from the DOGE read
-            txids:        [],
-            startedAt:    Date.now(),
-        };
-        this.rounds.set(epoch, state);
-
-        // Sign. EVERY validator signs, wallet or not: the sweepers exist so a hub
-        // with no DOGE wallet still gets rolled, so a wallet requirement here
-        // would evict exactly the validators the sweepers were built to carry.
-        if(myPubkey){
-            let stored = this._signatures.get(epoch);
-            let sig;
-            if(stored && stored.ledgerHash === ledgerHash){
-                // Restart re-emit: the same signature, not a fresh one.
-                sig = stored.sig;
-            } else {
-                sig = this.identity.sign(canonical);
-                this.recordSignature({ epoch, pubkey: myPubkey, ledger_hash: ledgerHash, sig });
-                this._signatures.set(epoch, { ledgerHash, sig });
-            }
-            state.signed = true;
-            // Our own signature goes through the same membership rule as a peer's,
-            // so the collected set has one definition rather than two. A hub with
-            // no active stake is in no responsible set and cannot be evicted.
-            if(members.has(myPubkey)) state.sigs.set(myPubkey, sig);
-            if(this.peerManager) this.peerManager.broadcast(XROLLCALL_SIGN, { epoch, pubkey: myPubkey, sig });
-        }
-
-        // Peers that signed before this hub opened the round: judged now, by the
-        // same rule as a live message, and dropped from the holding area either way.
-        let early = this._earlySigs.get(epoch);
-        this._earlySigs.delete(epoch);
-        for(let e of this._earlySigs.keys()) if(e < epoch) this._earlySigs.delete(e);
-        if(early) for(let [pk, sig] of early) this.onSign({ epoch, pubkey: pk, sig });
-
-        logger.info('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
-                    '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity') +
-                    ' v=' + (gates === null ? '0' : '1' + ' gates=' + gates.split(',').length));
-    }
-
-    // ── collect ──────────────────────────────────────────────────────────────
-
-    _handleMessage(env){
-        if(!env || !env.data) return;
-        switch(env.type){
-            case XROLLCALL_SIGN: return this.onSign(env.data);
-        }
-    }
-
-    onSign(d){
-        let epoch = Number(d.epoch);
-        let pk  = String(d.pubkey || '').toLowerCase();
-        let sig = String(d.sig || '').toLowerCase();
-        if(!Number.isFinite(epoch))      return;
-        if(!/^[0-9a-f]{64}$/.test(pk))  return;
-        if(!/^[0-9a-f]{128}$/.test(sig)) return;
-        let state = this.rounds.get(epoch);
-        if(!state){
-            // Not opened here yet: hold it, unverified, for the round to judge.
-            // Only epochs ahead of every open round are worth holding (an older
-            // one can never open), and the holding area stays small.
-            let newest = Math.max(-1, ...this.rounds.keys());
-            if(epoch <= newest) return;
-            let held = this._earlySigs.get(epoch) || new Map();
-            if(!held.has(pk)) held.set(pk, sig);
-            this._earlySigs.set(epoch, held);
-            while(this._earlySigs.size > EARLY_SIG_EPOCHS)
-                this._earlySigs.delete(Math.min(...this._earlySigs.keys()));
-            return;
-        }
-        // Deduped by pubkey, and the key is only ever recorded once its signature
-        // has verified: admitting a key on first sight would let a garbage pair
-        // arriving before the real one suppress it, which reads downstream as an
-        // absence and, over K epochs, evicts a validator that was demonstrably
-        // present.
-        if(state.sigs.has(pk)) return;
-        // No floor and no quorum here (that is the chain's job, §3.4). The only
-        // two questions are whether the signature is real and whether the signer
-        // is in this hub's snapshot.
-        if(!state.members.has(pk)) return;
-        if(!ValidatorIdentity.verify(state.canonical, sig, pk)) return;
-        state.sigs.set(pk, sig);
-    }
-
-    // ── elect ────────────────────────────────────────────────────────────────
-
-    // The election key. Identical on every hub because both fields are chain-
-    // derived, and STABLE while the tip advances, which is what makes the ladder
-    // climbable: E is fixed, so `since` grows across the whole accept window and
-    // floor(window / tolerance) ranks unlock inside it. The anchor ladder is inert
-    // on the bundle rail only because a checkpoint's snapshot_block chases the tip.
-    _electionKey(epoch){
-        return 'XROLLCALL|' + this.network + '|' + String(epoch);
-    }
-
-    // The candidate set: effective keys of the oracle_publish capability set, the
-    // SAME set the BTC close uses as R(E).
-    //
-    // The height passed is the RAW epoch. CapabilitySnapshot applies
-    // CANONICAL_REORG_BUFFER itself (_buriedBlockIndex), so this resolves at
-    // E - 6 = buriedSnapshotBlock(E, network), which is where the chain resolves
-    // R(E). Passing an already-buried height here would bury twice and elect from
-    // E - 12, forking the hub's leader from the one the close pays.
-    //
-    // Returns null when the set is unresolved, and every caller treats null as
-    // abstain: an empty order would make _rankUnlocked false for everyone anyway,
-    // but null says WHY, and it must never be read as "the federation is empty".
-    async _electionOrder(epoch){
-        let keys = null;
-        try {
-            let sap = this.hub && this.hub.stateAnchorPublisher;
-            if(sap && typeof sap._resolveCapabilitySet === 'function'){
-                // Borrowed rather than re-derived: the anchor rail already owns
-                // the resolver that fails closed off regtest and picks the
-                // source-keyed weighted form, and two copies of that logic would
-                // be two ways to disagree with the chain.
-                let set = await sap._resolveCapabilitySet('oracle_publish', epoch, this.network);
-                if(Array.isArray(set)) keys = set.map(v => String(v.pubkey).toLowerCase());
-            } else if(this.capabilitySnapshot && typeof this.capabilitySnapshot.getWeightSnapshot === 'function'){
-                // The weighted form specifically: the chain's R(E) is
-                // getStakeWeightsByCapability, which is source-keyed and carries
-                // delegated effective keys the count form does not.
-                let snap = await this.capabilitySnapshot.getWeightSnapshot('oracle_publish', epoch);
-                if(snap && Array.isArray(snap.validators))
-                    keys = snap.validators.map(v => String(v.pubkey).toLowerCase());
-            }
-        } catch(e){
-            logger.warn('RollcallRound: epoch=' + epoch + ' election set unresolved (' +
-                         (e && e.message ? e.message : e) + '); abstaining from publishing');
-            return null;
-        }
-        if(keys === null) return null;
-        return StateAnchorPublisher.hashOrder(this._electionKey(epoch), keys);
-    }
-
-    // Rank 0 may publish immediately; each further rank unlocks after another
-    // ROLLCALL_ELECTION_TOLERANCE_BLOCKS of BTC height past the epoch. Blocks, not
-    // wall clock, so every hub computes the same unlock with no clock sync. A key
-    // outside the order never publishes.
-    _rankUnlocked(order, pubkey, sinceBlocks){
-        if(!order) return false;
-        let rank = order.indexOf(String(pubkey || '').toLowerCase());
-        if(rank < 0) return false;
-        if(rank === 0) return true;
-        let unlocked = Number.isFinite(sinceBlocks)
-            ? Math.floor(Math.max(0, sinceBlocks) / this.electionToleranceBlocks) : 0;
-        return rank <= unlocked;
-    }
-
-    // ── publish ──────────────────────────────────────────────────────────────
-
-    async advance(state, tipBlock){
-        let since = tipBlock - state.epoch;
-        if(since > this.acceptWindow) return;       // nothing can land any more
-        let myPubkey = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-        if(!myPubkey) return;
-
-        if(state.order === null){
-            let order = await this._electionOrder(state.epoch);
-            if(order === null) return;              // unresolved: abstain, retry next tick
-            state.order  = order;
-            state.leader = order.length > 0 ? order[0] : null;
-            state.myRank = order.indexOf(myPubkey);
-        }
-
-        await this.maybePublish(state, myPubkey, since);
-        await this.maybeSelfPublish(state, myPubkey, since);
-    }
-
-    async maybePublish(state, myPubkey, since){
-        if(state.published) return;
-        if(since < this.publishDelayBlocks) return;
-        if(!this._rankUnlocked(state.order, myPubkey, since)) return;
-        if(state.sigs.size === 0) return;
-        if(!this.requireBroadcast()) return;
-
-        let onChain = await this.onChainSigners(state);
-        // Both branches below also exclude state.sent. Already on the wire from this
-        // hub's own earlier chunks is the same answer as already on chain: the DOGE
-        // read lags indexing by longer than a tick, so without it the retry after a
-        // partial failure re-broadcasts, and re-pays for, every chunk that went out.
-        let pairs;
-        if(onChain === null){
-            // The DOGE read is undecidable. The LEADER publishes anyway: its job
-            // is to publish every epoch and at worst it pays a duplicate fee that
-            // the union rule absorbs. A SWEEPER exists only to fill gaps, and one
-            // that cannot see the gaps has nothing to add, so it defers to a later
-            // tick rather than paying to re-publish what the leader already landed.
-            if(state.myRank !== 0) return;
-            pairs = Array.from(state.sigs, ([pubkey, sig]) => ({ pubkey, sig }))
-                        .filter(p => !state.sent.has(p.pubkey));
-        } else {
-            pairs = Array.from(state.sigs, ([pubkey, sig]) => ({ pubkey, sig }))
-                        .filter(p => !onChain.has(p.pubkey) && !state.sent.has(p.pubkey));
-        }
-        if(pairs.length === 0) return;
-
-        state.published = true;   // one sweep publish per epoch per hub; see below
-        let ok = await this.publishPairs(state, myPubkey, pairs, 'sweep');
-        // A definitive failure releases the slot so a later tick can retry inside
-        // the window, and the retry now rebuilds only the pairs that were never
-        // broadcast. An ambiguous send does NOT release: the DOGE node may have
-        // accepted the transaction, and re-broadcasting would burn the fee twice
-        // for a roll call that is already landing.
-        if(ok === 'retry') state.published = false;
-    }
-
-    async maybeSelfPublish(state, myPubkey, since){
-        if(state.selfPublished) return;
-        if(since < this.selfPublishBlocks) return;
-        let mySig = state.sigs.get(myPubkey);
-        if(!mySig) return;                       // nothing of ours to rescue
-        if(state.ownSigOnWire) return;           // our own publish already carried it
-        if(!this.requireBroadcast()) return;
-
-        let onChain = await this.onChainSigners(state);
-        // Unresolved read: publish. This is the censorship escape hatch, and the
-        // thing it escapes is precisely a federation whose answers cannot be
-        // trusted; one extra transaction is cheaper than an eviction.
-        if(onChain && onChain.has(myPubkey)) return;
-
-        state.selfPublished = true;
-        let ok = await this.publishPairs(state, myPubkey, [{ pubkey: myPubkey, sig: mySig }], 'self');
-        if(ok === 'retry') state.selfPublished = false;
-        if(ok === 'sent') state.ownSigOnWire = true;
-    }
-
-    // Broadcast one or more ROLLCALL actions carrying `pairs`. Returns 'sent',
-    // 'retry' (a definitive failure; the caller may release its slot, and every
-    // chunk that DID go out is recorded in state.sent so the retry rebuilds only
-    // the undelivered tail) or 'held' (ambiguous; the slot stays claimed).
-    async publishPairs(state, myPubkey, pairs, kind){
-        let key = kind === 'self' ? (state.epoch + ':self') : String(state.epoch);
-        if(this._committed.has(key)){
-            logger.warn('RollcallRound: epoch ' + state.epoch + ' (' + kind + ') already carries a committed ' +
-                         'publish spend in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
-            return 'held';
-        }
-
-        // Balance floor plus the runtime pause and the per-window spend ceiling,
-        // checked BEFORE anything is built. A blocked publish is a deferral, not
-        // a failure: an inert federation publishes nothing and every epoch closes
-        // unrolled, which evicts nobody.
-        // A balance source that THROWS reports null, not undefined: undefined means
-        // "this hub wired no balance source and the floor is inert", while an
-        // unreadable wallet must fail closed rather than look unconfigured.
-        let balance;
-        let signer = this.resolveSigner();
-        if(signer.getBalanceFn){
-            try { balance = await signer.getBalanceFn(); } catch(_){ balance = null; }
-            if(balance === undefined) balance = null;
-        }
-        let g = this.spendGuard.check(balance === undefined ? {} : { balance });
-        if(!g.ok){
-            logger.warn('RollcallRound: ' + g.reason + ' (epoch ' + state.epoch + ', ' + kind + '); deferring publish');
-            return 'retry';
-        }
-
-        // The cap is per EPOCH, not per build: a v1 epoch carries the GATES field in
-        // every action, so its pairs-per-action budget is what the ceiling leaves
-        // after that string. chunkPairs falls back to the v0 41 on a non-positive
-        // size, so the refusal has to happen here rather than there.
-        let maxPairs = RollcallRound.maxPairsForGates(state.gates);
-        if(maxPairs < 1){
-            logger.error('RollcallRound: the GATES field is ' + String(state.gates).length +
-                          ' bytes, leaving no room for a signature pair inside the ' +
-                          ACTION_DATA_CEILING + '-byte action-data ceiling (epoch ' + state.epoch +
-                          ', ' + kind + '); refusing to publish an action the decoder would drop');
-            return 'retry';
-        }
-        let chunks = RollcallRound.chunkPairs(pairs, maxPairs);
-
-        // RESERVE one token per chunk, because one chunk is one transaction and one
-        // fee. check() above is a PURE predicate read once for the whole batch, so on
-        // its own an N-chunk roll call spends N fees against a single pre-send answer
-        // and walks straight past the per-window ceiling by N-1. Reservation consumes
-        // the budget in the same synchronous turn, which is the shape spend_guard.js
-        // documents for an awaited send and the one AttestationBatchPublisher
-        // .broadcastWindow() already uses. check() STAYS: reserve() takes no balance
-        // argument, so dropping it would silently retire the ROLLCALL_MIN_BALANCE
-        // wallet floor.
-        let tokens = [];
-        for(let i = 0; i < chunks.length; i++){
-            let token = this.spendGuard.reserve();
-            if(!token){
-                // Read the reason BEFORE releasing: giving the slots back first
-                // re-opens the very gate that tripped, and the line then names a
-                // ceiling that was never the one in the way.
-                let why = this.spendGuard.noteBlocked();
-                for(let t of tokens) this.spendGuard.release(t);
-                logger.warn('RollcallRound: ' + why + ' (epoch ' + state.epoch +
-                             ', ' + kind + ', ' + chunks.length + ' chunk(s)); deferring publish');
-                return 'retry';
-            }
-            tokens.push(token);
-        }
-
-        // Durable intent BEFORE the money moves and AFTER the reservation, and the
-        // broadcast is GATED on it: an unwritable audit path must not let a real DOGE
-        // fee be spent with no recoverable trace, and a batch the ceiling declined
-        // must leave no orphan intent line behind.
-        if(!this.recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
-            for(let t of tokens) this.spendGuard.release(t);
-            logger.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
-                          '; deferring the publish for epoch ' + state.epoch +
-                          ' rather than spending a DOGE fee with no durable record');
-            return 'retry';
-        }
-        this._committed.add(key);
-
-        let result = 'sent';
-        for(let i = 0; i < chunks.length; i++){
-            // Re-read the operator pause before EVERY chunk. Each chunk is its own
-            // awaited transaction and its own fee, and the pause is an out-of-band
-            // runtime toggle (SpendGuard.pauseCapability from the control RPC), so a
-            // pause landing while chunk i-1 is in flight has to stop the chunks that
-            // have not gone out yet. Neither the pre-loop check() nor the reservations
-            // can see it: both were taken in one earlier synchronous turn. Every
-            // delivered chunk stays in state.sent, so the publish after a resume
-            // rebuilds only the undelivered tail rather than paying twice.
-            if(this.spendGuard.isPaused()){
-                for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                // Phase 'failed', not a new 'paused' phase: loadSpendLog decides
-                // after a restart from these phases, and only 'failed' un-commits an
-                // epoch whose chunks never went out. A phase the loader does not know
-                // leaves the bare 'intent' standing, which would quarantine the epoch
-                // permanently for a hub the operator merely paused and resumed.
-                this.recordSpend({ phase: 'failed', epoch: state.epoch, kind,
-                                    delivered: state.sent.size, remaining: chunks.length - i,
-                                    error: 'operator pause: ' + this.spendGuard.noteBlocked() });
-                logger.warn(this.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
-                             ', ' + kind + '); ' + (chunks.length - i) + ' of ' + chunks.length +
-                             ' chunk(s) not broadcast');
-                this._committed.delete(key);
-                return 'retry';
-            }
-            let chunk = chunks[i];
-            let wire = this.buildWire(state.epoch, state.ledgerHash, myPubkey, chunk, state.gates);
-            try {
-                let res = await this.broadcast(wire);
-                // The reservation IS the spend; record() here would count it twice.
-                this.spendGuard.commit(tokens[i]);
-                let txid = (res && res.txid) ? String(res.txid) : null;
-                if(txid) state.txids.push(txid);
-                // Mark delivery per chunk, not per batch: a later chunk's failure
-                // must not un-send the ones already on the wire.
-                for(let p of chunk){
-                    state.sent.add(p.pubkey);
-                    if(p.pubkey === myPubkey) state.ownSigOnWire = true;
-                }
-                this.recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
-                                    rank: state.myRank });
-                logger.info('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
-                            (txid ? ' txid=' + txid : '') +
-                            (state.myRank > 0 ? ' [SWEEPER: rank ' + state.myRank + ' of ' + state.order.length +
-                                                '; the elected leader left these signatures off chain]' : ''));
-            } catch(e){
-                if(isAmbiguousSendError(e)){
-                    // The send may have been accepted, so this chunk's reservation is
-                    // a real spend and only the untried chunks give their budget back.
-                    this.spendGuard.commit(tokens[i]);
-                    for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                    // Keep the epoch committed and say so on disk, so an operator
-                    // reconciling on chain has the epoch without stdout retention.
-                    this.recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
-                                        error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
-                    logger.warn(nodeUtil.format('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
-                                 '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
-                    return 'held';
-                }
-                // Definitive: nothing left this chunk, so it consumes no budget, and
-                // neither do the chunks after it. Keeping them reserved would make a
-                // failed send cost the window an allowance it never spent.
-                for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                this.recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
-                                    error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
-                logger.warn(nodeUtil.format('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
-                             e && e.message ? e.message : e));
-                this._committed.delete(key);
-                return 'retry';
-            }
-        }
-        return result;
-    }
-
-    // Which of the signatures this hub holds are already on chain for the epoch.
-    // Returns a Set of pubkeys, or null when the answer cannot be trusted.
-    //
-    // `max_block_time` is a WINDOW CUT the DOGE indexer applies to its own blocks.
-    // The chain's cut is the BTC header stamp at E + ACCEPT_WINDOW, which does not
-    // exist yet while we are still publishing, so this read uses a generous
-    // wall-clock bound instead: any DOGE block it admits is one that landed before
-    // the real cut, because we only publish while the tip is inside the window.
-    // The answer is therefore a subset of what will count, never a superset, so it
-    // can cost a duplicate fee and can never cost a missing signature.
-    async onChainSigners(state){
-        let keys = Array.from(state.sigs.keys());
-        if(keys.length === 0) return new Set();
-        let res;
-        try {
-            res = await this.dogeIndexerCall('getrollcallsigners', {
-                network:        this.network,
-                epoch_height:   state.epoch,
-                // Two hours of slack over wall clock: a DOGE miner may stamp a
-                // block that far ahead, and excluding such a block would only
-                // under-report what is already landed.
-                max_block_time: Math.floor(Date.now() / 1000) + 7200,
-                pubkeys:        keys,
-                publishers:     []
-            });
-        } catch(e){
-            return null;
-        }
-        if(!res || typeof res !== 'object' || !res.signers || typeof res.signers !== 'object') return null;
-        // A null hcut means no DOGE block is inside the window yet, so the empty
-        // maps are a shape and not a positive "none".
-        if(res.hcut === null || res.hcut === undefined) return null;
-        let out = new Set();
-        for(let pk of Object.keys(res.signers)){
-            let row = res.signers[pk];
-            if(!row) continue;
-            // A row carried under a different ledger_hash is one the BTC close
-            // will discard, so it is not presence and must not suppress a real
-            // publish of the same key.
-            if(String(row.ledger_hash || '').toLowerCase() !== state.ledgerHash) continue;
-            out.add(String(pk).toLowerCase());
-        }
-        state.onChainCount = out.size;
-        return out;
-    }
-
-    // ── the DOGE rail ────────────────────────────────────────────────────────
-
-    // Borrow the shared DOGE signer exactly as StateAnchorPublisher borrows the
-    // price publisher's: HUB_SIGNER_MODULE's contract is unchanged and there is
-    // one wiring point for all on-chain DOGE publishing.
-    resolveSigner(){
-        let op = (this.hub && this.hub.oraclePublisher) || {};
-        return {
-            broadcastFn:  this.broadcastFn  || op.broadcastFn  || null,
-            walletSignFn: this.walletSignFn || op.walletSignFn || null,
-            getBalanceFn: this.getBalanceFn || op.getBalanceFn || null,
-            encoder:      this.encoder      || op.encoder      || null
-        };
-    }
-
-    // Can this hub actually land a roll call? Every ROLLCALL is a two-phase P2SH
-    // publish and the built-in pipeline can only broadcast the funding tx, so a
-    // signer module without `broadcast(payload)` can sign roll calls all day and
-    // never publish one. Reported by getrollcallstatus so that gap is visible
-    // rather than showing up as a federation that mysteriously never rolls.
-    broadcastCapable(){
-        return typeof this.resolveSigner().broadcastFn === 'function';
-    }
-
-    // Gate every publish path on it, and say so exactly once: this is a standing
-    // deployment condition, not an event, and it is re-evaluated every tick.
-    requireBroadcast(){
-        if(this.broadcastCapable()) return true;
-        if(!this._loggedNoBroadcast){
-            this._loggedNoBroadcast = true;
-            logger.warn('RollcallRound: this hub signs and gossips roll calls but cannot PUBLISH one: ' +
-                         'HUB_SIGNER_MODULE exports no broadcast(payload), and every ROLLCALL is a two-phase ' +
-                         'P2SH action the built-in encoder pipeline fails closed on. Its own presence still ' +
-                         'reaches the chain through the sweepers. See examples/doge-signer.example.js.');
-        }
-        return false;
-    }
-
-    async broadcast(payload){
-        let signer = this.resolveSigner();
-        if(typeof signer.broadcastFn === 'function') return await signer.broadcastFn(payload);
-        // Reached only if the capability check above was bypassed. Build far
-        // enough to hit the two-phase guard, which refuses BEFORE the wallet hook
-        // runs, so nothing is signed and no fee is spent.
-        if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
-        if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
-        if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
-        let utxos = await signer.encoder.getUtxos(this.dogeAddress);
-        if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
-            throw new Error('no UTXOs available for ' + this.dogeAddress);
-        let built = await signer.encoder.createTx({
-            utxos: forwardableUtxos(utxos, 'RollcallRound'), pubkey: this.dogeAddress,
-            data: payload, change: this.dogeAddress, encoding: 'P2SH'
-        });
-        if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
-        assertSingleTxEncoding(built, 'RollcallRound');
-        let txHex = await signer.walletSignFn(built.psbt);
-        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
-        return await signer.encoder.broadcastTx(txHex);
-    }
-
-    // ── durable records ──────────────────────────────────────────────────────
-
-    // Append one fsync'd line. Returns true only on a confirmed durable write;
-    // the intent call gates on that result, the outcome calls are best-effort
-    // because the fee is already committed by then.
-    appendLine(file, obj){
-        let line = JSON.stringify(obj) + '\n';
-        try {
-            fs.mkdirSync(path.dirname(file), { recursive: true });
-            let fd = fs.openSync(file, 'a');
-            try { fs.writeSync(fd, line); fs.fsyncSync(fd); }
-            finally { fs.closeSync(fd); }
-            return true;
-        } catch(e){
-            logger.error(nodeUtil.format('RollcallRound: failed to write ' + file + ':', e && e.message ? e.message : e));
-            return false;
-        }
-    }
-
-    // Every durable record names the identity that wrote it, so a log that
-    // holds another hub's lines (a copied config dir, a shared audit path) can
-    // be told apart from this hub's own on the next boot.
-    ownPubkey(){
-        return this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-    }
-
-    recordSpend(entry){
-        return this.appendLine(this.spendLogPath,
-            Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this.ownPubkey() || undefined }, entry));
-    }
-
-    // A signature costs nothing on chain, so an unwritable path must not stop the
-    // hub answering an epoch; it only costs the restart re-emit.
-    recordSignature(entry){
-        return this.appendLine(this.signLogPath, Object.assign({ ts: Date.now() }, entry));
-    }
-
-    // Fold the append-only spend log into the set of epochs whose fee is already
-    // committed. Same sticky rules the other effectors use: a terminal 'sent' or
-    // 'ambiguous' is committed and never cleared; a bare 'intent' counts as
-    // committed (the transaction may have reached the node); only a 'failed', the
-    // definitive pre-send failure, clears a bare intent so a genuine retry runs.
-    //
-    // LAST-RECORD-WINS below the sticky 'sent', not first: an epoch that failed
-    // definitively and then retried appends a SECOND intent, and that intent must
-    // re-arm the guard exactly like the first.
-    loadSpendLog(){
-        let text;
-        try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
-        catch(e){ return; }
-        let mine = this.ownPubkey();
-        let outcome = new Map();
-        for(let line of text.split('\n')){
-            if(!line.trim()) continue;
-            let rec;
-            try { rec = JSON.parse(line); } catch(_){ continue; }   // a torn tail line
-            let epoch = Number(rec.epoch);
-            if(!Number.isFinite(epoch)) continue;
-            // Another identity's spend is not this hub's commitment. A record
-            // naming no pubkey predates the field and is kept as this hub's own.
-            if(mine && rec.pubkey && String(rec.pubkey).toLowerCase() !== mine) continue;
-            let key   = rec.kind === 'self' ? (epoch + ':self') : String(epoch);
-            let prior = outcome.get(key);
-            if(rec.phase === 'sent' || rec.phase === 'ambiguous') outcome.set(key, 'sent');
-            else if(prior === 'sent') continue;
-            else if(rec.phase === 'failed') outcome.set(key, 'failed');
-            else if(rec.phase === 'intent') outcome.set(key, 'intent');
-        }
-        for(let [key, st] of outcome) if(st === 'sent' || st === 'intent') this._committed.add(key);
-    }
-
-    // Last write wins: a re-signature for the same epoch (a reorg changed the
-    // ledger_hash under us) supersedes the earlier one.
-    //
-    // ONLY THIS HUB'S OWN LINES. A restored signature is re-emitted under this
-    // hub's pubkey without re-signing, so a line another identity wrote would be
-    // broadcast as ours: every peer drops it at verification, this hub records
-    // nothing of its own for the epoch, and it reads as ABSENT while believing
-    // it signed. Measured on the regtest acceptance venue on 2026-09-04, where
-    // three in-process hubs shared one log and the restarted hub carried a
-    // peer's signature on its own self-publish.
-    loadSignLog(){
-        let text;
-        try { text = fs.readFileSync(this.signLogPath, 'utf8'); }
-        catch(e){ return; }
-        let mine = this.ownPubkey();
-        for(let line of text.split('\n')){
-            if(!line.trim()) continue;
-            let rec;
-            try { rec = JSON.parse(line); } catch(_){ continue; }
-            let epoch = Number(rec.epoch);
-            let lh    = String(rec.ledger_hash || '').toLowerCase();
-            let sig   = String(rec.sig || '').toLowerCase();
-            if(!Number.isFinite(epoch)) continue;
-            if(!/^[0-9a-f]{64}$/.test(lh) || !/^[0-9a-f]{128}$/.test(sig)) continue;
-            if(mine && String(rec.pubkey || '').toLowerCase() !== mine) continue;
-            this._signatures.set(epoch, { ledgerHash: lh, sig });
-        }
-    }
-
-    // ── status ───────────────────────────────────────────────────────────────
-
-    // PUBLISHER STATE ONLY. No ledger facts (last_rolled_epoch, absent_streak)
-    // live here: those are the BTC indexer's and are authoritative there, and
-    // serving a per-epoch view of who did and did not sign is a pre-eviction
-    // targeting surface, which is why the RPC is in SENSITIVE_READ_METHODS.
-    getStatus(){
-        let epochs = Array.from(this.rounds.keys()).sort((a, b) => b - a);
-        let state  = epochs.length > 0 ? this.rounds.get(epochs[0]) : null;
-        if(!state){
-            return { epoch: null, signed: false, gossiped_count: 0, on_chain_count: null,
-                     leader: null, our_rank: -1, txids: [], broadcast_capable: this.broadcastCapable() };
-        }
-        return {
-            epoch:             state.epoch,
-            signed:            state.signed,
-            gossiped_count:    state.sigs.size,
-            on_chain_count:    state.onChainCount,
-            leader:            state.leader,
-            our_rank:          state.myRank,
-            txids:             state.txids.slice(),
-            broadcast_capable: this.broadcastCapable()
-        };
+        Object.defineProperties(target, descriptors);
     }
 }
+
+wirePart.bindRoundClass(RollcallRound);
+installParts(RollcallRound.prototype, [wirePart.methods, epochPart, gossipPart, electionPart,
+                                       publishPart, railPart, recordsPart]);
+installParts(RollcallRound, [wirePart.statics]);
 
 module.exports = Object.assign(RollcallRound, {
     XROLLCALL_SIGN,
