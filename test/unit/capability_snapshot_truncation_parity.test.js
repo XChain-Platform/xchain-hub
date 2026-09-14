@@ -25,7 +25,7 @@ const snapWrite = require('../../src/lib/capability_snapshot_write.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const OracleConsensus       = require('../../src/oracle/consensus.js');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
 const CrossChainDexEngine   = require('../../src/CrossChainDexEngine.js');
 const CrossChainCallEngine  = require('../../src/CrossChainCallEngine.js');
 const RetractionConsensus   = require('../../src/RetractionConsensus.js');

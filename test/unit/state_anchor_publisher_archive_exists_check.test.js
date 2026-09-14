@@ -28,7 +28,7 @@
 // seq the head ACTUALLY landed under, and every "can't tell" degrades to publishing.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 
 const CP = {

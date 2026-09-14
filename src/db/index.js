@@ -48,7 +48,7 @@ if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');
-const ark     = require('../anchor_reward_key.js');
+const ark     = require('../anchor/anchor_reward_key.js');
 
 // One mixin per table family, each an object of methods installed on
 // Database.prototype below. A family's file is named for the src/sql DDL it owns.

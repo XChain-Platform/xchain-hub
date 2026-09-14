@@ -38,7 +38,7 @@
 const { expect }            = require('chai');
 const os                    = require('os');
 const path                  = require('path');
-const StateAnchorPublisher  = require('../../../src/StateAnchorPublisher');
+const StateAnchorPublisher  = require('../../../src/anchor/publisher');
 const ValidatorIdentity     = require('../../../src/ValidatorIdentity');
 const eq                    = require('../../../src/equivocation_header.js');
 const ccr                   = require('../../../src/cross_chain_royalty_activation.js');

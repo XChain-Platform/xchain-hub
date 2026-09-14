@@ -26,7 +26,7 @@
 
 module.exports = {
     // Deletes from validator_rewards.
-    // Moved here from src/RewardTracker.js:212.
+    // Moved here from src/anchor/reward_tracker.js:212.
     async deleteValidatorReward(roundNumber, rewardType, qualifier) {
         return this.doQuery('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
     },
@@ -44,13 +44,13 @@ module.exports = {
     },
 
     // Reads rows from validator_rewards.
-    // Moved here from src/StateAnchorPublisher.js:3723.
+    // Moved here from src/anchor/publisher.js:3723.
     async findValidatorRewardsByRewardType(reward_type, round_number, round_qualifier) {
         return this.doQuery('SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND round_qualifier = ?', [reward_type, round_number, round_qualifier]);
     },
 
     // Reads rows from validator_rewards.
-    // Moved here from src/RewardTracker.js:195.
+    // Moved here from src/anchor/reward_tracker.js:195.
     async findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier) {
         return this.doQuery('SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ?', [roundNumber, rewardType, qualifier]);
     },
@@ -209,7 +209,7 @@ module.exports = {
     // Inserts a row into validator_rewards for one oracle round.
     // INSERT IGNORE relies on the UNIQUE KEY (validator_pubkey, round_number, reward_type)
     // so concurrent writes from multiple hubs collapse to one row per (validator, round).
-    // Moved here from src/RewardTracker.js:80.
+    // Moved here from src/anchor/reward_tracker.js:80.
     async createValidatorRoundReward(validatorPubkey, roundNumber, amount) {
         return this.doQuery(`INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
                          VALUES (?, ?, 'oracle_round', ?)`, [validatorPubkey, roundNumber, amount]);
@@ -218,14 +218,14 @@ module.exports = {
     // Inserts a row into validator_rewards for one anchor publish. INSERT IGNORE for
     // the same reason as the round reward above: the same hub recording twice is a
     // no-op, and the cross-pubkey collapse is decided by the caller before this runs.
-    // Moved here from src/RewardTracker.js:214.
+    // Moved here from src/anchor/reward_tracker.js:214.
     async createValidatorAnchorReward(validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier) {
         return this.doQuery(`INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
                      VALUES (?, ?, ?, ?, ?, ?)`, [validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier]);
     },
 
     // Reads one row from validator_rewards: what one validator is owed but has not claimed.
-    // Moved here from src/RewardTracker.js:275.
+    // Moved here from src/anchor/reward_tracker.js:275.
     async getUnclaimedValidatorRewardTotal(validatorPubkey) {
         return this.doQuery(`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total
                      FROM validator_rewards
@@ -233,7 +233,7 @@ module.exports = {
     },
 
     // Reads rows from validator_rewards: one validator's most recent rewards.
-    // Moved here from src/RewardTracker.js:283.
+    // Moved here from src/anchor/reward_tracker.js:283.
     async findValidatorRewardHistory(validatorPubkey, limit) {
         return this.doQuery(`SELECT round_number, reward_type, amount, claimed, created_at
                      FROM validator_rewards
@@ -243,7 +243,7 @@ module.exports = {
     },
 
     // Reads one row from validator_rewards: everything this hub has ever recorded.
-    // Moved here from src/RewardTracker.js:292.
+    // Moved here from src/anchor/reward_tracker.js:292.
     async getValidatorRewardsDistributedTotal() {
         return this.doQuery(`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total FROM validator_rewards`);
     },
@@ -271,7 +271,7 @@ module.exports = {
     },
 
     // Stamps the archive batch_seq on one not-yet-archived validator_rewards row.
-    // Moved here from src/StateAnchorPublisher.js:4753, the branch for a FINALIZED from a
+    // Moved here from src/anchor/publisher.js:4753, the branch for a FINALIZED from a
     // peer predating the round qualifier.
     async updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, validatorPubkey) {
         return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey]);
@@ -279,14 +279,14 @@ module.exports = {
 
     // Stamps the archive batch_seq on one not-yet-archived validator_rewards row, matched
     // on its round qualifier too, so a rebase-reissued archive seq cannot mark its twin.
-    // Moved here from src/StateAnchorPublisher.js:4753, the qualified branch.
+    // Moved here from src/anchor/publisher.js:4753, the qualified branch.
     async updateValidatorRewardArchiveBatchSeqByQualifier(batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier) {
         return this.doQuery('UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? AND round_qualifier = ? AND batch_seq IS NULL', [batchSeq, rewardType, roundNumber, validatorPubkey, roundQualifier]);
     },
 
     // Reads a page of pending anchor reward rows for the archive, for a hub with no
     // flag-days to bind (unscoped or unknown network). Moved here from
-    // src/StateAnchorPublisher.js:2505, the branch with no exclusion clause.
+    // src/anchor/publisher.js:2505, the branch with no exclusion clause.
     async findArchivableAnchorRewards(maxBatch) {
         return this.doQuery(
             "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL" + " " +

@@ -38,13 +38,13 @@ module.exports = {
     },
 
     // Reads rows from capability_snapshots.
-    // Moved here from src/StateAnchorPublisher.js:2922.
+    // Moved here from src/anchor/publisher.js:2922.
     async findCapabilitySnapshotsBySnapshotBlock(snapshot_block, capability) {
         return this.doQuery('SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC', [snapshot_block, capability]);
     },
 
     // Reads rows from capability_snapshots.
-    // Moved here from src/StateAnchorPublisher.js:4921.
+    // Moved here from src/anchor/publisher.js:4921.
     async findCapabilitySnapshotsBySnapshotBlockAndCapability(snapshot_block, capability) {
         return this.doQuery('SELECT signing_pubkey FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC', [snapshot_block, capability]);
     },

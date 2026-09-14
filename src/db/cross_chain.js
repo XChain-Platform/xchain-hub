@@ -89,7 +89,7 @@ const CROSS_CHAIN_MATCH_COLUMNS = ['match_id','snapshot_block','network',
 
 module.exports = {
     // Reads rows from cross_chain_calls.
-    // Moved here from src/StateAnchorPublisher.js:2491.
+    // Moved here from src/anchor/publisher.js:2491.
     async findCrossChainCallsByBatchSeq(maxBatch) {
         return this.doQuery('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status ORDER BY call_id ASC, phase ASC LIMIT ?', [maxBatch]);
     },
@@ -107,7 +107,7 @@ module.exports = {
     },
 
     // Reads rows from cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:2488.
+    // Moved here from src/anchor/publisher.js:2488.
     async findCrossChainMatchesByBatchSeq(maxBatch) {
         return this.doQuery('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status ORDER BY match_id ASC LIMIT ?', [maxBatch]);
     },
@@ -131,7 +131,7 @@ module.exports = {
     },
 
     // Reads one row from cross_chain_calls.
-    // Moved here from src/CrossChainCallEngine.js:998, src/StateAnchorPublisher.js:3598, src/StateAnchorPublisher.js:4502.
+    // Moved here from src/CrossChainCallEngine.js:998, src/anchor/publisher.js:3598, src/anchor/publisher.js:4502.
     async getCrossChainCallByCallIdAndPhase(call_id, phase) {
         return this.doQuery('SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [call_id, phase]);
     },
@@ -143,7 +143,7 @@ module.exports = {
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/CrossChainDexEngine.js:997, src/StateAnchorPublisher.js:3560, src/StateAnchorPublisher.js:4492.
+    // Moved here from src/CrossChainDexEngine.js:997, src/anchor/publisher.js:3560, src/anchor/publisher.js:4492.
     async getCrossChainMatchByMatchId(match_id) {
         return this.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [match_id]);
     },
@@ -155,7 +155,7 @@ module.exports = {
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:4808.
+    // Moved here from src/anchor/publisher.js:4808.
     async getNextAnchorBatchSeq() {
         return this.doQuery('SELECT COALESCE(GREATEST(  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1),   COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1),   COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1)), -1) + 1 AS next_seq');
     },
@@ -167,7 +167,7 @@ module.exports = {
     },
 
     // Updates cross_chain_calls.
-    // Moved here from src/StateAnchorPublisher.js:4783.
+    // Moved here from src/anchor/publisher.js:4783.
     async updateCrossChainCall(batchSeq, status, txid, call_id, phase) {
         return this.doQuery('UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE call_id = ? AND phase = ? AND (batch_seq IS NULL OR archived_status <> status)', [batchSeq, status, txid, call_id, phase]);
     },
@@ -179,7 +179,7 @@ module.exports = {
     },
 
     // Updates cross_chain_matches.
-    // Moved here from src/StateAnchorPublisher.js:4759.
+    // Moved here from src/anchor/publisher.js:4759.
     async updateCrossChainMatchByMatchIdAndBatchSeq(batchSeq, status, txid, match_id) {
         return this.doQuery('UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE match_id = ? AND (batch_seq IS NULL OR archived_status <> status)', [batchSeq, status, txid, match_id]);
     },
@@ -260,7 +260,7 @@ module.exports = {
     },
 
     // Reads the non-retracted cross_chain_matches rows among an explicit set of match ids,
-    // for the anchor-stamp re-broadcast. Moved here from src/StateAnchorPublisher.js:4732.
+    // for the anchor-stamp re-broadcast. Moved here from src/anchor/publisher.js:4732.
     // The ids are bound one placeholder each; their count is all they change.
     async findLiveCrossChainMatchesByMatchIds(matchIds) {
         return this.doQuery(

@@ -25,7 +25,7 @@ const { expect }           = require('chai');
 const fs                   = require('fs');
 const path                 = require('path');
 const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine.js');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
 const { DB_METHODS }       = require('../helpers/mockHub.js');
 
 const BLOCK      = 953200;
@@ -136,7 +136,7 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
     it('every capability_snapshots writer goes through the shared helper', function () {
         // Paths relative to this suite, so each one names the writer's file wherever
         // its feature directory keeps it.
-        const WRITERS = ['../../src/StateCheckpointEngine.js', '../../src/CrossChainDexEngine.js',
+        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/CrossChainDexEngine.js',
                          '../../src/CrossChainCallEngine.js', '../../src/oracle/consensus.js',
                          '../../src/RetractionConsensus.js', '../../src/attestation/relay.js'];
         let offenders = [];

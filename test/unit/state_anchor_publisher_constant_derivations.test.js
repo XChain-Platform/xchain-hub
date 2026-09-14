@@ -19,7 +19,7 @@
 // oversize anchor is dropped silently by every decoder.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 
 // LOCAL COPY of the canonical ceiling in xchain-documentation/protocol/
 // constants.js (MAX_ACTION_DATA_LENGTH). The decoder is the arbiter: it drops a

@@ -23,10 +23,10 @@ const XChainHub = proxyquire('../../../src/XChainHub', {
     './ValidatorIdentity.js': function () {},
     './oracle/consensus.js': function () {},
     './oracle/round.js':     function () {},
-    './RewardTracker.js':   function () {},
+    './anchor/reward_tracker.js':   function () {},
     './SlashDetector.js':   function () {},
     './CrossChainEngine.js': function () {},
-    './ReorgHandler.js':    function () {},
+    './anchor/reorg_handler.js':    function () {},
     './SwapTracker.js':     function () {},
     './Governance.js':      function () {}
 });

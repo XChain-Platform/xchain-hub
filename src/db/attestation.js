@@ -87,7 +87,7 @@ module.exports = {
     },
 
     // Deletes from attestations.
-    // Moved here from src/ReorgHandler.js:626.
+    // Moved here from src/anchor/reorg_handler.js:626.
     async deleteAttestation(chain, bound) {
         return this.doQuery('DELETE FROM attestations WHERE source_chain = ? AND created_at > FROM_UNIXTIME(? / 1000)', [chain, bound]);
     },

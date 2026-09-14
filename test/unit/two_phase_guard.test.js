@@ -34,7 +34,7 @@ const { assertSingleTxEncoding } = require('../../src/lib/two_phase_guard.js');
 
 // Every pipeline that builds a PSBT itself and hands it to the wallet hook.
 const CALL_SITES = [
-    'src/StateAnchorPublisher.js',
+    'src/anchor/publisher.js',
     'src/attestation/publisher.js',
     'src/attestation/relay.js',
     'src/oracle/publisher.js',

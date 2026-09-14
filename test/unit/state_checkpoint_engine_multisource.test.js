@@ -19,11 +19,11 @@
 // 2650 mirror persist, 2651 self-sign).
 
 const { expect }              = require('chai');
-const StateCheckpointEngine   = require('../../src/StateCheckpointEngine');
-const StateAnchorPublisher    = require('../../src/StateAnchorPublisher');
+const StateCheckpointEngine   = require('../../src/anchor/checkpoint_engine');
+const StateAnchorPublisher    = require('../../src/anchor/publisher');
 const ValidatorIdentity       = require('../../src/ValidatorIdentity');
 const swq                     = require('../../src/stake_weighted_quorum');
-const { resolveQuorumNetwork } = require('../../src/lib/quorum_network');
+const { resolveQuorumNetwork } = require('../../src/anchor/quorum_network');
 const { waitUntil }           = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

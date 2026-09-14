@@ -24,7 +24,7 @@
 // it real DOGE. These tests pin both halves - the backup wakes, the leader does not.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

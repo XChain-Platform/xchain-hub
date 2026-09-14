@@ -27,7 +27,7 @@ const proxyquire   = require('proxyquire');
 const EventEmitter = require('events');
 
 const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher.js');
+const StateAnchorPublisher = require('../../src/anchor/publisher.js');
 const rca                  = require('../../src/rollcall_activation.js');
 const rga                  = require('../../src/rollcall_gates_activation.js');
 const { knownGateKeys }    = require('../../src/consensus_rules_digest.js');

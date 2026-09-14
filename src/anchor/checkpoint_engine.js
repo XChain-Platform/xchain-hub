@@ -51,16 +51,16 @@
 
 const EventEmitter      = require('events');
 const axios             = require('axios');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const swq               = require('./stake_weighted_quorum.js');
-const eq                = require('./equivocation_header.js');
-const ckpt              = require('./checkpoint_commitment_activation.js');
-const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const { resolveCheckpointIntervalBlocks } = require('./lib/checkpoint_cadence.js');
-const snapWrite         = require('./lib/capability_snapshot_write.js');
-const coins             = require('./coins');
-const { noteCheckpointStalled } = require('./consensusDiagnostics');
+const ValidatorIdentity = require('../ValidatorIdentity.js');
+const swq               = require('../stake_weighted_quorum.js');
+const eq                = require('../equivocation_header.js');
+const ckpt              = require('../checkpoint_commitment_activation.js');
+const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
+const snapWrite         = require('../lib/capability_snapshot_write.js');
+const coins             = require('../coins');
+const { noteCheckpointStalled } = require('../consensusDiagnostics');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';

@@ -23,7 +23,7 @@
 // CHECKPOINT_INTERVAL_BLOCKS configured, burning DOGE on the extra anchors.
 
 const { expect }            = require('chai');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const { waitUntil }         = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');

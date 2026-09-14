@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect }            = require('chai');
-const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher  = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // #1224: _resolveCapabilitySet's local capability_snapshots-table fallback must be

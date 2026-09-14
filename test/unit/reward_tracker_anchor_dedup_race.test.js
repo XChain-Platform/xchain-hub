@@ -23,7 +23,7 @@
 // fixed-path assertion cannot be green merely because the harness never raced.
 
 const { expect }    = require('chai');
-const RewardTracker = require('../../src/RewardTracker');
+const RewardTracker = require('../../src/anchor/reward_tracker');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_LOW  = 'aa'.repeat(32);

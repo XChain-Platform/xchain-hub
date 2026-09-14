@@ -267,7 +267,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         // flood an operator's tail. The record must NOT share that throttle: a
         // collector counting stalled ticks needs every one, and dropping 59 of
         // every 60 makes a worsening cadence read as a steady one.
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();   // throttle CLOSED
@@ -284,7 +284,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     });
 
     it('carries the block it could not lead, and says unknown rather than dropping the field', function () {
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();
@@ -300,7 +300,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     it('names the round chains it actually runs, never a hardcoded BTC', function () {
         // The emission read `this.coin`, a property this class never assigns, so the
         // `|| 'BTC'` fallback fired every time and an LTC/DOGE hub's stall read as BTC.
-        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();

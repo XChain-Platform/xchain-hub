@@ -31,7 +31,7 @@
 // rather than masking the regression the way a pubkey-agnostic mock would.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK_WINNER = 'aa'.repeat(32);   // W: the row every honest hub derives + holds

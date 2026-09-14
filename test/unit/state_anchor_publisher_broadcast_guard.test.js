@@ -19,7 +19,7 @@
 // original fresh-PSBT retry behavior (the live multi-chain conflict fix).
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 
 function mkPub(){
     const pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });

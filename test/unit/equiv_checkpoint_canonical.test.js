@@ -19,8 +19,8 @@
 const { expect } = require('chai');
 const eq   = require('../../src/equivocation_header.js');
 const ckpt = require('../../src/checkpoint_commitment_activation.js');
-const SCE  = require('../../src/StateCheckpointEngine.js');
-const SAP  = require('../../src/StateAnchorPublisher.js');
+const SCE  = require('../../src/anchor/checkpoint_engine.js');
+const SAP  = require('../../src/anchor/publisher.js');
 // The frozen ANCHOR v0 wire vector, vendored byte-identically from
 // xchain-documentation/protocol/test-vectors/anchor_canonical.json and guarded by
 // anchor-golden-vectors.test.js. Driving the section parity off these bytes means the

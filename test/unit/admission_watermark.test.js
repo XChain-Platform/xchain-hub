@@ -25,7 +25,7 @@ const proxyquire = require('proxyquire');
 
 const HubDbBroadcaster = proxyquire('../../src/HubDbBroadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher.js');
+const StateAnchorPublisher = require('../../src/anchor/publisher.js');
 const Database             = require('../../src/db');
 const { admitMarginBlocks } = require('../../src/mirror_admission_activation.js');
 

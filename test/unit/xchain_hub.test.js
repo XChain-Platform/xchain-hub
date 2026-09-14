@@ -1101,7 +1101,7 @@ describe('XChainHub', function () {
                     './db':                  function () { return mockDb; },
                     './oracle/consensus.js':  function () { return oracleConsensus; },
                     './oracle/round.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
-                    './RewardTracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
+                    './anchor/reward_tracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
                     './SlashDetector.js':    function () { return slashDetector; },
                     // Stubbed here too: this describe block is about validator-set
                     // freshness, not the signing round, and the fixture peerManager
@@ -1178,7 +1178,7 @@ describe('XChainHub', function () {
                 './db':                 function () { return mockDb; },
                 './oracle/consensus.js': function () { return { setValidatorSet: sinon.stub(), on: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
                 './oracle/round.js':     function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
-                './RewardTracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
+                './anchor/reward_tracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
                 './SlashDetector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
                 './oracle/publisher.js': function () { return { start: sinon.stub().resolves() }; },
                 './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }

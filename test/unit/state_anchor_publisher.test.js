@@ -20,8 +20,8 @@ const zlib                  = require('zlib');
 const crypto                = require('crypto');
 const os                    = require('os');
 const path                  = require('path');
-const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
-const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+const StateAnchorPublisher  = require('../../src/anchor/publisher');
+const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const eq                    = require('../../src/equivocation_header.js');
 const ccr                   = require('../../src/cross_chain_royalty_activation.js');
@@ -3331,7 +3331,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
 // is a way a receiver must refuse to turn a wire message into a money row.
 describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
     const sinon = require('sinon');
-    const XANCREWARD = require('../../src/StateAnchorPublisher.js').XANCREWARD;
+    const XANCREWARD = require('../../src/anchor/publisher.js').XANCREWARD;
 
     const TXID = 'ab'.repeat(32);
 

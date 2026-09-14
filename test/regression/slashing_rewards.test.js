@@ -27,7 +27,7 @@
 
 const assert = require('assert');
 const SlashDetector = require('../../src/SlashDetector');
-const RewardTracker = require('../../src/RewardTracker');
+const RewardTracker = require('../../src/anchor/reward_tracker');
 const { DB_METHODS } = require('../helpers/mockHub');
 
 const PK = (c) => c.repeat(64);   // 64-hex pubkey

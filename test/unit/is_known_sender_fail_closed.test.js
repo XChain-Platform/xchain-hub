@@ -49,7 +49,7 @@ const CHAIN_KEYED = [
 // start admitting on chain state alone. They keep the registry-keyed predicate.
 const REGISTRY_KEYED = [
     { name: 'Governance',   cls: require('../../src/Governance'),   method: '_isKnownSender' },
-    { name: 'ReorgHandler', cls: require('../../src/ReorgHandler'), method: '_isKnownSender' },
+    { name: 'ReorgHandler', cls: require('../../src/anchor/reorg_handler'), method: '_isKnownSender' },
 ];
 
 function call(cls, method, peerManager, arg) {

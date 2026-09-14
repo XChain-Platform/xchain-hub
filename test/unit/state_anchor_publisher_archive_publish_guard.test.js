@@ -30,7 +30,7 @@
 // would ever notice.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { waitUntil }        = require('../helpers/waitUntil');
 

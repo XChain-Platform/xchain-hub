@@ -703,7 +703,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('ReorgHandler: Parameter validation', function () {
-        const ReorgHandler = require('../../src/ReorgHandler');
+        const ReorgHandler = require('../../src/anchor/reorg_handler');
 
         let hub, handler;
 
@@ -890,7 +890,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('RewardTracker: Participant validation', function () {
-        const RewardTracker = require('../../src/RewardTracker');
+        const RewardTracker = require('../../src/anchor/reward_tracker');
 
         let hub, rt;
 

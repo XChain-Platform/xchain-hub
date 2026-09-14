@@ -26,7 +26,7 @@
 
 'use strict';
 
-const { positiveIntConfig } = require('./config_int.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
 
 const DEFAULT_CHECKPOINT_INTERVAL_BLOCKS = 6;
 

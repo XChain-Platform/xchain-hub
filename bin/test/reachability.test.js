@@ -140,7 +140,7 @@ describe('bin/reachability.js', function () {
                 'src/db/anchor.js': 'module.exports = {};\n',
                 'src/db/configs.js': 'module.exports = {};\n',
                 'src/db/orphan.js': 'module.exports = {};\n',
-                'src/anchor_reward_key.js': 'module.exports = {};\n',
+                'src/anchor/anchor_reward_key.js': 'module.exports = {};\n',
             }, () => edgeFrom('src/db/index.js').toList());
 
             assert.deepStrictEqual(targets, ['src/db/anchor.js', 'src/db/configs.js'],
@@ -179,7 +179,7 @@ describe('bin/reachability.js', function () {
                     "const ark = require('../anchor_reward_key.js');",
                     'module.exports = class Database {};',
                 ].join('\n'),
-                'src/anchor_reward_key.js': 'module.exports = {};\n',
+                'src/anchor/anchor_reward_key.js': 'module.exports = {};\n',
             }, () => edgeFrom('src/db/index.js').toList());
             assert.deepStrictEqual(noMixins, [], 'a db home with no mixins is zero edges');
 

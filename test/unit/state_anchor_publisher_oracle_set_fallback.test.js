@@ -21,7 +21,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const KEY_A = 'aa'.repeat(33);

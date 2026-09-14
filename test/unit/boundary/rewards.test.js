@@ -12,7 +12,7 @@
 
 const sinon         = require('sinon');
 const { expect }    = require('chai');
-const RewardTracker = require('../../../src/RewardTracker');
+const RewardTracker = require('../../../src/anchor/reward_tracker');
 const { createMockHub } = require('../../helpers/mockHub');
 
 // Generate valid unique 64-hex-char pubkeys for testing

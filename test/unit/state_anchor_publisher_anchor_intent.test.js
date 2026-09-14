@@ -19,7 +19,7 @@
 // definitive pre-send failure and an ambiguous send.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 // A db double that routes by SQL shape and records every statement it saw.

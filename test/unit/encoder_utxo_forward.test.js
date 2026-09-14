@@ -30,7 +30,7 @@ const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../src/lib/enco
 
 // Every default-broadcast pipeline that fetches UTXOs and forwards them.
 const CALL_SITES = [
-    'src/StateAnchorPublisher.js',
+    'src/anchor/publisher.js',
     'src/attestation/publisher.js',
     'src/attestation/relay.js',
     'src/oracle/publisher.js',

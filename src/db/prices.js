@@ -209,7 +209,7 @@ module.exports = {
     },
 
     // Updates price_snapshots.
-    // Moved here from src/ReorgHandler.js:637.
+    // Moved here from src/anchor/reorg_handler.js:637.
     async updatePriceSnapshotByBlockTimestamp(bound) {
         return this.doQuery(`UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'`, [bound]);
     },

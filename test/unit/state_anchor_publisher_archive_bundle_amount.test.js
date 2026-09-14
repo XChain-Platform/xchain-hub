@@ -25,7 +25,7 @@
 // constant these assertions pass either way and prove nothing.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
 const PK        = 'cc'.repeat(32);

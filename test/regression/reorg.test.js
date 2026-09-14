@@ -12,7 +12,7 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const ReorgHandler   = require('../../src/ReorgHandler');
+const ReorgHandler   = require('../../src/anchor/reorg_handler');
 const { createMockHub }     = require('../helpers/mockHub');
 const { waitUntil }         = require('../helpers/waitUntil');
 const { VALIDATORS_3 }      = require('../helpers/fixtures');

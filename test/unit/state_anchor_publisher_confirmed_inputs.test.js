@@ -20,7 +20,7 @@
 
 const { expect }           = require('chai');
 const { waitUntil }        = require('../helpers/waitUntil');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { summarizeUtxoConfirmations } = require('../../src/lib/utxo_balance');
 const { DB_METHODS } = require('../helpers/mockHub.js');

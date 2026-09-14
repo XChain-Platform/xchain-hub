@@ -27,7 +27,7 @@
 // split between a definitive pre-send failure and an ambiguous send.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 

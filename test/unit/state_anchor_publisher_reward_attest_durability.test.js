@@ -29,7 +29,7 @@
 
 const { expect }           = require('chai');
 const sinon                = require('sinon');
-const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
+const StateAnchorPublisher = require('../../src/anchor/publisher');
 const arMod                = require('../../src/anchor_reward_activation.js');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
