@@ -376,3 +376,24 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
     });
 
 });
+
+// The parts reach canonicalRetraction and intentKey as RetractionConsensus.<static>,
+// so a static reassigned on the class (a double, a patch) is the one every signing
+// path runs, never a module-local copy the reassignment cannot reach.
+describe('RetractionConsensus statics dispatch through the class', function () {
+    it('every signing path calls the statics through the class, so a reassigned static is the one it runs', async function () {
+        let leader = makeIdentity(), me = makeIdentity(), lpk = leader.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: me, validators: [leader, me].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' })) });
+        let rc = new RetractionConsensus(hub), seen = [];
+        let saved = { intentKey: RetractionConsensus.intentKey, canonicalRetraction: RetractionConsensus.canonicalRetraction };
+        RetractionConsensus.intentKey = () => { seen.push('intentKey'); return 'reassigned'; };
+        RetractionConsensus.canonicalRetraction = (evt) => { seen.push('canonical'); return saved.canonicalRetraction(evt); };
+        try {
+            await rc.submitLocal(GOLDEN_EVT);   // two validators: opens a signing round
+            await rc.handleSignReq({ data: { retraction: GOLDEN_EVT, sig_pubkey: lpk, sig: leader.sign(GOLDEN_CANONICAL) } });
+            await rc.handleFinalized({ data: { retraction: GOLDEN_EVT, signatures: [] } });
+        } finally { Object.assign(RetractionConsensus, saved); rc.stop(); }
+        assert.deepStrictEqual(seen, ['intentKey', 'canonical', 'canonical', 'intentKey', 'canonical']);
+        assert.ok(hub.peerManager.broadcasts.some(b => b.type === 'XRETRACT_SIGN'), 'signed against the reassigned intent key');
+    });
+});

@@ -23,6 +23,7 @@ const assert = require('assert');
 const RollcallRound = require('../../src/rollcall/round.js');
 const rca           = require('../../src/rollcall_activation.js');
 const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
+const { turnsUntil, settleFlag } = require('../helpers/microtask_turns');
 
 const NETWORKS = ['mainnet', 'testnet', 'regtest'];
 
@@ -228,5 +229,35 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
             try { await eng.start(); } finally { console.log = real; clearInterval(eng._timer); }
             assert.strictEqual(eng._started, true, net + ' must start: it has an activation height');
         }
+    });
+});
+
+// AWAIT SHAPE of the round opening: runEpoch awaits its two lookups, then opens
+// the round, signs and gossips XROLLCALL_SIGN in one turn. A helper awaited
+// between the lookups and the gossip adds a turn where a peer's signature can be
+// judged against a round that does not exist yet. The counts are pinned from the
+// single-file engine, with both lookups already resolved.
+describe('RollcallRound runEpoch opens its round after the pinned microtask turns', function () {
+
+    it('opens, signs, gossips and settles on the pinned turns', async function () {
+        const me = 'c'.repeat(64);
+        const sent = [];
+        const eng = new RollcallRound({ network: 'regtest', p2pConfig: {},
+            peerManager: { broadcast: (type) => sent.push(type) },
+            identity: { getPubkeyHex: () => me, sign: () => 'd'.repeat(128) },
+            capabilitySnapshot: { getActiveWeightSnapshot: () => Promise.resolve({ validators: [{ pubkey: me }] }) } });
+        eng._indexerCall = () => Promise.resolve({ ledger_hash: 'ab'.repeat(32) });
+        eng.recordSignature = () => true;
+        const real = console.log;
+        console.log = () => {};
+        let flag, turns;
+        try {
+            turns = await turnsUntil(() => { flag = settleFlag(eng.runEpoch(60, 70)); }, {
+                roundOpen: () => eng.rounds.has(60),
+                signed:    () => sent.includes('XROLLCALL_SIGN'),
+                settled:   () => flag.settled
+            });
+        } finally { console.log = real; }
+        assert.deepStrictEqual(turns, { roundOpen: 2, signed: 2, settled: 3 });
     });
 });

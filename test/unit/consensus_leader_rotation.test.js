@@ -24,6 +24,7 @@ const { expect } = require('chai');
 const Consensus  = require('../../src/consensus/pbft');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, makeFederationSnapshot } = require('../helpers/fixtures');
+const { turnsUntil, settleFlag } = require('../helpers/microtask_turns');
 
 // Sorted member pubkeys are v1 < v2 < v3, so the rotation leader for
 // (seq, view 0) is VALIDATORS_3[seq % 3].
@@ -152,5 +153,33 @@ describe('Consensus: a refused propose() advances the rotation (livelock regress
         expect(A.pm.broadcast.calledWith('PBFT_PRE_PREPARE', sinon.match({ seq: 6 }))).to.be.true;
         await promise;
         for (let e of engines) expect(e.consensus.lastAppliedSeq).to.equal(6);
+    });
+});
+
+// AWAIT SHAPE: propose() opens the leader's round (PRE_PREPARE on the wire) after
+// the awaits it runs itself, the snapshot lock and nothing more, and the
+// single-node path applies after that same lock. A helper awaited in front of
+// either adds a turn where queued gossip runs before the round exists. The counts
+// are pinned from the single-file engine, with every lookup already resolved.
+describe('Consensus: propose() opens its round after the pinned microtask turns', function () {
+
+    beforeEach(function () { sinon.stub(console, 'log'); sinon.stub(console, 'warn'); });
+    afterEach(function () { sinon.restore(); });
+
+    it('the rotation leader broadcasts PRE_PREPARE on the pinned turn', async function () {
+        let B = makeEngine(VALIDATORS_3[1]);   // v2 leads seq 1
+        let turns = await turnsUntil(() => { B.consensus.propose({ cfg: 1 }).catch(() => {}); },
+            { prePrepare: () => B.pm.broadcast.calledWith('PBFT_PRE_PREPARE') });
+        await B.consensus.stop();
+        expect(turns).to.deep.equal({ prePrepare: 3 });
+    });
+
+    it('a single-node hub applies and settles on the pinned turns', async function () {
+        let hub = createMockHub({});
+        let consensus = new Consensus(hub);
+        let flag;
+        let turns = await turnsUntil(() => { flag = settleFlag(consensus.propose({ cfg: 1 })); },
+            { applied: () => hub.applyConfig.called, settled: () => flag.settled });
+        expect(turns).to.deep.equal({ applied: 1, settled: 4 });
     });
 });

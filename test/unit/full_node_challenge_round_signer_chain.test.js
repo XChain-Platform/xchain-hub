@@ -31,6 +31,7 @@ const EventEmitter = require('events');
 
 const FullNodeChallengeRound = require('../../src/consensus/full_node_challenge_round.js');
 const { applySignerHooks, buildSignerHooks } = require('../../src/lib/signer_loader.js');
+const { turnsUntil, settleFlag } = require('../helpers/microtask_turns');
 
 const TEMPLATE = path.join(__dirname, '..', '..', 'examples', 'doge-signer.example.js');
 const source   = fs.readFileSync(TEMPLATE, 'utf8').replace(/^#!.*\n/, '');
@@ -258,5 +259,46 @@ describe('FullNodeChallengeRound signer chain gate', function () {
             'the round stays unclaimed so a correctly-configured restart can still publish it');
         assert.strictEqual(spies.wallet.signPsbt.callCount, 0);
         assert.strictEqual(encoder.getUtxos.callCount, 0);
+    });
+});
+
+// AWAIT SHAPE of the round opening: runEpoch awaits its three lookups and, only
+// when this hub has an answer to compute, the computation. A hub with nothing to
+// compute finishes in the turn that opened the round, and a claimant's answer goes
+// out in the turn its computation resolves. The counts are pinned from the
+// single-file engine, with every lookup already resolved; a helper awaited in
+// front of either shows as an extra turn.
+describe('FullNodeChallengeRound runEpoch opens its round after the pinned microtask turns', function () {
+
+    function openable(coinRpcUrl, claimants) {
+        let eng = makeRound(btcEncoderSpy());
+        eng.coinRpcUrl = coinRpcUrl;
+        eng._indexerCall = () => Promise.resolve({ ledger_hash: 'ab'.repeat(32) });
+        eng._eligibleVerifiers = () => Promise.resolve(new Set([ME]));
+        eng.claimantSet = () => Promise.resolve(new Set(claimants));
+        eng.computeAnswer = () => Promise.resolve('answer');
+        return eng;
+    }
+
+    function timeRunEpoch(eng) {
+        let flag;
+        return turnsUntil(() => { flag = settleFlag(eng.runEpoch(288, 300)); }, {
+            roundOpen: () => eng.rounds.has(288),
+            answer:    () => eng.peerManager.broadcast.called,
+            settled:   () => flag.settled
+        });
+    }
+
+    beforeEach(() => { sinon.stub(console, 'log'); sinon.stub(console, 'warn'); });
+    afterEach(() => sinon.restore());
+
+    it('a hub with no answer to compute settles on the pinned turn', async function () {
+        let turns = await timeRunEpoch(openable('', []));
+        assert.deepStrictEqual(turns, { roundOpen: 3, settled: 4 });
+    });
+
+    it('a claimant broadcasts its answer digest and settles on the pinned turns', async function () {
+        let turns = await timeRunEpoch(openable('http://coin', [ME]));
+        assert.deepStrictEqual(turns, { roundOpen: 3, answer: 4, settled: 5 });
     });
 });

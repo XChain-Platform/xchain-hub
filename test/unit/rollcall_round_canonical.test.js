@@ -334,3 +334,39 @@ describe('RollcallRound canonical + wire conformance', function () {
             'MAX_PAIRS_PER_ACTION is below the real ceiling; the split is costing fees for nothing');
     });
 });
+
+// The size statics are reached as RollcallRound.<static>, inside maxPairsForGates
+// and from the publish path, so a static reassigned on the class (a double, a patch)
+// is the one they run, never a module-local copy the reassignment cannot reach.
+describe('RollcallRound size statics dispatch through the class', function () {
+
+    const NAMES = ['v1HeaderBytes', 'maxPairsForGates', 'chunkPairs'];
+    const saved = {};
+    beforeEach(function () { for (const n of NAMES) saved[n] = RollcallRound[n]; });
+    afterEach(function () { Object.assign(RollcallRound, saved); });
+
+    it('maxPairsForGates sizes the header through RollcallRound.v1HeaderBytes', function () {
+        RollcallRound.v1HeaderBytes = () => RollcallRound.ACTION_DATA_CEILING - 5 * RollcallRound.BYTES_PER_PAIR;
+        assert.strictEqual(RollcallRound.maxPairsForGates('any'), 5);
+    });
+
+    it('publishPairs caps and splits through RollcallRound.maxPairsForGates and chunkPairs', async function () {
+        const calls = [], released = [];
+        RollcallRound.maxPairsForGates = (gates) => { calls.push(['max', gates]); return 3; };
+        RollcallRound.chunkPairs = (pairs, max) => { calls.push(['chunk', pairs.length, max]); return [pairs]; };
+        const eng = Object.create(RollcallRound.prototype);
+        Object.assign(eng, {
+            _committed: new Set(), spendLogPath: 'unused', resolveSigner: () => ({}),
+            spendGuard: { check: () => ({ ok: true }), reserve: () => 'token', release: (t) => released.push(t) },
+            recordSpend: () => false   // the intent write fails, so nothing is ever sent
+        });
+        const real = console.error;
+        console.error = () => {};
+        let res;
+        try { res = await eng.publishPairs({ epoch: 60, gates: 'G' }, 'c'.repeat(64), [{}, {}], 'sweep'); }
+        finally { console.error = real; }
+        assert.strictEqual(res, 'retry');
+        assert.deepStrictEqual(calls, [['max', 'G'], ['chunk', 2, 3]]);
+        assert.deepStrictEqual(released, ['token']);
+    });
+});
