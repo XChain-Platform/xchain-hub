@@ -439,7 +439,7 @@ class AttestationConsensus extends EventEmitter {
         return this.finalized.has(String(rid).toLowerCase());
     }
 
-    _pruneEarlyMessages(now){
+    pruneEarlyMessages(now){
         for(let [rid, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){
                 // A round that drains clears its buffer, so anything parked here
@@ -452,13 +452,13 @@ class AttestationConsensus extends EventEmitter {
         }
     }
 
-    _bufferEarlyMessage(rid, envelope){
+    bufferEarlyMessage(rid, envelope){
         // Drop envelopes for a round torn down without finalization rather than
         // parking them for a later retry-round drain (item 2640). Parking them
         // would replay prior-attempt PBFT votes into the fresh round.
         if(this.tornDown.has(rid)) return;
         let now = Date.now();
-        this._pruneEarlyMessages(now);
+        this.pruneEarlyMessages(now);
         // Size gate (A-F5): drop an oversized pre-round envelope rather than buffer
         // it. The default ceiling clears the largest legitimate PROPOSE (64 KB
         // max_response_bytes fallback x1.4 base64) with headroom; only abuse is cut.
@@ -496,7 +496,7 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessageTtl.set(rid, now + this.earlyMessageTtlMs);
     }
 
-    _drainEarlyMessages(rid){
+    drainEarlyMessages(rid){
         let arr = this.earlyMessages.get(rid);
         if(!arr) return;
         let expiresAt = this.earlyMessageTtl.get(rid);
@@ -657,7 +657,7 @@ class AttestationConsensus extends EventEmitter {
         // one forks the federation while a refusal stalls this one rail and says so.
         let myAdmit = null;
         if(ah.isAdmissionEra(this.hub && this.hub.network, requestBlock)){
-            myAdmit = await this._resolveRoundAdmitBlocks();
+            myAdmit = await this.resolveRoundAdmitBlocks();
             if(!myAdmit){
                 console.error('AttestationConsensus: refusing to open round ' + rid.substring(0,16) +
                     '... at block ' + requestBlock + '; no fresh BTC admission tip to stamp an admission height from');
@@ -793,7 +793,7 @@ class AttestationConsensus extends EventEmitter {
         // staggered hub polls, the first proposer's PROPOSE typically lands
         // before peers create their pending entry; without this drain,
         // _handlePropose's `if(!pending) return` loses those votes.
-        this._drainEarlyMessages(rid);
+        this.drainEarlyMessages(rid);
 
         // For single-validator stacks (N=1) we already have everything we need
         this._maybeAdvanceFromProposals(rid).catch(e =>
@@ -844,7 +844,7 @@ class AttestationConsensus extends EventEmitter {
             // Round not started yet; buffer for drain in propose(). Without
             // this, the first proposer's PROPOSE is lost to peers whose
             // _startRound hasn't run yet, and PBFT can't reach 2f+1.
-            this._bufferEarlyMessage(rid, envelope);
+            this.bufferEarlyMessage(rid, envelope);
             return;
         }
 
@@ -937,7 +937,7 @@ class AttestationConsensus extends EventEmitter {
             // a winner exists, so drain it here the moment the proposal count
             // crosses the check threshold; a still-early replay just re-buffers.
             let need = Math.min(pending.redundancy, pending.responsible.length);
-            if(!pending.winner && pending.proposals.size >= need) this._drainEarlyMessages(rid);
+            if(!pending.winner && pending.proposals.size >= need) this.drainEarlyMessages(rid);
         }
 
         this._maybeAdvanceFromProposals(rid).catch(e =>
@@ -1206,13 +1206,13 @@ class AttestationConsensus extends EventEmitter {
         }
         if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
 
-        this._checkPrepareQuorum(rid);
+        this.checkPrepareQuorum(rid);
 
         // Winner is now set; replay any COMMITs that arrived (and were
         // buffered) before this point so their votes count toward quorum, plus any
         // non-leader judge_model PREPAREs buffered before the leader established it.
         this._drainEarlyCommits(rid);
-        this._drainEarlyMessages(rid);
+        this.drainEarlyMessages(rid);
     }
 
     // Establish a NON-OK round outcome (Phase 4): winner is the canonical
@@ -1281,9 +1281,9 @@ class AttestationConsensus extends EventEmitter {
         }
         if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
 
-        this._checkPrepareQuorum(rid);
+        this.checkPrepareQuorum(rid);
         this._drainEarlyCommits(rid);
-        this._drainEarlyMessages(rid);
+        this.drainEarlyMessages(rid);
     }
 
     // Record that a non-ok status has been published for a request, bounding
@@ -1325,7 +1325,7 @@ class AttestationConsensus extends EventEmitter {
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
         if(!pending){
-            this._bufferEarlyMessage(rid, envelope);
+            this.bufferEarlyMessage(rid, envelope);
             return;
         }
 
@@ -1438,7 +1438,7 @@ class AttestationConsensus extends EventEmitter {
             if(status === 'no_quorum' && pending.pinnedConsensusStrategy === 'byte_equality'){
                 let needNq = Math.min(pending.redundancy, pending.responsible.length);
                 if(pending.proposals.size < needNq){
-                    this._bufferEarlyMessage(rid, envelope);
+                    this.bufferEarlyMessage(rid, envelope);
                     return;
                 }
                 let nonOkModule = this.providerRegistry.getModule(pending.providerId);
@@ -1539,7 +1539,7 @@ class AttestationConsensus extends EventEmitter {
             // identical bodies) and stays first-verified-PREPARE-wins.
             if(pending.pinnedConsensusStrategy === 'judge_model' && pending.leaderPubkey &&
                senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
-                this._bufferEarlyMessage(rid, envelope);
+                this.bufferEarlyMessage(rid, envelope);
                 return;
             }
             // First PREPARE we accept establishes the winner. It MUST carry a valid
@@ -1584,7 +1584,7 @@ class AttestationConsensus extends EventEmitter {
                 // _handlePropose) instead of accepting blind.
                 let need = Math.min(pending.redundancy, pending.responsible.length);
                 if(pending.proposals.size < need){
-                    this._bufferEarlyMessage(rid, envelope);
+                    this.bufferEarlyMessage(rid, envelope);
                     return;
                 }
                 let matchesProposal = false;
@@ -1771,7 +1771,7 @@ class AttestationConsensus extends EventEmitter {
         }
 
         pending.prepares.add(senderPubkey);
-        this._checkPrepareQuorum(rid);
+        this.checkPrepareQuorum(rid);
 
         // A PREPARE can be the first thing to establish our winner (when we
         // adopt the leader's body above). Replay any COMMITs buffered before
@@ -1779,7 +1779,7 @@ class AttestationConsensus extends EventEmitter {
         // PREPAREs buffered pre-winner, which now verify over the canonical winner.
         if(pending.winner){
             this._drainEarlyCommits(rid);
-            this._drainEarlyMessages(rid);
+            this.drainEarlyMessages(rid);
             // A late PREPARE can carry the signature that crosses the commit
             // quorum AFTER this node already broadcast its COMMIT. In that state
             // _checkPrepareQuorum short-circuits on `_commitSent`, so the only
@@ -1791,11 +1791,11 @@ class AttestationConsensus extends EventEmitter {
             // the agree phase, so an unconditional call would finalize before
             // prepare quorum is reached. Post-commit the call is idempotent
             // (gated on signatures.size >= needed and the finalized flag).
-            if(pending._commitSent) this._checkCommitQuorum(rid);
+            if(pending._commitSent) this.checkCommitQuorum(rid);
         }
     }
 
-    _checkPrepareQuorum(rid){
+    checkPrepareQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized || !pending.winner) return;
         if(pending._commitSent) return;
@@ -1828,7 +1828,7 @@ class AttestationConsensus extends EventEmitter {
                     ...this._effectiveTimeWireFields(pending)
                 });
             }
-            this._checkCommitQuorum(rid);
+            this.checkCommitQuorum(rid);
         }
     }
 
@@ -1839,7 +1839,7 @@ class AttestationConsensus extends EventEmitter {
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
         if(!pending){
-            this._bufferEarlyMessage(rid, envelope);
+            this.bufferEarlyMessage(rid, envelope);
             return;
         }
         if(!pending.winner){
@@ -1870,10 +1870,10 @@ class AttestationConsensus extends EventEmitter {
             }
         }
         pending.commits.add(senderPubkey);
-        this._checkCommitQuorum(rid);
+        this.checkCommitQuorum(rid);
     }
 
-    _checkCommitQuorum(rid){
+    checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         // As in _checkPrepareQuorum: quorum <= redundancy by construction (see
@@ -1893,7 +1893,7 @@ class AttestationConsensus extends EventEmitter {
         pending.finalized = true;
         if(pending.status === 'ok'){
             // Terminal on the hub: the indexer flips the request to fulfilled.
-            this._markFinalized(rid);
+            this.markFinalized(rid);
         } else {
             // Non-ok statuses are RETRYABLE on the indexer (the request stays
             // pending), so the rid must NOT enter `finalized` or no retry round
@@ -1959,7 +1959,7 @@ class AttestationConsensus extends EventEmitter {
     // Record a finalized request ID, evicting the oldest once the ring-buffer
     // cap (`finalizedMax`) is reached. Keeps `finalized` bounded while
     // preserving Set semantics for the duplicate-finalization guards.
-    _markFinalized(rid){
+    markFinalized(rid){
         if(this.finalized.has(rid)) return;
         this.finalized.add(rid);
         this._finalizedOrder.push(rid);
@@ -2083,7 +2083,7 @@ class AttestationConsensus extends EventEmitter {
     // indexer's call-site guard reads attestation_responses on BTC only. Null when the
     // hub cannot produce a fresh BTC admission tip, which the caller turns into a refusal
     // to open the round.
-    async _resolveRoundAdmitBlocks(){
+    async resolveRoundAdmitBlocks(){
         let hub = this.hub;
         if(!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
         try { return await hub.resolveAdmitBlocks('attestation_responses', ['BTC']); }

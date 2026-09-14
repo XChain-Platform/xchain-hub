@@ -215,20 +215,20 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
 
     it('REFUSES a null-txid FINALIZED announcing terminal statuses (permanent suppression)', async () => {
         let { pub, envelope, stamped } = finalized(null, 'settled');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length, 'rows must stay pending and re-archive under a fresh seq').to.equal(0);
     });
 
     it('still back-fills the HONEST null-txid shape, where every row is __partial__', async () => {
         let { pub, envelope, stamped } = finalized(null, '__partial__');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length, 'the failed-broadcast announcement must keep working').to.equal(1);
         expect(stamped[0][2], 'no txid is stamped').to.equal(null);
     });
 
     it('back-fills terminal statuses once the archive head is CONFIRMED on DOGE', async () => {
         let { pub, envelope, stamped, asked } = finalized(TXID, 'settled', 'verified');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length).to.equal(1);
         expect(stamped[0][1][0].status, 'the announced terminal status lands').to.equal('settled');
         expect(stamped[0][2], 'the confirmed txid is stamped').to.equal(TXID);
@@ -244,7 +244,7 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
         // The fabricated-txid attack and an honest 0-conf announcement are the same
         // bytes on the wire, so neither may write archived_status = status here.
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length, 'the seq still advances fleet-wide').to.equal(1);
         expect(stamped[0][1][0].status, 'the suppressing status is NOT written').to.equal('__partial__');
         expect(stamped[0][2], 'no txid is stamped from an unconfirmed head').to.equal(null);
@@ -255,14 +255,14 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
 
     it('stamps NOTHING and queues nothing when the head is positively rejected on-chain', async () => {
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'rejected:txid');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length).to.equal(0);
         expect(pub._deferredFinalized.size).to.equal(0);
     });
 
     it('the drain stamps the queued announcement once the head buries', async () => {
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         expect(stamped.length).to.equal(1);                       // sentinel only
 
         let onChain = 'verified';
@@ -276,7 +276,7 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
 
     it('the drain drops a queued announcement the chain later REJECTS', async () => {
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
-        await pub._handleFinalized(envelope);
+        await pub.handleFinalized(envelope);
         pub._verifyArchiveCheckpointOnChain = async () => 'rejected:txid';
         await pub._drainDeferredFinalized();
         expect(stamped.length, 'no terminal stamp ever lands').to.equal(1);

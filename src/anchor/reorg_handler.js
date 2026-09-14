@@ -441,7 +441,7 @@ class ReorgHandler extends EventEmitter {
             affectedChains, digest, oldHash, newHash
         });
 
-        this._checkPrepareQuorum(reorgId);
+        this.checkPrepareQuorum(reorgId);
     }
 
     async _handlePrepare(envelope) {
@@ -533,7 +533,7 @@ class ReorgHandler extends EventEmitter {
         if (!pending || pending.digest !== digest) return;
 
         pending.prepares.add(envelope.sender);
-        this._checkPrepareQuorum(reorgId);
+        this.checkPrepareQuorum(reorgId);
     }
 
     _handleCommit(envelope) {
@@ -548,10 +548,10 @@ class ReorgHandler extends EventEmitter {
         if (!pending || pending.digest !== digest) return;
 
         pending.commits.add(envelope.sender);
-        this._checkCommitQuorum(reorgId);
+        this.checkCommitQuorum(reorgId);
     }
 
-    _checkPrepareQuorum(reorgId) {
+    checkPrepareQuorum(reorgId) {
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.finalized) return;
         // Never move to COMMIT for a reorg our own node did not confirm. Every
@@ -568,11 +568,11 @@ class ReorgHandler extends EventEmitter {
                 digest:  pending.digest
             });
 
-            this._checkCommitQuorum(reorgId);
+            this.checkCommitQuorum(reorgId);
         }
     }
 
-    _checkCommitQuorum(reorgId) {
+    checkCommitQuorum(reorgId) {
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.finalized) return;
         // Same invariant as _checkPrepareQuorum: an unverified round never

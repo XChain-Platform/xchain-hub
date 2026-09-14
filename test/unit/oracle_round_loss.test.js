@@ -322,7 +322,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         it('a round that finalized before stop() is not recorded', async function () {
             seat(VALIDATORS_3[2]);
             await oc.finalizeRound(ROUND, HEIGHT, TIME);
-            oc._markFinalized(ROUND);
+            oc.markFinalized(ROUND);
             await oc.stop();
             expect(lost()).to.have.length(0);
         });

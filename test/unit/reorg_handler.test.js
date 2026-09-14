@@ -364,7 +364,7 @@ describe('ReorgHandler', function () {
             // Drive the round to commit quorum and confirm the executed bound.
             pending.commits.add(VALIDATORS_3[1].addr);
             pending.commits.add(VALIDATORS_3[2].addr);
-            rh._checkCommitQuorum(reorgId);
+            rh.checkCommitQuorum(reorgId);
             await new Promise(r => setImmediate(r));
             expect(hub.db.doQuery.getCall(0).args[1][1], 'quorum rollback bound = block_time')
                 .to.equal(blockTime);
@@ -501,10 +501,10 @@ describe('ReorgHandler', function () {
                 finalized: false, timer: null
             });
 
-            rh._checkPrepareQuorum(reorgId);
+            rh.checkPrepareQuorum(reorgId);
             expect(pm.broadcast.called, 'no COMMIT broadcast for an unverified round').to.be.false;
 
-            rh._checkCommitQuorum(reorgId);
+            rh.checkCommitQuorum(reorgId);
             // _checkCommitQuorum refuses an unverified round inline, so the refusal is
             // already decided by the time it returns.
             expect(hub.db.doQuery.called, 'no rollback for an unverified round').to.be.false;
@@ -1132,7 +1132,7 @@ describe('ReorgHandler', function () {
                 prepares: new Set(['a', 'b']), commits: new Set(['a', 'b']),
                 finalized: false, timer: null, quorum: 2, digest: 'd', selfVerified: true
             });
-            rh._checkCommitQuorum('BTC:5:1');
+            rh.checkCommitQuorum('BTC:5:1');
             await waitUntil(() => rh.pendingReorgs.has('BTC:5:1') === false, { label: 'the failed rollback to clear the pending reorg' });
             expect(rh.pendingReorgs.has('BTC:5:1')).to.be.false;
         });

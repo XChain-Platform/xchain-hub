@@ -187,7 +187,7 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         eng.peerManager = null;
         eng._started = false;
         eng.loadSignLog = () => { eng._started = true; };
-        eng._loadSpendLog = () => { eng._started = true; };
+        eng.loadSpendLog = () => { eng._started = true; };
         eng.spendGuard = { persistTo: () => { eng._started = true; } };
         eng._tick = async () => { eng._started = true; };
         // start() logs a summary line that reads both of these on the armed path.

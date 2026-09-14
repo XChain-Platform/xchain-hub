@@ -128,18 +128,18 @@ describe('Consensus: snapshot-pinned leader election', function () {
     describe('_isLeaderIdentity()', function () {
         it('matches on the verified pubkey when the addr binding differs', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://binding-b:10001', 'ab'.repeat(32))).to.be.true;
+            expect(consensus.isLeaderIdentity(leader, 'ws://binding-b:10001', 'ab'.repeat(32))).to.be.true;
         });
 
         it('matches on addr when the sender pubkey is unresolvable', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://binding-a:10001', null)).to.be.true;
+            expect(consensus.isLeaderIdentity(leader, 'ws://binding-a:10001', null)).to.be.true;
         });
 
         it('rejects a mismatch on both, and a null leader', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
-            expect(consensus._isLeaderIdentity(leader, 'ws://other:10001', 'cd'.repeat(32))).to.be.false;
-            expect(consensus._isLeaderIdentity(null, 'ws://binding-a:10001', 'ab'.repeat(32))).to.be.false;
+            expect(consensus.isLeaderIdentity(leader, 'ws://other:10001', 'cd'.repeat(32))).to.be.false;
+            expect(consensus.isLeaderIdentity(null, 'ws://binding-a:10001', 'ab'.repeat(32))).to.be.false;
         });
     });
 
@@ -330,7 +330,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
         it('_initiateViewChange stashes the round population so the initiator keeps electing from it', function () {
             let members = memberSetOf(SNAPSHOT_SET);
-            consensus._initiateViewChange(SEQ, 2, false, [], members);
+            consensus.initiateViewChange(SEQ, 2, false, [], members);
             expect(consensus.viewChangeQuorums.get(SEQ).memberPubkeys).to.deep.equal(members);
             expect(consensus.memberPubkeysForSeq(SEQ)).to.deep.equal(members);
         });

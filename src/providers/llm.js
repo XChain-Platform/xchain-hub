@@ -111,7 +111,7 @@ const _fallbackSpendLogPath = () =>
 // ride spendStats(), which /health already reads.
 const _auditFaults = { consecutive: 0, total: 0, toFallback: 0, toStderr: 0, lastError: null };
 
-function _appendLine(file, line) {
+function appendLine(file, line) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     let fd = fs.openSync(file, 'a');
     try {
@@ -123,7 +123,7 @@ function _appendLine(file, line) {
 function _appendSpendRecord(record) {
     let line = JSON.stringify(record) + '\n';
     try {
-        _appendLine(_spendLogPath(), line);
+        appendLine(_spendLogPath(), line);
         _auditFaults.consecutive = 0;
         return;
     } catch (e) {
@@ -138,7 +138,7 @@ function _appendSpendRecord(record) {
     // both. The record carries the primary path it could not reach, so a later
     // reconciliation can tell a fallback line from a native one.
     try {
-        _appendLine(_fallbackSpendLogPath(), JSON.stringify(
+        appendLine(_fallbackSpendLogPath(), JSON.stringify(
             Object.assign({}, record, { auditFallbackFrom: _spendLogPath() })) + '\n');
         _auditFaults.toFallback++;
         return;

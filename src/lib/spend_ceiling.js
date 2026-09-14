@@ -71,7 +71,7 @@ class SpendCeiling {
     // True when the ceiling is off (no cap configured).
     get disabled(){ return this.maxPerWindow <= 0; }
 
-    _prune(now){
+    prune(now){
         let cutoff = now - this.windowMs;
         while (this._spends.length && this._spends[0] <= cutoff) this._spends.shift();
     }
@@ -79,7 +79,7 @@ class SpendCeiling {
     // Number of broadcasts recorded in the live window.
     countInWindow(now){
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         return this._spends.length;
     }
 
@@ -88,7 +88,7 @@ class SpendCeiling {
     allow(now){
         if (this.disabled) return true;
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         return this._spends.length < this.maxPerWindow;
     }
 
@@ -96,7 +96,7 @@ class SpendCeiling {
     record(now){
         if (this.disabled) return;
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         this._spends.push(now);
     }
 
@@ -108,7 +108,7 @@ class SpendCeiling {
     reserve(now){
         if (this.disabled) return null;
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         this._spends.push(now);
         return now;
     }
@@ -128,7 +128,7 @@ class SpendCeiling {
     seedConsumed(now){
         if (this.disabled) return;
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         while (this._spends.length < this.maxPerWindow) this._spends.push(now);
     }
 

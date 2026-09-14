@@ -280,7 +280,7 @@ class RollcallRound {
         // Both logs must be consumed BEFORE the first tick: the recovered epochs
         // gate the very round that tick reconstructs.
         this.loadSignLog();
-        this._loadSpendLog();
+        this.loadSpendLog();
         this.spendGuard.persistTo();
         let tick = async () => {
             try { await this._tick(); }
@@ -563,7 +563,7 @@ class RollcallRound {
         let early = this._earlySigs.get(epoch);
         this._earlySigs.delete(epoch);
         for(let e of this._earlySigs.keys()) if(e < epoch) this._earlySigs.delete(e);
-        if(early) for(let [pk, sig] of early) this._onSign({ epoch, pubkey: pk, sig });
+        if(early) for(let [pk, sig] of early) this.onSign({ epoch, pubkey: pk, sig });
 
         console.log('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
                     '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity') +
@@ -575,11 +575,11 @@ class RollcallRound {
     _handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
-            case XROLLCALL_SIGN: return this._onSign(env.data);
+            case XROLLCALL_SIGN: return this.onSign(env.data);
         }
     }
 
-    _onSign(d){
+    onSign(d){
         let epoch = Number(d.epoch);
         let pk  = String(d.pubkey || '').toLowerCase();
         let sig = String(d.sig || '').toLowerCase();
@@ -777,7 +777,7 @@ class RollcallRound {
         // "this hub wired no balance source and the floor is inert", while an
         // unreadable wallet must fail closed rather than look unconfigured.
         let balance;
-        let signer = this._resolveSigner();
+        let signer = this.resolveSigner();
         if(signer.getBalanceFn){
             try { balance = await signer.getBalanceFn(); } catch(_){ balance = null; }
             if(balance === undefined) balance = null;
@@ -869,7 +869,7 @@ class RollcallRound {
             let chunk = chunks[i];
             let wire = this.buildWire(state.epoch, state.ledgerHash, myPubkey, chunk, state.gates);
             try {
-                let res = await this._broadcast(wire);
+                let res = await this.broadcast(wire);
                 // The reservation IS the spend; record() here would count it twice.
                 this.spendGuard.commit(tokens[i]);
                 let txid = (res && res.txid) ? String(res.txid) : null;
@@ -966,7 +966,7 @@ class RollcallRound {
     // Borrow the shared DOGE signer exactly as StateAnchorPublisher borrows the
     // price publisher's: HUB_SIGNER_MODULE's contract is unchanged and there is
     // one wiring point for all on-chain DOGE publishing.
-    _resolveSigner(){
+    resolveSigner(){
         let op = (this.hub && this.hub.oraclePublisher) || {};
         return {
             broadcastFn:  this.broadcastFn  || op.broadcastFn  || null,
@@ -982,7 +982,7 @@ class RollcallRound {
     // never publish one. Reported by getrollcallstatus so that gap is visible
     // rather than showing up as a federation that mysteriously never rolls.
     broadcastCapable(){
-        return typeof this._resolveSigner().broadcastFn === 'function';
+        return typeof this.resolveSigner().broadcastFn === 'function';
     }
 
     // Gate every publish path on it, and say so exactly once: this is a standing
@@ -999,8 +999,8 @@ class RollcallRound {
         return false;
     }
 
-    async _broadcast(payload){
-        let signer = this._resolveSigner();
+    async broadcast(payload){
+        let signer = this.resolveSigner();
         if(typeof signer.broadcastFn === 'function') return await signer.broadcastFn(payload);
         // Reached only if the capability check above was bypassed. Build far
         // enough to hit the two-phase guard, which refuses BEFORE the wallet hook
@@ -1027,7 +1027,7 @@ class RollcallRound {
     // Append one fsync'd line. Returns true only on a confirmed durable write;
     // the intent call gates on that result, the outcome calls are best-effort
     // because the fee is already committed by then.
-    _appendLine(file, obj){
+    appendLine(file, obj){
         let line = JSON.stringify(obj) + '\n';
         try {
             fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -1049,14 +1049,14 @@ class RollcallRound {
     }
 
     _recordSpend(entry){
-        return this._appendLine(this.spendLogPath,
+        return this.appendLine(this.spendLogPath,
             Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this.ownPubkey() || undefined }, entry));
     }
 
     // A signature costs nothing on chain, so an unwritable path must not stop the
     // hub answering an epoch; it only costs the restart re-emit.
     recordSignature(entry){
-        return this._appendLine(this.signLogPath, Object.assign({ ts: Date.now() }, entry));
+        return this.appendLine(this.signLogPath, Object.assign({ ts: Date.now() }, entry));
     }
 
     // Fold the append-only spend log into the set of epochs whose fee is already
@@ -1068,7 +1068,7 @@ class RollcallRound {
     // LAST-RECORD-WINS below the sticky 'sent', not first: an epoch that failed
     // definitively and then retried appends a SECOND intent, and that intent must
     // re-arm the guard exactly like the first.
-    _loadSpendLog(){
+    loadSpendLog(){
         let text;
         try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
         catch(e){ return; }

@@ -629,7 +629,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(pending.timer.unref) pending.timer.unref();
 
         this.peerManager.broadcast(XCHK_SIGN_REQ, { checkpoint: cp, sig_pubkey: myPubkey, sig: mySig });
-        this._checkQuorum(id);
+        this.checkQuorum(id);
     }
 
     _handleMessage(envelope){
@@ -637,7 +637,7 @@ class StateCheckpointEngine extends EventEmitter {
         switch(envelope.type){
             case XCHK_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
             case XCHK_SIGN:      this._handleSign(envelope);      break;
-            case XCHK_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('StateCheckpointEngine: FINALIZED error: ' + (e && e.message))); break;
+            case XCHK_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('StateCheckpointEngine: FINALIZED error: ' + (e && e.message))); break;
         }
     }
 
@@ -753,10 +753,10 @@ class StateCheckpointEngine extends EventEmitter {
         if(!pending.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(pending.canonical, String(d.sig || ''), pubkey)) return;
         pending.signatures.set(pubkey, String(d.sig));
-        this._checkQuorum(id);
+        this.checkQuorum(id);
     }
 
-    _checkQuorum(id){
+    checkQuorum(id){
         let pending = this.pending.get(id);
         if(!pending || pending.done) return;
         let met = pending.weighted
@@ -775,7 +775,7 @@ class StateCheckpointEngine extends EventEmitter {
 
     // Every hub verifies + writes the finalized checkpoint locally (the mirror
     // streams from each hub to ITS OWN indexer subscribers, so everyone writes).
-    async _handleFinalized(envelope){
+    async handleFinalized(envelope){
         let d  = envelope.data;
         let cp = this._normalizeCheckpoint(d.checkpoint);
         if(!cp || !Array.isArray(d.signatures)){

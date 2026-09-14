@@ -436,7 +436,7 @@ class OracleConsensus extends EventEmitter {
 
     // --- Early-message buffering (finding F7) ---
 
-    _pruneEarlyMessages(now) {
+    pruneEarlyMessages(now) {
         for (let [round, expiresAt] of this.earlyMessageTtl) {
             if (expiresAt <= now) {
                 // A healthy round drains its buffer, so anything still parked
@@ -452,9 +452,9 @@ class OracleConsensus extends EventEmitter {
 
     // Hold a PREPARE/COMMIT that arrived before this hub's pendingRounds entry
     // exists for the round. Replayed by _drainEarlyMessages once it does.
-    _bufferEarlyMessage(round, envelope) {
+    bufferEarlyMessage(round, envelope) {
         let now = Date.now();
-        this._pruneEarlyMessages(now);
+        this.pruneEarlyMessages(now);
         let arr = this.earlyMessages.get(round);
         if (!arr) {
             // Bound the number of distinct buffered rounds (attacker picks `round`).
@@ -480,7 +480,7 @@ class OracleConsensus extends EventEmitter {
     // Replay buffered envelopes through the normal dispatch path. Called from
     // both pendingRounds.set sites (proposer + follower). Deletes the queue
     // up-front so replayed messages can't re-buffer.
-    _drainEarlyMessages(round) {
+    drainEarlyMessages(round) {
         let arr = this.earlyMessages.get(round);
         if (!arr) return;
         this.earlyMessages.delete(round);
@@ -494,7 +494,7 @@ class OracleConsensus extends EventEmitter {
     // Record a finalized round under the bounded FIFO ring (L1). Evicts the
     // oldest round once the window is full so `finalized` cannot grow unbounded
     // over the process lifetime.
-    _markFinalized(round) {
+    markFinalized(round) {
         // A round that genuinely finalizes supersedes any local skip marker for it
         // (the 'skipped' price_snapshots rows were upgraded to 'finalized' by
         // _storeSnapshot), so clear it from locallySkipped (stress-sweep #7).
@@ -688,7 +688,7 @@ class OracleConsensus extends EventEmitter {
         // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
         // not a new one. Genuine single-node / regtest bootstrap (_getQuorum() === 0)
         // keeps the self-finalize path, same federation test as the empty-set guard below.
-        if (!this._hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
+        if (!this.hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
             console.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
                 'hub\'s live validator set, which peers do not share.');
@@ -703,7 +703,7 @@ class OracleConsensus extends EventEmitter {
         // indexer's stake gate rejects (see _isEmptyFederationSnapshot). Genuine
         // single-node / regtest bootstrap (no federation) is unaffected and still
         // self-finalizes via the quorum===0 path.
-        if (this._isEmptyFederationSnapshot(snapshot)) {
+        if (this.isEmptyFederationSnapshot(snapshot)) {
             console.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than self-finalizing a ' +
                 'single-signature round the indexer stake gate would reject.');
@@ -766,7 +766,7 @@ class OracleConsensus extends EventEmitter {
             // era; no fresh tip means no round, never a guessed height (section 5.3).
             let soloAdmit = null;
             if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
-                soloAdmit = await this._resolveRoundAdmitBlocks();
+                soloAdmit = await this.resolveRoundAdmitBlocks();
                 if (!soloAdmit) {
                     console.error('Oracle: refusing to finalize round ' + round + ' at anchor ' + btcBlockHeight +
                         '; no fresh admission tip to stamp an admission height from');
@@ -779,11 +779,11 @@ class OracleConsensus extends EventEmitter {
             // Mark the round finalized so the guard at the top of finalizeRound()
             // dedupes any subsequent call for this round (prevents a duplicate
             // snapshot store / PRICE v0 broadcast).
-            this._markFinalized(round);
+            this.markFinalized(round);
             // participants are SIGNING KEYS (see the federated emit below), so the
             // reward/slash path can pay a chain-attributed validator that the local
             // registry has no row for.
-            let selfPk = this._selfPubkey();
+            let selfPk = this.selfPubkey();
             this.emit('round:finalized', {
                 round:          round,
                 btcBlockHeight: btcBlockHeight,
@@ -807,7 +807,7 @@ class OracleConsensus extends EventEmitter {
 
         let leader   = this._getLeader(round, memberPubkeys);
         let myAddr   = this.peerManager.validatorAddr;
-        let isLeader = this._isLeaderIdentity(leader, myAddr, this._resolveSenderPubkey(myAddr));
+        let isLeader = this.isLeaderIdentity(leader, myAddr, this.resolveSenderPubkey(myAddr));
 
         // Every return past this point is a seat, not an outcome: stamp it on the
         // watchdog entry so the abandonment record names what this hub waited on.
@@ -920,7 +920,7 @@ class OracleConsensus extends EventEmitter {
 
         let admitBlocks = null;
         if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
-            admitBlocks = await this._resolveRoundAdmitBlocks();
+            admitBlocks = await this.resolveRoundAdmitBlocks();
             if (!admitBlocks) {
                 console.error('Oracle: refusing to propose round ' + round + ' at anchor ' + btcBlockHeight +
                     '; no fresh admission tip to stamp an admission height from');
@@ -958,7 +958,7 @@ class OracleConsensus extends EventEmitter {
             // _checkPrepareQuorum/_checkCommitQuorum can tally signer stake (the count
             // quorum above is ignored when weighted).
             weighted:       !!weighted,
-            validators:     this._normalizeValidators(snapshot, weighted),
+            validators:     this.normalizeValidators(snapshot, weighted),
             // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
             // Null (no usable snapshot) keeps the legacy raw-sender count.
             memberPubkeys:  memberPubkeys || null
@@ -967,12 +967,12 @@ class OracleConsensus extends EventEmitter {
         // Vote sets hold PROVEN SIGNING KEYS, not sender addrs: quorum is a count of
         // distinct staked signers, and an addr is a self-asserted wire field that one
         // key could vary to forge a quorum. Seed our own key the same way.
-        let selfPk = this._selfPubkey();
+        let selfPk = this.selfPubkey();
         if (selfPk) pending.prepares.add(selfPk);
         if (mySig) pending.signatures.set(mySig.pubkey, mySig.sig);
         this.pendingRounds.set(round, pending);
         // Replay any PREPARE/COMMIT that beat this proposal (finding F7).
-        this._drainEarlyMessages(round);
+        this.drainEarlyMessages(round);
 
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
@@ -1016,7 +1016,7 @@ class OracleConsensus extends EventEmitter {
         console.log('Oracle: ' + tag + 'Proposed round ' + round + ' with ' + aggregated.length +
             ' prices (' + submissions.size + ' submissions)');
 
-        this._checkPrepareQuorum(round);
+        this.checkPrepareQuorum(round);
     }
 
     // Whether an authenticated envelope may be counted toward this round's quorum.
@@ -1037,7 +1037,7 @@ class OracleConsensus extends EventEmitter {
     // Addr-keyed by necessity: its remaining callers walk the submission map,
     // which is keyed by sender. The VOTE path no longer needs it, because
     // prepare/commit sets now hold proven keys directly.
-    _resolveSenderPubkey(sender) {
+    resolveSenderPubkey(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         let pk = (registry && typeof registry.get === 'function') ? registry.get(sender) : null;
         if (!pk && sender === this.peerManager.validatorAddr) {
@@ -1051,15 +1051,15 @@ class OracleConsensus extends EventEmitter {
     // prepare/commit set. Null only on a hub with no identity and no registry
     // row, which cannot sign a vote anyway; callers skip seeding rather than
     // admit a null into the tally.
-    _selfPubkey() {
-        return this._resolveSenderPubkey(this.peerManager && this.peerManager.validatorAddr);
+    selfPubkey() {
+        return this.resolveSenderPubkey(this.peerManager && this.peerManager.validatorAddr);
     }
 
     // Record one peer's vote in a key-keyed prepare/commit set. The envelope has
     // already cleared _isKnownSender, so it carries a proven key; this is where
     // the forgery bound actually bites, because N envelopes from ONE key collapse
     // to a single Set entry no matter how many distinct senders they name.
-    _addVote(voteSet, envelope) {
+    addVote(voteSet, envelope) {
         let pk = provenPubkey(envelope);
         if (pk) voteSet.add(pk);
     }
@@ -1074,7 +1074,7 @@ class OracleConsensus extends EventEmitter {
     // its fail-closed guard and an under-counted S lets a minority of stake clear the 2/3
     // bar. Same one-liner as the sibling rebuilds in this file (:2083) and in
     // CrossChainDexEngine.js / StakeShareWatcher.js.
-    _normalizeValidators(snapshot, weighted) {
+    normalizeValidators(snapshot, weighted) {
         if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
         let out = snapshot.validators.map(v => ({
             pubkey: String(v.pubkey).toLowerCase(),
@@ -1111,7 +1111,7 @@ class OracleConsensus extends EventEmitter {
         let filtered = new Map();
         let seen = new Set();
         for (let [addr, sub] of submissions) {
-            let pk = (sub && sub.pubkey) ? sub.pubkey : this._resolveSenderPubkey(addr);
+            let pk = (sub && sub.pubkey) ? sub.pubkey : this.resolveSenderPubkey(addr);
             if (!pk || !memberPubkeys.has(pk)) continue;
             if (seen.has(pk)) continue;
             seen.add(pk);
@@ -1303,7 +1303,7 @@ class OracleConsensus extends EventEmitter {
                 // memberPubkeys null, so its vote tally is unfiltered and its leader
                 // election is live-set rotation: three ways to disagree with every peer at
                 // the same height on nothing but its own indexer reachability.
-                if (!this._hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
+                if (!this.hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
                     console.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
                         'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
                         'pending round sized from this hub\'s live validator set.');
@@ -1318,7 +1318,7 @@ class OracleConsensus extends EventEmitter {
                 // round (finalizeRound), so a PROPOSE for one is spurious/Byzantine; drop
                 // it. Genuine single-node hubs receive no PROPOSEs, and a healthy
                 // federation snapshot is non-empty, so this only bites the bad case.
-                if (this._isEmptyFederationSnapshot(snap)) {
+                if (this.isEmptyFederationSnapshot(snap)) {
                     console.warn('Oracle: dropping PROPOSE for round ' + round + ': empty price-qualifying ' +
                         'snapshot at block ' + blockHeight + ' on a federated hub (a legitimate leader skips ' +
                         'such a round; not accepting a single-signature finalization).');
@@ -1343,8 +1343,8 @@ class OracleConsensus extends EventEmitter {
         // an empty registry (freshly staked, or a non-validator observer) would
         // otherwise admit the leader's PROPOSE via the chain-effective set and
         // then reject it as "non-leader" because it could not name its key.
-        let proposerPk   = provenPubkey(envelope) || this._resolveSenderPubkey(envelope.sender);
-        let isRealLeader = this._isLeaderIdentity(leader, envelope.sender, proposerPk);
+        let proposerPk   = provenPubkey(envelope) || this.resolveSenderPubkey(envelope.sender);
+        let isRealLeader = this.isLeaderIdentity(leader, envelope.sender, proposerPk);
         let isFallback   = false;
 
         if (!isRealLeader) {
@@ -1430,10 +1430,10 @@ class OracleConsensus extends EventEmitter {
             // deviation 0. Mirror _leaderSubmissionAddr's pubkey resolution; keep the
             // raw-addr guard as a belt-and-suspenders fallback for unknown-pubkey addrs.
             let refSubs = new Map();
-            let proposerPk = this._resolveSenderPubkey(envelope.sender);
+            let proposerPk = this.resolveSenderPubkey(envelope.sender);
             if (submissions) for (let [addr, sub] of submissions) {
                 if (addr === envelope.sender) continue;
-                let pk = (sub && sub.pubkey) ? String(sub.pubkey).toLowerCase() : this._resolveSenderPubkey(addr);
+                let pk = (sub && sub.pubkey) ? String(sub.pubkey).toLowerCase() : this.resolveSenderPubkey(addr);
                 if (proposerPk && pk === proposerPk) continue;
                 refSubs.set(addr, sub);
             }
@@ -1653,7 +1653,7 @@ class OracleConsensus extends EventEmitter {
                 snapshot:       snap || null,
                 quorum:         quorum,
                 weighted:       !!wt,
-                validators:     this._normalizeValidators(snap, wt),
+                validators:     this.normalizeValidators(snap, wt),
                 // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
                 memberPubkeys:  memberPubkeys || null,
                 timer:          setTimeout(() => {
@@ -1680,7 +1680,7 @@ class OracleConsensus extends EventEmitter {
             this._armRoundWatchdog(round, pending.btcBlockHeight, pending.btcBlockTime);
             // Replay any PREPARE/COMMIT that arrived while this handler was
             // awaiting the snapshot fetch above (finding F7).
-            this._drainEarlyMessages(round);
+            this.drainEarlyMessages(round);
         }
 
         let pending = this.pendingRounds.get(round);
@@ -1702,8 +1702,8 @@ class OracleConsensus extends EventEmitter {
             console.warn('Oracle: PROPOSE admission-map conflict for round ' + round + ' from ' + envelope.sender);
             return;
         }
-        this._addVote(pending.prepares, envelope);
-        let selfPkOnPropose = this._selfPubkey();
+        this.addVote(pending.prepares, envelope);
+        let selfPkOnPropose = this.selfPubkey();
         if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
 
         if (sig_pubkey && sig) {
@@ -1722,7 +1722,7 @@ class OracleConsensus extends EventEmitter {
             sig:        mySig ? mySig.sig    : null
         });
 
-        this._checkPrepareQuorum(round);
+        this.checkPrepareQuorum(round);
     }
 
     _handlePrepare(envelope) {
@@ -1740,7 +1740,7 @@ class OracleConsensus extends EventEmitter {
             // No pending entry yet: the PROPOSE may still be in flight or its
             // handler mid-await on the snapshot fetch. Buffer instead of
             // dropping (finding F7); replayed once pendingRounds is populated.
-            if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            if (!this.finalized.has(round)) this.bufferEarlyMessage(round, envelope);
             else noteDrop({ reason: 'round_torn_down', phase: 'prepare', round, sender: envelope.sender, envelope });
             return;
         }
@@ -1749,9 +1749,9 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        this._addVote(pending.prepares, envelope);
+        this.addVote(pending.prepares, envelope);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
-        this._checkPrepareQuorum(round);
+        this.checkPrepareQuorum(round);
     }
 
     _handleCommit(envelope) {
@@ -1767,7 +1767,7 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending) {
             // Same early-arrival race as _handlePrepare (finding F7).
-            if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            if (!this.finalized.has(round)) this.bufferEarlyMessage(round, envelope);
             else noteDrop({ reason: 'round_torn_down', phase: 'commit', round, sender: envelope.sender, envelope });
             return;
         }
@@ -1776,9 +1776,9 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        this._addVote(pending.commits, envelope);
+        this.addVote(pending.commits, envelope);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
-        this._checkCommitQuorum(round);
+        this.checkCommitQuorum(round);
     }
 
     // Whether the round has cleared quorum. STAKE_WEIGHTED_QUORUM tallies the
@@ -1788,7 +1788,7 @@ class OracleConsensus extends EventEmitter {
     // cannot finalize without >2/3 stake having signed it, so the published PRICE
     // always clears the indexer's identical weighted gate. Below activation: the
     // count of the passed vote set against the locked quorum.
-    _quorumMet(pending, voteSet) {
+    quorumMet(pending, voteSet) {
         if (pending.weighted)
             return swq.meetsStakeThreshold(pending.validators, [...pending.signatures.keys()]);
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
@@ -1815,15 +1815,15 @@ class OracleConsensus extends EventEmitter {
         return counted;
     }
 
-    _checkPrepareQuorum(round) {
+    checkPrepareQuorum(round) {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
         // Use the round's locked quorum (snapshot at the block boundary),
         // not a live recompute, to keep every hub in lockstep across the round.
-        if (this._quorumMet(pending, pending.prepares) && !pending._commitSent) {
+        if (this.quorumMet(pending, pending.prepares) && !pending._commitSent) {
             pending._commitSent = true;
-            let selfPk = this._selfPubkey();
+            let selfPk = this.selfPubkey();
             if (selfPk) pending.commits.add(selfPk);
 
             // Include this validator's signature in the COMMIT message so late-joining nodes
@@ -1840,16 +1840,16 @@ class OracleConsensus extends EventEmitter {
                 sig:        mySig ? mySig.sig    : null
             });
 
-            this._checkCommitQuorum(round);
+            this.checkCommitQuorum(round);
         }
     }
 
-    _checkCommitQuorum(round) {
+    checkCommitQuorum(round) {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
         // Same quorum rule as _checkPrepareQuorum (see _quorumMet).
-        if (this._quorumMet(pending, pending.commits)) {
+        if (this.quorumMet(pending, pending.commits)) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
             // Fire-and-forget (mirrors the prior promise-chain behavior); durability,
@@ -1889,7 +1889,7 @@ class OracleConsensus extends EventEmitter {
 
                 // Persistence succeeded: now (and only now) it is safe to finalize and
                 // drop the in-memory round state.
-                this._markFinalized(round);
+                this.markFinalized(round);
                 this.pendingRounds.delete(round);
                 this._clearRoundTracking(round);
                 console.log('Oracle: Round ' + round + ' finalized (' +
@@ -2470,7 +2470,7 @@ class OracleConsensus extends EventEmitter {
     // The map this hub stamps on a round it leads: tip + the price margin on EVERY chain the
     // federation serves, because the price read set is every chain (section 5.1). Null when
     // any tip is stale or absent, which the caller treats as "propose nothing".
-    async _resolveRoundAdmitBlocks() {
+    async resolveRoundAdmitBlocks() {
         let hub = this.hub;
         if (!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
         try { return await hub.resolveAdmitBlocks('price_snapshots', ah.ADMIT_COLUMN_CHAINS.slice()); }
@@ -2899,7 +2899,7 @@ class OracleConsensus extends EventEmitter {
         if (memberPubkeys && memberPubkeys.size > 0) {
             let keys = [...memberPubkeys].sort();
             let pubkey = keys[round % keys.length];
-            return { addr: this._addrForPubkey(pubkey), pubkey: pubkey };
+            return { addr: this.addrForPubkey(pubkey), pubkey: pubkey };
         }
         if (this.validatorSet.length === 0) return null;
         return this.validatorSet[round % this.validatorSet.length];
@@ -2910,7 +2910,7 @@ class OracleConsensus extends EventEmitter {
     // bound to several addrs resolves identically on every hub), then own
     // identity. Null when unknown; leader-addr comparisons then fail and the
     // fallback-proposer election salvages the round.
-    _addrForPubkey(pubkey) {
+    addrForPubkey(pubkey) {
         for (let v of this.validatorSet) {
             if (v && v.pubkey && String(v.pubkey).toLowerCase() === pubkey) return v.addr;
         }
@@ -2933,7 +2933,7 @@ class OracleConsensus extends EventEmitter {
     // round leader. Matches on addr OR verified pubkey so a snapshot-derived
     // leader is still recognized when this hub's addr binding for that key
     // differs from the one _addrForPubkey picked.
-    _isLeaderIdentity(leader, addr, pubkey) {
+    isLeaderIdentity(leader, addr, pubkey) {
         if (!leader) return false;
         if (leader.addr && leader.addr === addr) return true;
         let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
@@ -2949,7 +2949,7 @@ class OracleConsensus extends EventEmitter {
         let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
         if (!lpk) return null;
         for (let [addr, sub] of submissions) {
-            let pk = (sub && sub.pubkey) ? sub.pubkey : this._resolveSenderPubkey(addr);
+            let pk = (sub && sub.pubkey) ? sub.pubkey : this.resolveSenderPubkey(addr);
             if (pk === lpk) return addr;
         }
         return null;
@@ -2978,7 +2978,7 @@ class OracleConsensus extends EventEmitter {
     // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
     // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
     // earlier on both round paths by _hasDeterministicSnapshot.
-    _isEmptyFederationSnapshot(snapshot) {
+    isEmptyFederationSnapshot(snapshot) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
         let empty = !Array.isArray(vals) || vals.length === 0;
@@ -2992,7 +2992,7 @@ class OracleConsensus extends EventEmitter {
     // this hub's reachability. Present-but-EMPTY is a different case (a real, agreed-upon
     // zero-qualifier set) and is handled by _isEmptyFederationSnapshot.
     // Mirrors Consensus._hasDeterministicSnapshot.
-    _hasDeterministicSnapshot(snapshot) {
+    hasDeterministicSnapshot(snapshot) {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }
 

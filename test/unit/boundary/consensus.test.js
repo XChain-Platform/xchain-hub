@@ -287,7 +287,7 @@ describe('Boundary: Consensus (PBFT)', function () {
 
         it('rapid view increments produce valid leaders', function () {
             for (let i = 0; i < 20; i++) {
-                consensus._initiateViewChange(1);
+                consensus.initiateViewChange(1);
             }
             expect(consensus.view).to.equal(20);
             let leader = consensus._getLeader(1);

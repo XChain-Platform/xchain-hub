@@ -365,7 +365,7 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
 
         let fin = leader.sent.find(m => m.type === 'XANC_FINALIZED');
         expect(fin, 'round one announced a FINALIZED').to.not.equal(undefined);
-        await laggy.pub._handleFinalized({ type: 'XANC_FINALIZED', sender: leader.pubkey, data: fin.data });
+        await laggy.pub.handleFinalized({ type: 'XANC_FINALIZED', sender: leader.pubkey, data: fin.data });
 
         expect(laggy.pub._observedConsumedBatchSeq, 'batch 0 learned as consumed').to.equal(0);
         expect(laggy.db.matches[0].batch_seq, 'and the missed back-fill actually landed').to.equal(0);

@@ -162,14 +162,14 @@ class CrossChainDexConsensus extends EventEmitter {
         this.earlyMessageTtl.clear();
     }
 
-    _pruneEarlyMessages(now){
+    pruneEarlyMessages(now){
         for(let [id, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){ this.earlyMessages.delete(id); this.earlyMessageTtl.delete(id); }
         }
     }
-    _bufferEarlyMessage(id, envelope){
+    bufferEarlyMessage(id, envelope){
         let now = Date.now();
-        this._pruneEarlyMessages(now);
+        this.pruneEarlyMessages(now);
         // Size gate (A-F5): drop an oversized pre-membership envelope rather than
         // buffer it. A PROPOSE's `row` is the only large field and a legitimate
         // one is far under this ceiling; this only rejects abuse.
@@ -192,7 +192,7 @@ class CrossChainDexConsensus extends EventEmitter {
         arr.push(envelope);
         this.earlyMessageTtl.set(id, now + this.earlyMessageTtlMs);
     }
-    _drainEarlyMessages(id){
+    drainEarlyMessages(id){
         let arr = this.earlyMessages.get(id);
         if(!arr) return;
         this.earlyMessages.delete(id);
@@ -328,7 +328,7 @@ class CrossChainDexConsensus extends EventEmitter {
             catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
             let sig = this.identity.sign(canonical);
             pending.signatures.set(myPubkey, sig);
-            this._finalize(rid);
+            this.finalize(rid);
             return;
         }
 
@@ -341,7 +341,7 @@ class CrossChainDexConsensus extends EventEmitter {
             await this._broadcastPropose(pending);
         }
 
-        this._drainEarlyMessages(rid);
+        this.drainEarlyMessages(rid);
     }
 
     _armTimer(rid){
@@ -370,7 +370,7 @@ class CrossChainDexConsensus extends EventEmitter {
             this.emit('match:abandoned', { matchId: rid });
             return;
         }
-        this._initiateViewChange(rid);
+        this.initiateViewChange(rid);
     }
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
@@ -494,7 +494,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         let view = Number(d.view) || 0;
@@ -604,12 +604,12 @@ class CrossChainDexConsensus extends EventEmitter {
                 });
             }
         }
-        this._checkPrepareQuorum(rid);
+        this.checkPrepareQuorum(rid);
 
         // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
         // verification against our stale canonical and were buffered; replay them
         // now that the round canonical matches what they signed.
-        if(adopted) this._drainEarlyMessages(rid);
+        if(adopted) this.drainEarlyMessages(rid);
     }
 
     _handlePrepare(envelope){
@@ -617,7 +617,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
@@ -626,12 +626,12 @@ class CrossChainDexConsensus extends EventEmitter {
             // canonical. A mismatch usually means this vote raced ahead of the
             // leader's PROPOSE (we still hold our pre-built canonical); buffer
             // it for replay after adoption rather than losing it.
-            this._bufferEarlyMessage(rid, envelope);
+            this.bufferEarlyMessage(rid, envelope);
             return;
         }
         pending.signatures.set(senderPubkey, String(d.sig));
         pending.prepares.add(senderPubkey);
-        this._checkPrepareQuorum(rid);
+        this.checkPrepareQuorum(rid);
     }
 
     // Quorum test for a collected vote set (prepares or commits). Stake-weighted
@@ -642,7 +642,7 @@ class CrossChainDexConsensus extends EventEmitter {
         return voteSet.size >= pending.quorum;
     }
 
-    _checkPrepareQuorum(rid){
+    checkPrepareQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized || pending._commitSent) return;
         if(!this._meetsQuorum(pending, pending.prepares)) return;
@@ -656,7 +656,7 @@ class CrossChainDexConsensus extends EventEmitter {
                 commit_sig: this.identity.sign(this._commitPayload(pending.canonical))
             });
         }
-        this._checkCommitQuorum(rid);
+        this.checkCommitQuorum(rid);
     }
 
     _handleCommit(envelope){
@@ -664,7 +664,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
@@ -673,7 +673,7 @@ class CrossChainDexConsensus extends EventEmitter {
             // node whose canonical diverged "finalize" with zero collected
             // signatures and persist an unverifiable mirror row. Buffer for
             // replay in case the leader's PROPOSE (and adoption) is still racing.
-            this._bufferEarlyMessage(rid, envelope);
+            this.bufferEarlyMessage(rid, envelope);
             return;
         }
         // The artifact signature verified above proves the peer signed the
@@ -689,17 +689,17 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
         pending.commits.add(senderPubkey);
-        this._checkCommitQuorum(rid);
+        this.checkCommitQuorum(rid);
     }
 
-    _checkCommitQuorum(rid){
+    checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         if(!this._meetsQuorum(pending, pending.commits)) return;
-        this._finalize(rid);
+        this.finalize(rid);
     }
 
-    _finalize(rid){
+    finalize(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         pending.finalized = true;
@@ -707,7 +707,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
 
-        this._markFinalized(rid, pending.row, sigs, pending.view);
+        this.markFinalized(rid, pending.row, sigs, pending.view);
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
 
         console.log('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
@@ -749,7 +749,7 @@ class CrossChainDexConsensus extends EventEmitter {
         return had;
     }
 
-    _markFinalized(rid, row, signatures, view){
+    markFinalized(rid, row, signatures, view){
         if(this.finalized.has(rid)) return;
         this.finalized.add(rid);
         // Store the finalizing view too: FINAL_SYNC state-transfer must tell a straggler
@@ -763,7 +763,7 @@ class CrossChainDexConsensus extends EventEmitter {
         }
     }
 
-    _initiateViewChange(rid){
+    initiateViewChange(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         pending.view++;
@@ -796,7 +796,7 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
         let pending = this.pending.get(rid);
-        if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
         let view = Number(d.view);
         if(!Number.isFinite(view)) return;
         let voter = String(d.sig_pubkey || '').toLowerCase();
@@ -914,7 +914,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // guard is never consulted for this round again. Taking the higher view is the bug.
         pending.view       = syncView;
         console.log('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
-        this._finalize(rid);
+        this.finalize(rid);
     }
 
     _handleNewView(envelope){
@@ -922,7 +922,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
         let view = Number(d.view);
         if(!Number.isFinite(view) || view <= pending.view) return;        // monotonic: never rewind
         let announcer = String(d.sig_pubkey || '').toLowerCase();

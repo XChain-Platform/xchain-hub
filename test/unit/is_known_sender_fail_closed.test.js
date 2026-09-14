@@ -202,7 +202,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
             const votes = new Set();
             const self = { };
             for (let i = 0; i < 7; i++) {
-                cls.prototype._addVote.call(self, votes, env(KEY_CHAIN, 'forged-addr-' + i));
+                cls.prototype.addVote.call(self, votes, env(KEY_CHAIN, 'forged-addr-' + i));
             }
             expect(votes.size, 'one signing key, one vote').to.equal(1);
             expect([...votes]).to.deep.equal([KEY_CHAIN]);
@@ -211,15 +211,15 @@ describe('one key is one vote (count-mode forgery bound)', function () {
         it(name + ': distinct keys each count once', function () {
             const votes = new Set();
             const self = { };
-            cls.prototype._addVote.call(self, votes, env(KEY_CHAIN, 'a'));
-            cls.prototype._addVote.call(self, votes, env(KEY_REGISTRY, 'b'));
+            cls.prototype.addVote.call(self, votes, env(KEY_CHAIN, 'a'));
+            cls.prototype.addVote.call(self, votes, env(KEY_REGISTRY, 'b'));
             expect(votes.size).to.equal(2);
         });
 
         it(name + ': an envelope with no proven key adds nothing', function () {
             const votes = new Set();
             const self = { };
-            cls.prototype._addVote.call(self, votes, env(undefined, 'a'));
+            cls.prototype.addVote.call(self, votes, env(undefined, 'a'));
             expect(votes.size).to.equal(0);
         });
     }
@@ -249,7 +249,7 @@ describe('Consensus._quorumMet counts signing keys', function () {
         // One key that forged three sender addrs: three addrs, one key. Must NOT pass.
         const addrs = new Set(['a', 'b', 'c']);
         const keys  = new Set([KEY_CHAIN]);
-        expect(self._quorumMet(ctx, addrs, keys)).to.equal(false);
+        expect(self.quorumMet(ctx, addrs, keys)).to.equal(false);
     });
 
     it('passes once enough DISTINCT keys have voted', function () {
@@ -257,13 +257,13 @@ describe('Consensus._quorumMet counts signing keys', function () {
         const ctx = { weighted: false, quorum: 3 };
         const addrs = new Set(['a']);
         const keys  = new Set([KEY_CHAIN, KEY_REGISTRY, KEY_STRANGER]);
-        expect(self._quorumMet(ctx, addrs, keys)).to.equal(true);
+        expect(self.quorumMet(ctx, addrs, keys)).to.equal(true);
     });
 
     it('falls back to the addr set only when no key voted (pre-bootstrap)', function () {
         const self = Object.create(Consensus.prototype);
         const ctx = { weighted: false, quorum: 2 };
-        expect(self._quorumMet(ctx, new Set(['a', 'b']), new Set())).to.equal(true);
-        expect(self._quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(true);
+        expect(self.quorumMet(ctx, new Set(['a', 'b']), new Set())).to.equal(true);
+        expect(self.quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(true);
     });
 });

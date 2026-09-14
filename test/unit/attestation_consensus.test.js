@@ -331,10 +331,10 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
     it('evicts the oldest request id once finalizedMax is exceeded', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.finalizedMax = 2;
-        c._markFinalized('a');
-        c._markFinalized('b');
-        c._markFinalized('b'); // duplicate is a no-op
-        c._markFinalized('c'); // evicts 'a'
+        c.markFinalized('a');
+        c.markFinalized('b');
+        c.markFinalized('b'); // duplicate is a no-op
+        c.markFinalized('c'); // evicts 'a'
         expect(c.finalized.has('a')).to.equal(false);
         expect(c.finalized.has('b')).to.equal(true);
         expect(c.finalized.has('c')).to.equal(true);
@@ -344,7 +344,7 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
     it('tombstones evicted rids and bounds the tombstone ring by finalizedMax', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.finalizedMax = 2;
-        ['a', 'b', 'c', 'd', 'e'].forEach(r => c._markFinalized(r));
+        ['a', 'b', 'c', 'd', 'e'].forEach(r => c.markFinalized(r));
         // a/b/c were evicted, but the tombstone ring is itself capped at
         // finalizedMax, so the oldest tombstone ('a') has aged out and cannot leak.
         expect(c._finalizedEvictedOrder).to.deep.equal(['b', 'c']);
@@ -356,8 +356,8 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
     it('counts and warns when a round is proposed for an already-evicted finalized rid', async function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.finalizedMax = 1;
-        c._markFinalized('aa');
-        c._markFinalized('bb');            // evicts 'aa' -> tombstone
+        c.markFinalized('aa');
+        c.markFinalized('bb');            // evicts 'aa' -> tombstone
         let warn = sinon.stub(console, 'warn');
         // responsible=[] trips the unfinalizable-round guard immediately after the
         // detector, so no signing or broadcast state is needed to exercise this path.
@@ -428,7 +428,7 @@ describe('AttestationConsensus: nonOkPublished ring buffer', function () {
         sinon.stub(console, 'warn');
         c.nonOkPublishedMax = 1;
         c._recordNonOkPublished('a', 'provider_error');
-        c._markFinalized('a');                            // retry round later succeeded
+        c.markFinalized('a');                            // retry round later succeeded
         c._recordNonOkPublished('b', 'provider_error');   // evicts 'a', now terminal
         expect(c.nonOkEvictedWhilePendingCount).to.equal(0);
     });
@@ -442,24 +442,24 @@ describe('AttestationConsensus: early-message buffer', function () {
 
     it('caps the per-request early-message buffer', function () {
         let env = { type: 'ATTEST_PROPOSE', data: { requestId: 'r' } };
-        for (let i = 0; i < c.earlyMessageMaxPerRid + 5; i++) c._bufferEarlyMessage('r', env);
+        for (let i = 0; i < c.earlyMessageMaxPerRid + 5; i++) c.bufferEarlyMessage('r', env);
         expect(c.earlyMessages.get('r').length).to.equal(c.earlyMessageMaxPerRid);
     });
 
     it('prunes expired entries on the next buffer', function () {
         let clock = sinon.useFakeTimers();
-        c._bufferEarlyMessage('old', { type: 'ATTEST_PROPOSE', data: { requestId: 'old' } });
+        c.bufferEarlyMessage('old', { type: 'ATTEST_PROPOSE', data: { requestId: 'old' } });
         expect(c.earlyMessages.has('old')).to.equal(true);
         clock.tick(c.earlyMessageTtlMs + 1);
         // Buffering anything triggers a prune of the now-expired 'old' entry.
-        c._bufferEarlyMessage('new', { type: 'ATTEST_PROPOSE', data: { requestId: 'new' } });
+        c.bufferEarlyMessage('new', { type: 'ATTEST_PROPOSE', data: { requestId: 'new' } });
         expect(c.earlyMessages.has('old')).to.equal(false);
         expect(c.earlyMessages.has('new')).to.equal(true);
         clock.restore();
     });
 
     it('_drainEarlyMessages is a no-op when nothing is buffered', function () {
-        expect(() => c._drainEarlyMessages('none')).to.not.throw();
+        expect(() => c.drainEarlyMessages('none')).to.not.throw();
     });
 });
 
@@ -479,7 +479,7 @@ describe('AttestationConsensus: propose() guards', function () {
     const RID = 'ab'.repeat(16);
 
     it('returns immediately if the request is already finalized', async function () {
-        c._markFinalized(RID);
+        c.markFinalized(RID);
         await c.propose(RID, roundState(me, [me], Buffer.from('b'), 'http_get', 1));
         expect(c.pending.has(RID)).to.equal(false);
     });
@@ -1550,7 +1550,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         });
         it(type + ': ignores a message for an already-finalized request', function () {
             let rid = '1a'.repeat(16);
-            c._markFinalized(rid);
+            c.markFinalized(rid);
             c._handleMessage({ type, data: { requestId: rid, sig_pubkey: pub(p1) } });
             expect(c.earlyMessages.has(rid)).to.equal(false);
             expect(c.pending.has(rid)).to.equal(false);
@@ -1577,17 +1577,17 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
 
     it('_checkPrepareQuorum returns early when no winner is set', function () {
         c.pending.set('z', { winner: null, finalized: false, prepares: new Set(), quorum: 1, redundancy: 1 });
-        expect(() => c._checkPrepareQuorum('z')).to.not.throw();
+        expect(() => c.checkPrepareQuorum('z')).to.not.throw();
     });
 
     it('_checkPrepareQuorum returns early when a commit was already sent', function () {
         c.pending.set('z', { winner: {}, finalized: false, _commitSent: true, prepares: new Set() });
-        expect(() => c._checkPrepareQuorum('z')).to.not.throw();
+        expect(() => c.checkPrepareQuorum('z')).to.not.throw();
     });
 
     it('_checkCommitQuorum returns early for a finalized round', function () {
         c.pending.set('z', { finalized: true });
-        expect(() => c._checkCommitQuorum('z')).to.not.throw();
+        expect(() => c.checkCommitQuorum('z')).to.not.throw();
     });
 
     it('constructor tolerates a hub without getIdentity / p2pConfig', function () {
@@ -2168,7 +2168,7 @@ describe('AttestationConsensus: A-F5 early-buffer bounds (attestation half)', fu
 
     it('caps the number of DISTINCT buffered requestIds with FIFO eviction', function () {
         c.earlyMessageMaxDistinctIds = 3;
-        for (let i = 0; i < 4; i++) c._bufferEarlyMessage('rid' + i, env('rid' + i));
+        for (let i = 0; i < 4; i++) c.bufferEarlyMessage('rid' + i, env('rid' + i));
         expect(c.earlyMessages.size).to.equal(3);
         expect(c.earlyMessages.has('rid0'), 'oldest rid evicted').to.equal(false);
         expect(c.earlyMessages.has('rid3'), 'newest rid kept').to.equal(true);
@@ -2177,17 +2177,17 @@ describe('AttestationConsensus: A-F5 early-buffer bounds (attestation half)', fu
 
     it('drops an oversized envelope instead of buffering it', function () {
         c.earlyMessageMaxBytes = 64;
-        c._bufferEarlyMessage('rid-big', env('rid-big', { body_b64: 'A'.repeat(1000) }));
+        c.bufferEarlyMessage('rid-big', env('rid-big', { body_b64: 'A'.repeat(1000) }));
         expect(c.earlyMessages.has('rid-big')).to.equal(false);
         // A normal-sized envelope still buffers.
-        c._bufferEarlyMessage('rid-ok', env('rid-ok'));
+        c.bufferEarlyMessage('rid-ok', env('rid-ok'));
         expect(c.earlyMessages.get('rid-ok')).to.have.lengthOf(1);
     });
 
     it('drops an unserializable (cyclic) envelope instead of throwing', function () {
         let data = { requestId: 'rid-cycle' };
         data.self = data;
-        expect(() => c._bufferEarlyMessage('rid-cycle', { type: 'ATTEST_PREPARE', data })).to.not.throw();
+        expect(() => c.bufferEarlyMessage('rid-cycle', { type: 'ATTEST_PREPARE', data })).to.not.throw();
         expect(c.earlyMessages.has('rid-cycle')).to.equal(false);
     });
 });

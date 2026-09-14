@@ -768,7 +768,7 @@ class StateAnchorPublisher {
                 .catch(err => console.error('StateAnchorPublisher: failover-wake flush error:', err && err.message));
         }, this.rankWakeMs);
         if(this._rankWakeTimer.unref) this._rankWakeTimer.unref();
-        this._startConfirmationWatchdog();
+        this.startConfirmationWatchdog();
         // The startup catch-up flush (see startupFlushMs). A NORMAL flush, not a
         // wake: the point is to run the one leader pass a restart otherwise defers
         // by a whole interval.
@@ -854,8 +854,8 @@ class StateAnchorPublisher {
     // cannot be read. FAIL SOFT, unlike the balance gate: this reading only ever
     // withholds a broadcast, so an unreachable encoder must leave the decision to the
     // guards that already fail closed rather than add a second way to stall publishing.
-    async _readUtxoReserve(signer){
-        signer = signer || this._resolveSigner();
+    async readUtxoReserve(signer){
+        signer = signer || this.resolveSigner();
         if(!signer.encoder || !this.dogeAddress) return null;
         let utxos;
         try { utxos = await signer.encoder.getUtxos(this.dogeAddress); }
@@ -875,9 +875,9 @@ class StateAnchorPublisher {
     // condition: the address holds outputs, their confirmation state is known, and
     // NOT ONE of them is confirmed. Under confirmed-inputs-only that wallet cannot
     // fund anything; under the escape hatch it is not our call.
-    async _confirmedUtxoAvailable(signer){
+    async confirmedUtxoAvailable(signer){
         if(this.allowUnconfirmedInputs) return true;
-        let summary = await this._readUtxoReserve(signer);
+        let summary = await this.readUtxoReserve(signer);
         if(!summary)             return true;   // unreadable: not our call to block
         if(!summary.known)       return true;   // no confirmations field served
         if(summary.total === 0)  return true;   // empty wallet is the balance gate's call
@@ -904,7 +904,7 @@ class StateAnchorPublisher {
                 .catch(err => console.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
             let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
 
-            let signer = this._resolveSigner();
+            let signer = this.resolveSigner();
             if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
                 if(!this._loggedNoPipeline){
                     console.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
@@ -941,7 +941,7 @@ class StateAnchorPublisher {
             // Defer the flush instead of building on it; rows stay pending, no marker
             // is armed, no intent is recorded, and the next wake retries as a normal
             // flush. Fail soft, see _confirmedUtxoAvailable.
-            if(!(await this._confirmedUtxoAvailable(signer))){
+            if(!(await this.confirmedUtxoAvailable(signer))){
                 this._noteNoConfirmedUtxo('this flush');
                 return { anchored: [], archive: 'none', skipped: 'no_confirmed_utxo' };
             }
@@ -1298,7 +1298,7 @@ class StateAnchorPublisher {
             }
             let txid = result && result.txid ? result.txid : null;
             if(txid && !(result && result.exists))
-                this._notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
+                this.notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
             if(!txid){
                 // A confirmed DOGE broadcast always returns a txid; a null txid is a
                 // false/incomplete success (broadcastTx returned empty instead of
@@ -3025,7 +3025,7 @@ class StateAnchorPublisher {
         switch(envelope.type){
             case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
             case XANC_SIGN:      this._handleSign(envelope).catch(e => console.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
-            case XANC_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
+            case XANC_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
             case XANC_BUNDLE_DONE:   this._handleBundleDone(envelope).catch(e => console.error('StateAnchorPublisher: BUNDLE_DONE error: ' + (e && e.message)));     break;
             case XANCPUB_SIGN_REQ: this._handleAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
             case XANCPUB_SIGN:     this._handleAttestSign(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN error: ' + (e && e.message)));         break;
@@ -3953,7 +3953,7 @@ class StateAnchorPublisher {
         }
         let txid = result && result.txid ? result.txid : null;
         if(txid) await this._markArchiveSent(network, round.batchSeq, txid);
-        if(txid && !(result && result.exists)) this._notePendingConfirmation('archive_head', txid, String(round.batchSeq));
+        if(txid && !(result && result.exists)) this.notePendingConfirmation('archive_head', txid, String(round.batchSeq));
 
         // The seq the chunks must be addressed to. Normally this round's own, but when
         // the head above was ADOPTED it is the seq that head actually landed under,
@@ -3989,7 +3989,7 @@ class StateAnchorPublisher {
                 let chunkResult = await this._broadcastWithRetry(chunkBroadcaster, v2Payload, undefined,
                       () => this._findExistingArchiveChunk(cp, round, i));
                 if(chunkResult && chunkResult.txid && !chunkResult.exists)
-                    this._notePendingConfirmation('archive_chunk', chunkResult.txid, round.batchSeq + '/' + i);
+                    this.notePendingConfirmation('archive_chunk', chunkResult.txid, round.batchSeq + '/' + i);
             }
             catch(e){
                 lostChunks++;
@@ -4116,7 +4116,7 @@ class StateAnchorPublisher {
     }
 
     // Back-fills batch metadata from the archive leader so a rotated leader doesn't re-archive.
-    async _handleFinalized(envelope){
+    async handleFinalized(envelope){
         let d = envelope.data;
         if(!d || !Array.isArray(d.matches)) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
@@ -4890,7 +4890,7 @@ class StateAnchorPublisher {
         } catch(e){ return []; }
     }
 
-    _resolveSigner(){
+    resolveSigner(){
         let op = this.hub.oraclePublisher || {};
         return {
             broadcastFn:  this.broadcastFn  || op.broadcastFn  || null,
@@ -5111,11 +5111,11 @@ class StateAnchorPublisher {
 
     // ----- Landing: confirmation watchdog over our own broadcasts -----
 
-    _startConfirmationWatchdog(){
+    startConfirmationWatchdog(){
         if(this._confirmTimer) return;
         if(!this.confirmCheckIntervalMs) return;
         this._confirmTimer = setInterval(() => {
-            this._checkPublishedConfirmations().catch(e =>
+            this.checkPublishedConfirmations().catch(e =>
                 console.warn('StateAnchorPublisher: confirmation watchdog tick failed: ' + (e && e.message)));
         }, this.confirmCheckIntervalMs);
         if(this._confirmTimer.unref) this._confirmTimer.unref();
@@ -5124,7 +5124,7 @@ class StateAnchorPublisher {
     // Record a broadcast as awaiting confirmation. A broadcaster that returns no
     // txid cannot be watched, so it is not tracked: an untrackable send must not
     // masquerade as a stalled one. Adopted (already-mined) anchors are not sent here.
-    _notePendingConfirmation(kind, txid, ref){
+    notePendingConfirmation(kind, txid, ref){
         if(!txid) return;
         let key = String(txid).toLowerCase();
         if(this._pendingConfirmations.has(key)) return;
@@ -5143,10 +5143,10 @@ class StateAnchorPublisher {
     //     cannot descend from an unmined ancestor
     // Everything else stays pending, which is exactly the stuck case. Fail soft end
     // to end: nothing here throws, blocks publishing, re-broadcasts, or spends.
-    async _checkPublishedConfirmations(){
+    async checkPublishedConfirmations(){
         if(this._pendingConfirmations.size === 0) return;
         let summary = null;
-        try { summary = await this._readUtxoReserve(); } catch(e){ summary = null; }
+        try { summary = await this.readUtxoReserve(); } catch(e){ summary = null; }
         if(!summary || !summary.known){ this.confirmationCheckFailures++; return; }
         this.lastConfirmationCheckAt = Date.now();
         for(let entry of Array.from(this._pendingConfirmations.values())){
@@ -5186,12 +5186,12 @@ class StateAnchorPublisher {
     // never-connected transport errors are safe to retry. Everything else
     // (timeout, reset mid-flight, 5xx after the request went out) is ambiguous.
     // Delegates to the shared classifier so all four hub effectors agree.
-    _isAmbiguousSendError(e){
+    isAmbiguousSendError(e){
         return isAmbiguousSendError(e);
     }
 
     async _defaultBroadcast(payload, signer, opts){
-        signer = signer || this._resolveSigner();
+        signer = signer || this.resolveSigner();
         if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
         if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
@@ -5248,7 +5248,7 @@ class StateAnchorPublisher {
         try {
             return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
         } catch(e){
-            if(this._isAmbiguousSendError(e)) e.anchorAmbiguousSend = true;
+            if(this.isAmbiguousSendError(e)) e.anchorAmbiguousSend = true;
             throw e;
         }
     }

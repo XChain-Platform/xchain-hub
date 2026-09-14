@@ -163,7 +163,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         // The distinct-round count must stay capped and evict the oldest first.
         oc.earlyMessageMaxRounds = 8;
         for (let r = 0; r < 100; r++) {
-            oc._bufferEarlyMessage(r, voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'd' + r));
+            oc.bufferEarlyMessage(r, voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'd' + r));
         }
         expect(oc.earlyMessages.size).to.equal(8);
         // FIFO: only the newest 8 round keys survive (92..99); round 0 evicted.

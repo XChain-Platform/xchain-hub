@@ -273,7 +273,7 @@ class FullNodeChallengeRound {
         // Consume the spend log BEFORE the first tick, or the recovered epochs arrive
         // too late to gate the round that tick reconstructs. Same reason
         // the spend window is reloaded here and not lazily.
-        this._loadSpendLog();
+        this.loadSpendLog();
         this.spendGuard.persistTo();
         let tick = async () => { try { await this._tick(); } catch(e){ console.warn('FullNodeChallengeRound tick:', e && e.message ? e.message : e); } };
         this._timer = setInterval(tick, this.pollMs);
@@ -487,7 +487,7 @@ class FullNodeChallengeRound {
         switch(env.type){
             case XNODE_ANSWER:   return this.onAnswer(env.data);
             case XNODE_SIGN_REQ: return this.onSignReq(env.data);
-            case XNODE_SIGN:     return this._onSign(env.data);
+            case XNODE_SIGN:     return this.onSign(env.data);
             case XNODE_DONE:     return this.onDone(env.data);
         }
     }
@@ -562,7 +562,7 @@ class FullNodeChallengeRound {
         });
     }
 
-    async _onSign(d){
+    async onSign(d){
         let state = this.rounds.get(Number(d.epoch));
         if(!state || state.finalized || !state.passList) return;
         let pk = String(d.sig_pubkey || '').toLowerCase();
@@ -597,7 +597,7 @@ class FullNodeChallengeRound {
     // clause on 'no prior record' instead dropped it, so intent/failed/intent - retry,
     // then crash after the node accepted - reloaded as uncommitted and re-broadcast,
     // which is the very failure mode this durable guard exists to prevent.
-    _loadSpendLog(){
+    loadSpendLog(){
         let text;
         try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
         catch(e){ return; }   // absent on a first run

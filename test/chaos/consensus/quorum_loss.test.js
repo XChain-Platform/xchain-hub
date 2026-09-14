@@ -203,7 +203,7 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         await con.start();
 
-        con._initiateViewChange(1);
+        con.initiateViewChange(1);
 
         expect(con.view).to.equal(1);
         expect(con.pendingViewChanges.has(1)).to.be.true;

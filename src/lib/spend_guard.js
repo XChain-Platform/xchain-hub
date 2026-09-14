@@ -169,13 +169,13 @@ class SpendGuard {
     isPaused(){ return this.paused; }
 
     // ---- Gate 2b: cost window helpers ----
-    _prune(now){
+    prune(now){
         let cutoff = now - this.windowMs;
         while (this._spends.length && this._spends[0].t <= cutoff) this._spends.shift();
     }
     spentInWindow(now){
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         let sum = 0;
         for (let e of this._spends) sum += e.cost;
         return sum;
@@ -251,7 +251,7 @@ class SpendGuard {
     record(cost){
         let now = Date.now();
         this.ceiling.record(now);
-        this._prune(now);
+        this.prune(now);
         this._spends.push({ t: now, cost: this._cost(cost) });
         this.persist();
     }

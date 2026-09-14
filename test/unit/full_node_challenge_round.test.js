@@ -706,7 +706,7 @@ describe('FullNodeChallengeRound', function () {
                 const hub = makeHub();
                 const eng = await startEpoch(hub);
                 eng.spendLogPath = logPath;
-                eng._loadSpendLog();                 // what start() now does before the first tick
+                eng.loadSpendLog();                 // what start() now does before the first tick
                 return { hub, eng };
             }
 
@@ -801,12 +801,12 @@ describe('FullNodeChallengeRound', function () {
                 const hub = makeHub();
                 const eng = await startEpoch(hub);
                 eng.spendLogPath = path.join(dir, 'does-not-exist.jsonl');
-                expect(() => eng._loadSpendLog()).to.not.throw();
+                expect(() => eng.loadSpendLog()).to.not.throw();
                 expect(eng._committedEpochs.size).to.equal(0);
                 const p = path.join(dir, 'torn.jsonl');
                 fs.writeFileSync(p, JSON.stringify({ phase: 'sent', epoch: 288 }) + '\n{"phase":"sen');
                 eng.spendLogPath = p;
-                eng._loadSpendLog();
+                eng.loadSpendLog();
                 expect([...eng._committedEpochs]).to.deep.equal([288]);
             });
 

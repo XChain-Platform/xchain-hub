@@ -2023,7 +2023,7 @@ describe('StateAnchorPublisher', function () {
 
         // (1) PARTIAL: a match carries the __partial__ sentinel → the follower must NOT mirror the reward.
         let pMatches = [matchRow('mp', '__partial__')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 0, txid: txid, snapshot_block: snap, matches: pMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(0, txid, pMatches.length))
         }});
@@ -2034,7 +2034,7 @@ describe('StateAnchorPublisher', function () {
         // envelope is well-formed enough to reach the reward gate (guards against a false pass
         // where _backfillBatch silently failed for both cases).
         let cMatches = [matchRow('mc', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 1, txid: txid, snapshot_block: snap, matches: cMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(1, txid, cMatches.length))
         }});
@@ -2060,7 +2060,7 @@ describe('StateAnchorPublisher', function () {
             sig_pubkey: attacker.pubkey, sig: attacker.identity.sign(follower.pub._finalizedCanonical(7, txid, fMatches.length))
         }});
 
-        await follower.pub._handleFinalized(env());
+        await follower.pub.handleFinalized(env());
         let m1 = follower.db.matches.find(m => m.match_id === 'm1');
         expect(m1.archived_status, 'row NOT archived by the forge').to.not.equal('finalized');
         expect(m1.batch_seq, 'no bogus batch_seq stamped').to.equal(null);
@@ -2070,7 +2070,7 @@ describe('StateAnchorPublisher', function () {
         // election (with the batch's checkpoint identity) for the batch, proving the
         // gate (not a malformed envelope) rejected it.
         follower.pub._recordObservedArchiveLeader(7, attacker.pubkey, CP_ROW);
-        await follower.pub._handleFinalized(env());
+        await follower.pub.handleFinalized(env());
         expect(follower.db.matches.find(m => m.match_id === 'm1').archived_status,
             'observed leader IS honored').to.equal('finalized');
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
@@ -2119,7 +2119,7 @@ describe('StateAnchorPublisher', function () {
             sig: leader.identity.sign(gated.pub._finalizedCanonical(seq, txid, announced.length))
         }});
 
-        await gated.pub._handleFinalized(forged());
+        await gated.pub.handleFinalized(forged());
         let m2 = gated.db.matches.find(m => m.match_id === 'm2');
         expect(m2.archived_status, 'a row outside the co-signed archive is NOT suppressed').to.equal(null);
         expect(m2.batch_seq, 'and carries no batch seq').to.equal(null);
@@ -2128,7 +2128,7 @@ describe('StateAnchorPublisher', function () {
         // proposer) still back-fills, so the envelope is valid all the way down and the
         // membership record is the only thing that stopped it above.
         abstaining.pub._observedArchiveContents.clear();
-        await abstaining.pub._handleFinalized(forged());
+        await abstaining.pub.handleFinalized(forged());
         expect(abstaining.db.matches.find(m => m.match_id === 'm2').archived_status,
             'a hub holding no co-signed body abstains and still back-fills').to.equal('finalized');
     });
@@ -2145,7 +2145,7 @@ describe('StateAnchorPublisher', function () {
         follower.pub._recordObservedArchiveLeader(9, leader.pubkey, CP_ROW);        // observed + checkpoint identity stashed
         follower.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });  // the checkpoint was never anchored
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 9, txid: 'dogetx_phantom', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(9, 'dogetx_phantom', fMatches.length))
         }});
@@ -2176,7 +2176,7 @@ describe('StateAnchorPublisher', function () {
         // the corrected flag-day gate reading the checkpoint's network.
         follower.pub._recordObservedArchiveLeader(3, leader.pubkey, CP_ROW);
         let cMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 3, txid: 'dogetx_scoped', snapshot_block: 100, matches: cMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(3, 'dogetx_scoped', cMatches.length))
         }});
@@ -2203,7 +2203,7 @@ describe('StateAnchorPublisher', function () {
                      actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash };
         };
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 11, txid: 'ab'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(11, 'ab'.repeat(32), fMatches.length))
         }});
@@ -2222,7 +2222,7 @@ describe('StateAnchorPublisher', function () {
         // the elected leader is referencing someone else's anchor.
         follower.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 12, txid: 'ff'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(12, 'ff'.repeat(32), fMatches.length))
         }});
@@ -2244,7 +2244,7 @@ describe('StateAnchorPublisher', function () {
         // ('finalized'): stamping it would mark the row archived under a bogus
         // terminal status and strand it from every future archive round.
         let fMatches = [matchRow('m1', 'attacker_status')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', fMatches.length))
         }});
@@ -2256,7 +2256,7 @@ describe('StateAnchorPublisher', function () {
         // Control: the TRUE status (and the __partial__ sentinel) both pass, so
         // the rejection above came from the content check, not a malformed envelope.
         let okMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: okMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', okMatches.length))
         }});
@@ -2272,7 +2272,7 @@ describe('StateAnchorPublisher', function () {
         follower.db.rewardRows.push({ reward_type: 'oracle_round', round_number: 1,
                                       validator_pubkey: leader.pubkey, batch_seq: null, block_index: 100 });
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 5, txid: 'dogetx_rw', snapshot_block: 100, matches: fMatches, calls: [],
             rewards: [{ reward_type: 'oracle_round', round_number: 1, validator_pubkey: leader.pubkey }],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(5, 'dogetx_rw', fMatches.length))
@@ -2291,7 +2291,7 @@ describe('StateAnchorPublisher', function () {
         let orig = follower.pub._getActiveOraclePublishPubkeys.bind(follower.pub);
         follower.pub._getActiveOraclePublishPubkeys = async (blk) => (blk === 999999 ? [] : orig(blk));
         let fMatches = [matchRow('m1', 'finalized')];
-        await follower.pub._handleFinalized({ data: {
+        await follower.pub.handleFinalized({ data: {
             batch_seq: 6, txid: 'dogetx_snap', snapshot_block: 999999, matches: fMatches, calls: [], rewards: [],
             sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(6, 'dogetx_snap', fMatches.length))
         }});

@@ -160,9 +160,9 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
     });
 
     it('_hasDeterministicSnapshot separates a NULL snapshot from a present-but-empty one', function () {
-        expect(oc._hasDeterministicSnapshot(null)).to.equal(false);
-        expect(oc._hasDeterministicSnapshot({})).to.equal(false);
-        expect(oc._hasDeterministicSnapshot({ validators: [] })).to.equal(true);
-        expect(oc._hasDeterministicSnapshot({ validators: [{ pubkey: 'aa' }] })).to.equal(true);
+        expect(oc.hasDeterministicSnapshot(null)).to.equal(false);
+        expect(oc.hasDeterministicSnapshot({})).to.equal(false);
+        expect(oc.hasDeterministicSnapshot({ validators: [] })).to.equal(true);
+        expect(oc.hasDeterministicSnapshot({ validators: [{ pubkey: 'aa' }] })).to.equal(true);
     });
 });

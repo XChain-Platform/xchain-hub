@@ -89,7 +89,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
 
     describe('_addrForPubkey()', function () {
         it('resolves via the loaded validator set first', function () {
-            expect(oc._addrForPubkey(VALIDATORS_3[1].pubkey.toLowerCase()))
+            expect(oc.addrForPubkey(VALIDATORS_3[1].pubkey.toLowerCase()))
                 .to.equal(VALIDATORS_3[1].addr);
         });
 
@@ -97,19 +97,19 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
             let stranger = makeValidator(7);
             pm.validatorPubkeys.set('ws://z-later:10001', stranger.pubkey);
             pm.validatorPubkeys.set(stranger.addr, stranger.pubkey);
-            expect(oc._addrForPubkey(stranger.pubkey.toLowerCase())).to.equal(stranger.addr);
+            expect(oc.addrForPubkey(stranger.pubkey.toLowerCase())).to.equal(stranger.addr);
         });
 
         it('resolves own identity pubkey to own addr as a last resort', function () {
             oc.setValidatorSet([]);
             pm.validatorPubkeys = new Map();
             hub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
-            expect(oc._addrForPubkey(VALIDATORS_3[0].pubkey.toLowerCase()))
+            expect(oc.addrForPubkey(VALIDATORS_3[0].pubkey.toLowerCase()))
                 .to.equal(pm.validatorAddr);
         });
 
         it('returns null for an unknown pubkey', function () {
-            expect(oc._addrForPubkey('ff'.repeat(32))).to.be.null;
+            expect(oc.addrForPubkey('ff'.repeat(32))).to.be.null;
         });
     });
 

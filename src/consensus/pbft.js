@@ -181,7 +181,7 @@ class Consensus {
     // and two hubs with different local sets could finalize the same round over
     // different N: a federation split. Used by both the leader (propose) and
     // follower (_handlePrePrepare) paths so they refuse in lockstep.
-    _hasDeterministicSnapshot(snapshot) {
+    hasDeterministicSnapshot(snapshot) {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }
 
@@ -196,7 +196,7 @@ class Consensus {
     // OracleConsensus fix. A null snapshot is a DIFFERENT case handled by
     // _hasDeterministicSnapshot (fail closed for federations); this is only the
     // present-but-empty case.
-    _isEmptyFederationSnapshot(snapshot) {
+    isEmptyFederationSnapshot(snapshot) {
         return this.isFederated() && !!snapshot &&
             Array.isArray(snapshot.validators) && snapshot.validators.length === 0;
     }
@@ -252,7 +252,7 @@ class Consensus {
         // sets. Refuse to propose rather than split. Genuine single-host hubs
         // (not _isFederated) have no peer to diverge from, so they keep the
         // existing fallback/single-node path below.
-        if (this.isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
+        if (this.isFederated() && !this.hasDeterministicSnapshot(snapshot)) {
             throw new Error('Consensus: refusing to PROPOSE config change without a deterministic ' +
                 'validator snapshot (federated hub); indexer capability snapshot unavailable');
         }
@@ -273,7 +273,7 @@ class Consensus {
         // ratified. Refuse and retry when the snapshot populates (leader twin of
         // the follower decline below).
         if (quorum === 0) {
-            if (this._isEmptyFederationSnapshot(snapshot)) {
+            if (this.isEmptyFederationSnapshot(snapshot)) {
                 throw new Error('Consensus: refusing to apply config change unilaterally over an EMPTY ' +
                     'active-validator snapshot (block ' + snapshot.blockIndex + ', federated hub); ' +
                     'will retry when the snapshot populates');
@@ -315,7 +315,7 @@ class Consensus {
         //     identity guard evaluates the rotation at the CLAIMED seq.
         let nextSeq = Math.max(this.seq, this.lastAppliedSeq) + 1;
         let leader = this._getLeader(nextSeq, memberPubkeys);
-        if (leader && !this._isLeaderIdentity(leader, this.peerManager.validatorAddr, this._selfPubkey())) {
+        if (leader && !this.isLeaderIdentity(leader, this.peerManager.validatorAddr, this.selfPubkey())) {
             this.seq = nextSeq;
             throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' +
                 (leader.addr || leader.pubkey) + ')');
@@ -357,7 +357,7 @@ class Consensus {
                 // authoritative for the count path; these are consulted only when
                 // weighted). One vote per staking source (DELEGATE v0 is additive).
                 weighted:       !!weighted,
-                validators:     this._normalizeValidators(snapshot, weighted),
+                validators:     this.normalizeValidators(snapshot, weighted),
                 // The round's pinned leader-election population, carried
                 // so every later leader question for this seq (view change, a
                 // repeat PRE_PREPARE, NEW_VIEW) is answered from the set the
@@ -387,7 +387,7 @@ class Consensus {
                     // view-change vote tally uses the same rule (count or stake)
                     // this proposal round used, even though we've just removed the
                     // proposal from the map. Captured here, before deletion.
-                    this._initiateViewChange(seq, proposal.quorum, proposal.weighted, proposal.validators,
+                    this.initiateViewChange(seq, proposal.quorum, proposal.weighted, proposal.validators,
                         proposal.memberPubkeys);
                     reject(new Error('Consensus timeout for seq ' + seq + ' (received ' +
                         proposal.prepares.size + ' prepares, ' + proposal.commits.size + ' commits, need ' + quorum + ')'));
@@ -408,7 +408,7 @@ class Consensus {
             }, this.equivVote(seq, this.view, digest, proposal.btcBlockHeight)));
 
             // Check if we already have quorum (unlikely but handles edge case)
-            this._checkPrepareQuorum(seq);
+            this.checkPrepareQuorum(seq);
         });
     }
 
@@ -580,7 +580,7 @@ class Consensus {
             // over its own LOCAL validatorSet while the leader (and peers) used a
             // different set. We create no proposal and emit no PREPARE; the round
             // either reaches quorum without us or times out into view change.
-            if (this.isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
+            if (this.isFederated() && !this.hasDeterministicSnapshot(snapshot)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' without a deterministic validator snapshot (federated hub); ' +
                     'indexer capability snapshot unavailable');
@@ -605,7 +605,7 @@ class Consensus {
             // legitimate leader refuses to propose such a round, so a PRE_PREPARE for
             // one is spurious; create no proposal and let it time out into view
             // change (follower twin of the propose() refusal above).
-            if (this._isEmptyFederationSnapshot(snapshot)) {
+            if (this.isEmptyFederationSnapshot(snapshot)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' over an EMPTY active-validator snapshot (block ' + btcBlockHeight +
                     ', federated hub); a legitimate leader skips such a round.');
@@ -636,7 +636,7 @@ class Consensus {
                 quorum:         quorum,
                 btcBlockHeight: btcBlockHeight || null,
                 weighted:       !!weighted,
-                validators:     this._normalizeValidators(snapshot, weighted),
+                validators:     this.normalizeValidators(snapshot, weighted),
                 memberPubkeys:  this._memberPubkeySet(snapshot),
                 preparePubkeys: new Set(),
                 commitPubkeys:  new Set()
@@ -674,7 +674,7 @@ class Consensus {
 
         proposal.prepares.add(envelope.sender);
         proposal.prepares.add(this.peerManager.validatorAddr);
-        let proposerPk = this._resolveSenderPubkey(envelope);
+        let proposerPk = this.resolveSenderPubkey(envelope);
         if (proposerPk) proposal.preparePubkeys.add(proposerPk);
         this.addSelfPubkey(proposal.preparePubkeys);
 
@@ -683,7 +683,7 @@ class Consensus {
             configDigest: configDigest
         }, this.equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
-        this._checkPrepareQuorum(seq);
+        this.checkPrepareQuorum(seq);
 
         // Now that the round is open locally, deliver anything that voted on it
         // while the snapshot lock was still in flight. Without this the leader's
@@ -784,16 +784,16 @@ class Consensus {
 
         proposal.prepares.add(envelope.sender);
         if (proposal.preparePubkeys) {
-            let pk = this._resolveSenderPubkey(envelope);
+            let pk = this.resolveSenderPubkey(envelope);
             if (pk) proposal.preparePubkeys.add(pk);
         }
 
-        this._checkPrepareQuorum(seq);
+        this.checkPrepareQuorum(seq);
     }
 
     // Normalize a locked snapshot's validators into the source-keyed shape the
     // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
-    _normalizeValidators(snapshot, weighted) {
+    normalizeValidators(snapshot, weighted) {
         if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
         let out = snapshot.validators.map(v => ({
             pubkey: String(v.pubkey).toLowerCase(),
@@ -833,7 +833,7 @@ class Consensus {
     // is then only recognizable by pubkey, and a round whose leader no hub can
     // address times out into a view change that rotates to the next member.
     // Mirrors OracleConsensus._addrForPubkey.
-    _addrForPubkey(pubkey) {
+    addrForPubkey(pubkey) {
         for (let v of this.validatorSet) {
             if (v && v.pubkey && String(v.pubkey).toLowerCase() === pubkey) return v.addr;
         }
@@ -857,7 +857,7 @@ class Consensus {
     // only by key: one such case is two hubs holding different addr bindings
     // for the same staker, which an addr-only self-check turns back into the
     // very divergence the pinning removes.
-    _selfPubkey() {
+    selfPubkey() {
         let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
         if (!identity) return null;
         let pk = identity.getPubkeyHex();
@@ -868,7 +868,7 @@ class Consensus {
     // leader. Matches on addr OR verified pubkey so a snapshot-derived leader is
     // still recognized when this hub's addr binding for that key differs from
     // the one _addrForPubkey picked. Mirrors OracleConsensus._isLeaderIdentity.
-    _isLeaderIdentity(leader, addr, pubkey) {
+    isLeaderIdentity(leader, addr, pubkey) {
         if (!leader) return false;
         if (leader.addr && leader.addr === addr) return true;
         let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
@@ -889,7 +889,7 @@ class Consensus {
                 ' from ' + envelope.sender + ': no leader can be elected (empty validator set)');
             return false;
         }
-        if (!this._isLeaderIdentity(leader, envelope.sender, this._resolveSenderPubkey(envelope))) {
+        if (!this.isLeaderIdentity(leader, envelope.sender, this.resolveSenderPubkey(envelope))) {
             console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
                 ' from non-leader ' + envelope.sender);
             return false;
@@ -947,7 +947,7 @@ class Consensus {
     // vote still counts in the address set and is only omitted from the weighted
     // stake tally (a known validator on a transient version mismatch; weighted
     // mode only activates post-flag-day when every hub stamps sig_pubkey).
-    _resolveSenderPubkey(envelope) {
+    resolveSenderPubkey(envelope) {
         if (envelope && envelope.sig_pubkey && typeof envelope.sig_pubkey === 'string')
             return envelope.sig_pubkey.toLowerCase();
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
@@ -963,7 +963,7 @@ class Consensus {
     // pubkeys that voted; below activation: the legacy 2f+1 count of the address
     // vote set against the round-locked quorum. `ctx` is a proposal (PREPARE/COMMIT)
     // or a {quorum, weighted, validators} view-change context.
-    _quorumMet(ctx, addrSet, pubkeySet) {
+    quorumMet(ctx, addrSet, pubkeySet) {
         if (ctx.weighted)
             return swq.meetsStakeThreshold(ctx.validators, pubkeySet || new Set());
         let quorum = (typeof ctx.quorum === 'number') ? ctx.quorum : this._getQuorum();
@@ -977,14 +977,14 @@ class Consensus {
         return (keyed > 0 ? keyed : addrSet.size) >= quorum;
     }
 
-    _checkPrepareQuorum(seq) {
+    checkPrepareQuorum(seq) {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.resolved) return;
 
         // Use the round's locked quorum (federation snapshot at the BTC
         // block boundary), not a live recompute. This keeps every hub in
         // lockstep across the round. Weighted rounds tally signer stake.
-        if (this._quorumMet(proposal, proposal.prepares, proposal.preparePubkeys)) {
+        if (this.quorumMet(proposal, proposal.prepares, proposal.preparePubkeys)) {
             if (!proposal._commitSent) {
                 proposal._commitSent = true;
 
@@ -996,7 +996,7 @@ class Consensus {
                     configDigest: proposal.digest
                 }, this.equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
-                this._checkCommitQuorum(seq);
+                this.checkCommitQuorum(seq);
             }
         }
     }
@@ -1021,19 +1021,19 @@ class Consensus {
 
         proposal.commits.add(envelope.sender);
         if (proposal.commitPubkeys) {
-            let pk = this._resolveSenderPubkey(envelope);
+            let pk = this.resolveSenderPubkey(envelope);
             if (pk) proposal.commitPubkeys.add(pk);
         }
 
-        this._checkCommitQuorum(seq);
+        this.checkCommitQuorum(seq);
     }
 
-    _checkCommitQuorum(seq) {
+    checkCommitQuorum(seq) {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.applied || proposal._applying) return;
 
         // Same quorum rule as _checkPrepareQuorum; see _quorumMet.
-        if (this._quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
+        if (this.quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
             // Synchronous in-flight guard, distinct from the durable `applied` marker.
             // _applyConfig/_saveSeq are async, and `applied` is only set after they
             // resolve (deliberately, so a _saveSeq failure leaves it false for retry).
@@ -1151,10 +1151,10 @@ class Consensus {
         // validator at all.
         if (!this.pendingViewChangePubkeys.has(view))
             this.pendingViewChangePubkeys.set(view, new Set());
-        let vcPk = this._resolveSenderPubkey(envelope);
+        let vcPk = this.resolveSenderPubkey(envelope);
         if (vcPk) this.pendingViewChangePubkeys.get(view).add(vcPk);
 
-        if (this._quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
+        if (this.quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
             // View change accepted; update view and check if we're the new leader.
             // The new leader comes from the round's pinned population,
             // the same one PRE_PREPARE was validated against, so a view change
@@ -1162,7 +1162,7 @@ class Consensus {
             // not recognize as leader.
             this.view = view;
             let newLeader = this._getLeader(seq, vcCtx.memberPubkeys || null);
-            if (this._isLeaderIdentity(newLeader, this.peerManager.validatorAddr, this._selfPubkey())) {
+            if (this.isLeaderIdentity(newLeader, this.peerManager.validatorAddr, this.selfPubkey())) {
                 console.log('PBFT: View change to view ' + view + '; this node is the new leader');
                 this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
             }
@@ -1233,7 +1233,7 @@ class Consensus {
         let memberPubkeys = this.memberPubkeysForSeq(seq);
         let expectedLeader = this.leaderAt(seq, view, memberPubkeys);
         if (!expectedLeader ||
-            !this._isLeaderIdentity(expectedLeader, envelope.sender, this._resolveSenderPubkey(envelope))) {
+            !this.isLeaderIdentity(expectedLeader, envelope.sender, this.resolveSenderPubkey(envelope))) {
             console.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
                 ' from non-leader ' + envelope.sender);
             return;
@@ -1247,7 +1247,7 @@ class Consensus {
     // (lockedWeighted + lockedValidators) is captured by the caller BEFORE the
     // proposal is deleted, so the stake-weighted view-change tally can run even
     // though the proposal is gone.
-    _initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators, lockedMemberPubkeys) {
+    initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators, lockedMemberPubkeys) {
         this.view++;
         console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
 
@@ -1303,7 +1303,7 @@ class Consensus {
         if (memberPubkeys && memberPubkeys.size > 0) {
             let keys = [...memberPubkeys].sort();
             let pubkey = keys[(seq + view) % keys.length];
-            return { addr: this._addrForPubkey(pubkey), pubkey: pubkey };
+            return { addr: this.addrForPubkey(pubkey), pubkey: pubkey };
         }
         if (this.validatorSet.length === 0) return null;
         return this.validatorSet[(seq + view) % this.validatorSet.length];
@@ -1315,7 +1315,7 @@ class Consensus {
 
     _isLeader(seq, memberPubkeys) {
         let leader = this._getLeader(seq, memberPubkeys);
-        return this._isLeaderIdentity(leader, this.peerManager.validatorAddr, this._selfPubkey());
+        return this.isLeaderIdentity(leader, this.peerManager.validatorAddr, this.selfPubkey());
     }
 
     // Calculate quorum size: legacy live-set computation, used as a

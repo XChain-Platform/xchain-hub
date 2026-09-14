@@ -647,8 +647,8 @@ describe('Consensus (PBFT)', function () {
                 resolve: () => {}, reject: () => {}
             });
 
-            consensus._checkCommitQuorum(6);   // starts the (pending) apply
-            consensus._checkCommitQuorum(6);   // re-entrant while in flight: must be a no-op
+            consensus.checkCommitQuorum(6);   // starts the (pending) apply
+            consensus.checkCommitQuorum(6);   // re-entrant while in flight: must be a no-op
             expect(hub.applyConfig.calledOnce).to.be.true;
 
             release();
@@ -672,7 +672,7 @@ describe('Consensus (PBFT)', function () {
 
         it('_initiateViewChange increments view and broadcasts', function () {
             consensus.view = 0;
-            consensus._initiateViewChange(5);
+            consensus.initiateViewChange(5);
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledOnce).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('PBFT_VIEW_CHANGE');
@@ -818,7 +818,7 @@ describe('Consensus (PBFT)', function () {
 
             // Initiate with the round-locked quorum (N=7: 5). No proposal
             // remains in pendingProposals, mirroring the real timeout flow.
-            consensus._initiateViewChange(5, 5);
+            consensus.initiateViewChange(5, 5);
             expect(consensus.view).to.equal(1);
             expect(consensus.pendingProposals.has(5)).to.be.false;
             expect(consensus.viewChangeQuorums.get(5).quorum).to.equal(5);
@@ -840,7 +840,7 @@ describe('Consensus (PBFT)', function () {
             consensus.lastAppliedSeq = 10;
             consensus.viewChangeQuorums.set(3, 5);  // stale (seq 3 <= lastApplied 10)
 
-            consensus._initiateViewChange(12, 7);
+            consensus.initiateViewChange(12, 7);
             expect(consensus.viewChangeQuorums.has(3)).to.be.false; // pruned
             expect(consensus.viewChangeQuorums.get(12).quorum).to.equal(7);
         });
@@ -1349,12 +1349,12 @@ describe('Consensus (PBFT)', function () {
 
         it('_checkPrepareQuorum returns when the proposal is resolved', function () {
             consensus.pendingProposals.set(5, { resolved: true });
-            expect(() => consensus._checkPrepareQuorum(5)).to.not.throw();
+            expect(() => consensus.checkPrepareQuorum(5)).to.not.throw();
         });
 
         it('_checkCommitQuorum returns when the proposal is already applied', function () {
             consensus.pendingProposals.set(5, { applied: true });
-            expect(() => consensus._checkCommitQuorum(5)).to.not.throw();
+            expect(() => consensus.checkCommitQuorum(5)).to.not.throw();
         });
 
         it('applies a follower proposal (no resolve handler) on commit quorum', async function () {
@@ -1472,30 +1472,30 @@ describe('Consensus (PBFT)', function () {
         describe('_quorumMet()', function () {
             it('count mode: vote-set size vs the round-locked quorum', function () {
                 let ctx = { weighted: false, quorum: 3 };
-                expect(consensus._quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(false);
-                expect(consensus._quorumMet(ctx, new Set(['a', 'b', 'c']), null)).to.equal(true);
+                expect(consensus.quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(false);
+                expect(consensus.quorumMet(ctx, new Set(['a', 'b', 'c']), null)).to.equal(true);
             });
 
             it('weighted mode: whale clears alone; a small-stake count-majority does not', function () {
                 let ctx = { weighted: true, validators: normValidators() };
                 // Whale alone (a COUNT minority of one): 3·1000 > 2·1300.
-                expect(consensus._quorumMet(ctx, new Set(), new Set([WHALE.pubkey.toLowerCase()]))).to.equal(true);
+                expect(consensus.quorumMet(ctx, new Set(), new Set([WHALE.pubkey.toLowerCase()]))).to.equal(true);
                 // All three small sources (a COUNT majority): 3·300 = 900, not > 2600.
-                expect(consensus._quorumMet(ctx, new Set(), new Set(SMALL.map(v => v.pubkey.toLowerCase())))).to.equal(false);
+                expect(consensus.quorumMet(ctx, new Set(), new Set(SMALL.map(v => v.pubkey.toLowerCase())))).to.equal(false);
             });
         });
 
         describe('_resolveSenderPubkey()', function () {
             it('prefers envelope.sig_pubkey (lowercased)', function () {
-                expect(consensus._resolveSenderPubkey({ sender: 'ws://x', sig_pubkey: 'AABB' })).to.equal('aabb');
+                expect(consensus.resolveSenderPubkey({ sender: 'ws://x', sig_pubkey: 'AABB' })).to.equal('aabb');
             });
             it('falls back to the addr→pubkey registry', function () {
                 pm.validatorPubkeys = new Map([['ws://x', 'CCDD']]);
-                expect(consensus._resolveSenderPubkey({ sender: 'ws://x' })).to.equal('ccdd');
+                expect(consensus.resolveSenderPubkey({ sender: 'ws://x' })).to.equal('ccdd');
             });
             it('returns null when neither resolves', function () {
                 pm.validatorPubkeys = new Map();
-                expect(consensus._resolveSenderPubkey({ sender: 'ws://x' })).to.equal(null);
+                expect(consensus.resolveSenderPubkey({ sender: 'ws://x' })).to.equal(null);
             });
         });
 
@@ -1546,7 +1546,7 @@ describe('Consensus (PBFT)', function () {
                 let p = weightedProposal();
                 p.preparePubkeys.add(WHALE.pubkey.toLowerCase());
                 consensus.pendingProposals.set(1, p);
-                consensus._checkPrepareQuorum(1);
+                consensus.checkPrepareQuorum(1);
                 expect(p._commitSent).to.equal(true);
                 expect(pm.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
                 expect(p.commitPubkeys.has(WHALE.pubkey.toLowerCase())).to.be.true;
@@ -1556,7 +1556,7 @@ describe('Consensus (PBFT)', function () {
                 let p = weightedProposal();
                 for (let v of SMALL) p.preparePubkeys.add(v.pubkey.toLowerCase());
                 consensus.pendingProposals.set(1, p);
-                consensus._checkPrepareQuorum(1);
+                consensus.checkPrepareQuorum(1);
                 expect(p._commitSent).to.not.equal(true);
                 expect(pm.broadcast.called).to.be.false;
             });
@@ -1565,7 +1565,7 @@ describe('Consensus (PBFT)', function () {
                 let p = weightedProposal();
                 p.commitPubkeys.add(WHALE.pubkey.toLowerCase());
                 consensus.pendingProposals.set(1, p);
-                consensus._checkCommitQuorum(1);
+                consensus.checkCommitQuorum(1);
                 await new Promise(r => setImmediate(r));   // _applyConfig is async
                 expect(hub.applyConfig.calledWith({ cfg: 1 })).to.be.true;
             });
@@ -1575,7 +1575,7 @@ describe('Consensus (PBFT)', function () {
             beforeEach(beWhale);
 
             it('_initiateViewChange stashes the weighted context + seeds self view-change pubkey', function () {
-                consensus._initiateViewChange(5, 3, true, normValidators());
+                consensus.initiateViewChange(5, 3, true, normValidators());
                 let ctx = consensus.viewChangeQuorums.get(5);
                 expect(ctx.quorum).to.equal(3);
                 expect(ctx.weighted).to.equal(true);
@@ -1616,12 +1616,12 @@ describe('Consensus (PBFT)', function () {
     describe('null-snapshot fail-closed gate (#5334)', function () {
 
         it('_hasDeterministicSnapshot: true only for a real validators array', function () {
-            expect(consensus._hasDeterministicSnapshot(null)).to.be.false;
-            expect(consensus._hasDeterministicSnapshot({})).to.be.false;
-            expect(consensus._hasDeterministicSnapshot({ validators: 'nope' })).to.be.false;
-            expect(consensus._hasDeterministicSnapshot({ validators: {} })).to.be.false;
-            expect(consensus._hasDeterministicSnapshot({ validators: [] })).to.be.true;
-            expect(consensus._hasDeterministicSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.true;
+            expect(consensus.hasDeterministicSnapshot(null)).to.be.false;
+            expect(consensus.hasDeterministicSnapshot({})).to.be.false;
+            expect(consensus.hasDeterministicSnapshot({ validators: 'nope' })).to.be.false;
+            expect(consensus.hasDeterministicSnapshot({ validators: {} })).to.be.false;
+            expect(consensus.hasDeterministicSnapshot({ validators: [] })).to.be.true;
+            expect(consensus.hasDeterministicSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.true;
         });
 
         it('(a) propose() throws when minValidators>1 and snapshot is null', async function () {
@@ -1695,11 +1695,11 @@ describe('Consensus (PBFT)', function () {
 
         it('_isEmptyFederationSnapshot: true only for a present-but-empty snapshot in a federation', function () {
             consensus.minValidators = 4;
-            expect(consensus._isEmptyFederationSnapshot(null)).to.be.false;
-            expect(consensus._isEmptyFederationSnapshot({ validators: [] })).to.be.true;
-            expect(consensus._isEmptyFederationSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.false;
+            expect(consensus.isEmptyFederationSnapshot(null)).to.be.false;
+            expect(consensus.isEmptyFederationSnapshot({ validators: [] })).to.be.true;
+            expect(consensus.isEmptyFederationSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.false;
             consensus.minValidators = 1;
-            expect(consensus._isEmptyFederationSnapshot({ validators: [] })).to.be.false;
+            expect(consensus.isEmptyFederationSnapshot({ validators: [] })).to.be.false;
         });
 
         it('(a2) propose() throws over an EMPTY federation snapshot instead of applying unilaterally', async function () {

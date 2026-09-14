@@ -490,7 +490,7 @@ describe('AttestationPublisher: queue I/O', function () {
     it('_enqueue appends a JSON line and _readQueue parses it back', function () {
         const entry = { ts: 12345, requestId: '11'.repeat(32), wire: 'ATTEST|1|...' };
         pub._enqueue(entry);
-        const entries = pub._readQueue();
+        const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('11'.repeat(32));
         expect(entries[0].wire).to.equal('ATTEST|1|...');
@@ -499,7 +499,7 @@ describe('AttestationPublisher: queue I/O', function () {
     it('_enqueue appends multiple entries correctly', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
-        const entries = pub._readQueue();
+        const entries = pub.readQueue();
         expect(entries).to.have.length(2);
         expect(entries[0].requestId).to.equal('aa'.repeat(32));
         expect(entries[1].requestId).to.equal('bb'.repeat(32));
@@ -507,7 +507,7 @@ describe('AttestationPublisher: queue I/O', function () {
 
     it('_readQueue returns [] when the file does not exist', function () {
         fs.unlinkSync(pub.queuePath);
-        expect(pub._readQueue()).to.deep.equal([]);
+        expect(pub.readQueue()).to.deep.equal([]);
     });
 
     it('_readQueue skips malformed JSON lines', function () {
@@ -517,7 +517,7 @@ describe('AttestationPublisher: queue I/O', function () {
             'not json\n' +
             JSON.stringify({ requestId: 'aa'.repeat(32), wire: 'W' }) + '\n'
         );
-        const entries = pub._readQueue();
+        const entries = pub.readQueue();
         // malformed line is skipped; valid line is parsed
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('aa'.repeat(32));
@@ -529,7 +529,7 @@ describe('AttestationPublisher: queue I/O', function () {
             JSON.stringify({ wire: 'W' }) + '\n' +                     // missing requestId
             JSON.stringify({ requestId: 'bb'.repeat(32), wire: 'W2' }) + '\n'
         );
-        const entries = pub._readQueue();
+        const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('bb'.repeat(32));
     });
@@ -537,16 +537,16 @@ describe('AttestationPublisher: queue I/O', function () {
     it('_rewriteQueue replaces file contents with the given entries', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
-        pub._rewriteQueue([{ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' }]);
-        const entries = pub._readQueue();
+        pub.rewriteQueue([{ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' }]);
+        const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('cc'.repeat(32));
     });
 
     it('_rewriteQueue with empty array clears the file', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._rewriteQueue([]);
-        const entries = pub._readQueue();
+        pub.rewriteQueue([]);
+        const entries = pub.readQueue();
         expect(entries).to.have.length(0);
     });
 
@@ -555,7 +555,7 @@ describe('AttestationPublisher: queue I/O', function () {
         pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
         pub._enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
         pub._removeFromQueue(new Set(['aa'.repeat(32), 'bb'.repeat(32)]));  // lowercase drop set
-        const entries = pub._readQueue();
+        const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('cc'.repeat(32));
     });
@@ -563,13 +563,13 @@ describe('AttestationPublisher: queue I/O', function () {
     it('_removeFromQueue is a no-op for empty drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._removeFromQueue(new Set());
-        expect(pub._readQueue()).to.have.length(1);
+        expect(pub.readQueue()).to.have.length(1);
     });
 
     it('_removeFromQueue is a no-op for null drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._removeFromQueue(null);
-        expect(pub._readQueue()).to.have.length(1);
+        expect(pub.readQueue()).to.have.length(1);
     });
 
     it('_enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)', function () {
@@ -589,7 +589,7 @@ describe('AttestationPublisher: queue I/O', function () {
     it('_rewriteQueue logs error (does not throw) on unwritable path', function () {
         const errStub = sinon.stub(console, 'error');
         pub.queuePath = '/nonexistent-root/cannot-write.jsonl';
-        pub._rewriteQueue([]);
+        pub.rewriteQueue([]);
         expect(errStub.called).to.equal(true);
         errStub.restore();
     });
@@ -1839,7 +1839,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
             { request_id: intent, txid: null,   sent_at: null }
         ]);
         const pub = makePublisher(MY_PUB, { db });
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
         expect(pub._publishedRequests.has(sent)).to.equal(true);
         expect(pub._quarantinedRequests.has(intent)).to.equal(true);
         expect(pub._quarantinedRequests.has(sent)).to.equal(false);
@@ -1866,7 +1866,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         const rid = 'd7'.repeat(32);
         const db = makeMarkerDb([{ request_id: rid, txid: null, sent_at: null }]);
         const pub = makePublisher(MY_PUB, { db });
-        await pub._hydratePublishedMarkers();
+        await pub.hydratePublishedMarkers();
         const bcast = sinon.stub().resolves({ txid: 'x' });
         pub.setBroadcastHook(bcast);
         sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
@@ -1938,7 +1938,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         // still be publishable, not quarantined.
         const pub2 = makePublisher(MY_PUB, { db });
         pub2.queuePath = pub.queuePath;
-        await pub2._hydratePublishedMarkers();
+        await pub2.hydratePublishedMarkers();
         expect(pub2._quarantinedRequests.size, 'a never-sent request must not be quarantined').to.equal(0);
         const bcast2 = sinon.stub().resolves({ txid: 'tx-2' });
         pub2.setBroadcastHook(bcast2);
@@ -2080,7 +2080,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(rows[0].intent_status, 'the unconfirmed ok send must survive as an intent').to.equal('ok');
 
         const pub2 = makePublisher(MY_PUB, { db });
-        await pub2._hydratePublishedMarkers();
+        await pub2.hydratePublishedMarkers();
         expect(pub2._quarantinedRequests.has(rid + '|ok'),
                'the ok send may have reached the node; it awaits an operator').to.equal(true);
         expect(pub2._quarantinedRequests.has(rid),
@@ -2297,7 +2297,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         expect(deletes(db).length, 'nothing published yet, so nothing to age out').to.equal(0);
 
         // A confirmed marker landing is what arms the sweep.
-        await pub._markPublished(RID_A, 'tx-1');
+        await pub.markPublished(RID_A, 'tx-1');
         expect(pub._markersAddedSinceSweep).to.equal(true);
         await pub._processQueue();
         await pub._retentionSweep;
@@ -2315,7 +2315,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         const db  = mkDb(0, true);   // every DELETE throws
         const pub = makePublisher(MY_PUB, { db, p2pConfig: { [ENV_KEY]: '600000' } });
         fs.writeFileSync(pub.queuePath, '');
-        await pub._markPublished(RID_A, 'tx-1');
+        await pub.markPublished(RID_A, 'tx-1');
 
         await pub._processQueue();          // must not reject
         await pub._retentionSweep;          // the rejection is swallowed inside

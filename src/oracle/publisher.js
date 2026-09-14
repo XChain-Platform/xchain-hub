@@ -666,7 +666,7 @@ class OraclePublisher {
             let broadcastResult = await this.encoder.broadcastTx(txHex);
             return broadcastResult || { txid: null };
         } catch (e) {
-            if (this._isAmbiguousSendError(e)) e.oracleAmbiguousSend = true;
+            if (this.isAmbiguousSendError(e)) e.oracleAmbiguousSend = true;
             throw e;
         }
     }
@@ -786,7 +786,7 @@ class OraclePublisher {
 
     // Classify a broadcast failure (delegates to the shared classifier so
     // all four hub effectors answer "could this send have landed?" identically).
-    _isAmbiguousSendError(e){
+    isAmbiguousSendError(e){
         return isAmbiguousSendError(e);
     }
 
@@ -821,7 +821,7 @@ class OraclePublisher {
     // cannot be read. FAIL SOFT, unlike the balance gate: this reading only ever
     // withholds a broadcast, so an unreachable encoder must leave the decision to the
     // guards that already fail closed rather than add a second way to stall publishing.
-    async _readUtxoReserve() {
+    async readUtxoReserve() {
         if (!this.encoder || !this.dogeAddress) return null;
         let utxos;
         try {
@@ -846,8 +846,8 @@ class OraclePublisher {
     // package's fate: it either chains onto it and stalls the same way, or is refused
     // once the chain hits Dogecoin's inherited 25-transaction / 101 kB ancestor limits.
     // Deferring costs one window; broadcasting costs a fee for a wire that cannot mine.
-    async _confirmedUtxoAvailable() {
-        let summary = await this._readUtxoReserve();
+    async confirmedUtxoAvailable() {
+        let summary = await this.readUtxoReserve();
         if (!summary)                       return true;   // unreadable: not our call to block
         if (!summary.known)                 return true;   // no confirmations field served
         if (summary.total === 0)            return true;   // empty wallet is the balance gate's call
@@ -858,12 +858,12 @@ class OraclePublisher {
 
     // Start watching broadcasts to confirmation. Unref'd so it never holds the process
     // open, and a no-op when the cadence is disabled or nothing could ever be read.
-    _startConfirmationWatchdog() {
+    startConfirmationWatchdog() {
         if (this._confirmTimer) return;
         if (!this.confirmCheckIntervalMs) return;
         if (!this.encoder || !this.dogeAddress) return;
         this._confirmTimer = setInterval(() => {
-            this._checkPublishedConfirmations().catch((e) => {
+            this.checkPublishedConfirmations().catch((e) => {
                 // Unreachable in practice (the check swallows its own faults); kept so a
                 // future edit inside it can never reject into an unhandled rejection.
                 console.warn('OraclePublisher: confirmation watchdog tick failed: ', e);
@@ -875,7 +875,7 @@ class OraclePublisher {
     // Record a broadcast as awaiting confirmation. A broadcaster that returns no txid
     // cannot be watched, so it is not tracked: an untrackable send must not masquerade
     // as a stalled one.
-    _notePendingConfirmation(round, txid) {
+    notePendingConfirmation(round, txid) {
         if (!txid) return;
         let key = String(txid);
         if (this._pendingConfirmations.has(key)) return;
@@ -898,11 +898,11 @@ class OraclePublisher {
     //
     // Fail soft end to end. An unreadable encoder returns early with the tail intact,
     // and nothing here throws, blocks publishing, or spends.
-    async _checkPublishedConfirmations() {
+    async checkPublishedConfirmations() {
         if (this._pendingConfirmations.size === 0) return;
         let summary;
         try {
-            summary = await this._readUtxoReserve();
+            summary = await this.readUtxoReserve();
         } catch (e) {
             summary = null;
         }
@@ -986,7 +986,7 @@ class OraclePublisher {
         // (or ambiguously-published) round. Best-effort; a DB error is logged inside.
         if (this.db) {
             try {
-                await this._hydratePublishedMarkers();
+                await this.hydratePublishedMarkers();
             } catch (e) {
                 console.error('OraclePublisher: failed to hydrate durable publish markers on startup ' +
                     '(the in-process guard still covers this lifetime): ', e);
@@ -1024,7 +1024,7 @@ class OraclePublisher {
 
         // Watch broadcasts through to a block. Without it a wire that never mines
         // leaves the rail reporting a healthy lastPublishedTxid indefinitely.
-        this._startConfirmationWatchdog();
+        this.startConfirmationWatchdog();
 
         console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
         // The publish cadence next to the bound it has to fit inside, because a rail
@@ -1254,7 +1254,7 @@ class OraclePublisher {
     }
 
     // Read all queue entries (used by _processQueue and on restart)
-    _readQueue() {
+    readQueue() {
         try {
             let raw = fs.readFileSync(this.queuePath, 'utf8');
             return raw.split('\n').filter(line => line.trim().length > 0).map(line => {
@@ -1270,7 +1270,7 @@ class OraclePublisher {
     // dequeue side must NOT swallow a failure: on false the just-published rounds are
     // still on the durable queue, so the caller keeps its in-process dedup guard armed
     // (preventing re-broadcast) and surfaces the failure loudly for operator repair.
-    _rewriteQueue(entries) {
+    rewriteQueue(entries) {
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
             let fd = fs.openSync(this.queuePath, 'w');
@@ -1703,18 +1703,18 @@ class OraclePublisher {
         let w = this._windowIndexOf(round);
         if (!Number.isFinite(w)) return;
         for (let lower of Array.from(this._windows.keys())) {
-            if (lower < w) this._armWindowTimer(lower);
+            if (lower < w) this.armWindowTimer(lower);
         }
         if (!this._windows.has(w)) this._windows.set(w, { timer: null });
         if (parseInt(round) % this.batchWindowRounds === this.batchWindowRounds - 1) {
-            this._armWindowTimer(w);
+            this.armWindowTimer(w);
         }
     }
 
     // Arm the grace timer for a window, once. Never re-armed: extending it on every
     // late arrival would let a steady trickle of stragglers postpone an hour of price
     // data indefinitely.
-    _armWindowTimer(windowIndex) {
+    armWindowTimer(windowIndex) {
         let state = this._windows.get(windowIndex);
         if (!state) { state = { timer: null }; this._windows.set(windowIndex, state); }
         if (state.timer) return;
@@ -2719,7 +2719,7 @@ class OraclePublisher {
     // broadcaster returned none, so sent_at, not txid, gates re-broadcast).
     // Throws on a DB error so the caller can FAIL CLOSED (never broadcast when we
     // cannot prove the round is unpublished).
-    async _getPublishedMarker(round) {
+    async getPublishedMarker(round) {
         if (!this.db) return null;
         let rows = await this.db.findOraclePublishedRoundsByRound(round);
         return (rows && rows.length > 0) ? rows[0] : null;
@@ -2728,7 +2728,7 @@ class OraclePublisher {
     // Durably record broadcast INTENT for a round before the send. Idempotent: an
     // existing row (intent or sent) is left untouched. Throws on a DB error so the
     // caller fails closed. No-op when no DB is wired.
-    async _recordPublishIntent(round) {
+    async recordPublishIntent(round) {
         if (!this.db) return;
         await this.db.setOraclePublishedRound(round);
     }
@@ -2737,7 +2737,7 @@ class OraclePublisher {
     // after a successful send. A failure here is logged, not thrown: the DOGE is
     // already spent, and the intent row means a restart quarantines the round rather
     // than re-broadcasting it. No-op when no DB is wired.
-    async _markPublished(round, txid) {
+    async markPublished(round, txid) {
         if (!this.db) return;
         try {
             await this.db.updateOraclePublishedRound(txid, round);
@@ -2761,7 +2761,7 @@ class OraclePublisher {
     // that has published for months does not read as one that never published once its
     // process memory is gone. txid rides along in the select list because the marker
     // row is the only record of which wire carried that round.
-    async _hydratePublishedMarkers() {
+    async hydratePublishedMarkers() {
         if (!this.db) return;
         let rows = await this.db.findAllOraclePublishedRounds();
         let quarantined = [];
@@ -2837,7 +2837,7 @@ class OraclePublisher {
         // A batch entry's `round` is its FIRST round, which is also the LOWEST round
         // it carries, so the clamp below still lands under every round the entry
         // protects and needs no batch-specific arm.
-        for (let entry of this._readQueue()) {
+        for (let entry of this.readQueue()) {
             let r = Number(entry && entry.round);
             if (Number.isFinite(r) && r < cutoff) cutoff = r;
         }
@@ -2877,14 +2877,14 @@ class OraclePublisher {
         }
         this._sweeping = true;
         try {
-            return await this._processQueueInner();
+            return await this.processQueueInner();
         } finally {
             this._sweeping = false;
         }
     }
 
     // Process pending rounds in the queue: build payload, check balance, broadcast
-    async _processQueueInner() {
+    async processQueueInner() {
         // item 2677 kill switch: suppress the replay/sweep too, not just the live
         // path, so a disabled publisher spends nothing. Entries stay on the durable
         // queue untouched and resume only when re-enabled and re-swept.
@@ -2893,7 +2893,7 @@ class OraclePublisher {
             return;
         }
 
-        let entries = this._readQueue();
+        let entries = this.readQueue();
         if (entries.length === 0) return;
 
         // item 2676 - hard balance floor gate (was: balance read then only WARNed,
@@ -2928,7 +2928,7 @@ class OraclePublisher {
         // Defer the pass instead: entries stay on the durable queue, nothing is
         // dead-lettered, and no attempt counter is burned, because this is not a
         // broadcast failure. Fail soft, see _confirmedUtxoAvailable.
-        if (!(await this._confirmedUtxoAvailable())) {
+        if (!(await this.confirmedUtxoAvailable())) {
             this.noConfirmedUtxoDeferrals++;
             this.lastNoConfirmedUtxoAt = Date.now();
             let seen = this.lastUtxoReserve || { unconfirmed: 0 };
@@ -2995,7 +2995,7 @@ class OraclePublisher {
                 for (let r of entryRounds) {
                     let marker;
                     try {
-                        marker = await this._getPublishedMarker(r);
+                        marker = await this.getPublishedMarker(r);
                     } catch (e) {
                         console.error('OraclePublisher: cannot read durable publish marker for round ' + r +
                             '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e);
@@ -3067,7 +3067,7 @@ class OraclePublisher {
                 let intentFailed = false;
                 for (let r of entryRounds) {
                     try {
-                        await this._recordPublishIntent(r);
+                        await this.recordPublishIntent(r);
                     } catch (e) {
                         console.error('OraclePublisher: cannot record durable publish intent for round ' + r +
                             '; deferring broadcast (fail closed): ', e);
@@ -3101,7 +3101,7 @@ class OraclePublisher {
                 // and every guard reads it that way, so a batch that marked only its first
                 // round would leave the rest re-publishable under a different split (D10).
                 for (let r of entryRounds) {
-                    await this._markPublished(r, (result && result.txid) || null);
+                    await this.markPublished(r, (result && result.txid) || null);
                 }
                 if (entry.batch) {
                     console.log('OraclePublisher: published PRICE batch [' + entry.batch.firstRound + ',' +
@@ -3126,7 +3126,7 @@ class OraclePublisher {
                 // Hand the wire to the watchdog. lastPublishedTxid alone answers "did we
                 // send", never "did it land", and the two diverge for as long as a stuck
                 // package sits in the mempool.
-                this._notePendingConfirmation(this.lastPublishedRound, this.lastPublishedTxid);
+                this.notePendingConfirmation(this.lastPublishedRound, this.lastPublishedTxid);
                 // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
                 // item 2675 - NEVER blind-retry an ambiguous send. A timeout / reset /
@@ -3145,7 +3145,7 @@ class OraclePublisher {
                 // automatic retry. A custom broadcastFn sets no tag, so an unknown
                 // broadcaster keeps the conservative default it has today.
                 if (!(err && err.oraclePreSend)
-                    && (this._isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend))) {
+                    && (this.isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend))) {
                     // COMMIT, not release: this branch has already decided the tx may be
                     // on-chain and dead-letters the round rather than retrying, so the fee
                     // may well have been paid. Keeping the reservation charges the window
@@ -3192,7 +3192,7 @@ class OraclePublisher {
         let seen     = new Set(remaining.map(e => e.round));
         let resolved = new Set(entries.map(e => e.round).filter(r => !seen.has(r)));
         let rebuilt  = remaining.slice();
-        for (let e of this._readQueue()) {
+        for (let e of this.readQueue()) {
             if (resolved.has(e.round) || seen.has(e.round)) continue;
             seen.add(e.round);
             rebuilt.push(e);
@@ -3205,7 +3205,7 @@ class OraclePublisher {
         // published rounds remain on the queue file: keep the guard armed (it prevents
         // the re-broadcast) and surface the failure so an operator repairs the queue
         // before a restart drops the in-memory guard.
-        let rewritten = this._rewriteQueue(rebuilt);
+        let rewritten = this.rewriteQueue(rebuilt);
         if (rewritten) {
             this._publishedRounds.clear();
         } else {
@@ -3237,7 +3237,7 @@ class OraclePublisher {
     // in-memory reads; queueDepth touches the durable queue file.
     getStats() {
         let queueDepth = 0;
-        try { queueDepth = this._readQueue().length; } catch (e) { queueDepth = null; }
+        try { queueDepth = this.readQueue().length; } catch (e) { queueDepth = null; }
         let oldestUnconfirmed = this.oldestUnconfirmedPublish();
         return {
             queueDepth:          queueDepth,

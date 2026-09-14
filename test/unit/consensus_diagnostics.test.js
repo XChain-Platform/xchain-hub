@@ -129,7 +129,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
 
         // A round that assembles drains its buffer, so anything still parked at
         // expiry is a vote that was silently lost.
-        oc._pruneEarlyMessages(Date.now() + oc.earlyMessageTtlMs + 1);
+        oc.pruneEarlyMessages(Date.now() + oc.earlyMessageTtlMs + 1);
 
         expect(drops('early_ttl')).to.have.lengthOf(1);
         expect(drops('early_ttl')[0]).to.include('count=1');
@@ -156,7 +156,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         oc._handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', digest));        // unknown_sender
         oc.earlyMessages.set(999, [voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest)]);
         oc.earlyMessageTtl.set(999, Date.now() - 1);
-        oc._pruneEarlyMessages(Date.now());                                                  // early_ttl
+        oc.pruneEarlyMessages(Date.now());                                                  // early_ttl
 
         const reasons = new Set(drops().map(l => (l.match(/reason=(\w+)/) || [])[1]));
         expect([...reasons].sort()).to.deep.equal(['digest_mismatch', 'early_ttl', 'unknown_sender']);

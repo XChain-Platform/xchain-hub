@@ -758,13 +758,13 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let bus = buildMesh(1);
         let c = bus.nodes[0].consensus;
         c.earlyMessageMaxDistinctIds = 4;
-        for (let i = 0; i < 10; i++) c._bufferEarlyMessage('id' + i, { type: 'X', data: { n: i } });
+        for (let i = 0; i < 10; i++) c.bufferEarlyMessage('id' + i, { type: 'X', data: { n: i } });
         expect(c.earlyMessages.size).to.equal(4);
         expect(c.earlyMessages.has('id0')).to.be.false;   // oldest distinct id evicted
         expect(c.earlyMessages.has('id9')).to.be.true;    // newest retained
 
         c.earlyMessageMaxBytes = 50;
-        c._bufferEarlyMessage('big', { type: 'X', data: { row: 'x'.repeat(500) } });
+        c.bufferEarlyMessage('big', { type: 'X', data: { row: 'x'.repeat(500) } });
         expect(c.earlyMessages.has('big')).to.be.false;   // oversized -> not buffered
     });
 });

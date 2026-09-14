@@ -176,7 +176,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             let origErr = console.error;
             console.error = (...a) => errors.push(a.join(' '));
             try {
-                let anchored = await pub._publishPendingCheckpoints(pub._resolveSigner(), 100, false);
+                let anchored = await pub._publishPendingCheckpoints(pub.resolveSigner(), 100, false);
                 expect(anchored).to.deep.equal([]);
             } finally { console.error = origErr; }
             expect(errors.filter(l => l.indexOf('v0 publish failed') !== -1), 'not reported as a failure').to.have.length(0);
@@ -198,36 +198,36 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         });
         it('tracks a broadcast txid, resolves it when its change confirms, and counts it', async function () {
             const { pub } = buildPub([{ txid: 'ee'.repeat(32), vout: 1, value: '1', confirmations: 0 }]);
-            pub._notePendingConfirmation('anchor_BTC', 'EE'.repeat(32), '100');
-            pub._notePendingConfirmation('anchor_BTC', 'ee'.repeat(32), '100');        // case-folded dedupe
+            pub.notePendingConfirmation('anchor_BTC', 'EE'.repeat(32), '100');
+            pub.notePendingConfirmation('anchor_BTC', 'ee'.repeat(32), '100');        // case-folded dedupe
             expect(pub.getAnchorStats().unconfirmedPublishes).to.equal(1);
-            await pub._checkPublishedConfirmations();
+            await pub.checkPublishedConfirmations();
             expect(pub.getAnchorStats().unconfirmedPublishes, 'still at depth 0').to.equal(1);
             pub.hub.oraclePublisher.encoder.getUtxos = async () => [{ txid: 'ee'.repeat(32), vout: 1, value: '1', confirmations: 1 }];
-            await pub._checkPublishedConfirmations();
+            await pub.checkPublishedConfirmations();
             expect(pub.getAnchorStats().unconfirmedPublishes).to.equal(0);
             expect(pub.confirmedPublishes).to.equal(1);
         });
         it('an absent txid counts as landed only when the address holds a confirmed output (its change was spent on)', async function () {
             const { pub } = buildPub([{ txid: 'ff'.repeat(32), vout: 0, value: '1', confirmations: 0 }]);
-            pub._notePendingConfirmation('archive_head', 'ee'.repeat(32), '7');
-            await pub._checkPublishedConfirmations();
+            pub.notePendingConfirmation('archive_head', 'ee'.repeat(32), '7');
+            await pub.checkPublishedConfirmations();
             expect(pub.getAnchorStats().unconfirmedPublishes, 'absent + nothing confirmed = still stuck').to.equal(1);
             pub.hub.oraclePublisher.encoder.getUtxos = async () => [{ txid: 'ff'.repeat(32), vout: 0, value: '1', confirmations: 2 }];
-            await pub._checkPublishedConfirmations();
+            await pub.checkPublishedConfirmations();
             expect(pub.getAnchorStats().unconfirmedPublishes).to.equal(0);
         });
         it('warns UNCONFIRMED_ANCHOR once a broadcast is older than the stale bound, naming it', async function () {
             process.env.ANCHOR_CONFIRM_STALE_MS = '1';
             const { pub } = buildPub([{ txid: 'ee'.repeat(32), vout: 1, value: '1', confirmations: 0 }]);
             const notedAt = Date.now();
-            pub._notePendingConfirmation('anchor_DOGE', 'ee'.repeat(32), '150174');
+            pub.notePendingConfirmation('anchor_DOGE', 'ee'.repeat(32), '150174');
             // The stale bound is wall-clock; poll until it has provably elapsed.
             await waitUntil(() => Date.now() - notedAt > 1, { label: 'stale bound elapsed' });
             let warns = [];
             let origWarn = console.warn;
             console.warn = (...a) => warns.push(a.join(' '));
-            try { await pub._checkPublishedConfirmations(); } finally { console.warn = origWarn; }
+            try { await pub.checkPublishedConfirmations(); } finally { console.warn = origWarn; }
             let hit = warns.filter(l => l.indexOf('UNCONFIRMED_ANCHOR') !== -1);
             expect(hit).to.have.length(1);
             expect(hit[0]).to.contain('anchor_DOGE 150174');
@@ -237,9 +237,9 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
         });
         it('an unreadable UTXO set fails soft: counted, nothing resolved, nothing thrown', async function () {
             const { pub } = buildPub([CONFIRMED]);
-            pub._notePendingConfirmation('anchor_LTC', 'ee'.repeat(32), '1');
+            pub.notePendingConfirmation('anchor_LTC', 'ee'.repeat(32), '1');
             pub.hub.oraclePublisher.encoder.getUtxos = async () => { throw new Error('encoder down'); };
-            await pub._checkPublishedConfirmations();
+            await pub.checkPublishedConfirmations();
             expect(pub.confirmationCheckFailures).to.equal(1);
             expect(pub.getAnchorStats().unconfirmedPublishes).to.equal(1);
         });

@@ -65,7 +65,7 @@ describe('ring caps reject a negative operator value', function () {
         expect(ac.nonOkPublishedMax).to.equal(40000);
 
         // The eviction the negative cap used to defeat: a just-added id survives.
-        ac._markFinalized('req-1');
+        ac.markFinalized('req-1');
         expect(ac.finalized.has('req-1')).to.be.true;
     });
 
@@ -105,8 +105,8 @@ describe('ring caps reject a negative operator value', function () {
 
         // The behaviour a negative cap defeated: the envelope the inverted size gate
         // would have dropped is buffered, and a second distinct rid does not evict it.
-        ac._bufferEarlyMessage('rid-1', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-1' } });
-        ac._bufferEarlyMessage('rid-2', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-2' } });
+        ac.bufferEarlyMessage('rid-1', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-1' } });
+        ac.bufferEarlyMessage('rid-2', { type: 'ATTEST_PROPOSE', data: { request_id: 'rid-2' } });
         expect(ac.earlyMessages.get('rid-1'), 'rid-1 must survive the distinct-id eviction').to.have.lengthOf(1);
         expect(ac.earlyMessages.get('rid-2')).to.have.lengthOf(1);
     });
@@ -119,8 +119,8 @@ describe('ring caps reject a negative operator value', function () {
         expect(dex.earlyMessageMaxDistinctIds).to.equal(512);
         expect(dex.earlyMessageMaxBytes).to.equal(131072);
 
-        dex._bufferEarlyMessage('match-1', { type: 'XDEX_PROPOSE', data: { match_id: 'match-1' } });
-        dex._bufferEarlyMessage('match-2', { type: 'XDEX_PROPOSE', data: { match_id: 'match-2' } });
+        dex.bufferEarlyMessage('match-1', { type: 'XDEX_PROPOSE', data: { match_id: 'match-1' } });
+        dex.bufferEarlyMessage('match-2', { type: 'XDEX_PROPOSE', data: { match_id: 'match-2' } });
         expect(dex.earlyMessages.get('match-1'), 'match-1 must survive the distinct-id eviction').to.have.lengthOf(1);
         expect(dex.earlyMessages.get('match-2')).to.have.lengthOf(1);
     });
@@ -139,7 +139,7 @@ describe('ring caps reject a negative operator value', function () {
             let hub = createMockHub();
             let oc  = new OracleConsensus(hub, { getSubmissions: sinon.stub().returns(new Map()) });
             expect(oc.earlyMessageMaxRounds).to.equal(256);
-            oc._bufferEarlyMessage(1, { type: 'ORACLE_PREPARE', data: { round: 1 } });
+            oc.bufferEarlyMessage(1, { type: 'ORACLE_PREPARE', data: { round: 1 } });
             expect(oc.earlyMessages.get(1)).to.have.lengthOf(1);
         } finally {
             if (prior === undefined) delete process.env.ORACLE_EARLY_MSG_MAX_ROUNDS;

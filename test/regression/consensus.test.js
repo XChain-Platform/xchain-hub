@@ -223,7 +223,7 @@ describe('Regression: Consensus (PBFT)', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
             consensus.view = 0;
 
-            consensus._initiateViewChange(5);
+            consensus.initiateViewChange(5);
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledOnce).to.be.true;

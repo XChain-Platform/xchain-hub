@@ -63,7 +63,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
     });
 
     it('a genuinely finalized round IS still dropped at the finalized guard (contrast)', async function () {
-        oc._markFinalized(ROUND);
+        oc.markFinalized(ROUND);
 
         let known  = sinon.stub(oc, '_isKnownSender').returns(false);
         let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
@@ -81,7 +81,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         expect(oc.locallySkipped.has(ROUND)).to.be.true;
         expect(oc._locallySkippedOrder).to.include(ROUND);
 
-        oc._markFinalized(ROUND);
+        oc.markFinalized(ROUND);
 
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc._locallySkippedOrder).to.not.include(ROUND);
@@ -114,7 +114,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
     });
 
     it('_markLocallySkipped is a no-op once the round is already finalized', function () {
-        oc._markFinalized(ROUND);
+        oc.markFinalized(ROUND);
         oc._markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
@@ -132,7 +132,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         oc._markLocallySkipped(ROUND);
         expect(seen).to.deep.equal([ROUND]);
 
-        oc._markFinalized(ROUND + 1);
+        oc.markFinalized(ROUND + 1);
         oc._markLocallySkipped(ROUND + 1);
         expect(seen).to.deep.equal([ROUND]);
     });

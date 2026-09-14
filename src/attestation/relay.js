@@ -1210,7 +1210,7 @@ class AttestationRelay {
         // Rank 0 is the round's broadcaster; every other rank waits out its failover
         // window in _sweepFinalized so a silent leader costs one window, not the
         // request's whole deadline.
-        if(rank === 0) await this._broadcast(phase, rid);
+        if(rank === 0) await this.broadcast(phase, rid);
     }
 
     // This node's position in the hash-ordered signer set for the request. The same
@@ -1241,7 +1241,7 @@ class AttestationRelay {
                 if(Date.now() - entry.finalizedAt < entry.rank * this.failoverWindowMs) continue;
                 console.warn('AttestationRelay: leader silent for the ' + phase + ' leg of ' +
                              rid.substring(0, 16) + '...; rank ' + entry.rank + ' stepping in');
-                await this._broadcast(phase, rid);
+                await this.broadcast(phase, rid);
             }
         }
     }
@@ -1263,7 +1263,7 @@ class AttestationRelay {
         return this._homePending.has(rid) || this._homeRelayed.has(rid);
     }
 
-    async _broadcast(phase, rid){
+    async broadcast(phase, rid){
         let state = this._legState(phase);
         let entry = state.wire.get(rid);
         if(!entry) return;

@@ -294,7 +294,7 @@ class CapabilitySnapshot {
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
-            this._prune(now);
+            this.prune(now);
             return snapshot;
         } catch (err) {
             // Indexer unreachable / down (or 401/403 auth mismatch): caller falls
@@ -357,7 +357,7 @@ class CapabilitySnapshot {
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
-            this._prune(now);
+            this.prune(now);
             return snapshot;
         } catch (err) {
             return this._onFetchError('getstakeweightsbycapability', err);
@@ -401,7 +401,7 @@ class CapabilitySnapshot {
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
-            this._prune(now);
+            this.prune(now);
             return snapshot;
         } catch (err) {
             return this._onFetchError('getactivevalidators', err);
@@ -448,7 +448,7 @@ class CapabilitySnapshot {
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
-            this._prune(now);
+            this.prune(now);
             return snapshot;
         } catch (err) {
             return this._onFetchError('getactivestakeweights', err);
@@ -692,7 +692,7 @@ class CapabilitySnapshot {
         return Math.max(0, Math.floor(n) - this.reorgBufferBlocks);
     }
 
-    _prune(now) {
+    prune(now) {
         for (let [k, v] of this.cache) {
             if (v.expiresAt <= now) this.cache.delete(k);
         }

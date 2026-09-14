@@ -259,31 +259,31 @@ describe('StateAnchorPublisher: _isAmbiguousSendError classification', function 
     const pub = mkPub();
 
     it('encoder RPC rejections are NOT ambiguous (the node answered, tx refused)', function () {
-        expect(pub._isAmbiguousSendError(new Error('Encoder RPC error: bad-txns'))).to.equal(false);
+        expect(pub.isAmbiguousSendError(new Error('Encoder RPC error: bad-txns'))).to.equal(false);
     });
 
     it('HTTP 4xx refusals are NOT ambiguous', function () {
         const e = new Error('Request failed with status code 401');
         e.response = { status: 401 };
-        expect(pub._isAmbiguousSendError(e)).to.equal(false);
+        expect(pub.isAmbiguousSendError(e)).to.equal(false);
     });
 
     it('never-connected transport errors are NOT ambiguous', function () {
         for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) {
             const e = new Error(code);
             e.code = code;
-            expect(pub._isAmbiguousSendError(e), code).to.equal(false);
+            expect(pub.isAmbiguousSendError(e), code).to.equal(false);
         }
     });
 
     it('timeouts, resets, and 5xx after the request went out ARE ambiguous', function () {
         const t = new Error('timeout of 30000ms exceeded'); t.code = 'ECONNABORTED';
-        expect(pub._isAmbiguousSendError(t)).to.equal(true);
+        expect(pub.isAmbiguousSendError(t)).to.equal(true);
         const r = new Error('socket hang up'); r.code = 'ECONNRESET';
-        expect(pub._isAmbiguousSendError(r)).to.equal(true);
+        expect(pub.isAmbiguousSendError(r)).to.equal(true);
         const s = new Error('Request failed with status code 502'); s.response = { status: 502 };
-        expect(pub._isAmbiguousSendError(s)).to.equal(true);
-        expect(pub._isAmbiguousSendError(new Error('mystery'))).to.equal(true);
+        expect(pub.isAmbiguousSendError(s)).to.equal(true);
+        expect(pub.isAmbiguousSendError(new Error('mystery'))).to.equal(true);
     });
 });
 

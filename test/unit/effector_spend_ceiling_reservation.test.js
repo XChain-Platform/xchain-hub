@@ -109,8 +109,8 @@ describe('await-safe spend gating on the hub effectors', function () {
         // hide the spend race behind a skip, and the point here is that the gate
         // holds even when a second pass reaches the send (a future second call
         // site, a sweep timer, or a caller that bypasses the wrapper).
-        const passA = pub._processQueueInner();
-        const passB = pub._processQueueInner();
+        const passA = pub.processQueueInner();
+        const passB = pub.processQueueInner();
 
         // Let both passes reach the awaited broadcast before either settles.
         await new Promise(r => setImmediate(r));
@@ -146,7 +146,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         pub.db = { ...DB_METHODS, doQuery: doQuery };
 
         pub.spendGuard.pause('ceiling closed for this test');
-        await pub._processQueueInner();
+        await pub.processQueueInner();
 
         const intentWrites = doQuery.getCalls().filter(c => /INSERT INTO oracle_published_rounds/.test(String(c.args[0])));
         expect(intentWrites.length,
@@ -176,8 +176,8 @@ describe('await-safe spend gating on the hub effectors', function () {
         relay.broadcastFn = broadcastStub;
         relay._legState('request').wire.set(rid, { coin: null, wire: 'ATTEST|3|' + rid });
 
-        const sendA = relay._broadcast('request', rid);
-        const sendB = relay._broadcast('request', rid);
+        const sendA = relay.broadcast('request', rid);
+        const sendB = relay.broadcast('request', rid);
 
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));

@@ -229,7 +229,7 @@ class CrossChainEngine extends EventEmitter {
             // subscribes to 'attestation:finalized', so its swap_records rows sat at
             // 'initiated' forever, and a repeat request re-ran the whole path instead
             // of short-circuiting on the finalized ring.
-            this._markFinalized(attestationId);
+            this.markFinalized(attestationId);
             this.emit('attestation:finalized', attestation);
             return attestation;
         }
@@ -266,7 +266,7 @@ class CrossChainEngine extends EventEmitter {
 
             // Add own PREPARE
             // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see _addVote).
-            let selfPkOnPropose = this._selfPubkey();
+            let selfPkOnPropose = this.selfPubkey();
             if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
             this.pendingAttestations.set(attestationId, pending);
 
@@ -286,7 +286,7 @@ class CrossChainEngine extends EventEmitter {
                 destChain, confirmations, digest, btcBlockHeight
             });
 
-            this._checkPrepareQuorum(attestationId);
+            this.checkPrepareQuorum(attestationId);
         });
     }
 
@@ -320,7 +320,7 @@ class CrossChainEngine extends EventEmitter {
     // envelope MUST carry its registered key's signature), so this resolves the identity
     // that actually signed rather than a claim. Own addr falls back to the local identity
     // for a hub absent from its own registry. Mirrors OracleConsensus._resolveSenderPubkey.
-    _resolveSenderPubkey(sender) {
+    resolveSenderPubkey(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         let pk = (registry && typeof registry.get === 'function') ? registry.get(sender) : null;
         if (!pk && this.peerManager && sender === this.peerManager.validatorAddr) {
@@ -332,15 +332,15 @@ class CrossChainEngine extends EventEmitter {
 
     // This hub's own signing key, for seeding its own vote into a key-keyed
     // prepare/commit set. Null only on a hub that cannot sign a vote anyway.
-    _selfPubkey() {
-        return this._resolveSenderPubkey(this.peerManager && this.peerManager.validatorAddr);
+    selfPubkey() {
+        return this.resolveSenderPubkey(this.peerManager && this.peerManager.validatorAddr);
     }
 
     // Record one peer's vote in a key-keyed set. The envelope has already cleared
     // _isKnownSender, so it carries a proven key. N envelopes from ONE key collapse
     // to a single entry however many distinct senders they name, which is what
     // bounds count-mode forgery here.
-    _addVote(voteSet, envelope) {
+    addVote(voteSet, envelope) {
         let pk = provenPubkey(envelope);
         if (pk) voteSet.add(pk);
     }
@@ -509,8 +509,8 @@ class CrossChainEngine extends EventEmitter {
         }
 
         let pending = this.pendingAttestations.get(attestationId);
-        this._addVote(pending.prepares, envelope);
-        let selfPkOnAccept = this._selfPubkey();
+        this.addVote(pending.prepares, envelope);
+        let selfPkOnAccept = this.selfPubkey();
         if (selfPkOnAccept) pending.prepares.add(selfPkOnAccept);
 
         // Send PREPARE
@@ -518,7 +518,7 @@ class CrossChainEngine extends EventEmitter {
             attestationId, digest
         });
 
-        this._checkPrepareQuorum(attestationId);
+        this.checkPrepareQuorum(attestationId);
     }
 
     _handlePrepare(envelope) {
@@ -534,8 +534,8 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;
 
-        this._addVote(pending.prepares, envelope);
-        this._checkPrepareQuorum(attestationId);
+        this.addVote(pending.prepares, envelope);
+        this.checkPrepareQuorum(attestationId);
     }
 
     _handleCommit(envelope) {
@@ -551,8 +551,8 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;
 
-        this._addVote(pending.commits, envelope);
-        this._checkCommitQuorum(attestationId);
+        this.addVote(pending.commits, envelope);
+        this.checkCommitQuorum(attestationId);
     }
 
     // --- Source-action verification ---
@@ -603,7 +603,7 @@ class CrossChainEngine extends EventEmitter {
         return resp.data ? resp.data.result : null;
     }
 
-    _checkPrepareQuorum(attestationId) {
+    checkPrepareQuorum(attestationId) {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
@@ -614,7 +614,7 @@ class CrossChainEngine extends EventEmitter {
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (this._countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
             pending._commitSent = true;
-            let selfPkOnCommit = this._selfPubkey();
+            let selfPkOnCommit = this.selfPubkey();
             if (selfPkOnCommit) pending.commits.add(selfPkOnCommit);
 
             this.peerManager.broadcast(XCHAIN_ATTEST_COMMIT, {
@@ -622,11 +622,11 @@ class CrossChainEngine extends EventEmitter {
                 digest:         pending.digest
             });
 
-            this._checkCommitQuorum(attestationId);
+            this.checkCommitQuorum(attestationId);
         }
     }
 
-    _checkCommitQuorum(attestationId) {
+    checkCommitQuorum(attestationId) {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
@@ -651,7 +651,7 @@ class CrossChainEngine extends EventEmitter {
             this._storeWithRetry(attestation)
                 .then(() => {
                     if (pending.timer) clearTimeout(pending.timer);
-                    this._markFinalized(attestationId);
+                    this.markFinalized(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
                     console.log('CrossChain: Attestation finalized: ' + attestationId +
@@ -786,7 +786,7 @@ class CrossChainEngine extends EventEmitter {
     // Record a finalized attestation id under the bounded FIFO ring (R2-CCF4).
     // Evicts the oldest id once the window is full so the set cannot grow without
     // limit over the process lifetime.
-    _markFinalized(attestationId) {
+    markFinalized(attestationId) {
         if (this.finalized.has(attestationId)) return;
         this.finalized.add(attestationId);
         this._finalizedOrder.push(attestationId);

@@ -951,7 +951,7 @@ describe('CrossChainEngine', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest first', function () {
             engine.finalizedMax = 5;
-            for (let i = 0; i < 20; i++) engine._markFinalized('att:' + i);
+            for (let i = 0; i < 20; i++) engine.markFinalized('att:' + i);
             expect(engine.finalized.size).to.equal(5);
             expect(engine._finalizedOrder.length).to.equal(5);
             // Oldest evicted, newest 5 (att:15..att:19) retained.
@@ -963,9 +963,9 @@ describe('CrossChainEngine', function () {
 
         it('is idempotent for a repeated id (no double-count, no double-evict)', function () {
             engine.finalizedMax = 3;
-            engine._markFinalized('a');
-            engine._markFinalized('a');
-            engine._markFinalized('a');
+            engine.markFinalized('a');
+            engine.markFinalized('a');
+            engine.markFinalized('a');
             expect(engine.finalized.size).to.equal(1);
             expect(engine._finalizedOrder).to.deep.equal(['a']);
         });

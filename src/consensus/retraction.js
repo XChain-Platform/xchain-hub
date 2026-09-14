@@ -186,7 +186,7 @@ class RetractionConsensus {
         let quorum   = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         if(snapCount <= 1){
-            await this._finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
+            await this.finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
             return;
         }
 
@@ -221,7 +221,7 @@ class RetractionConsensus {
         if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
 
         this.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
-        this._checkQuorum(id);
+        this.checkQuorum(id);
     }
 
     broadcastUnsigned(evt){
@@ -233,7 +233,7 @@ class RetractionConsensus {
         switch(envelope.type){
             case XRETRACT_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
             case XRETRACT_SIGN:      this._handleSign(envelope); break;
-            case XRETRACT_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
+            case XRETRACT_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
         }
     }
 
@@ -306,10 +306,10 @@ class RetractionConsensus {
         if(!pending.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(pending.canonical, String(d.sig || ''), pubkey)) return;
         pending.signatures.set(pubkey, String(d.sig));
-        this._checkQuorum(id);
+        this.checkQuorum(id);
     }
 
-    _checkQuorum(id){
+    checkQuorum(id){
         let pending = this.pending.get(id);
         if(!pending || pending.done) return;
         let met = pending.weighted
@@ -323,14 +323,14 @@ class RetractionConsensus {
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XRETRACT_FINALIZED, { retraction: pending.evt, signatures: sigs });
-        this._finalize(pending.evt, pending.canonical, id, sigs, true)
+        this.finalize(pending.evt, pending.canonical, id, sigs, true)
             .catch(e => console.error('RetractionConsensus: finalize error: ' + (e && e.message)));
     }
 
     // Every hub streams the finalized signed deletion to ITS OWN mirror
     // subscribers (each hub serves its own indexer fleet), after re-verifying
     // the quorum independently - a Byzantine initiator cannot shortcut this.
-    async _handleFinalized(envelope){
+    async handleFinalized(envelope){
         let d   = envelope.data;
         let evt = this.normalizeRetraction(d.retraction);
         if(!evt || !Array.isArray(d.signatures)) return;
@@ -360,7 +360,7 @@ class RetractionConsensus {
             ? swq.meetsStakeThreshold(vset, sigs.map(s => s.pubkey))
             : (sigs.length >= quorum);
         if(!met) return;                                           // sub-quorum, ignore
-        await this._finalize(evt, canonical, id, sigs, false);
+        await this.finalize(evt, canonical, id, sigs, false);
     }
 
     // Mirrors verify against the capability_snapshots rows at snapshot_block,
@@ -384,7 +384,7 @@ class RetractionConsensus {
     // duplicate FINALIZED arriving mid-await from streaming the same deletion twice.
     // forgetFinalized on the error paths is what makes that ordering safe.
     // Returns true when the signed deletion was actually streamed.
-    async _finalize(evt, canonical, id, sigs, isInitiator){
+    async finalize(evt, canonical, id, sigs, isInitiator){
         this.rememberFinalized(id);
         let label = evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
                     ' (snapshot ' + evt.snapshot_block + ')';

@@ -688,23 +688,23 @@ describe('OracleConsensus', function () {
 
         it('false for a null snapshot (indexer-unreachable degradation path)', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._isEmptyFederationSnapshot(null)).to.be.false;
+            expect(oc.isEmptyFederationSnapshot(null)).to.be.false;
         });
 
         it('true for an empty snapshot when federated (>= 2 registered validators)', function () {
             oc.setValidatorSet(VALIDATORS_3);   // _getQuorum() = 2
-            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
+            expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
         });
 
         it('false for an empty snapshot when single-node (no validators, no peers)', function () {
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);       // _getQuorum() = 0
-            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
+            expect(oc.isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
         });
 
         it('false for a non-empty snapshot even when federated', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._isEmptyFederationSnapshot({ validators: [{ pubkey: 'aa' }], count: 1 })).to.be.false;
+            expect(oc.isEmptyFederationSnapshot({ validators: [{ pubkey: 'aa' }], count: 1 })).to.be.false;
         });
     });
 
@@ -737,8 +737,8 @@ describe('OracleConsensus', function () {
 
         it('count mode: vote-set size vs the round\'s locked quorum', function () {
             let pending = { weighted: false, quorum: 3, signatures: new Map() };
-            expect(oc._quorumMet(pending, new Set(['a', 'b']))).to.equal(false);
-            expect(oc._quorumMet(pending, new Set(['a', 'b', 'c']))).to.equal(true);
+            expect(oc.quorumMet(pending, new Set(['a', 'b']))).to.equal(false);
+            expect(oc.quorumMet(pending, new Set(['a', 'b', 'c']))).to.equal(true);
         });
 
         it('weighted mode: tallies SIGNER STAKE from the signatures map, ignoring the address vote set', function () {
@@ -755,13 +755,13 @@ describe('OracleConsensus', function () {
             // Even a full address vote set cannot finalize.
             let sybilPending = { weighted: true, validators, quorum: 0,
                 signatures: new Map(sybils.map(pk => [pk, 'sig'])) };
-            expect(oc._quorumMet(sybilPending, new Set(sybils))).to.equal(false);
+            expect(oc.quorumMet(sybilPending, new Set(sybils))).to.equal(false);
 
             // The whale alone clears it, despite an EMPTY address vote set, proving
             // the tally is over signer stake, not the prepares/commits sets.
             let whalePending = { weighted: true, validators, quorum: 0,
                 signatures: new Map([['a'.repeat(64), 'sig']]) };
-            expect(oc._quorumMet(whalePending, new Set())).to.equal(true);
+            expect(oc.quorumMet(whalePending, new Set())).to.equal(true);
         });
     });
 
@@ -1737,7 +1737,7 @@ describe('OracleConsensus', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest rounds first', function () {
             oc.finalizedMax = 4;
-            for (let r = 1; r <= 20; r++) oc._markFinalized(r);
+            for (let r = 1; r <= 20; r++) oc.markFinalized(r);
             expect(oc.finalized.size).to.equal(4);
             expect(oc.finalized.has(1)).to.be.false;
             expect(oc.finalized.has(16)).to.be.false;
@@ -1747,8 +1747,8 @@ describe('OracleConsensus', function () {
 
         it('is idempotent for a repeated round', function () {
             oc.finalizedMax = 3;
-            oc._markFinalized(9);
-            oc._markFinalized(9);
+            oc.markFinalized(9);
+            oc.markFinalized(9);
             expect(oc.finalized.size).to.equal(1);
             expect(oc._finalizedOrder).to.deep.equal([9]);
         });

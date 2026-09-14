@@ -296,7 +296,7 @@ describe('OraclePublisher', function () {
             fsMock.readFileSync.throws(new Error('ENOENT'));
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            expect(pub._readQueue()).to.deep.equal([]);
+            expect(pub.readQueue()).to.deep.equal([]);
         });
 
         it('parses valid JSONL entries', function () {
@@ -305,7 +305,7 @@ describe('OraclePublisher', function () {
             fsMock.readFileSync.returns(JSON.stringify(e1) + '\n' + JSON.stringify(e2) + '\n');
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let entries = pub._readQueue();
+            let entries = pub.readQueue();
             expect(entries).to.have.length(2);
             expect(entries[0].round).to.equal(1);
         });
@@ -314,7 +314,7 @@ describe('OraclePublisher', function () {
             fsMock.readFileSync.returns('INVALID_JSON\n' + JSON.stringify({ round: 1 }) + '\n');
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let entries = pub._readQueue();
+            let entries = pub.readQueue();
             expect(entries).to.have.length(1);
         });
 
@@ -322,7 +322,7 @@ describe('OraclePublisher', function () {
             fsMock.readFileSync.returns('\n\n' + JSON.stringify({ round: 1 }) + '\n\n');
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let entries = pub._readQueue();
+            let entries = pub.readQueue();
             expect(entries).to.have.length(1);
         });
     });
@@ -334,7 +334,7 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             let entries = [{ round: 1 }, { round: 2 }];
-            pub._rewriteQueue(entries);
+            pub.rewriteQueue(entries);
             expect(fsMock.writeSync.called).to.be.true;
             let written = fsMock.writeSync.firstCall.args[1];
             expect(written).to.include('{"round":1}');
@@ -344,7 +344,7 @@ describe('OraclePublisher', function () {
         it('writes empty string for empty entries', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            pub._rewriteQueue([]);
+            pub.rewriteQueue([]);
             let written = fsMock.writeSync.firstCall.args[1];
             expect(written).to.equal('');
         });
@@ -353,7 +353,7 @@ describe('OraclePublisher', function () {
             fsMock.openSync.throws(new Error('disk full'));
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            pub._rewriteQueue([{ round: 1 }]); // must not throw
+            pub.rewriteQueue([{ round: 1 }]); // must not throw
         });
     });
 

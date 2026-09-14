@@ -265,7 +265,7 @@ class AttestationPublisher {
         // Load the durable at-most-once markers BEFORE the crash-replay
         // sweep below, or that first sweep is exactly the pass that re-broadcasts a
         // response the pre-crash process already sent.
-        await this._hydratePublishedMarkers().catch(err =>
+        await this.hydratePublishedMarkers().catch(err =>
             console.error('AttestationPublisher: durable publish-marker hydration failed; the in-process guard is ' +
                           'the only cover this lifetime: ' + (err && err.message ? err.message : err)));
 
@@ -496,7 +496,7 @@ class AttestationPublisher {
             this._ambiguousSends.delete(rid);
             this._recordSpend(rid, result && result.txid, 'live');   // durable spend audit
             this._publishedRequests.mark(this._publicationKey(rid, responseStatus));
-            await this._markPublished(rid, result && result.txid, responseStatus);   // restart-surviving marker
+            await this.markPublished(rid, result && result.txid, responseStatus);   // restart-surviving marker
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
             this._broadcastFailed++;
@@ -506,7 +506,7 @@ class AttestationPublisher {
             // the sweep defers re-broadcast (see _processQueue) instead of blindly
             // spending a second fee. Definitive pre-send errors leave no mark and retry
             // normally.
-            if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
+            if (this.isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
                 // COMMIT, not release: a fee may have been paid, so the window must be
                 // charged for it. Releasing here hands the ceiling back an allowance a
                 // real spend already consumed, and the next request spends past it.
@@ -610,7 +610,7 @@ class AttestationPublisher {
     // rather than spend on an unproven request; a hub whose schema reconciliation has
     // not yet added the per-outcome columns lands here too, and defers rather than
     // spending against an identity it cannot read.
-    async _getPublishedMarker(rid){
+    async getPublishedMarker(rid){
         let db = this._db();
         if (!db) return null;
         let rows = await db.findAttestPublishedRequestsByRequestId(rid);
@@ -622,7 +622,7 @@ class AttestationPublisher {
     // publication already completed, so a crash mid-send of a second response is
     // quarantined rather than replayed for a second fee. Throws on a DB error so the
     // caller fails closed. No-op when no DB is wired.
-    async _recordPublishIntent(rid, status){
+    async recordPublishIntent(rid, status){
         let db = this._db();
         if (!db) return;
         await db.setAttestPublishedRequest(rid, String(status || 'ok'));
@@ -635,7 +635,7 @@ class AttestationPublisher {
     // column past its width. Logged, never thrown: the BTC fee is already spent, and
     // the surviving armed intent makes a restart QUARANTINE this publication instead of
     // re-broadcasting it, which is the fail-safe direction. No-op when no DB is wired.
-    async _markPublished(rid, txid, status){
+    async markPublished(rid, txid, status){
         let db = this._db();
         if (!db) return;
         let st = String(status || 'ok');
@@ -660,7 +660,7 @@ class AttestationPublisher {
     // DB error is logged and startup continues, leaving the in-process guard as the only
     // cover for this process lifetime (the behavior before this marker existed, never
     // worse).
-    async _hydratePublishedMarkers(){
+    async hydratePublishedMarkers(){
         let db = this._db();
         if (!db) return;
         let rows = await db.findAllAttestPublishedRequests();
@@ -778,7 +778,7 @@ class AttestationPublisher {
         // Invariant 2. Best-effort read; an unreadable queue returns [] and the window
         // applies on its own (an unreadable queue file is already loud elsewhere).
         let queued = [];
-        for (let entry of this._readQueue()){
+        for (let entry of this.readQueue()){
             let rid = String(entry && entry.requestId || '').toLowerCase();
             if (rid) queued.push(rid);
         }
@@ -851,7 +851,7 @@ class AttestationPublisher {
         if (!this._db()) return 'send';
         let marker;
         try {
-            marker = await this._getPublishedMarker(rid);
+            marker = await this.getPublishedMarker(rid);
         } catch (e) {
             console.error('AttestationPublisher: cannot read the durable publish marker for %s...; deferring broadcast (fail closed to avoid a duplicate BTC spend):',
                 rid.substring(0,16), e);
@@ -883,7 +883,7 @@ class AttestationPublisher {
     // not record.
     async _armPublishIntent(rid, status){
         try {
-            await this._recordPublishIntent(rid, status);
+            await this.recordPublishIntent(rid, status);
             return true;
         } catch (e) {
             console.error('AttestationPublisher: cannot record durable publish intent for %s...; deferring broadcast (fail closed):',
@@ -894,11 +894,11 @@ class AttestationPublisher {
 
     // Classify a broadcast failure (delegates to the shared classifier so
     // all four hub effectors answer "could this send have landed?" identically).
-    _isAmbiguousSendError(e){
+    isAmbiguousSendError(e){
         return isAmbiguousSendError(e);
     }
 
-    _readQueue(){
+    readQueue(){
         try {
             let raw = fs.readFileSync(this.queuePath, 'utf8');
             return raw.split('\n').filter(line => line.trim().length > 0).map(line => {
@@ -912,7 +912,7 @@ class AttestationPublisher {
     // Truncate-and-rewrite the durable queue. Returns true on a confirmed fsync'd
     // write, false on failure, so the dequeue path can tell whether a just-published
     // entry is still on disk (mirrors OraclePublisher._rewriteQueue).
-    _rewriteQueue(entries){
+    rewriteQueue(entries){
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
             let fd = fs.openSync(this.queuePath, 'w');
@@ -933,8 +933,8 @@ class AttestationPublisher {
     // published entry.
     _removeFromQueue(dropSet){
         if (!dropSet || dropSet.size === 0) return true;
-        let remaining = this._readQueue().filter(e => !dropSet.has(String(e.requestId).toLowerCase()));
-        let rewritten = this._rewriteQueue(remaining);
+        let remaining = this.readQueue().filter(e => !dropSet.has(String(e.requestId).toLowerCase()));
+        let rewritten = this.rewriteQueue(remaining);
         if (rewritten){
             // The durable queue now equals `remaining`, which holds no just-dropped
             // (published) request, so no published entry can still be on disk and the
@@ -1096,7 +1096,7 @@ class AttestationPublisher {
         }
         this._sweeping = true;
         try {
-            return await this._processQueueInner();
+            return await this.processQueueInner();
         } finally {
             this._sweeping = false;
             // Marker-table retention, not part of the broadcast pass. It runs from the
@@ -1108,7 +1108,7 @@ class AttestationPublisher {
         }
     }
 
-    async _processQueueInner(){
+    async processQueueInner(){
         // Kill switch: suppress the failover/replay sweep too, not just the
         // live path, or a paused publisher would still drain the queue and spend BTC.
         // Entries stay on the durable WAL untouched and resume only when re-enabled.
@@ -1117,7 +1117,7 @@ class AttestationPublisher {
             return;
         }
 
-        let entries = this._readQueue();
+        let entries = this.readQueue();
         if (entries.length === 0) return;
 
         // Authoritative double-broadcast guard: any request no longer in the
@@ -1240,7 +1240,7 @@ class AttestationPublisher {
                 this._publishedRequests.mark(this._publicationKey(rid, entryStatus));
                 this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
                 this._ambiguousSends.delete(rid);
-                await this._markPublished(rid, result && result.txid, entryStatus);   // restart-surviving marker
+                await this.markPublished(rid, result && result.txid, entryStatus);   // restart-surviving marker
                 this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');
                 replayed++;
                 drop.add(rid);
@@ -1251,7 +1251,7 @@ class AttestationPublisher {
                 // does: only a definitively-unsent broadcast frees budget.
                 // Mark an ambiguous replay failure so the NEXT sweep defers
                 // rather than immediately re-broadcasting a possibly-landed tx.
-                if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
+                if (this.isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
                     // COMMIT: the replay may have paid a fee, so the window is charged
                     // for it rather than handed the allowance back.
                     this.spendGuard.commit(spendToken);
@@ -1385,7 +1385,7 @@ class AttestationPublisher {
         try {
             return await this.encoder.broadcastTx(txHex);
         } catch (e) {
-            if (this._isAmbiguousSendError(e)) e.attestAmbiguousSend = true;
+            if (this.isAmbiguousSendError(e)) e.attestAmbiguousSend = true;
             throw e;
         }
     }

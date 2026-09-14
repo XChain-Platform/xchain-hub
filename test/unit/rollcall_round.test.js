@@ -362,7 +362,7 @@ describe('RollcallRound', function () {
                 JSON.stringify({ phase: 'sent', epoch: 30, kind: 'sweep', pubkey: other }) + '\n' +
                 JSON.stringify({ phase: 'sent', epoch: 60, kind: 'sweep' }) + '\n' +
                 JSON.stringify({ phase: 'sent', epoch: 90, kind: 'self',  pubkey: mine }) + '\n');
-            eng._loadSpendLog();
+            eng.loadSpendLog();
             assert.ok(!eng._committed.has('30'), 'another identity\'s spend is not this hub\'s commitment');
             assert.ok(eng._committed.has('60'), 'a record predating the pubkey field is this hub\'s own');
             assert.ok(eng._committed.has('90:self'));
@@ -843,7 +843,7 @@ describe('RollcallRound', function () {
             loadModule();
             wireRpc({ tip: 38 });
             const second = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            second._loadSpendLog();
+            second.loadSpendLog();
             await second._tick();
             assert.strictEqual(second.hub.oraclePublisher.broadcastFn.callCount, 0);
         });

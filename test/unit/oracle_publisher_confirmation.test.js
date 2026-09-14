@@ -249,7 +249,7 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx1', 0)]);
 
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             let stats = h.p.getStats();
             expect(stats.unconfirmedPublishes).to.equal(1);
@@ -264,11 +264,11 @@ describe('OraclePublisher landing guards', function () {
         it('clears the flag once the transaction is confirmed', async function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx1', 0)]);
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
             expect(h.p.getStats().unconfirmedPublishes).to.equal(1);
 
             h.encoder.serve([utxo('tx1', 3)]);
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             let stats = h.p.getStats();
             expect(stats.unconfirmedPublishes).to.equal(0);
@@ -284,7 +284,7 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx2', 2)]);
 
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             expect(h.p.getStats().unconfirmedPublishes).to.equal(0);
             expect(h.p.getStats().confirmedPublishes).to.equal(1);
@@ -294,7 +294,7 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx2', 0), utxo('tx3', 0)]);
 
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             expect(h.p.getStats().unconfirmedPublishes).to.equal(1);
             expect(h.p.getStats().oldestUnconfirmedTxid).to.equal('tx1');
@@ -304,7 +304,7 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)], cfg: { ORACLE_PUBLISH_CONFIRM_STALE_MS: 0 } });
             await publishThen(h, [utxo('tx1', 0)]);
 
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             let diag = logs.warn.filter(w => w.includes('UNCONFIRMED_PUBLISH'));
             expect(diag).to.have.length(1);
@@ -315,7 +315,7 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx1', 0)]);
 
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             expect(logs.warn.filter(w => w.includes('UNCONFIRMED_PUBLISH'))).to.have.length(0);
             expect(h.p.getStats().unconfirmedPublishes).to.equal(1);
@@ -325,8 +325,8 @@ describe('OraclePublisher landing guards', function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             await publishThen(h, [utxo('tx1', 0)]);
 
-            await h.p._checkPublishedConfirmations();
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             expect(h.encoder.createTx.called).to.be.false;
             expect(h.encoder.broadcastTx.called).to.be.false;
@@ -353,7 +353,7 @@ describe('OraclePublisher landing guards', function () {
             await h.p._processQueue();
 
             h.encoder.getUtxos = sinon.stub().rejects(new Error('encoder unreachable'));
-            await h.p._checkPublishedConfirmations();   // must not throw
+            await h.p.checkPublishedConfirmations();   // must not throw
 
             let stats = h.p.getStats();
             expect(stats.unconfirmedPublishes).to.equal(1);
@@ -367,7 +367,7 @@ describe('OraclePublisher landing guards', function () {
             await h.p._processQueue();
 
             h.encoder.serve([utxo('tx1', null)]);
-            await h.p._checkPublishedConfirmations();
+            await h.p.checkPublishedConfirmations();
 
             expect(h.p.getStats().unconfirmedPublishes).to.equal(1);
             expect(h.p.getStats().confirmationCheckFailures).to.equal(1);
@@ -379,10 +379,10 @@ describe('OraclePublisher landing guards', function () {
             // on its own; nothing here may throw out of the timer.
             let db = { doQuery: sinon.stub().rejects(new Error('DB down')) };
             let h  = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)], db: db });
-            h.p._notePendingConfirmation(5, 'tx1');
+            h.p.notePendingConfirmation(5, 'tx1');
 
             h.encoder.serve([utxo('tx1', 4)]);
-            await h.p._checkPublishedConfirmations();   // must not throw
+            await h.p.checkPublishedConfirmations();   // must not throw
 
             expect(h.p.getStats().unconfirmedPublishes).to.equal(0);
             expect(h.p.getStats().confirmedPublishes).to.equal(1);
@@ -420,7 +420,7 @@ describe('OraclePublisher landing guards', function () {
         it('clears a confirmation on its own schedule', async function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)], cfg: { ORACLE_PUBLISH_CONFIRM_CHECK_MS: 5 } });
             await h.p.start();
-            h.p._notePendingConfirmation(5, 'tx1');
+            h.p.notePendingConfirmation(5, 'tx1');
             h.encoder.serve([utxo('tx1', 1)]);
 
             await waitUntil(() => h.p.getStats().unconfirmedPublishes === 0,

@@ -281,7 +281,7 @@ class AttestationBatchPublisher {
         }
 
         this._running = true;
-        this._armWindowTimer();
+        this.armWindowTimer();
         console.log('AttestationBatchPublisher started (network: ' + this.network +
                     ', window: ' + this.windowS + 's' +
                     (this.windowS === ATTEST_BATCH_WINDOW_S ? '' : ' [regtest override]') +
@@ -338,13 +338,13 @@ class AttestationBatchPublisher {
     // Re-armed from inside its own callback rather than on an interval, because the
     // boundary is a wall-clock instant: an interval started mid-window drifts off it
     // and would close windows at arbitrary offsets on every hub.
-    _armWindowTimer(){
+    armWindowTimer(){
         if(this._windowTimer) clearTimeout(this._windowTimer);
         this._windowTimer = setTimeout(() => {
             this._windowTimer = null;
             this.sweep()
                 .catch(e => console.error('AttestationBatchPublisher: window sweep failed: ' + (e && e.message)))
-                .then(() => { if(this._running) this._armWindowTimer(); });
+                .then(() => { if(this._running) this.armWindowTimer(); });
         }, this.msToNextBoundary());
         // Never hold a process open for a publishing cadence: the windows a stopped hub
         // misses are picked up by the catch-up on its next start.
@@ -865,11 +865,11 @@ class AttestationBatchPublisher {
                 btc_block_height: window.btc_block_height,
                 rows:             this._wireRows(window.rows)
             });
-            this._checkSignQuorum();
+            this.checkSignQuorum();
         });
     }
 
-    _checkSignQuorum(){
+    checkSignQuorum(){
         let round = this._signRound;
         if(!round || round.done) return;
         let met = round.weighted
@@ -914,17 +914,17 @@ class AttestationBatchPublisher {
         let windowStart = Number(d.window_start), windowEnd = Number(d.window_end);
         if(!Number.isInteger(windowStart) || !Number.isInteger(windowEnd) ||
            windowStart < 0 || windowEnd !== windowStart + this.windowS) {
-            this._refuse(windowStart, 'window bounds are not this hub\'s cadence');
+            this.refuse(windowStart, 'window bounds are not this hub\'s cadence');
             return;
         }
         // Bound the proposed row list BEFORE any DB work: the count is proposer-chosen
         // and an unbounded one is a query-cost amplifier on every attestation validator.
         if(!Array.isArray(d.rows) || d.rows.length > abw.ATTEST_BATCH_MAX_ROWS){
-            this._refuse(windowStart, 'row list is missing or over the consensus cap');
+            this.refuse(windowStart, 'row list is missing or over the consensus cap');
             return;
         }
         if(Number(d.row_count) !== d.rows.length){
-            this._refuse(windowStart, 'row_count does not match the rows sent');
+            this.refuse(windowStart, 'row_count does not match the rows sent');
             return;
         }
 
@@ -936,7 +936,7 @@ class AttestationBatchPublisher {
         let myTip  = await this._resolveAnchor();
         if(!Number.isInteger(anchor) || anchor <= 0 || myTip === null ||
            anchor > myTip || anchor < myTip - ANCHOR_MAX_LAG_BLOCKS){
-            this._refuse(windowStart, 'proposed anchor ' + anchor + ' is outside this hub\'s bounds (tip ' +
+            this.refuse(windowStart, 'proposed anchor ' + anchor + ' is outside this hub\'s bounds (tip ' +
                          (myTip === null ? 'unresolved: ' + this._anchorFailure : myTip) +
                          ', max lag ' + ANCHOR_MAX_LAG_BLOCKS + ')',
                          myTip === null ? 'no_chain_tip' : null);
@@ -948,7 +948,7 @@ class AttestationBatchPublisher {
         let set = await this._resolveAttestationSet(anchor);
         let me  = this.identity.getPubkeyHex().toLowerCase();
         if(!set || !set.some(v => v.pubkey === me)){
-            this._refuse(windowStart, 'this hub holds no attestation capability at anchor ' + anchor);
+            this.refuse(windowStart, 'this hub holds no attestation capability at anchor ' + anchor);
             return;
         }
         // Same rows the leader wrote, from this hub's own resolution (deterministic,
@@ -959,12 +959,12 @@ class AttestationBatchPublisher {
         try {
             mine = await this._selectWindowRows(windowStart, windowEnd);
         } catch(e){
-            this._refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
+            this.refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
             return;
         }
         let verdict = this._matchesLocalWindow(d.rows, mine);
         if(!verdict.ok){
-            this._refuse(windowStart, verdict.why);
+            this.refuse(windowStart, verdict.why);
             return;
         }
 
@@ -1046,13 +1046,13 @@ class AttestationBatchPublisher {
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
-        this._checkSignQuorum();
+        this.checkSignQuorum();
     }
 
     // reasonClass separates a distinct, actionable shape (no chain tip resolved at
     // all, so this hub refuses every proposal it is ever handed) from the generic
     // total, which mixes it with ordinary content and cadence disagreements.
-    _refuse(windowStart, why, reasonClass){
+    refuse(windowStart, why, reasonClass){
         this.stats.signRefusals++;
         if(reasonClass === 'no_chain_tip') this.stats.signRefusalsNoChainTip++;
         console.warn('AttestationBatchPublisher: refusing to co-sign the batch for window ' +

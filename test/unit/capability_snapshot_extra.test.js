@@ -318,7 +318,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             let now  = Date.now();
             snap.cache.set('old:1',  { expiresAt: now - 1 });
             snap.cache.set('fresh:2', { expiresAt: now + 10000 });
-            snap._prune(now);
+            snap.prune(now);
             expect(snap.cache.has('old:1')).to.be.false;
             expect(snap.cache.has('fresh:2')).to.be.true;
         });

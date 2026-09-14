@@ -278,11 +278,11 @@ class OracleBatchSigner {
                 btc_block_height: anchor,
                 rounds:           rounds
             });
-            this._checkSignQuorum();
+            this.checkSignQuorum();
         });
     }
 
-    _checkSignQuorum(){
+    checkSignQuorum(){
         let round = this._signRound;
         if(!round || round.done) return;
         let met = round.weighted
@@ -340,12 +340,12 @@ class OracleBatchSigner {
         try {
             mine = await this._deriveWindow(first, last);
         } catch(e){
-            this._refuse(first, last, 'local price_snapshots unreadable (' + (e && e.message) + ')');
+            this.refuse(first, last, 'local price_snapshots unreadable (' + (e && e.message) + ')');
             return;
         }
         // No finalized round of our own in the window: we have nothing to attest with.
         // This is the honest "the whole window is skipped here" case as well.
-        if(mine.length === 0){ this._refuse(first, last, 'no finalized rounds in the window locally'); return; }
+        if(mine.length === 0){ this.refuse(first, last, 'no finalized rounds in the window locally'); return; }
 
         // A round this hub ingested from a batch that ALREADY LANDED cannot be
         // re-derived here. PriceAggregator.receiveBatch pins
@@ -358,7 +358,7 @@ class OracleBatchSigner {
         // published. Say so instead: an already-landed round is not signable content.
         let landed = mine.filter(r => r.batchSourced).map(r => r.round);
         if(landed.length){
-            this._refuse(first, last, 'round(s) ' + landed.join(',') + ' here came from a batch that ' +
+            this.refuse(first, last, 'round(s) ' + landed.join(',') + ' here came from a batch that ' +
                 'already landed on chain, so their own BTC anchor is no longer recoverable from ' +
                 'price_snapshots (reference_block holds the landing block); this window has ' +
                 'already published and there is nothing left to co-sign');
@@ -377,7 +377,7 @@ class OracleBatchSigner {
         // ONCE on the batch anchor, so signing a straddling window would judge its
         // earlier rounds under a rule set they never finalized under.
         if(this._straddlesArmedOracleFlagDay(firstAnchor, myAnchor)){
-            this._refuse(first, last, 'window straddles an armed oracle flag day (anchors ' +
+            this.refuse(first, last, 'window straddles an armed oracle flag day (anchors ' +
                          firstAnchor + '..' + myAnchor + ')');
             return;
         }
@@ -388,12 +388,12 @@ class OracleBatchSigner {
         try {
             signingSet = await this._resolvePriceSet(myAnchor);
         } catch(e){
-            this._refuse(first, last, 'price capability set unresolvable at anchor ' + myAnchor);
+            this.refuse(first, last, 'price capability set unresolvable at anchor ' + myAnchor);
             return;
         }
         let me = this.identity.getPubkeyHex().toLowerCase();
         if(!signingSet.some(v => v.pubkey === me)){
-            this._refuse(first, last, 'this hub does not hold `price` at anchor ' + myAnchor);
+            this.refuse(first, last, 'this hub does not hold `price` at anchor ' + myAnchor);
             return;
         }
 
@@ -409,7 +409,7 @@ class OracleBatchSigner {
             ours   = this._canonical(first, last, myAnchor, mine);
             theirs = this._canonical(d.first_round, d.last_round, d.btc_block_height, d.rounds);
         } catch(e){
-            this._refuse(first, last, 'canonical build failed (' + (e && e.message) + ')');
+            this.refuse(first, last, 'canonical build failed (' + (e && e.message) + ')');
             return;
         }
         if(ours !== theirs){
@@ -420,7 +420,7 @@ class OracleBatchSigner {
             // and field is the difference between "the federation disagrees" and a
             // fix. Never dump the pair lists themselves - a 37-pair round would put
             // kilobytes per refusal into the log.
-            this._refuse(first, last, 'proposal does not match this hub\'s own finalized rounds (' +
+            this.refuse(first, last, 'proposal does not match this hub\'s own finalized rounds (' +
                          this._describeMismatch(d, mine, myAnchor) + ')');
             return;
         }
@@ -447,12 +447,12 @@ class OracleBatchSigner {
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
-        this._checkSignQuorum();
+        this.checkSignQuorum();
     }
 
     // ---------------------------------------------------------------- helpers
 
-    _refuse(first, last, why){
+    refuse(first, last, why){
         this.stats.batchSignRefusals++;
         console.warn('OracleBatchSigner: refusing to co-sign batch [' + first + ',' + last + ']: ' + why);
     }

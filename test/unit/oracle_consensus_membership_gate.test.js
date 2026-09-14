@@ -102,10 +102,10 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
         };
         // One member + two non-member votes: quorum NOT met.
         let votes = new Set([VALIDATORS_3[0].pubkey, NONMEMBER.pubkey, makeValidator(8).pubkey]);
-        expect(oc._quorumMet(pending, votes)).to.be.false;
+        expect(oc.quorumMet(pending, votes)).to.be.false;
         // Second member joins: met.
         votes.add(VALIDATORS_3[1].pubkey);
-        expect(oc._quorumMet(pending, votes)).to.be.true;
+        expect(oc.quorumMet(pending, votes)).to.be.true;
     });
 
     it('count-mode quorum counts one key once however many addrs carried it', function () {
@@ -116,13 +116,13 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
             memberPubkeys: new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey])
         };
         let votes = new Set([VALIDATORS_3[0].addr, twinAddr]);
-        expect(oc._quorumMet(pending, votes)).to.be.false; // one distinct key, not two
+        expect(oc.quorumMet(pending, votes)).to.be.false; // one distinct key, not two
     });
 
     it('legacy behavior preserved when no snapshot is available (memberPubkeys null)', function () {
         let pending = { weighted: false, quorum: 2, signatures: new Map(), memberPubkeys: null };
         let votes = new Set([VALIDATORS_3[0].addr, NONMEMBER.addr]);
-        expect(oc._quorumMet(pending, votes)).to.be.true; // raw sender count, unchanged
+        expect(oc.quorumMet(pending, votes)).to.be.true; // raw sender count, unchanged
     });
 
     // item 4941: price_snapshots.validator_count is the endorsement breadth operators,
