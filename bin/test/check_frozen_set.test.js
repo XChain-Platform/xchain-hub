@@ -112,6 +112,13 @@ describe('bin/check-frozen-set.js', function () {
             ]);
         });
     });
+});
+
+// The blocks below carry the same suite title on purpose: the readability limit is
+// per callback, so one long body becomes several same-titled blocks and every full
+// test title stays exactly what it was.
+describe('bin/check-frozen-set.js', function () {
+    this.timeout(60000);
 
     describe('a carrier moved into a subdirectory', () => {
         let root;
@@ -148,6 +155,10 @@ describe('bin/check-frozen-set.js', function () {
                 'a check that stays red after the repair is a check nobody can act on');
         });
     });
+});
+
+describe('bin/check-frozen-set.js', function () {
+    this.timeout(60000);
 
     describe('a carrier the gate list does not name yet', () => {
         let root;

@@ -71,6 +71,16 @@ describe('bin/sibling-reference-map.js', function () {
                 'a move has to repoint every element, so one "dynamic, ask a human" line would hide both');
         });
 
+    });
+});
+
+// The blocks below carry the same suite title on purpose: the readability limit is
+// per callback, so one long body becomes several same-titled blocks and every full
+// test title stays exactly what it was.
+describe('bin/sibling-reference-map.js', function () {
+    this.timeout(120000);
+
+    describe('the indirect idioms', () => {
         it('reports a tail it cannot resolve instead of guessing at it', () => {
             const source = [
                 "const path = require('path');",
@@ -94,6 +104,10 @@ describe('bin/sibling-reference-map.js', function () {
             assert.deepStrictEqual(hits, ['src/xchainPrice.js', 'src/xchainPriceQuery.js']);
         });
     });
+});
+
+describe('bin/sibling-reference-map.js', function () {
+    this.timeout(120000);
 
     describe('the computed requires', () => {
         it('names the gate carriers the rules digest loads without a literal', () => {
@@ -141,6 +155,10 @@ describe('bin/sibling-reference-map.js', function () {
             assert.strictEqual(map.referenceCount, 1);
         });
     });
+});
+
+describe('bin/sibling-reference-map.js', function () {
+    this.timeout(120000);
 
     describe('the census', () => {
         it('separates a site that breaks a build from one that only misleads a reader', () => {

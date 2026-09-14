@@ -99,6 +99,13 @@ describe('bin/reachability.js', function () {
             }
         });
     });
+});
+
+// The blocks below carry the same suite title on purpose: the readability limit is
+// per callback, so one long body becomes several same-titled blocks and every full
+// test title stays exactly what it was.
+describe('bin/reachability.js', function () {
+    this.timeout(120000);
 
     describe('the declared dynamic edges', () => {
         it('resolves every SHARED_GATES carrier to a file that exists', () => {
@@ -126,6 +133,13 @@ describe('bin/reachability.js', function () {
             }
         });
 
+    });
+});
+
+describe('bin/reachability.js', function () {
+    this.timeout(120000);
+
+    describe('the declared dynamic edges', () => {
         it('reads the db home mixins out of the index requires, and nothing else', () => {
             // The shape this repo has today. A file sitting in the home that the
             // index does not load is NOT an edge: it is a candidate, and an edge
@@ -169,6 +183,13 @@ describe('bin/reachability.js', function () {
                 'every .js beside the index, and only the .js files');
         });
 
+    });
+});
+
+describe('bin/reachability.js', function () {
+    this.timeout(120000);
+
+    describe('the declared dynamic edges', () => {
         it('reports no mixin edge, rather than throwing, when the home has none', () => {
             // A home whose index loads no mixin, and a checkout with no db home at
             // all. Neither may throw an exception that stops the sweep outright,
@@ -205,6 +226,10 @@ describe('bin/reachability.js', function () {
                 'if a literal require appears, this test has stopped proving the edge does the work');
         });
     });
+});
+
+describe('bin/reachability.js', function () {
+    this.timeout(120000);
 
     describe('the verdict', () => {
         it('keeps a module whose only caller is a bin/ script, and names the caller', () => {
@@ -241,6 +266,10 @@ describe('bin/reachability.js', function () {
                 'a bare package specifier is not a repo-local edge');
         });
     });
+});
+
+describe('bin/reachability.js', function () {
+    this.timeout(120000);
 
     describe('--root', () => {
         it('measures the checkout it is given, not the one it lives in', () => {

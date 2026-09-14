@@ -35,10 +35,14 @@ const digest   = require('../../src/consensus_rules_digest.js');
 const coins    = require('../../src/coins/index.js');
 const schema   = require('../../src/hub_schema_version.js');
 
+// The identity values under test, read once per block. A block recomputes them
+// rather than sharing one hook across blocks: the reading is pure, so a second
+// read is the same read.
+let value;
+
 describe('bin/consensus-identity.js', function () {
     this.timeout(60000);
 
-    let value;
     before(() => { value = identity.codeIdentity(); });
 
     it('reports the digest the hub itself computes', () => {
@@ -65,6 +69,16 @@ describe('bin/consensus-identity.js', function () {
         );
     });
 
+});
+
+// The blocks below carry the same suite title on purpose: the readability limit is
+// per callback, so one long body becomes several same-titled blocks and every full
+// test title stays exactly what it was.
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    before(() => { value = identity.codeIdentity(); });
+
     it('pins the coin hash per (coin, network) PAIR and not once per network', () => {
         const expected = coins.ALLOWED_COINS.length * coins.NETWORKS.length;
         assert.strictEqual(Object.keys(value.coin_consensus_pins).length, expected,
@@ -89,6 +103,12 @@ describe('bin/consensus-identity.js', function () {
     it('reports the schema version every reader checks for strict equality', () => {
         assert.strictEqual(value.hub_schema_version, schema.HUB_SCHEMA_VERSION);
     });
+});
+
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    before(() => { value = identity.codeIdentity(); });
 
     describe('compare', () => {
         it('names the gate that stopped resolving, not just the moved digest', () => {
@@ -124,6 +144,10 @@ describe('bin/consensus-identity.js', function () {
             assert.ok(differences.some((d) => d.kind === 'coin_pin' && d.field === 'BTC:regtest'));
         });
     });
+});
+
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
 
     describe('--root', () => {
         it('measures the checkout it is given, not the one it lives in', () => {

@@ -33,6 +33,13 @@ const pkg    = require('../../package.json');
 
 const SCRIPT_NAMES = Object.keys(pkg.scripts).filter((n) => n.startsWith('test') || n.startsWith('ci'));
 
+// One script's pin, one file, two titles: the smallest shape that can show a
+// declared rename, a file that stopped being collected and a title that vanished.
+const PIN = {
+    titleSets: { aaa: ['suite one', 'suite two'] },
+    scripts: { test: { files: { 'test/unit/old_name.test.js': 'aaa' } } },
+};
+
 describe('bin/suite-title-map.js', function () {
     this.timeout(60000);
 
@@ -44,6 +51,13 @@ describe('bin/suite-title-map.js', function () {
                 'the venue runs these, so a glob that stopped collecting here must be visible');
         });
     });
+});
+
+// The blocks below carry the same suite title on purpose: the readability limit is
+// per callback, so one long body becomes several same-titled blocks and every full
+// test title stays exactly what it was.
+describe('bin/suite-title-map.js', function () {
+    this.timeout(60000);
 
     describe('reading a command line', () => {
         it('keeps a quoted glob whole', () => {
@@ -95,25 +109,24 @@ describe('bin/suite-title-map.js', function () {
             assert.ok(parsed.segments[0].args.includes('@regression-p[01]'));
         });
     });
+});
+
+describe('bin/suite-title-map.js', function () {
+    this.timeout(60000);
 
     describe('comparing a tree against a pin', () => {
-        const pin = {
-            titleSets: { aaa: ['suite one', 'suite two'] },
-            scripts: { test: { files: { 'test/unit/old_name.test.js': 'aaa' } } },
-        };
-
         it('reports no difference when a rename is declared', () => {
             const fresh = {
                 titleSets: { aaa: ['suite one', 'suite two'] },
                 scripts: { test: { files: { 'test/unit/new_name.test.js': 'aaa' } } },
             };
             const renames = { 'test/unit/old_name.test.js': 'test/unit/new_name.test.js' };
-            assert.deepStrictEqual(titles.compare(pin, fresh, renames), []);
+            assert.deepStrictEqual(titles.compare(PIN, fresh, renames), []);
         });
 
         it('reports a file that quietly stopped being collected', () => {
             const fresh = { titleSets: {}, scripts: { test: { files: {} } } };
-            const differences = titles.compare(pin, fresh, {});
+            const differences = titles.compare(PIN, fresh, {});
             assert.strictEqual(differences.length, 1);
             assert.strictEqual(differences[0].kind, 'file_dropped');
             assert.strictEqual(differences[0].file, 'test/unit/old_name.test.js');
@@ -124,7 +137,7 @@ describe('bin/suite-title-map.js', function () {
                 titleSets: { bbb: ['suite one'] },
                 scripts: { test: { files: { 'test/unit/old_name.test.js': 'bbb' } } },
             };
-            const differences = titles.compare(pin, fresh, {});
+            const differences = titles.compare(PIN, fresh, {});
             assert.deepStrictEqual(differences, [{
                 script: 'test',
                 kind: 'title_dropped',
@@ -133,12 +146,19 @@ describe('bin/suite-title-map.js', function () {
             }]);
         });
 
+    });
+});
+
+describe('bin/suite-title-map.js', function () {
+    this.timeout(60000);
+
+    describe('comparing a tree against a pin', () => {
         it('reads a pin that stores title digests exactly as one that stores the text', () => {
-            const hashed = titles.toPin(pin);
+            const hashed = titles.toPin(PIN);
             assert.strictEqual(hashed.titleEncoding, 'sha256');
             assert.ok(hashed.titleSets.aaa.every((d) => /^[0-9a-f]{64}$/.test(d)),
                 'the committed pin carries digests, never title text');
-            assert.deepStrictEqual(titles.compare(hashed, pin, {}), []);
+            assert.deepStrictEqual(titles.compare(hashed, PIN, {}), []);
         });
 
         it('still names the file when one digested title no longer matches', () => {
@@ -146,7 +166,7 @@ describe('bin/suite-title-map.js', function () {
                 titleSets: { ccc: ['suite one', 'suite two, retitled'] },
                 scripts: { test: { files: { 'test/unit/old_name.test.js': 'ccc' } } },
             };
-            const differences = titles.compare(titles.toPin(pin), fresh, {});
+            const differences = titles.compare(titles.toPin(PIN), fresh, {});
             assert.deepStrictEqual(differences.map((d) => [d.kind, d.file]), [
                 ['title_dropped', 'test/unit/old_name.test.js'],
                 ['title_added', 'test/unit/old_name.test.js'],
