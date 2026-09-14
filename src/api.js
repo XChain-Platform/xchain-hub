@@ -149,7 +149,7 @@ const TELEMETRY_ADMIN_KEY      = hubConfig.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./api/hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,

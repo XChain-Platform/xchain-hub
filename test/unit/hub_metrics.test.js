@@ -16,7 +16,7 @@
 
 const { expect } = require('chai');
 
-const { installHubOracleMetrics, installHubStakeShareMetrics } = require('../../src/hub_metrics');
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('../../src/api/hub_metrics');
 const { StakeShareMonitor, evaluateStakeShare } = require('../../src/lib/stake_share_monitor.js');
 const { installObservability }    = require('../../src/observability');
 
