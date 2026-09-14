@@ -7,7 +7,7 @@
  *
  * Generates docs/openrpc.json (OpenRPC 1.3.2) for the hub's JSON-RPC API.
  * METHODS below mirrors the jsonRpcController in src/api.js (and the `auth`
- * flags mirror its WRITE_METHODS set); test/unit/openrpc-coverage.test.js
+ * flags mirror its WRITE_METHODS set); test/unit/openrpc_coverage.test.js
  * fails if either drifts.
  *
  * Run: node docs/openrpc.build.js
@@ -20,7 +20,7 @@ const path = require('path');
 // with_watermark to get row age in the hub's clock domain, so the handler's
 // return type switches from a bare array to { watermark, snapshots }. Declared
 // by hand because that switch is conditional and cannot be inferred (item
-// #4481); the drift guard in test/unit/openrpc-coverage.test.js keeps the
+// #4481); the drift guard in test/unit/openrpc_coverage.test.js keeps the
 // PARAMS honest, not the result shapes.
 const SNAPSHOTS_ARRAY = {
     type: 'array',
@@ -125,7 +125,7 @@ const BRIDGE_INVARIANT_RESULT = {
 // (item #4481): 20 of these rows once listed a synthetic envelope name, or none
 // at all, for handlers that take real named fields, so a contract-driven client
 // could not see the arguments it had to send and a rename went undetected. The
-// param-fidelity assertion in test/unit/openrpc-coverage.test.js now fails on
+// param-fidelity assertion in test/unit/openrpc_coverage.test.js now fails on
 // any re-divergence.
 const METHODS = [
     ['ping', 'Health check.', [], { result: PING_RESULT }],

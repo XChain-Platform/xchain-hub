@@ -6,7 +6,7 @@
 # so the run reports green having exercised none of them. Measured 2026-08-12,
 # that gap was 1 guard here (a venue without xchain-vm ran 3723 passing / 5
 # pending where a full local checkout runs 3724 / 4). See
-# test/unit/sibling-coverage.test.js, which reports the surface this file leaves
+# test/unit/sibling_coverage.test.js, which reports the surface this file leaves
 # uncovered; the same gap applies to a sibling that is declared but missing.
 #
 # ci-dispatch.sh ships each of these at its origin/master (falling back to local

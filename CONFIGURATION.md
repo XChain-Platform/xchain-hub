@@ -203,7 +203,7 @@ handler, governance, and attestation subsystems are **all enabled only when
 | `ORACLE_BATCH_WINDOW_ROUNDS` | No | derived | Rounds per published batch. Derived from the fee-price staleness bound rather than chosen, and an operator value above that ceiling is clamped with a warning: a window too wide leaves the newest snapshot older than `ORACLE_MAX_PRICE_AGE_SECONDS` for most of every window, and native-coin fees stop being priceable. `getStats()` reports the ceiling, the cadence and the worst-case snapshot age. |
 | `ORACLE_BATCH_GRACE_MS` | No | `300000` | How long after a window closes the leader waits before assembling it, so late rounds still land in the buffer. |
 | `ORACLE_BATCH_BUFFER_MAX_ROUNDS` | No | `4032` | Age bound on the durable buffer, so a hub whose batches never land does not grow it without limit. |
-| `ORACLE_BATCH_LANDING_RESERVE_MS` | No | see `src/lib/price_batch_cadence.js` | Time budgeted for a batch to broadcast, confirm and index, counted against the staleness bound when the window ceiling is derived. |
+| `ORACLE_BATCH_LANDING_RESERVE_MS` | No | see `src/oracle/price_batch_cadence.js` | Time budgeted for a batch to broadcast, confirm and index, counted against the staleness bound when the window ceiling is derived. |
 | `ORACLE_BATCH_CATCHUP_INTERVAL_MS` | No | `3600000` (1h) | How often a closed window that is still buffered and unpublished is re-proposed. A window whose signing round misses quorum publishes nothing and is deliberately left re-proposable; this sweep is what re-proposes it, at most four windows per pass, oldest first. `batchWindowsAwaitingRetry` in `getStats()` is the backlog, and a count that does not fall across sweeps means the federation cannot agree on the content, not that the rail is idle. |
 | `ORACLE_BATCH_SIGN_TIMEOUT_MS` | No | `15000` | How long the leader waits for co-signatures on a batch canonical before giving up on the window. Shared with the ATTEST response batch rail deliberately: the two rounds have the same shape and the same failure mode, and a second family of timeout names would be a second thing to drift. A window that reaches no quorum stays unpublished, keeps its rows and is retried with byte-identical content. |
 
@@ -511,7 +511,7 @@ derivation lives in
 [ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/anchor.md)
 ("Where the publisher constants come from"), mirrored in the `StateAnchorPublisher`
 constructor comment and pinned by
-`test/unit/StateAnchorPublisher.constant-derivations.test.js`. In short:
+`test/unit/state_anchor_publisher_constant_derivations.test.js`. In short:
 
 - **`ANCHOR_CHUNK_MAX_BYTES` = 6000** reserves head room under the protocol's
   8192-byte `MAX_ACTION_DATA_LENGTH` ceiling, because chunk 0 shares the v1/v6
@@ -678,7 +678,7 @@ different values still produce roll calls each other's indexers accept.
 ### Why those magnitudes (before you retune them)
 
 The ordering is what binds, and
-`test/unit/RollcallRound.invariants.test.js` pins both halves of it for every
+`test/unit/rollcall_round_invariants.test.js` pins both halves of it for every
 network's defaults:
 
 - **`PUBLISH_DELAY` < `SELF_PUBLISH` < `ACCEPT_WINDOW - 24`.** The 24 BTC blocks
