@@ -56,6 +56,9 @@
  ********************************************************************/
 
 'use strict';
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const DEFAULT_FAILURE_WINDOW_MS   = 24 * 60 * 60 * 1000;  // 24h per spec §8.1
 const DEFAULT_FAILURE_THRESHOLD   = 3;
@@ -187,7 +190,7 @@ class AttestationSpotChecker {
             this._reorgHandler = (evt) => {
                 let height = evt && (evt.reorgHeight != null ? evt.reorgHeight : evt.height);
                 this.rollback(height).catch(err =>
-                    console.warn('AttestationSpotChecker: rollback error: ' + (err && err.message ? err.message : err)));
+                    logger.warn('AttestationSpotChecker: rollback error: ' + (err && err.message ? err.message : err)));
             };
             reorg.on('reorg:confirmed', this._reorgHandler);
         }
@@ -196,16 +199,16 @@ class AttestationSpotChecker {
 
         let consensus = this.hub.attestationConsensus;
         if (!consensus) {
-            console.log('AttestationSpotChecker: no AttestationConsensus, skipping consensus wiring');
+            logger.info('AttestationSpotChecker: no AttestationConsensus, skipping consensus wiring');
             this.startScheduler();
             return;
         }
         this._messageHandler = (event) => {
             this.onRequestFinalized(event).catch(err =>
-                console.warn('AttestationSpotChecker: onRequestFinalized error: ' + (err && err.message ? err.message : err)));
+                logger.warn('AttestationSpotChecker: onRequestFinalized error: ' + (err && err.message ? err.message : err)));
         };
         consensus.on('request:finalized', this._messageHandler);
-        console.log('AttestationSpotChecker started (window=' + this.failureWindowMs + 'ms, threshold=' + this.failureThreshold + ')');
+        logger.info('AttestationSpotChecker started (window=' + this.failureWindowMs + 'ms, threshold=' + this.failureThreshold + ')');
         this.startScheduler();
     }
 
@@ -215,19 +218,19 @@ class AttestationSpotChecker {
         if (this._scheduler) return;
         if (!this.schedulerEnabled) return;
         if (!this._injector) {
-            console.log('AttestationSpotChecker: SPOT_CHECK_ENABLED but no injector wired; scheduler idle');
+            logger.info('AttestationSpotChecker: SPOT_CHECK_ENABLED but no injector wired; scheduler idle');
             return;
         }
         if (this.corpus.length === 0) {
-            console.log('AttestationSpotChecker: SPOT_CHECK_ENABLED but corpus empty; scheduler idle');
+            logger.info('AttestationSpotChecker: SPOT_CHECK_ENABLED but corpus empty; scheduler idle');
             return;
         }
         this._scheduler = setInterval(() => {
             this.schedulerTick().catch(err =>
-                console.warn('AttestationSpotChecker: scheduler tick error: ' + (err && err.message ? err.message : err)));
+                logger.warn('AttestationSpotChecker: scheduler tick error: ' + (err && err.message ? err.message : err)));
         }, this.intervalMs);
         if (this._scheduler.unref) this._scheduler.unref();  // never pin process liveness
-        console.log('AttestationSpotChecker scheduler started (interval=' + this.intervalMs +
+        logger.info('AttestationSpotChecker scheduler started (interval=' + this.intervalMs +
                     'ms, corpus=' + this.corpus.length + ', maxPerTick=' + this.maxPerTick + ')');
     }
 
@@ -248,12 +251,12 @@ class AttestationSpotChecker {
         // load-bearing: only this timer ever clears the flag, so a throw out of the body
         // would wedge the scheduler for the process lifetime.
         if (this._tickInFlight) {
-            console.warn('AttestationSpotChecker: injection tick still in flight; skipping this scheduler pass');
+            logger.warn('AttestationSpotChecker: injection tick still in flight; skipping this scheduler pass');
             return 0;
         }
         // Backpressure: leave headroom so injections never evict live entries.
         if (this._queue.size >= Math.floor(MAX_QUEUE_SIZE * 0.9)) {
-            console.warn('AttestationSpotChecker: spot-check queue near capacity, skipping injection tick');
+            logger.warn('AttestationSpotChecker: spot-check queue near capacity, skipping injection tick');
             return 0;
         }
         this._tickInFlight = true;
@@ -272,14 +275,14 @@ class AttestationSpotChecker {
                     let requestId = (res && (res.requestId || res.request_id))
                         || (typeof res === 'string' ? res : null);
                     if (!requestId) {
-                        console.warn('AttestationSpotChecker: injector returned no request_id for provider ' + entry.providerId);
+                        logger.warn('AttestationSpotChecker: injector returned no request_id for provider ' + entry.providerId);
                         continue;
                     }
                     this.register(requestId, entry.providerId, entry.expectedPattern);
                     this._injectedCount++;
                     injected++;
                 } catch (e) {
-                    console.warn('AttestationSpotChecker: injection failed for provider ' + entry.providerId + ': ' +
+                    logger.warn('AttestationSpotChecker: injection failed for provider ' + entry.providerId + ': ' +
                                  (e && e.message ? e.message : e));
                 }
             }
@@ -299,7 +302,7 @@ class AttestationSpotChecker {
         if (this._sweeper) return;
         this._sweeper = setInterval(() => {
             this.sweepReJudge().catch(err =>
-                console.warn('AttestationSpotChecker: re-judge sweep error: ' + (err && err.message ? err.message : err)));
+                logger.warn('AttestationSpotChecker: re-judge sweep error: ' + (err && err.message ? err.message : err)));
         }, this.rejudgeSweepMs);
         if (this._sweeper.unref) this._sweeper.unref();
     }
@@ -334,7 +337,7 @@ class AttestationSpotChecker {
             for (let [rid, rec] of Array.from(this._pendingReJudge.entries())) {
                 if (now - rec.firstSeen > this.rejudgeMaxAgeMs || rec.attempts >= REJUDGE_MAX_ATTEMPTS) {
                     this._pendingReJudge.delete(rid);
-                    console.warn('AttestationSpotChecker: giving up on deferred spot-check ' + rid.substring(0, 16) +
+                    logger.warn('AttestationSpotChecker: giving up on deferred spot-check ' + rid.substring(0, 16) +
                                  '... after ' + rec.attempts + ' attempt(s); no evidence recorded');
                     continue;
                 }
@@ -349,7 +352,7 @@ class AttestationSpotChecker {
                         { body: Buffer.from(String(rec.expectedPattern || ''), 'utf8'), meta: rec.meta }
                     ], { outcome }));
                 } catch (e) {
-                    console.warn('AttestationSpotChecker: re-judge threw for ' + rid.substring(0, 16) + '...: ' +
+                    logger.warn('AttestationSpotChecker: re-judge threw for ' + rid.substring(0, 16) + '...: ' +
                                  (e && e.message ? e.message : e));
                     continue;
                 }
@@ -359,7 +362,7 @@ class AttestationSpotChecker {
                     // remaining attempts on it.
                     if (TRANSIENT_INCONCLUSIVE.indexOf(String(outcome.reason)) < 0) {
                         this._pendingReJudge.delete(rid);
-                        console.warn('AttestationSpotChecker: deferred spot-check ' + rid.substring(0, 16) +
+                        logger.warn('AttestationSpotChecker: deferred spot-check ' + rid.substring(0, 16) +
                                      '... resolved inconclusive (reason=' + outcome.reason + '); no evidence recorded');
                     }
                     continue;
@@ -383,7 +386,7 @@ class AttestationSpotChecker {
             await this.persistStats(s.pubkey, providerId, rid, blockIndex, passed);
         }
         if (passed) return;
-        console.warn('AttestationSpotChecker: failed spot-check on ' + rid.substring(0, 16) +
+        logger.warn('AttestationSpotChecker: failed spot-check on ' + rid.substring(0, 16) +
                      '... (provider=' + providerId + ', signers=' + (signatures || []).length + ')');
         for (let s of (signatures || [])) {
             this.recordFailure(s.pubkey, rid);
@@ -465,14 +468,14 @@ class AttestationSpotChecker {
         if (entry.providerId !== event.providerId) {
             // Provider mismatch (almost certainly a bug at registration).
             // Treat as inconclusive rather than slash.
-            console.warn('AttestationSpotChecker: provider mismatch on ' + rid.substring(0, 16) +
+            logger.warn('AttestationSpotChecker: provider mismatch on ' + rid.substring(0, 16) +
                          '... (registered=' + entry.providerId + ', finalized=' + event.providerId + ')');
             return;
         }
 
         let provider = this.providerRegistry && this.providerRegistry.getModule(entry.providerId);
         if (!provider || typeof provider.agree !== 'function') {
-            console.warn('AttestationSpotChecker: no agree() on provider ' + entry.providerId + ': cannot judge spot-check');
+            logger.warn('AttestationSpotChecker: no agree() on provider ' + entry.providerId + ': cannot judge spot-check');
             return;
         }
 
@@ -511,7 +514,7 @@ class AttestationSpotChecker {
         } catch (e) {
             // A throw is a judge TRANSPORT failure, not a verdict about the round,
             // so hold it for re-judging rather than dropping the spot-check.
-            console.warn('AttestationSpotChecker: judge call threw for %s...; deferred for re-judge:', rid.substring(0, 16), e);
+            logger.warn(nodeUtil.format('AttestationSpotChecker: judge call threw for %s...; deferred for re-judge:', rid.substring(0, 16), e));
             this.deferReJudge(rid, deferRecord);
             return;
         }
@@ -522,7 +525,7 @@ class AttestationSpotChecker {
             // llm.js pauses deliberately, and no later consensus event re-judges a
             // finalized request. Hold it and let the sweep score it once the judge is
             // back. Still neutral in the meantime: no evidence is recorded either way.
-            console.warn('AttestationSpotChecker: judge unavailable on ' + rid.substring(0, 16) +
+            logger.warn('AttestationSpotChecker: judge unavailable on ' + rid.substring(0, 16) +
                          '... (reason=' + outcome.reason + '); deferred for re-judge');
             this.deferReJudge(rid, deferRecord);
             return;
@@ -537,7 +540,7 @@ class AttestationSpotChecker {
             // the two branches directly above it is also FINAL: the reason is a
             // property of this round's own bytes, so re-asking cannot change it and
             // holding the record would only burn attempts.
-            console.warn('AttestationSpotChecker: inconclusive judge verdict on ' + rid.substring(0, 16) +
+            logger.warn('AttestationSpotChecker: inconclusive judge verdict on ' + rid.substring(0, 16) +
                          '... (reason=' + outcome.reason + '); no evidence recorded');
             return;
         }
@@ -565,7 +568,7 @@ class AttestationSpotChecker {
             // publishers' post-write sweeps). Throttled and fire-and-forget inside.
             this.sweepStatsRetention();
         } catch (e) {
-            console.warn('AttestationSpotChecker: stats persist failed for ' +
+            logger.warn('AttestationSpotChecker: stats persist failed for ' +
                          String(pubkey).substring(0, 16) + '...: ' + (e && e.message ? e.message : e));
         }
     }
@@ -588,7 +591,7 @@ class AttestationSpotChecker {
         let deleted = (res && res.affectedRows) ? Number(res.affectedRows) : 0;
         if (deleted > 0) {
             this.statsPruned += deleted;
-            console.log('AttestationSpotChecker: spot-check stats retention pruned ' + deleted +
+            logger.info('AttestationSpotChecker: spot-check stats retention pruned ' + deleted +
                         ' outcome row(s) older than ' + windowSec + 's');
         }
         return deleted;
@@ -604,7 +607,7 @@ class AttestationSpotChecker {
         if (now - this._statsSweptAt < STATS_SWEEP_MIN_INTERVAL_MS) return;
         this._statsSweptAt = now;
         this._statsSweep = this._pruneStats().catch((e) => {
-            console.warn('AttestationSpotChecker: spot-check stats retention sweep failed ' +
+            logger.warn('AttestationSpotChecker: spot-check stats retention sweep failed ' +
                          '(the outcome table keeps growing until it succeeds): ' +
                          (e && e.message ? e.message : e));
             return 0;
@@ -634,12 +637,12 @@ class AttestationSpotChecker {
             let res = await db.deleteAttestationValidatorStatsAboveBlock(h);
             let removed = res && (res.affectedRows != null ? res.affectedRows : (Array.isArray(res) ? 0 : 0));
             if (removed) {
-                console.log('AttestationSpotChecker: reorg rollback removed ' + removed +
+                logger.info('AttestationSpotChecker: reorg rollback removed ' + removed +
                             ' spot-check row(s) above block ' + h);
             }
             return removed || 0;
         } catch (e) {
-            console.warn('AttestationSpotChecker: reorg rollback failed: ' + (e && e.message ? e.message : e));
+            logger.warn('AttestationSpotChecker: reorg rollback failed: ' + (e && e.message ? e.message : e));
             return 0;
         }
     }
@@ -659,7 +662,7 @@ class AttestationSpotChecker {
             let failed = Number(r.failed) || 0;
             return { total, failed, passed: total - failed };
         } catch (e) {
-            console.warn('AttestationSpotChecker: statsFor query failed: ' + (e && e.message ? e.message : e));
+            logger.warn('AttestationSpotChecker: statsFor query failed: ' + (e && e.message ? e.message : e));
             return empty;
         }
     }
@@ -688,7 +691,7 @@ class AttestationSpotChecker {
             });
             let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
             this.hub.slashDetector.recordSlashProposal(pk, 'attestation_spot_check_failure', pseudoRound, evidence)
-                .catch(e => console.warn('AttestationSpotChecker: slash record failed:', e));
+                .catch(e => logger.warn(nodeUtil.format('AttestationSpotChecker: slash record failed:', e)));
         }
     }
 

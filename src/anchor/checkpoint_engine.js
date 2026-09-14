@@ -62,6 +62,9 @@ const snapWrite         = require('../lib/capability_snapshot_write.js');
 const coins             = require('../coins');
 const { noteCheckpointStalled } = require('../consensus/diagnostics');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -135,7 +138,7 @@ class StateCheckpointEngine extends EventEmitter {
         this.cosignToleranceBlocks = parseInt(hubConfig.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS
             || cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS || String(CHECKPOINT_COSIGN_TOLERANCE_BLOCKS));
         if(!(this.cosignToleranceBlocks >= 0)){
-            console.warn('config: CHECKPOINT_COSIGN_TOLERANCE_BLOCKS="' +
+            logger.warn('config: CHECKPOINT_COSIGN_TOLERANCE_BLOCKS="' +
                          String(hubConfig.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS ||
                                 cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS) +
                          '" is not a non-negative integer; using the default (' +
@@ -301,7 +304,7 @@ class StateCheckpointEngine extends EventEmitter {
         let now = Date.now();
         if(now - this._cadenceStallLoggedAt < this._cadenceStallLogMs) return;
         this._cadenceStallLoggedAt = now;
-        console.warn('StateCheckpointEngine: checkpoint cadence STALLED at BTC block ' +
+        logger.warn('StateCheckpointEngine: checkpoint cadence STALLED at BTC block ' +
                      (block == null ? 'unknown' : block) + ': ' + reason +
                      ' (no checkpoint will be produced until this is fixed; ' +
                      this._cadenceStalls + ' stalled tick(s) so far)');
@@ -316,7 +319,7 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     async start(){
-        if(!this.enabled){ console.log('StateCheckpointEngine: disabled (CHECKPOINT_ENABLED=false)'); return; }
+        if(!this.enabled){ logger.info('StateCheckpointEngine: disabled (CHECKPOINT_ENABLED=false)'); return; }
         // Fill any indexer URL left empty at construction (a configs-table-
         // provisioned hub carries no *_INDEXER_URL env var, and the p2pConfig
         // fallback never holds one) via the hub's configs-aware resolver, so this
@@ -332,7 +335,7 @@ class StateCheckpointEngine extends EventEmitter {
         }
         for(const coin of (this.chains || [])){
             if(!this.indexers[coin] || !this.indexers[coin].url)
-                console.warn('StateCheckpointEngine: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
+                logger.warn('StateCheckpointEngine: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
         }
         // Restore the cadence latch from the last checkpoint we already produced.
         // Without this the latch starts null, so the FIRST tick after a restart
@@ -346,10 +349,10 @@ class StateCheckpointEngine extends EventEmitter {
             this.peerManager.on('message', this._messageHandler);
         }
         this._pollTimer = setInterval(() => {
-            this._tick().catch(err => console.error('StateCheckpointEngine: tick error:', err && err.message));
+            this._tick().catch(err => logger.error(nodeUtil.format('StateCheckpointEngine: tick error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
-        console.log('StateCheckpointEngine started (every ' + this.intervalBlocks + ' BTC blocks, chains ' + this.chains.join('/') + ')');
+        logger.info('StateCheckpointEngine started (every ' + this.intervalBlocks + ' BTC blocks, chains ' + this.chains.join('/') + ')');
     }
 
     async stop(){
@@ -370,7 +373,7 @@ class StateCheckpointEngine extends EventEmitter {
         try {
             rows = await this.db.findStateCheckpointsByNetwork(this.network);
         } catch(e){
-            console.warn('StateCheckpointEngine: getStats query failed: ' + (e && e.message));
+            logger.warn('StateCheckpointEngine: getStats query failed: ' + (e && e.message));
         }
         let last_finalized_by_chain = {};
         for(let r of rows){
@@ -427,10 +430,10 @@ class StateCheckpointEngine extends EventEmitter {
             let last = rows && rows[0] ? rows[0].last_block : null;
             if(last != null){
                 this._lastCheckpointBtcBlock = Number(last);
-                console.log('StateCheckpointEngine: cadence latch restored at snapshot block ' + this._lastCheckpointBtcBlock);
+                logger.info('StateCheckpointEngine: cadence latch restored at snapshot block ' + this._lastCheckpointBtcBlock);
             }
         } catch(e){
-            console.warn('StateCheckpointEngine: could not restore cadence latch (' + (e && e.message) + '), first tick may checkpoint early');
+            logger.warn('StateCheckpointEngine: could not restore cadence latch (' + (e && e.message) + '), first tick may checkpoint early');
         }
     }
 
@@ -521,7 +524,7 @@ class StateCheckpointEngine extends EventEmitter {
             for(let chain of this.chains){
                 if(!this.indexers[chain].url) continue;
                 try { await this.runRound(chain, btcBlock, validators); }
-                catch(e){ console.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message)); }
+                catch(e){ logger.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message)); }
             }
         } finally {
             this._ticking = false;
@@ -623,7 +626,7 @@ class StateCheckpointEngine extends EventEmitter {
             this.pending.delete(id);
             if(!pending.done){
                 this._roundTimeouts++;
-                console.warn('StateCheckpointEngine: round ' + id + ' timed out at ' +
+                logger.warn('StateCheckpointEngine: round ' + id + ' timed out at ' +
                     pending.signatures.size + '/' + quorum + ' sigs, retrying next cadence');
             }
         }, this.roundTimeoutMs);
@@ -636,9 +639,9 @@ class StateCheckpointEngine extends EventEmitter {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XCHK_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
+            case XCHK_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
             case XCHK_SIGN:      this._handleSign(envelope);      break;
-            case XCHK_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('StateCheckpointEngine: FINALIZED error: ' + (e && e.message))); break;
+            case XCHK_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('StateCheckpointEngine: FINALIZED error: ' + (e && e.message))); break;
         }
     }
 
@@ -717,7 +720,7 @@ class StateCheckpointEngine extends EventEmitter {
             block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null
         });
         if(mine !== canonical){
-            console.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index + ' diverges from our indexer, NOT signing');
+            logger.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index + ' diverges from our indexer, NOT signing');
             return;
         }
 
@@ -727,7 +730,7 @@ class StateCheckpointEngine extends EventEmitter {
         // carries none of the light-client commitment its own flag-day requires. The
         // propose path already refuses this; refuse it here too.
         if(StateCheckpointEngine.isRootless(cp)){
-            console.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index +
+            logger.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index +
                 ' is checkpoint-commitment active but carries no light-client roots, NOT signing');
             return;
         }
@@ -771,7 +774,7 @@ class StateCheckpointEngine extends EventEmitter {
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XCHK_FINALIZED, { checkpoint: pending.cp, signatures: sigs });
         this._acceptFinalized(pending.cp, sigs, pending.quorum, true)
-            .catch(e => console.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
+            .catch(e => logger.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
     }
 
     // Every hub verifies + writes the finalized checkpoint locally (the mirror
@@ -781,7 +784,7 @@ class StateCheckpointEngine extends EventEmitter {
         let cp = this.normalizeCheckpoint(d.checkpoint);
         if(!cp || !Array.isArray(d.signatures)){
             this._malformedFinalized++;
-            console.warn('StateCheckpointEngine: dropped malformed FINALIZED broadcast (missing checkpoint or signatures array)');
+            logger.warn('StateCheckpointEngine: dropped malformed FINALIZED broadcast (missing checkpoint or signatures array)');
             return;
         }
 
@@ -790,7 +793,7 @@ class StateCheckpointEngine extends EventEmitter {
         // to persist it even with an otherwise-valid signature set.
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)){
             this._malformedFinalized++;
-            console.warn('StateCheckpointEngine: dropped FINALIZED with seq ' + cp.checkpoint_seq +
+            logger.warn('StateCheckpointEngine: dropped FINALIZED with seq ' + cp.checkpoint_seq +
                 ' != derived seq for snapshot_block ' + cp.snapshot_block);
             return;
         }
@@ -820,7 +823,7 @@ class StateCheckpointEngine extends EventEmitter {
             : (sigs.length >= quorum);
         if(!met){                                                  // sub-quorum, ignore
             this._subQuorumFinalized++;
-            console.warn('StateCheckpointEngine: dropped sub-quorum FINALIZED for snapshot_block ' + cp.snapshot_block +
+            logger.warn('StateCheckpointEngine: dropped sub-quorum FINALIZED for snapshot_block ' + cp.snapshot_block +
                 ' (' + sigs.length + '/' + quorum + ' valid sigs' + (weighted ? ', stake-weighted' : '') +
                 '); persisted nothing on this hub');
             return;
@@ -889,7 +892,7 @@ class StateCheckpointEngine extends EventEmitter {
         let seated = await this.seatedCheckpointAtSeq(cp);
         if(seated && StateCheckpointEngine.checkpointRowDiffers(seated, cp)){
             this._seqConflicts++;
-            console.error('StateCheckpointEngine: CONFLICTING checkpoint at ' + cp.chain + '/' + cp.network +
+            logger.error('StateCheckpointEngine: CONFLICTING checkpoint at ' + cp.chain + '/' + cp.network +
                           ' seq ' + cp.checkpoint_seq + ': we hold block ' + Number(seated.block_index) +
                           ' (' + String(seated.block_hash) + '), this FINALIZED carries block ' +
                           Number(cp.block_index) + ' (' + String(cp.block_hash) + '). Both were quorum-signed, ' +
@@ -921,7 +924,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(Number.isFinite(latch) && (this._lastCheckpointBtcBlock == null || latch > this._lastCheckpointBtcBlock))
             this._lastCheckpointBtcBlock = latch;
 
-        console.log('StateCheckpointEngine: checkpoint ' + cp.chain + '/' + cp.network + ' @ ' + cp.block_index +
+        logger.info('StateCheckpointEngine: checkpoint ' + cp.chain + '/' + cp.network + ' @ ' + cp.block_index +
                     ' seq ' + cp.checkpoint_seq + ' (' + sigs.length + '/' + quorum + ' sigs' + (isLeader ? ', leader' : '') + ')');
         this.emit('checkpoint:finalized', { checkpoint: cp, signatures: sigs });
     }
@@ -989,7 +992,7 @@ class StateCheckpointEngine extends EventEmitter {
         let held = this._signedAtSeq.get(key);
         if(held !== undefined && held !== canonical){
             this._seqDoubleSignRefusals++;
-            console.error('StateCheckpointEngine: SECOND PAYLOAD at ' + cp.chain + '/' + cp.network +
+            logger.error('StateCheckpointEngine: SECOND PAYLOAD at ' + cp.chain + '/' + cp.network +
                           ' seq ' + cp.checkpoint_seq + ': this hub signed a different payload at that ' +
                           'sequence and refuses block ' + Number(cp.block_index) + ' (' +
                           String(cp.block_hash) + '). One signature per sequence is what keeps two ' +
@@ -1086,7 +1089,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(this.network === ''){
             if(!this._warnedUnscopedNetwork){
                 this._warnedUnscopedNetwork = true;
-                console.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
+                logger.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
                     'flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-commitment) ' +
                     'resolves to OFF while the checkpoints it handles are scoped to "' + recordNet +
                     '". Set HUB_NETWORK. Continuing on the legacy unscoped path.');
@@ -1126,7 +1129,7 @@ class StateCheckpointEngine extends EventEmitter {
         try {
             r = await this.db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(cp.chain, cp.network, Number(cp.checkpoint_seq));
         } catch(e){
-            console.warn('StateCheckpointEngine: same-seq conflict check could not read ' + cp.chain + '/' +
+            logger.warn('StateCheckpointEngine: same-seq conflict check could not read ' + cp.chain + '/' +
                          cp.network + ' seq ' + cp.checkpoint_seq + ' (' + (e && e.message) +
                          '); the unique key still admits one row, but a conflict would go unreported');
             return null;
@@ -1208,7 +1211,7 @@ class StateCheckpointEngine extends EventEmitter {
         // predicate as everything else. The window ends when operators raise the cap
         // (coordinated), which is the design's already-stated posture.
         if(validators && validators.truncated === true){
-            console.warn('StateCheckpointEngine: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('StateCheckpointEngine: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return;
@@ -1268,7 +1271,7 @@ class StateCheckpointEngine extends EventEmitter {
         } catch(e){
             failure = (e && e.message) ? e.message : String(e);
         }
-        console.error('StateCheckpointEngine: could not stream a committed ' + table +
+        logger.error('StateCheckpointEngine: could not stream a committed ' + table +
                       ' row to mirror subscribers (' + failure + '); forcing subscriber resync');
         try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync(reason); }
         catch(_e){ /* the repair itself must never fail a committed checkpoint */ }

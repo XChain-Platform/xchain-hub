@@ -57,6 +57,8 @@
 // The rail the signer contract has always meant, and the only one every module
 // written before `chains` existed signs for. It is both the default declaration
 // and the default a wiring site gets when it names no chain.
+const { getLogger } = require('../observability');
+const logger = getLogger();
 const DEFAULT_CHAIN  = 'DOGE';
 const DEFAULT_CHAINS = [DEFAULT_CHAIN];
 
@@ -139,7 +141,7 @@ function applySignerHooks(publisher, hooks, chain){
     let declared = (Array.isArray(hooks.chains) && hooks.chains.length) ? hooks.chains : DEFAULT_CHAINS;
     if(declared.indexOf(need) === -1){
         let name = (publisher.constructor && publisher.constructor.name) || 'publisher';
-        console.warn('signer-loader: ' + name + ' settles on ' + need + ' but HUB_SIGNER_MODULE (' +
+        logger.warn('signer-loader: ' + name + ' settles on ' + need + ' but HUB_SIGNER_MODULE (' +
                      (hooks.source || 'unknown') + ') declares chains [' + declared.join(', ') + ']; ' +
                      'leaving its sign, broadcast and balance hooks UNWIRED. ' + name + ' stays idle until an ' +
                      'operator signer declaring ' + need + ' is configured, rather than paying a ' +

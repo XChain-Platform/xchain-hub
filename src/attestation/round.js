@@ -50,6 +50,9 @@ const lss    = require('../attest_leader_silence_skip_activation.js');
 // unrecognised block-anchored strategy against; shared with the dispatch sites it names.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES } = require('../constants.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -241,15 +244,15 @@ class AttestationRound {
 
     async start(){
         if(!this.peerManager){
-            console.log('AttestationRound: no peer manager; skipping start');
+            logger.info('AttestationRound: no peer manager; skipping start');
             return;
         }
         this._pollTimer = setInterval(() => {
-            this._pollPending().catch(e => console.error('AttestationRound: poll error:', e));
+            this._pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: poll error:', e)));
         }, this.pollMs);
         // Kick the first poll without waiting for the interval
-        this._pollPending().catch(e => console.error('AttestationRound: initial poll error:', e));
-        console.log('AttestationRound: started (poll=' + this.pollMs + 'ms, confirmations=' + this.confirmations + ')');
+        this._pollPending().catch(e => logger.error(nodeUtil.format('AttestationRound: initial poll error:', e)));
+        logger.info('AttestationRound: started (poll=' + this.pollMs + 'ms, confirmations=' + this.confirmations + ')');
     }
 
     async stop(){
@@ -320,10 +323,10 @@ class AttestationRound {
                 // has a key mismatch between the indexer and this hub. Log clearly so
                 // they can identify the misconfiguration instead of seeing a generic
                 // "unreachable" message and chasing a network issue.
-                console.warn('AttestationRound: HTTP ' + status + ' from BTC indexer at ' + url +
+                logger.warn('AttestationRound: HTTP ' + status + ' from BTC indexer at ' + url +
                     ': auth mismatch - check that BTC_INDEXER_API_KEY on this hub matches INDEXER_API_KEY on the indexer');
             } else {
-                console.warn('AttestationRound: poll failed:', e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('AttestationRound: poll failed:', e && e.message ? e.message : e));
             }
             return;
         }
@@ -344,7 +347,7 @@ class AttestationRound {
                 : 'a JSON-RPC error: ' + String((result.error && (result.error.message || result.error))).slice(0, 200);
             if(this._pollRpcWarnAt === 0 || now - this._pollRpcWarnAt >= this.pollMs){
                 this._pollRpcWarnAt = now;
-                console.warn('AttestationRound: getpendingattestation_requests returned ' + detail +
+                logger.warn('AttestationRound: getpendingattestation_requests returned ' + detail +
                     ' from BTC indexer at ' + url + ' - no attestation requests are being admitted' +
                     ' (rejections so far: ' + this.pollRpcErrorCount + ')');
             }
@@ -368,7 +371,7 @@ class AttestationRound {
 
             this.seen.set(rid, Date.now());
             this._startRound(req, latestBlock).catch(e =>
-                console.error('AttestationRound: start failed for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e))
+                logger.error('AttestationRound: start failed for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e))
             );
         }
 
@@ -383,7 +386,7 @@ class AttestationRound {
             this.pollCursor = { block_index: Number(last.block_index), action_index: Number(last.action_index) };
         }
         if(requests.length < POLL_LIMIT){
-            if(this.pollCursor) console.log('AttestationRound: reached end of pending queue; restarting sweep next poll');
+            if(this.pollCursor) logger.info('AttestationRound: reached end of pending queue; restarting sweep next poll');
             this.pollCursor = null;
         }
         } finally {
@@ -425,8 +428,8 @@ class AttestationRound {
                 meta:   (row.meta === null || row.meta === undefined) ? '' : String(row.meta)
             };
         } catch (e) {
-            console.warn('AttestationRound: fetch-cache read failed for ' + String(rid).substring(0,16) +
-                         '...; falling back to a fresh fetch:', e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('AttestationRound: fetch-cache read failed for ' + String(rid).substring(0,16) +
+                         '...; falling back to a fresh fetch:', e && e.message ? e.message : e));
             return null;
         }
     }
@@ -444,8 +447,8 @@ class AttestationRound {
                 ? String(fetched.meta) : '';
             await this.db.setAttestationFetchCache(rid, String(providerId || ''), String(status || 'ok'), body, meta, model ? String(model) : null);
         } catch (e) {
-            console.warn('AttestationRound: fetch-cache write failed for ' + String(rid).substring(0,16) +
-                         '...; a restart may re-pay this fetch:', e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('AttestationRound: fetch-cache write failed for ' + String(rid).substring(0,16) +
+                         '...; a restart may re-pay this fetch:', e && e.message ? e.message : e));
         }
     }
 
@@ -456,7 +459,7 @@ class AttestationRound {
         try {
             await this.db.deleteAttestationFetchCache(this.cacheCutoffEpochSec());
         } catch (e) {
-            console.warn('AttestationRound: fetch-cache eviction failed:', e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('AttestationRound: fetch-cache eviction failed:', e && e.message ? e.message : e));
         }
     }
 
@@ -549,7 +552,7 @@ class AttestationRound {
         if(pubkey && rec.watchPubkey === pubkey && !hasProposed(pubkey)
            && esc.isProvenSilent(latestBlock, rec.watchBlock, this.leaderRotationBlocks)){
             rec.silent.add(pubkey);
-            console.warn('AttestationRound: leader slot ' + idx + ' skipped for ' + rid.substring(0,16) +
+            logger.warn('AttestationRound: leader slot ' + idx + ' skipped for ' + rid.substring(0,16) +
                          '... (' + pubkey.substring(0,16) + '... held the slot from block ' + rec.watchBlock +
                          ' to ' + latestBlock + ' with no PROPOSE for this request; the skip does not spend a rotation)');
             let skippedIdx = idx;
@@ -563,7 +566,7 @@ class AttestationRound {
             // out of leaders rather than that rotation quietly stopped working.
             if(idx <= skippedIdx && !rec.heldLogged){
                 rec.heldLogged = true;
-                console.warn('AttestationRound: no live leader slot remains for ' + rid.substring(0,16) +
+                logger.warn('AttestationRound: no live leader slot remains for ' + rid.substring(0,16) +
                              '... (' + rec.silent.size + ' of ' + responsible.length +
                              ' responsible members proven silent); holding slot ' + idx);
             }
@@ -593,12 +596,12 @@ class AttestationRound {
         // Provider known? (governance might have ATTEST v0 (request) whose
         // provider is governance-defined but not deployed locally.)
         if(!this.providerRegistry.isKnown(providerId)){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' unknown');
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' unknown');
             return;
         }
         let providerModule = this.providerRegistry.getModule(providerId);
         if(!providerModule || typeof providerModule.fetch !== 'function'){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' module missing fetch()');
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' module missing fetch()');
             return;
         }
 
@@ -619,7 +622,7 @@ class AttestationRound {
         if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0){
             // Empty snapshot means no qualified validators exist at the request's
             // block; request can't be served. Will eventually expire on deadline.
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... empty capability snapshot at block ' + snapshotBlk);
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... empty capability snapshot at block ' + snapshotBlk);
             return;
         }
 
@@ -640,7 +643,7 @@ class AttestationRound {
         let providerFloor = (this.providerRegistry && typeof this.providerRegistry.getMinStake === 'function')
             ? this.providerRegistry.getMinStake(providerId, snapshotBlk) : null;
         if(weighted && providerFloor === null){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
                          '" has no min_stake_xchain floor at block ' + snapshotBlk + ' (failing closed)');
             return;
         }
@@ -669,7 +672,7 @@ class AttestationRound {
         // indexer's ATTEST_ADMISSION flag-day, is rejected at admission and
         // never polled at all).
         if(responsible.length < Math.max(1, redundancy)){
-            console.warn('AttestationRound: skipping unfinalizable ' + rid.substring(0,16) +
+            logger.warn('AttestationRound: skipping unfinalizable ' + rid.substring(0,16) +
                 '... (responsible=' + responsible.length + ' < redundancy=' + Math.max(1, redundancy) +
                 ' at block ' + snapshotBlk +
                 (weighted ? ', weighted source-dedupe, provider floor ' + providerFloor : '') + ')');
@@ -698,7 +701,7 @@ class AttestationRound {
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
             // Not in the responsible set; log so operators can distinguish "saw and skipped" from "never polled".
-            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... not responsible at block ' + snapshotBlk +
+            logger.info('AttestationRound: skipping ' + rid.substring(0,16) + '... not responsible at block ' + snapshotBlk +
                         ' (snapshot=' + snapshot.validators.length + ', leader=' + (leaderPubkey ? leaderPubkey.substring(0,16) + '...' : 'none') + ')');
             return;
         }
@@ -709,7 +712,7 @@ class AttestationRound {
         // reports the constructor's tunable, which has no request block to key on.
         // Format is pinned by the acceptance drill (spec §10 ZC1 greps for
         // `tip=<N> conf=0 widen=1`), so it is a contract, not a debug line.
-        console.log('AttestationRound: starting ' + rid.substring(0,16) +
+        logger.info('AttestationRound: starting ' + rid.substring(0,16) +
                     '... tip=' + latestBlock +
                     ' conf=' + this.confirmationsFor(snapshotBlk) +
                     ' widen=' + widen);
@@ -767,18 +770,18 @@ class AttestationRound {
         let pinnedConsensusStrategy = (this.providerRegistry && typeof this.providerRegistry.getConsensusStrategy === 'function')
             ? this.providerRegistry.getConsensusStrategy(providerId, snapshotBlk) : null;
         if(!pinnedConsensusStrategy){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
                          '" has no block-anchored consensus_strategy at block ' + snapshotBlk + ' (failing closed)');
             return;
         }
         if(SUPPORTED_CONSENSUS_STRATEGIES.indexOf(pinnedConsensusStrategy) === -1){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+            logger.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
                          '" has unsupported consensus_strategy "' + pinnedConsensusStrategy + '" at block ' + snapshotBlk +
                          ' (failing closed; this build implements ' + SUPPORTED_CONSENSUS_STRATEGIES.join(', ') + ')');
             return;
         }
         if(!pinnedFetchModel){
-            console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
+            logger.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
                          snapshotBlk + '; fetch falls back to the provider module default (un-pinned)');
         }
 
@@ -790,7 +793,7 @@ class AttestationRound {
         let minFee    = (providerDef && !bc.isNull(providerDef.min_fee_xchain)) ? String(providerDef.min_fee_xchain) : '0';
         let reqFeeAmt = (request && !bc.isNull(request.fee_amount)) ? String(request.fee_amount) : '0';
         if(bc.bcgt(minFee, '0') && bc.bclt(reqFeeAmt, minFee)){
-            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... fee ' + reqFeeAmt +
+            logger.info('AttestationRound: skipping ' + rid.substring(0,16) + '... fee ' + reqFeeAmt +
                         ' below provider "' + providerId + '" min_fee ' + minFee + ' (request will expire + refund)');
             return;
         }
@@ -808,7 +811,7 @@ class AttestationRound {
         // providers/llm, where the wasted call burns vendor quota on precisely the
         // degraded rounds already running long.
         if(this.consensus && typeof this.consensus.isRoundActive === 'function' && this.consensus.isRoundActive(rid)){
-            console.log('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (consensus round already active)');
+            logger.info('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (consensus round already active)');
             return;
         }
         // The same short-circuit for a round this hub already FINALIZED. The
@@ -818,7 +821,7 @@ class AttestationRound {
         // here rather than by propose()'s ring check after the provider is paid.
         if(this.consensus && typeof this.consensus.isFinalized === 'function' && this.consensus.isFinalized(rid)){
             this.finalizedSkipCount++;
-            console.log('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (already finalized; awaiting bind)');
+            logger.info('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (already finalized; awaiting bind)');
             return;
         }
 
@@ -838,7 +841,7 @@ class AttestationRound {
             fetched  = { body: cached.body, meta: cached.meta };
             myStatus = cached.status;
             this.fetchCacheHitCount++;
-            console.log('AttestationRound: reusing recorded fetch for ' + rid.substring(0,16) +
+            logger.info('AttestationRound: reusing recorded fetch for ' + rid.substring(0,16) +
                         '... (status=' + myStatus + '); no provider call issued');
         } else {
             // Counted BEFORE the call, not after it: a fetch that throws may still
@@ -862,7 +865,7 @@ class AttestationRound {
                     network:          this.hub.network
                 });
             } catch (e) {
-                console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
+                logger.warn(nodeUtil.format('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e));
                 myStatus = 'provider_error';
             }
             // Record the COMPLETED outcome only. A claim written before the call
@@ -912,7 +915,7 @@ class AttestationRound {
         };
         this.rounds.set(rid, roundState);
 
-        console.log('AttestationRound: ' + (amLeader ? '[LEADER]' : '[FOLLOWER]') +
+        logger.info('AttestationRound: ' + (amLeader ? '[LEADER]' : '[FOLLOWER]') +
                     ' proposing ' + rid.substring(0,16) + '... (provider=' + providerId +
                     ', status=' + myStatus +
                     (myStatus === 'ok' ? ', body=' + fetched.body.length + 'B, meta=' + fetched.meta : '') +

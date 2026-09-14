@@ -22,6 +22,9 @@
  *
  ********************************************************************/
 
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 class SwapTracker {
 
     constructor(hub) {
@@ -34,10 +37,10 @@ class SwapTracker {
         if (!crossChainEngine) return;
         this._attestationHandler = (attestation) => {
             this.onAttestationFinalized(attestation).catch(err =>
-                console.error('SwapTracker: attestation:finalized handling failed:', err && err.message ? err.message : err));
+                logger.error(nodeUtil.format('SwapTracker: attestation:finalized handling failed:', err && err.message ? err.message : err)));
         };
         crossChainEngine.on('attestation:finalized', this._attestationHandler);
-        console.log('SWAP tracker started');
+        logger.info('SWAP tracker started');
     }
 
     stop(crossChainEngine) {
@@ -52,7 +55,7 @@ class SwapTracker {
             sourceChain, sourceActionIndex, destChain, destActionIndex || null,
             destChain, destActionIndex || null
         );
-        console.log('SWAP: Initiated ' + sourceChain + ':' + sourceActionIndex + ' → ' + destChain);
+        logger.info('SWAP: Initiated ' + sourceChain + ':' + sourceActionIndex + ' → ' + destChain);
     }
 
     async getSwap(sourceChain, sourceActionIndex) {
@@ -89,7 +92,7 @@ class SwapTracker {
                 'attested',
                 attestation.attestationId
             );
-            console.log('SWAP: Attested ' + attestation.sourceChain + ':' + attestation.sourceActionIndex);
+            logger.info('SWAP: Attested ' + attestation.sourceChain + ':' + attestation.sourceActionIndex);
         }
     }
 }

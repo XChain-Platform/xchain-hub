@@ -74,6 +74,9 @@ const stateCheckpointsMixin    = require('./state_checkpoints.js');
 const swapRecordsMixin         = require('./swap_records.js');
 const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const MIXINS = [
     anchorMixin,
@@ -236,8 +239,8 @@ class Database {
                 return results.length > 0;
             } catch (e){
                 this.failFastIfFatal(e, 'checking database existence');
-                console.log('Database connection error:', e.code || 'unknown');
-                console.log("Error checking if " + this.dbName + " exists. Trying again in 5 seconds...");
+                logger.info(nodeUtil.format('Database connection error:', e.code || 'unknown'));
+                logger.info("Error checking if " + this.dbName + " exists. Trying again in 5 seconds...");
                 await this._sleep(5000);
             }
         }
@@ -251,7 +254,7 @@ class Database {
             port:     this.port,
             timezone: 'Z'   // same UTC pin as the pool, see connectionPoolParams
         };
-        console.log("Creating " + this.dbName + " database...");
+        logger.info("Creating " + this.dbName + " database...");
         while(true){
             try {
                 let db = await mariadb.createConnection(connectionParams);
@@ -260,8 +263,8 @@ class Database {
                 return true;
             } catch(e){
                 this.failFastIfFatal(e, 'creating the database');
-                console.log("Database creation error:", e.code || 'unknown');
-                console.log("Error creating " + this.dbName + ". Trying again in 5 seconds...");
+                logger.info(nodeUtil.format("Database creation error:", e.code || 'unknown'));
+                logger.info("Error creating " + this.dbName + ". Trying again in 5 seconds...");
                 await this._sleep(5000);
             }
         }
@@ -275,7 +278,7 @@ class Database {
         let db    = await this.getConnection();
         // One summary line instead of a per-table pair; error paths below still
         // name the table, so a failure stays attributable.
-        console.log('Verifying database and tables...');
+        logger.info('Verifying database and tables...');
         let checked = 0;
         let created = 0;
         for(let file of files){
@@ -294,13 +297,13 @@ class Database {
                         // later queries with "Unknown column".
                         await this.alterTableForDrift(file, db);
                 } catch(e){
-                    console.error('Error verifying ' + table + ' table: ' + e);
+                    logger.error('Error verifying ' + table + ' table: ' + e);
                     throw e;
                 }
             }
         }
         await db.release();
-        console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
+        logger.info('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
         return true;
     }
 
@@ -484,12 +487,12 @@ class Database {
             for(let r of rows)
                 if(String(r.c).toLowerCase() === String(column).toLowerCase()) return;   // already migrated
             await db.query('ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + columnDef);
-            console.log('Migration: added ' + table + '.' + column + ' ' + columnDef);
+            logger.info('Migration: added ' + table + '.' + column + ' ' + columnDef);
         } catch(e){
-            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is absent. Until it exists this hub ' +
+            logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is absent. Until it exists this hub ' +
                 'cannot stamp an admission height for that table, so above the mirror admission activation it ' +
                 'will REFUSE to finalize those rows. Run by hand: ALTER TABLE `' + table + '` ADD COLUMN `' +
-                column + '` ' + columnDef, e);
+                column + '` ' + columnDef, e));
         } finally {
             await db.release();
         }
@@ -526,7 +529,7 @@ class Database {
 
             let missing = await this.missingIndexColumns(db, table, '(network, source_chain)');
             if(missing.length > 0){
-                console.error('Migration: cannot re-key ' + table + ' on (network, source_chain); the table is '
+                logger.error('Migration: cannot re-key ' + table + ' on (network, source_chain); the table is '
                     + 'missing ' + missing.join(', ') + '. The fence stays chain-keyed, so one network\'s '
                     + 'retraction still fences every network for that chain. Run the fleet migration '
                     + '(xchain-hub/migrations/2026-09-11-price-ingest-watermarks-network-column.sql) by hand.');
@@ -536,13 +539,13 @@ class Database {
             await db.query('ALTER TABLE `' + table + '` DROP PRIMARY KEY, ADD PRIMARY KEY (network, source_chain)');
             let after = await this.liveIndexColumns(db, table, 'PRIMARY');
             if(after[0] === 'network' && after[1] === 'source_chain')
-                console.log('Migration: re-keyed ' + table + ' on (network, source_chain); the price ingest '
+                logger.info('Migration: re-keyed ' + table + ' on (network, source_chain); the price ingest '
                     + 'fence is now per network, not shared across every network on this hub DB.');
             else
-                console.error('Migration: the re-key of ' + table + ' did not take (PRIMARY now covers '
+                logger.error('Migration: the re-key of ' + table + ' did not take (PRIMARY now covers '
                     + (after.join(', ') || 'nothing') + '). The fence is still chain-keyed.');
         } catch(e){
-            console.error('Migration error re-keying ' + table + ':', e);
+            logger.error(nodeUtil.format('Migration error re-keying ' + table + ':', e));
         } finally {
             await db.release();
         }
@@ -571,17 +574,17 @@ class Database {
             let liveCharset = String(rows[0].CHARACTER_SET_NAME || '').toLowerCase();
             if(liveCharset === String(targetCharset).toLowerCase()) return; // already widened
             await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
-            console.log('Migration: widened ' + table + '.' + column + ' ' + liveCharset + ' -> ' + targetCharset);
+            logger.info('Migration: widened ' + table + '.' + column + ' ' + liveCharset + ' -> ' + targetCharset);
         } catch(e){
             // Swallowed loudly, as _migrateColumnType is and for the same reason: runMigrations
             // is one sequential pass at startup, and a throw takes the remaining migrations and
             // the hub boot with it. A narrow column stores every BMP body exactly as it does
             // now, so booting is the better trade - but the line has to name what stays broken
             // and the statement that finishes the job.
-            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is still ' + targetCharset +
+            logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is still ' + targetCharset +
                 '-incapable. Until it is widened, a provider body carrying a 4-byte character ' +
                 'cannot be stored and the response never reaches an indexer. Run by hand: ' +
-                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e);
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e));
         } finally {
             await db.release();
         }
@@ -608,17 +611,17 @@ class Database {
             let liveType = String(rows[0].DATA_TYPE || '').toLowerCase();
             if(liveType === String(targetType).toLowerCase()) return; // already converted
             await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
-            console.log('Migration: converted ' + table + '.' + column + ' ' + liveType + ' -> ' + targetType);
+            logger.info('Migration: converted ' + table + '.' + column + ' ' + liveType + ' -> ' + targetType);
         } catch(e){
             // Swallowed on purpose, and loudly. runMigrations runs every migration in one
             // sequential pass at startup, so a throw here would take the remaining migrations
             // and the hub boot down with it - the wrong trade for a column that fails in 2038,
             // not today. What it must never be is invisible, so the line names the consequence
             // and the exact statement an operator runs to finish the job by hand.
-            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is still ' +
+            logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is still ' +
                 'the old type. Until it is converted, any value past the TIMESTAMP epoch ' +
                 'limit (2038-01-19 03:14:07 UTC) cannot be stored. Run by hand: ' +
-                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e);
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e));
         } finally {
             await db.release();
         }
@@ -637,9 +640,9 @@ class Database {
             );
             if(!existing[0] || Number(existing[0].c) === 0) return;
             await db.query('ALTER TABLE `' + table + '` DROP INDEX `' + indexName + '`');
-            console.log('Migration: dropped redundant INDEX ' + indexName + ' on ' + table);
+            logger.info('Migration: dropped redundant INDEX ' + indexName + ' on ' + table);
         } catch(e){
-            console.error('Migration error dropping ' + indexName + ' on ' + table + ':', e);
+            logger.error(nodeUtil.format('Migration error dropping ' + indexName + ' on ' + table + ':', e));
         } finally {
             await db.release();
         }
@@ -662,12 +665,12 @@ class Database {
             let result = await db.query(deleteSql);
             let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
             if(deleted > 0)
-                console.log('Migration: removed ' + deleted + ' duplicate rows from ' + table);
+                logger.info('Migration: removed ' + deleted + ' duplicate rows from ' + table);
 
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
-            console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
+            logger.info('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
         } catch(e){
-            console.error('Migration error on ' + table + ':', e);
+            logger.error(nodeUtil.format('Migration error on ' + table + ':', e));
         } finally {
             await db.release();
         }
@@ -734,13 +737,13 @@ class Database {
                 }
                 if(present.length > 0){
                     await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
-                    console.log('Migration: completed an interrupted widen of ' + indexName + ' on ' + table);
+                    logger.info('Migration: completed an interrupted widen of ' + indexName + ' on ' + table);
                 }
             }
 
             if(present.length === 0){
                 await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
-                console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
+                logger.info('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
                 return;
             }
             if(present.indexOf(String(requiredColumn).toLowerCase()) !== -1) return;   // already widened
@@ -749,7 +752,7 @@ class Database {
             if(missing.length > 0){
                 // The existing key is untouched, so the table is exactly as constrained as
                 // it was; the widen simply does not happen on this boot.
-                console.error('MIGRATION SKIPPED: UNIQUE KEY ' + indexName + ' on ' + table +
+                logger.error('MIGRATION SKIPPED: UNIQUE KEY ' + indexName + ' on ' + table +
                     ' cannot be widened because the table has no ' + missing.join(', ') +
                     ' column. The narrower key is left in place. Add the column, then run: ' + byHand);
                 return;
@@ -766,9 +769,9 @@ class Database {
                 throw new Error('the widened key did not appear under its own name');
 
             await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + tempName);
-            console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
+            logger.info('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
         } catch(e){
-            console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
+            logger.error(nodeUtil.format('Migration error widening ' + indexName + ' on ' + table + ':', e));
             if(dropped) await this.assertUniqueKeyStillEnforced(db, table, indexName, tempName, byHand);
         } finally {
             await db.release();
@@ -791,10 +794,10 @@ class Database {
                 if(rows && rows[0] && Number(rows[0].nu) === 0){ enforcing = name; break; }
             }
         } catch(probeError){
-            console.error('Could not read the index state of ' + table + ':', probeError);
+            logger.error(nodeUtil.format('Could not read the index state of ' + table + ':', probeError));
         }
         if(enforcing === tempName)
-            console.error('WARNING: ' + table + ' is constrained by the temporary key ' + tempName +
+            logger.error('WARNING: ' + table + ' is constrained by the temporary key ' + tempName +
                 ' rather than ' + indexName + '. The next boot completes the rename; nothing is lost meanwhile.');
         if(enforcing) return;
         throw new Error('Refusing to start: the UNIQUE KEY ' + indexName + ' on ' + table +
@@ -815,9 +818,9 @@ class Database {
                 [ark.ARCHIVE_REWARD_TYPE]);
             let changed = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
             if(changed > 0)
-                console.log('Migration: qualified ' + changed + ' archive reward row(s) by snapshot block');
+                logger.info('Migration: qualified ' + changed + ' archive reward row(s) by snapshot block');
         } catch(e){
-            console.error('Migration error qualifying archive rewards:', e);
+            logger.error(nodeUtil.format('Migration error qualifying archive rewards:', e));
         } finally {
             await db.release();
         }
@@ -835,9 +838,9 @@ class Database {
             if(existing[0] && Number(existing[0].c) > 0) return;
 
             await db.query('ALTER TABLE ' + table + ' ADD INDEX ' + indexName + ' ' + indexColumns);
-            console.log('Migration: added INDEX ' + indexName + ' on ' + table);
+            logger.info('Migration: added INDEX ' + indexName + ' on ' + table);
         } catch(e){
-            console.error('Migration error on ' + table + ':', e);
+            logger.error(nodeUtil.format('Migration error on ' + table + ':', e));
         } finally {
             await db.release();
         }
@@ -862,9 +865,9 @@ class Database {
             if(missing.length === 0) return; // already covers every target value
             let enumDef = 'ENUM(' + enumValues.map(v => "'" + v + "'").join(',') + ')';
             await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + enumDef + ' ' + (nullClause || ''));
-            console.log('Migration: widened ' + table + '.' + column + ' ENUM (added ' + missing.join(', ') + ')');
+            logger.info('Migration: widened ' + table + '.' + column + ' ENUM (added ' + missing.join(', ') + ')');
         } catch(e){
-            console.error('Migration error widening ' + table + '.' + column + ':', e);
+            logger.error(nodeUtil.format('Migration error widening ' + table + '.' + column + ':', e));
         } finally {
             await db.release();
         }
@@ -981,16 +984,16 @@ class Database {
             const cur = liveByName.get(exp.name.toLowerCase());
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
-                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT (cannot backfill existing rows safely). Skipping; add manually.');
+                    logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT (cannot backfill existing rows safely). Skipping; add manually.');
                     continue;
                 }
-                console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
+                logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
                 await db.query('ALTER TABLE `' + table + '` ADD COLUMN ' + exp.definition);
                 continue;
             }
             const liveIsNullable = cur.IS_NULLABLE === 'YES';
             if(!liveIsNullable && exp.nullable){
-                console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
+                logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
                 await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + ' NULL');
             }
         }
@@ -1004,7 +1007,7 @@ class Database {
             if(Date.now() < this.circuitOpenUntil)
                 throw new Error('Circuit breaker open: database connections rejected until cooldown expires');
             this.circuitState = 'half-open';
-            console.log('Circuit breaker half-open: attempting reconnection');
+            logger.info('Circuit breaker half-open: attempting reconnection');
         }
 
         let connection  = null;
@@ -1019,7 +1022,7 @@ class Database {
                 if(this.circuitState === 'half-open'){
                     this.circuitState = 'closed';
                     this.circuitFailures = 0;
-                    console.log('Circuit breaker closed: database connection restored');
+                    logger.info('Circuit breaker closed: database connection restored');
                 }
                 this.circuitFailures = 0;
             } catch (e){
@@ -1034,7 +1037,7 @@ class Database {
                     throw new Error('Could not connect to MariaDB after ' + maxAttempts + ' attempts');
                 let delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
                 let jitter = Math.floor(Math.random() * delay * 0.3);
-                console.log("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
+                logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
                 await this._sleep(delay + jitter);
             }
@@ -1051,7 +1054,7 @@ class Database {
                         args[i] = toUtcDatetimeLiteral(args[i]);
                     } else if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object'
                               && !isDriverNativeArg(args[i])) {
-                        console.warn('db.doQuery: object arg serialized to JSON at index ' + i);
+                        logger.warn('db.doQuery: object arg serialized to JSON at index ' + i);
                         args[i] = JSON.stringify(args[i]);
                     }
                 }
@@ -1066,7 +1069,7 @@ class Database {
                 // prices), so a failed INSERT/UPDATE read as success and the row was
                 // silently missing downstream. An empty result must mean a genuinely
                 // empty SELECT, never a failed query.
-                console.error('Error running database query:', error);
+                logger.error(nodeUtil.format('Error running database query:', error));
                 throw error;
             } finally {
                 // Release in finally so an error no longer leaks the pooled

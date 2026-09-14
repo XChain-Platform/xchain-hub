@@ -60,6 +60,9 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } = 
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('../constants.js');
 const { noteDrop } = require('../consensus/diagnostics');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
@@ -313,13 +316,13 @@ class AttestationConsensus extends EventEmitter {
 
     async start(){
         if(!this.peerManager){
-            console.log('AttestationConsensus: no peer manager; skipping start');
+            logger.info('AttestationConsensus: no peer manager; skipping start');
             return;
         }
         this._messageHandler = (env) => this._handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
         this.checkNonOkSizingFloor();
-        console.log('AttestationConsensus: started');
+        logger.info('AttestationConsensus: started');
     }
 
     // item 3421 - observability for the nonOkPublished ring's SIZING FLOOR (see the
@@ -340,7 +343,7 @@ class AttestationConsensus extends EventEmitter {
         let floor = blocks * NONOK_THROUGHPUT_PER_BLOCK;
         let ok    = this.nonOkPublishedMax >= floor;
         if(!ok){
-            console.warn('AttestationConsensus: ATTESTATION_NONOK_PUBLISHED_MAX=' + this.nonOkPublishedMax +
+            logger.warn('AttestationConsensus: ATTESTATION_NONOK_PUBLISHED_MAX=' + this.nonOkPublishedMax +
                 ' is BELOW the sizing floor of ' + floor + ' implied by provider "' + providerId +
                 '" (deadline_window_blocks=' + blocks + ' x ' + NONOK_THROUGHPUT_PER_BLOCK +
                 ' non-ok finalizations/block). A still-pending non-ok entry can be evicted while ' +
@@ -570,7 +573,7 @@ class AttestationConsensus extends EventEmitter {
         // again.
         if(this._finalizedEvicted.has(rid)){
             this.finalizedEvictedWhilePendingCount++;
-            console.warn('AttestationConsensus: re-proposing request ' + rid.substring(0,16) +
+            logger.warn('AttestationConsensus: re-proposing request ' + rid.substring(0,16) +
                 '... whose finalized entry was already evicted (ring full at ' + this.finalizedMax +
                 '; raise ATTESTATION_FINALIZED_MAX; evictions_while_pending=' +
                 this.finalizedEvictedWhilePendingCount + ')');
@@ -621,7 +624,7 @@ class AttestationConsensus extends EventEmitter {
         // instead and let the request reach its normal deadline expiry + refund.
         let needed = Math.max(quorum, roundState.redundancy);
         if(responsible.length < needed){
-            console.warn('AttestationConsensus: skipping unfinalizable round for ' + rid.substring(0,16) +
+            logger.warn('AttestationConsensus: skipping unfinalizable round for ' + rid.substring(0,16) +
                 '... (responsible=' + responsible.length + ' < needed=' + needed +
                 '; quorum=' + quorum + ' redundancy=' + roundState.redundancy + ')');
             return;
@@ -659,7 +662,7 @@ class AttestationConsensus extends EventEmitter {
         if(ah.isAdmissionEra(this.hub && this.hub.network, requestBlock)){
             myAdmit = await this.resolveRoundAdmitBlocks();
             if(!myAdmit){
-                console.error('AttestationConsensus: refusing to open round ' + rid.substring(0,16) +
+                logger.error('AttestationConsensus: refusing to open round ' + rid.substring(0,16) +
                     '... at block ' + requestBlock + '; no fresh BTC admission tip to stamp an admission height from');
                 return;
             }
@@ -676,7 +679,7 @@ class AttestationConsensus extends EventEmitter {
         let myBodyOverCap = !!myBody && !assertBodyWithinCap(myBody);
         if(myBodyOverCap){
             this.bodyOverCapRejectCount++;
-            console.warn('AttestationConsensus: refusing to propose ' + rid.substring(0,16) +
+            logger.warn('AttestationConsensus: refusing to propose ' + rid.substring(0,16) +
                 '... (own body is ' + bodyByteLength(myBody) + ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' +
                 ATTEST_RESPONSE_BODY_MAX_BYTES + '; request is not proposable by this hub)');
         }
@@ -756,7 +759,7 @@ class AttestationConsensus extends EventEmitter {
 
         pending.timer = setTimeout(() => {
             if(!pending.finalized){
-                console.warn('AttestationConsensus: round timeout for ' + rid.substring(0,16) + '...');
+                logger.warn('AttestationConsensus: round timeout for ' + rid.substring(0,16) + '...');
                 // Count before teardown so the metric rail carries the quorum
                 // loss even when the warn above is never scraped (item 8c1148c0).
                 this.roundTimeoutCount++;
@@ -797,7 +800,7 @@ class AttestationConsensus extends EventEmitter {
 
         // For single-validator stacks (N=1) we already have everything we need
         this.maybeAdvanceFromProposals(rid).catch(e =>
-            console.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
+            logger.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
     }
 
     _handleMessage(envelope){
@@ -860,11 +863,11 @@ class AttestationConsensus extends EventEmitter {
         // peer could otherwise craft a body_b64 up to the WebSocket frame limit,
         // far larger than the provider's configured response cap.
         if(String(d.body_b64 || '').length > this.bodyB64Limit(pending)){
-            console.warn('AttestationConsensus: oversized PROPOSE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
+            logger.warn('AttestationConsensus: oversized PROPOSE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
             return;
         }
         if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
-            console.warn('AttestationConsensus: oversized PROPOSE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            logger.warn('AttestationConsensus: oversized PROPOSE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
         // Same cap for `status`, and for the same reason: it is a short outcome
@@ -873,7 +876,7 @@ class AttestationConsensus extends EventEmitter {
         // concatenated into the A-F4 candidate key, so an uncapped one is
         // adversarial padding on every surface `meta` is capped against.
         if(String(d.status || '').length > ATTEST_META_MAX_LENGTH){
-            console.warn('AttestationConsensus: oversized PROPOSE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            logger.warn('AttestationConsensus: oversized PROPOSE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 
@@ -890,7 +893,7 @@ class AttestationConsensus extends EventEmitter {
         if(wireEffective === undefined) return;
         let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig || ''), senderPubkey)){
-            console.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
+            logger.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
             return;
         }
         // Bound it here as well as at the PREPARE adoption sites, because the
@@ -902,7 +905,7 @@ class AttestationConsensus extends EventEmitter {
         // than just the field) keeps `proposals` free of entries whose stamp the
         // resolver would have to re-screen.
         if(wireEffective !== null && !this.effectiveTimeWithinFollowerWindow(wireEffective)){
-            console.warn('AttestationConsensus: PROPOSE effective_time ' + wireEffective + ' out of window from ' +
+            logger.warn('AttestationConsensus: PROPOSE effective_time ' + wireEffective + ' out of window from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
@@ -914,7 +917,7 @@ class AttestationConsensus extends EventEmitter {
         // this is the point that keeps this hub from ever signing for it.
         if(!assertBodyWithinCap(body)){
             this.bodyOverCapRejectCount++;
-            console.warn('AttestationConsensus: oversized PROPOSE body (decoded ' + bodyByteLength(body) +
+            logger.warn('AttestationConsensus: oversized PROPOSE body (decoded ' + bodyByteLength(body) +
                 ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' + ATTEST_RESPONSE_BODY_MAX_BYTES + ') from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
@@ -941,7 +944,7 @@ class AttestationConsensus extends EventEmitter {
         }
 
         this.maybeAdvanceFromProposals(rid).catch(e =>
-            console.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
+            logger.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
     }
 
     // Once enough proposals are in, run provider.agree() to pick a winner and
@@ -991,7 +994,7 @@ class AttestationConsensus extends EventEmitter {
         // Run provider's consensus strategy
         let providerModule = this.providerRegistry.getModule(pending.providerId);
         if(!providerModule || typeof providerModule.agree !== 'function'){
-            console.warn('AttestationConsensus: provider ' + pending.providerId + ' has no agree(); cannot finalize ' + rid.substring(0,16) + '...');
+            logger.warn('AttestationConsensus: provider ' + pending.providerId + ' has no agree(); cannot finalize ' + rid.substring(0,16) + '...');
             return;
         }
         let proposalsArr = okProposals;
@@ -1047,7 +1050,7 @@ class AttestationConsensus extends EventEmitter {
                   pinnedApprovedModels: pending.pinnedApprovedModels || null,
                   timeoutMs: judgeTimeoutMs, expectedN: need, outcome: judgeOutcome }));
         } catch (e) {
-            console.warn('AttestationConsensus: agree() threw for %s...:', rid.substring(0,16), e);
+            logger.warn(nodeUtil.format('AttestationConsensus: agree() threw for %s...:', rid.substring(0,16), e));
             winner = null;
         }
         pending._agreeing = false;
@@ -1073,10 +1076,10 @@ class AttestationConsensus extends EventEmitter {
 
         if(!winner){
             if(judgeOutcome.inconclusive)
-                console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (could not judge: reason=' +
+                logger.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (could not judge: reason=' +
                              judgeOutcome.reason + '; ' + proposalsArr.length + ' proposals)');
             else
-                console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
+                logger.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
             // Phase 4: publish an explicit STATUS=no_quorum ATTEST v1 (audit
             // row; the request stays pending on the indexer so later retry
             // rounds can still fulfill it before the deadline).
@@ -1124,7 +1127,7 @@ class AttestationConsensus extends EventEmitter {
                 // per round forever and bury the genuine status-mismatch case this
                 // warning exists for.
                 if(!(pending.mirrorEra && p.effectiveTime !== pending.effectiveTime))
-                    console.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
+                    logger.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
             } else if(strategy === 'byte_equality' && (p.status || 'ok') === 'ok' && this.hub.slashDetector){
                 // Diverged OK proposal under byte_equality; record as slash
                 // candidate. An honest status='provider_error' report is a
@@ -1132,7 +1135,7 @@ class AttestationConsensus extends EventEmitter {
                 // Best-effort; failures don't disrupt the round.
                 this.hub.slashDetector.recordAttestationDivergence(
                     pubkey, rid, pending.providerId, pHash.toString('hex'), winnerHashHex
-                ).catch(e => console.warn('AttestationConsensus: divergence record failed:', e));
+                ).catch(e => logger.warn(nodeUtil.format('AttestationConsensus: divergence record failed:', e)));
             }
         }
 
@@ -1162,7 +1165,7 @@ class AttestationConsensus extends EventEmitter {
                 let reSig = this.signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime);
                 if(reSig) pending.signatures.set(pending.myPubkey, reSig);
             } else {
-                console.warn('AttestationConsensus: leader abstaining from judge_model re-sign for ' + rid +
+                logger.warn('AttestationConsensus: leader abstaining from judge_model re-sign for ' + rid +
                     ' (no own non-empty ok body fetched; will not vouch for a winner it never evaluated)');
             }
         }
@@ -1263,7 +1266,7 @@ class AttestationConsensus extends EventEmitter {
             if(reSig) pending.signatures.set(pending.myPubkey, reSig);
         }
 
-        console.warn('AttestationConsensus: non-ok outcome status=' + status + ' for ' + rid.substring(0,16) +
+        logger.warn('AttestationConsensus: non-ok outcome status=' + status + ' for ' + rid.substring(0,16) +
                     '... (' + pending.signatures.size + ' aligned sig(s))');
 
         let mySig = pending.signatures.get(pending.myPubkey) || null;
@@ -1308,7 +1311,7 @@ class AttestationConsensus extends EventEmitter {
                 // poll). Warn + count so operators can raise the cap.
                 if(!this.finalized.has(oldest)){
                     this.nonOkEvictedWhilePendingCount++;
-                    console.warn('AttestationConsensus: evicted non-ok throttle entry for still-pending request ' +
+                    logger.warn('AttestationConsensus: evicted non-ok throttle entry for still-pending request ' +
                                 oldest.substring(0,16) + '... (ring full at ' + this.nonOkPublishedMax +
                                 '; raise ATTESTATION_NONOK_PUBLISHED_MAX; evictions_while_pending=' +
                                 this.nonOkEvictedWhilePendingCount + ')');
@@ -1334,16 +1337,16 @@ class AttestationConsensus extends EventEmitter {
 
         // Reject oversized payloads before allocating a Buffer (see _handlePropose).
         if(String(d.body_b64 || '').length > this.bodyB64Limit(pending)){
-            console.warn('AttestationConsensus: oversized PREPARE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
+            logger.warn('AttestationConsensus: oversized PREPARE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
             return;
         }
         if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
-            console.warn('AttestationConsensus: oversized PREPARE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            logger.warn('AttestationConsensus: oversized PREPARE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
         // Status cap, mirroring the PROPOSE guard above.
         if(String(d.status || '').length > ATTEST_META_MAX_LENGTH){
-            console.warn('AttestationConsensus: oversized PREPARE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            logger.warn('AttestationConsensus: oversized PREPARE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 
@@ -1366,7 +1369,7 @@ class AttestationConsensus extends EventEmitter {
         // wire `body`, so a late echo's own decoded length is harmless either way.
         if(!assertBodyWithinCap(body)){
             this.bodyOverCapRejectCount++;
-            console.warn('AttestationConsensus: oversized PREPARE body (decoded ' + bodyByteLength(body) +
+            logger.warn('AttestationConsensus: oversized PREPARE body (decoded ' + bodyByteLength(body) +
                 ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' + ATTEST_RESPONSE_BODY_MAX_BYTES + ') from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
@@ -1381,7 +1384,7 @@ class AttestationConsensus extends EventEmitter {
             // below (a hub only vouches for what it observed), never from
             // trusting the sender.
             if(body.length !== 0 || meta !== ''){
-                console.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
+                logger.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
                 return;
             }
             // Whitelist the adopted status to the exact set a hub can DERIVE
@@ -1392,13 +1395,13 @@ class AttestationConsensus extends EventEmitter {
             // failed co-sign it, and finalize a terminal ATTEST that kills an
             // otherwise-retryable request and triggers a wrongful refund.
             if(status !== 'provider_error' && status !== 'no_quorum'){
-                console.warn('AttestationConsensus: non-ok PREPARE with non-derivable status "' + status + '" from ' + senderPubkey.substring(0,16) + '... (rejected)');
+                logger.warn('AttestationConsensus: non-ok PREPARE with non-derivable status "' + status + '" from ' + senderPubkey.substring(0,16) + '... (rejected)');
                 return;
             }
             let seenNonOk = this.nonOkPublished.get(rid);
             if(seenNonOk && seenNonOk.has(status)) return;  // this status already published; don't co-sign a duplicate
             if(!d.sig || !d.sig_pubkey){
-                console.warn('AttestationConsensus: unsigned non-ok PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
+                logger.warn('AttestationConsensus: unsigned non-ok PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
             // WINNER-ESTABLISHING BLOCK: this hub is about to adopt a field it did
@@ -1409,11 +1412,11 @@ class AttestationConsensus extends EventEmitter {
             if(wireEffective === undefined) return;
             let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
-                console.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
+                logger.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
             if(wireEffective !== null && !this.effectiveTimeWithinFollowerWindow(wireEffective)){
-                console.warn('AttestationConsensus: non-ok PREPARE effective_time ' + wireEffective + ' out of window from ' +
+                logger.warn('AttestationConsensus: non-ok PREPARE effective_time ' + wireEffective + ' out of window from ' +
                     senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
                 return;
             }
@@ -1462,14 +1465,14 @@ class AttestationConsensus extends EventEmitter {
                 // derive is one it must not co-sign (items 2641, 2579).
                 if(derivedWinner && typeof derivedWinner.then === 'function'){
                     derivedWinner.then(() => {}, () => {});
-                    console.error('AttestationConsensus: byte_equality provider "' + pending.providerId +
+                    logger.error('AttestationConsensus: byte_equality provider "' + pending.providerId +
                         '" exports an async agree(); no_quorum self-derivation is unavailable on the ' +
                         'synchronous PREPARE path, so ' + rid.substring(0,16) + '... is not co-signed ' +
                         '(config error: strategy/module shape mismatch)');
                     return;
                 }
                 if(derivedWinner){
-                    console.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
+                    logger.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
                         '... for ' + rid.substring(0,16) + '... (own agree() derives an ok winner; not co-signing)');
                     return;
                 }
@@ -1549,7 +1552,7 @@ class AttestationConsensus extends EventEmitter {
             // co-sign (item 4559). For judge_model the sender is already constrained to
             // the elected leader above; a node that cannot sign cannot lead a round.
             if(!d.sig || !d.sig_pubkey){
-                console.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
+                logger.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
             // WINNER-ESTABLISHING BLOCK (ok path). Same two guards, same order, same
@@ -1559,11 +1562,11 @@ class AttestationConsensus extends EventEmitter {
             if(wireEffective === undefined) return;
             let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
-                console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
+                logger.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
             if(wireEffective !== null && !this.effectiveTimeWithinFollowerWindow(wireEffective)){
-                console.warn('AttestationConsensus: PREPARE effective_time ' + wireEffective + ' out of window from ' +
+                logger.warn('AttestationConsensus: PREPARE effective_time ' + wireEffective + ' out of window from ' +
                     senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
                 return;
             }
@@ -1601,7 +1604,7 @@ class AttestationConsensus extends EventEmitter {
                     }
                 }
                 if(!matchesProposal){
-                    console.warn('AttestationConsensus: leader PREPARE body matches no collected proposal from ' +
+                    logger.warn('AttestationConsensus: leader PREPARE body matches no collected proposal from ' +
                         senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected, A-F1)');
                     return;
                 }
@@ -1677,7 +1680,7 @@ class AttestationConsensus extends EventEmitter {
                     // quorum via other validators or correctly times out.
                     let ownBody = myProposal.body;
                     if(!ownBody || ownBody.length === 0){
-                        console.warn('AttestationConsensus: abstaining from judge_model PREPARE for ' + rid + ' (no own non-empty body fetched; will not co-sign leader winner)');
+                        logger.warn('AttestationConsensus: abstaining from judge_model PREPARE for ' + rid + ' (no own non-empty body fetched; will not co-sign leader winner)');
                         return;
                     }
                     // Semantic consensus: our own body is byte-divergent from the
@@ -1766,7 +1769,7 @@ class AttestationConsensus extends EventEmitter {
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             } else {
-                console.warn('AttestationConsensus: PREPARE sig not over winner body from ' + senderPubkey.substring(0,16) + '... (not counted)');
+                logger.warn('AttestationConsensus: PREPARE sig not over winner body from ' + senderPubkey.substring(0,16) + '... (not counted)');
             }
         }
 
@@ -1915,7 +1918,7 @@ class AttestationConsensus extends EventEmitter {
             sigsArray.push({ pubkey: pk, sig: sg });
         }
 
-        console.log('AttestationConsensus: finalized ' + rid.substring(0,16) + '... (' +
+        logger.info('AttestationConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' +
                     sigsArray.length + ' sigs)');
 
@@ -2065,7 +2068,7 @@ class AttestationConsensus extends EventEmitter {
                     : this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
-            console.warn('AttestationConsensus: sign failed:', e);
+            logger.warn(nodeUtil.format('AttestationConsensus: sign failed:', e));
             return null;
         }
     }
@@ -2088,7 +2091,7 @@ class AttestationConsensus extends EventEmitter {
         if(!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
         try { return await hub.resolveAdmitBlocks('attestation_responses', ['BTC']); }
         catch (e){
-            console.error('AttestationConsensus: admission tip read failed:', e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('AttestationConsensus: admission tip read failed:', e && e.message ? e.message : e));
             return null;
         }
     }
@@ -2141,12 +2144,12 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.mirrorEra) return null;
         let raw = (d && d.effective_time !== undefined && d.effective_time !== null) ? d.effective_time : null;
         if(raw === null){
-            console.warn('AttestationConsensus: mirror-era ' + phase + ' with no effective_time from ' +
+            logger.warn('AttestationConsensus: mirror-era ' + phase + ' with no effective_time from ' +
                 String(senderPubkey).substring(0,16) + '... for ' + String(rid).substring(0,16) + '... (rejected)');
             return undefined;
         }
         if(!isCanonicalIntSpelling(raw)){
-            console.warn('AttestationConsensus: mirror-era ' + phase + ' with non-canonical effective_time ' +
+            logger.warn('AttestationConsensus: mirror-era ' + phase + ' with non-canonical effective_time ' +
                 JSON.stringify(raw) + ' from ' + String(senderPubkey).substring(0,16) + '... for ' +
                 String(rid).substring(0,16) + '... (rejected, D59)');
             return undefined;

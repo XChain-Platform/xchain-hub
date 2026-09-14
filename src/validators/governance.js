@@ -33,6 +33,9 @@ const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const { ORACLE_DEVIATION_THRESHOLD } = require('../constants.js');
 const { noteDrop } = require('../consensus/diagnostics');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -267,10 +270,10 @@ class Governance extends EventEmitter {
         // rejection into process death, so without this a per-tick fault kills the hub
         // instead of logging and re-arming, which is what the tally path intends.
         this._tallyTimer = setInterval(() => {
-            this._checkExpiredProposals().catch(e => console.error('Governance tally tick error:', e));
+            this._checkExpiredProposals().catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
         }, this.tallyInterval);
 
-        console.log('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
+        logger.info('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
     }
 
     async stop() {
@@ -372,7 +375,7 @@ class Governance extends EventEmitter {
             validatorSnapshot: snapshot
         });
 
-        console.log('Governance: Proposal created: ' + proposalId + ' (' + parameter + ': ' + currentValue + ' -> ' + proposedValue + ')' +
+        logger.info('Governance: Proposal created: ' + proposalId + ' (' + parameter + ': ' + currentValue + ' -> ' + proposedValue + ')' +
             (activation !== null ? ' [activation block ' + activation + ']' : ''));
 
         return { proposalId, parameter, status: 'voting', votingEnd: votingEnd.toISOString(), activationBlock: activation };
@@ -424,7 +427,7 @@ class Governance extends EventEmitter {
             proposalId, vote: voteChoice, voterPubkey, signature, seq
         });
 
-        console.log('Governance: Vote cast: ' + voteChoice + ' on ' + proposalId);
+        logger.info('Governance: Vote cast: ' + voteChoice + ' on ' + proposalId);
         return { proposalId, vote: voteChoice, voter: voterPubkey };
     }
 
@@ -462,19 +465,19 @@ class Governance extends EventEmitter {
                 // async (a cooldown-window DB lookup): surface rejections instead of
                 // letting them escape the gossip dispatcher as an unhandled rejection.
                 this._handlePropose(envelope).catch(e =>
-                    console.error('Governance: GOV_PROPOSE handler error:', e && e.message ? e.message : e));
+                    logger.error(nodeUtil.format('Governance: GOV_PROPOSE handler error:', e && e.message ? e.message : e)));
                 break;
             case GOV_VOTE:
                 // async (a proposal-window lookup): surface rejections instead of
                 // letting them escape the gossip dispatcher as an unhandled rejection.
                 this._handleVote(envelope).catch(e =>
-                    console.error('Governance: GOV_VOTE handler error:', e && e.message ? e.message : e));
+                    logger.error(nodeUtil.format('Governance: GOV_VOTE handler error:', e && e.message ? e.message : e)));
                 break;
             case GOV_RESULT:
                 // async: a rejection out of the gossip dispatcher would be an
                 // unhandled rejection (process exit), so catch and log here.
                 this._handleResult(envelope).catch(e =>
-                    console.error('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e));
+                    logger.error(nodeUtil.format('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e)));
                 break;
         }
     }
@@ -509,7 +512,7 @@ class Governance extends EventEmitter {
         if (proposerRegistry && proposerRegistry.size > 0) {
             let senderPk = String(proposerRegistry.get(envelope.sender) || '').toLowerCase();
             if (!senderPk || senderPk !== String(proposerPubkey || '').toLowerCase()) {
-                console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                logger.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                     '): proposerPubkey does not bind to the sending validator (attribution spoof guard)');
                 return;
             }
@@ -519,7 +522,7 @@ class Governance extends EventEmitter {
         // never records or votes on it. With no local row, a later GOV_RESULT UPDATE matches
         // 0 rows and never emits proposal:finalized, so the threshold stays pinned.
         if (MIN_STAKE_GOVERNANCE_DISABLED && parseCapabilityMinStakeParam(parameter)) {
-            console.warn('Governance: dropping inbound CAPABILITY_*_MIN_STAKE proposal ' + proposalId +
+            logger.warn('Governance: dropping inbound CAPABILITY_*_MIN_STAKE proposal ' + proposalId +
                 ' (' + parameter + '); governance MIN_STAKE changes are disabled pre-launch (#4352)');
             return;
         }
@@ -541,7 +544,7 @@ class Governance extends EventEmitter {
             let latest = (raw !== null && raw !== undefined) ? Number(raw) : null;
             if (activationBlock === undefined || activationBlock === null || !Number.isInteger(Number(activationBlock))) {
                 // Block-anchored parameter arrived with no valid activation block; drop.
-                console.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
+                logger.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
                     ' (' + parameter + '): missing or non-integer activation_block');
                 return;
             }
@@ -549,7 +552,7 @@ class Governance extends EventEmitter {
             if (latest !== null && Number.isInteger(latest)) {
                 let minAb = minActivationBlock(latest, this.votingPeriod);
                 if (ab < minAb) {
-                    console.warn('Governance: dropping inbound proposal ' + proposalId +
+                    logger.warn('Governance: dropping inbound proposal ' + proposalId +
                         ' (' + parameter + '): activation_block ' + ab + ' is below follower min ' + minAb);
                     return;
                 }
@@ -559,7 +562,7 @@ class Governance extends EventEmitter {
                 // activation_block could let a dishonest proposer inject a too-soon
                 // activation. Drop and wait until the hub has a tip so the min-bound
                 // check can run properly.
-                console.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
+                logger.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
                     ' (' + parameter + '): cannot validate activation_block ' + ab +
                     ' without a local tip (tipless follower); will re-evaluate when tip is available');
                 return;
@@ -588,7 +591,7 @@ class Governance extends EventEmitter {
         try {
             this.validateChangeBounds(parameter, currentValue, proposedValue);
         } catch (e) {
-            console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+            logger.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                 '): change exceeds allowed bounds: ' + e.message);
             return;
         }
@@ -616,7 +619,7 @@ class Governance extends EventEmitter {
         let snap        = this.parseSnapshot(envelope.data.validatorSnapshot);
         let snapValid   = !!snap && this.snapshotMatchesLocalSet(snap);
         if (this.isSnapshotLockActive() && !snapValid) {
-            console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+            logger.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                 '): snapshot-lock active but validator_snapshot is missing or does not match the local set');
             return;
         }
@@ -648,17 +651,17 @@ class Governance extends EventEmitter {
                 let cooldownEnd = new Date(rejected[0].voting_end).getTime() + (COOLDOWN_DAYS * 86400000);
                 if (Date.now() < cooldownEnd) {
                     let daysLeft = ((cooldownEnd - Date.now()) / 86400000).toFixed(1);
-                    console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                    logger.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                         '): parameter is in re-proposal cooldown (' + daysLeft + ' days remaining)');
                     return;
                 }
             }
         } catch (e) {
-            console.error('Governance: cooldown re-check failed for inbound proposal %s (%s); proceeding (fail-open):',
-                proposalId, parameter, e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('Governance: cooldown re-check failed for inbound proposal %s (%s); proceeding (fail-open):',
+                proposalId, parameter, e && e.message ? e.message : e));
         }
 
-        this.db.createGovernanceProposalByProposalIdAndProposerPubkey(proposalId, proposerPubkey || '', parameter, currentValue, proposedValue, rationale || '', localVotingEnd, activation, snapshotJson).catch(e => console.error('Governance: failed to persist inbound proposal %s:', proposalId, e));
+        this.db.createGovernanceProposalByProposalIdAndProposerPubkey(proposalId, proposerPubkey || '', parameter, currentValue, proposedValue, rationale || '', localVotingEnd, activation, snapshotJson).catch(e => logger.error(nodeUtil.format('Governance: failed to persist inbound proposal %s:', proposalId, e)));
         // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
         // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
         // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
@@ -690,7 +693,7 @@ class Governance extends EventEmitter {
         // as soon as external validators register.
         let voteSeq = normalizeVoteSeq(seq);
         if (!voteSeq) {
-            console.warn('Governance: dropped vote on ' + proposalId + ' from ' + voterPubkey +
+            logger.warn('Governance: dropped vote on ' + proposalId + ' from ' + voterPubkey +
                 ': missing or invalid seq (a legacy peer, or a replay stripped of its seq)');
             return;
         }
@@ -724,7 +727,7 @@ class Governance extends EventEmitter {
         try {
             prows = await this.db.getGovernanceProposalElectorateInVoting(proposalId);
         } catch (e) {
-            console.error('Governance: failed to look up proposal for inbound vote %s:', proposalId, e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('Governance: failed to look up proposal for inbound vote %s:', proposalId, e && e.message ? e.message : e));
             return;
         }
         if (!prows.length || new Date(prows[0].voting_end).getTime() < Date.now()) return;
@@ -736,8 +739,8 @@ class Governance extends EventEmitter {
         if (electorate && !electorate.some(e => e.pubkey === pk)) return;
 
         this.upsertVote(proposalId, voterPubkey, vote, signature, voteSeq)
-            .catch(e => console.error('Governance: failed to persist inbound vote for proposal %s from %s:',
-                proposalId, voterPubkey, e));
+            .catch(e => logger.error(nodeUtil.format('Governance: failed to persist inbound vote for proposal %s from %s:',
+                proposalId, voterPubkey, e)));
         // A vote is consensus-tally-affecting state: a silently-dropped write here makes this
         // node's tally diverge from peers that succeeded, with no symptom until operators
         // compare counts. Log it so a tally mismatch is traceable to the specific dropped write.
@@ -814,7 +817,7 @@ class Governance extends EventEmitter {
             } catch (e) { return; }
             let localResult = this.computeTally(votes, electorate).approved ? 'passed' : 'failed';
             if (localResult !== status) {
-                console.warn('Governance: GOV_RESULT status mismatch from leader ' + envelope.sender +
+                logger.warn('Governance: GOV_RESULT status mismatch from leader ' + envelope.sender +
                     ' on ' + proposalId + ': wire=' + status + ' local=' + localResult +
                     ' (applying local re-tally)');
             }
@@ -875,8 +878,8 @@ class Governance extends EventEmitter {
             try {
                 await this.upsertVote(proposalId, v.voterPubkey, v.vote, v.signature, seq);
             } catch (e) {
-                console.error('Governance: failed to ingest GOV_RESULT vote evidence for %s from %s:',
-                    proposalId, v.voterPubkey, e && e.message ? e.message : e);
+                logger.error(nodeUtil.format('Governance: failed to ingest GOV_RESULT vote evidence for %s from %s:',
+                    proposalId, v.voterPubkey, e && e.message ? e.message : e));
             }
         }
     }
@@ -909,7 +912,7 @@ class Governance extends EventEmitter {
             // Tally check runs on a timer, so don't crash -- but log the error.
             // A systematic failure here (schema drift, column mismatch) would
             // otherwise freeze every proposal in 'voting' state with no signal.
-            console.error('Governance tally error:', e.message, e);
+            logger.error(nodeUtil.format('Governance tally error:', e.message, e));
             return;
         }
 
@@ -923,7 +926,7 @@ class Governance extends EventEmitter {
             try {
                 await this._tallyProposal(proposal);
             } catch (e) {
-                console.error('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e);
+                logger.error(nodeUtil.format('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e));
             }
         }
     }
@@ -968,7 +971,7 @@ class Governance extends EventEmitter {
             }))
         });
 
-        console.log('Governance: Proposal ' + proposal.proposal_id + ': ' + newStatus +
+        logger.info('Governance: Proposal ' + proposal.proposal_id + ': ' + newStatus +
             ' (' + approvals + '/' + totalVotes + ' approve, ' + validatorCount + ' validators)');
 
         if (approved) {

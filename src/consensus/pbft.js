@@ -33,6 +33,9 @@ const { isAdmissibleSigner } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const { noteDrop } = require('./diagnostics');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -208,7 +211,7 @@ class Consensus {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        console.log('Consensus engine started (seq: ' + this.seq + ')');
+        logger.info('Consensus engine started (seq: ' + this.seq + ')');
     }
 
     async stop() {
@@ -261,7 +264,7 @@ class Consensus {
         // available (BTC indexer unreachable). An empty validator list makes
         // meetsStakeThreshold always false, stalling the round permanently.
         if (weighted && (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)) {
-            console.warn('Consensus: weighted mode requested but snapshot unavailable; falling back to count mode for this round');
+            logger.warn('Consensus: weighted mode requested but snapshot unavailable; falling back to count mode for this round');
             weighted = false;
         }
         let quorum = snapshot
@@ -280,7 +283,7 @@ class Consensus {
                     'will retry when the snapshot populates');
             }
             if (this.minValidators > 1) {
-                console.warn('Consensus: operating in single-node mode (MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0)');
+                logger.warn('Consensus: operating in single-node mode (MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0)');
             }
             await this.applyConfig(config);
             return true;
@@ -469,9 +472,9 @@ class Consensus {
                 // call. Errors are caught and logged; they never bubble up to
                 // the gossip layer.
                 this._handlePrePrepare(envelope).catch(err =>
-                    console.error('Consensus: PRE_PREPARE handler error for seq %s:',
+                    logger.error(nodeUtil.format('Consensus: PRE_PREPARE handler error for seq %s:',
                         (envelope && envelope.data && envelope.data.seq),
-                        err && err.message ? err.message : err));
+                        err && err.message ? err.message : err)));
                 break;
             case PBFT_PREPARE:     this._handlePrepare(envelope);    break;
             case PBFT_COMMIT:      this._handleCommit(envelope);     break;
@@ -498,19 +501,19 @@ class Consensus {
         // envelope cannot be identity-checked at all, so it is dropped here,
         // still before any snapshot/indexer work.
         if (typeof view !== 'number') {
-            console.warn('PBFT: Rejecting PRE_PREPARE with no view from ' + envelope.sender + ' (seq ' + seq + ')');
+            logger.warn('PBFT: Rejecting PRE_PREPARE with no view from ' + envelope.sender + ' (seq ' + seq + ')');
             return;
         }
 
         // Reject stale/replayed sequence numbers
         if (seq <= this.lastAppliedSeq) {
-            console.warn('Consensus: Rejecting PRE_PREPARE with stale seq ' + seq + ' (last applied: ' + this.lastAppliedSeq + ')');
+            logger.warn('Consensus: Rejecting PRE_PREPARE with stale seq ' + seq + ' (last applied: ' + this.lastAppliedSeq + ')');
             return;
         }
 
         let computedDigest = this._digest(config);
         if (computedDigest !== configDigest) {
-            console.warn('PBFT: PRE_PREPARE digest mismatch from ' + envelope.sender + ' (seq ' + seq + ')');
+            logger.warn('PBFT: PRE_PREPARE digest mismatch from ' + envelope.sender + ' (seq ' + seq + ')');
             return;
         }
 
@@ -529,7 +532,7 @@ class Consensus {
             // the own-tip fallback, so this closes that specific hole. Genuine
             // single-node / regtest hubs keep the local-tip fallback.
             if (this.isFederated() && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
-                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                logger.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' from ' + envelope.sender + ': PRE_PREPARE carries no valid btcBlockHeight ' +
                     '(federated hub); refusing to pin the validator snapshot at the local BTC tip, ' +
                     'which would diverge from the leader\'s snapshot for this seq.');
@@ -556,13 +559,13 @@ class Consensus {
                     ? await this.hub._resolveBtcLatestBlock()
                     : null;
                 if (!Number.isFinite(Number(myTip))) {
-                    console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                    logger.warn('Consensus: declining to PREPARE for seq ' + seq +
                         ' from ' + envelope.sender + ': cannot resolve our own BTC tip to bound the ' +
                         'leader-stamped snapshot height (federated hub).');
                     return;
                 }
                 if (Math.abs(Number(myTip) - Number(btcBlockHeight)) > this.snapshotToleranceBlocks) {
-                    console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                    logger.warn('Consensus: declining to PREPARE for seq ' + seq +
                         ' from ' + envelope.sender + ': PRE_PREPARE btcBlockHeight ' + btcBlockHeight +
                         ' deviates from our own BTC tip ' + myTip + ' by more than ' +
                         this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
@@ -582,7 +585,7 @@ class Consensus {
             // different set. We create no proposal and emit no PREPARE; the round
             // either reaches quorum without us or times out into view change.
             if (this.isFederated() && !this.hasDeterministicSnapshot(snapshot)) {
-                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                logger.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' without a deterministic validator snapshot (federated hub); ' +
                     'indexer capability snapshot unavailable');
                 return;
@@ -593,7 +596,7 @@ class Consensus {
             // and weighted=true, making meetsStakeThreshold always false and
             // stalling view-change recovery as well.
             if (weighted && (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)) {
-                console.warn('Consensus: follower weighted mode requested but snapshot unavailable; falling back to count mode');
+                logger.warn('Consensus: follower weighted mode requested but snapshot unavailable; falling back to count mode');
                 weighted = false;
             }
             let quorum = snapshot
@@ -607,7 +610,7 @@ class Consensus {
             // one is spurious; create no proposal and let it time out into view
             // change (follower twin of the propose() refusal above).
             if (this.isEmptyFederationSnapshot(snapshot)) {
-                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                logger.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' over an EMPTY active-validator snapshot (block ' + btcBlockHeight +
                     ', federated hub); a legitimate leader skips such a round.');
                 return;
@@ -669,7 +672,7 @@ class Consensus {
         // broadcasting PREPARE with the incoming digest would cast a vote we
         // can never commit and that peers will reject. Drop it.
         if (proposal.digest !== configDigest) {
-            console.warn('PBFT: PRE_PREPARE seq ' + seq + ' digest conflicts with existing proposal; ignoring');
+            logger.warn('PBFT: PRE_PREPARE seq ' + seq + ' digest conflicts with existing proposal; ignoring');
             return;
         }
 
@@ -753,14 +756,14 @@ class Consensus {
             for (let env of bucket) {
                 try { this._handleMessage(env); }
                 catch (e) {
-                    console.error('PBFT: error replaying a buffered vote for seq %s:', seq,
-                        e && e.message ? e.message : e);
+                    logger.error(nodeUtil.format('PBFT: error replaying a buffered vote for seq %s:', seq,
+                        e && e.message ? e.message : e));
                 }
             }
         } finally {
             this._replayingSeq = null;
         }
-        console.log('PBFT: replayed ' + bucket.length + ' vote(s) that arrived for seq ' + seq +
+        logger.info('PBFT: replayed ' + bucket.length + ' vote(s) that arrived for seq ' + seq +
             ' before this hub opened the round');
         return bucket.length;
     }
@@ -886,12 +889,12 @@ class Consensus {
     leaderIdentityOk(seq, view, envelope, memberPubkeys) {
         let leader = this.leaderAt(seq, view, memberPubkeys);
         if (!leader) {
-            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
+            logger.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
                 ' from ' + envelope.sender + ': no leader can be elected (empty validator set)');
             return false;
         }
         if (!this.isLeaderIdentity(leader, envelope.sender, this.resolveSenderPubkey(envelope))) {
-            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
+            logger.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
                 ' from non-leader ' + envelope.sender);
             return false;
         }
@@ -1072,7 +1075,7 @@ class Consensus {
 
                 this.pendingProposals.delete(seq);
 
-                console.log('PBFT: Config applied (seq ' + seq + ', ' +
+                logger.info('PBFT: Config applied (seq ' + seq + ', ' +
                     proposal.prepares.size + ' prepares, ' +
                     proposal.commits.size + ' commits)');
 
@@ -1081,7 +1084,7 @@ class Consensus {
                 // pendingProposals so incoming COMMIT messages trigger a retry
                 // when the DB recovers. Reject the proposer's promise if present
                 // so the caller can surface the error.
-                console.error('PBFT: Error applying config (seq %s):', seq, err.message);
+                logger.error(nodeUtil.format('PBFT: Error applying config (seq %s):', seq, err.message));
                 // Clear the in-flight guard so a subsequent COMMIT can retry the apply
                 // when the DB recovers (proposal.applied is still false).
                 proposal._applying = false;
@@ -1164,7 +1167,7 @@ class Consensus {
             this.view = view;
             let newLeader = this._getLeader(seq, vcCtx.memberPubkeys || null);
             if (this.isLeaderIdentity(newLeader, this.peerManager.validatorAddr, this.selfPubkey())) {
-                console.log('PBFT: View change to view ' + view + '; this node is the new leader');
+                logger.info('PBFT: View change to view ' + view + '; this node is the new leader');
                 this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
             }
             this.pendingViewChanges.delete(view);
@@ -1235,13 +1238,13 @@ class Consensus {
         let expectedLeader = this.leaderAt(seq, view, memberPubkeys);
         if (!expectedLeader ||
             !this.isLeaderIdentity(expectedLeader, envelope.sender, this.resolveSenderPubkey(envelope))) {
-            console.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
+            logger.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
                 ' from non-leader ' + envelope.sender);
             return;
         }
 
         this.view = view;
-        console.log('PBFT: New view ' + view + ' announced by ' + envelope.sender);
+        logger.info('PBFT: New view ' + view + ' announced by ' + envelope.sender);
     }
 
     // Initiate a view change (called when leader times out). The weighted context
@@ -1250,7 +1253,7 @@ class Consensus {
     // though the proposal is gone.
     initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators, lockedMemberPubkeys) {
         this.view++;
-        console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
+        logger.info('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
 
         // Stash the round-locked quorum CONTEXT for this seq so _handleViewChange
         // tallies view-change votes against the proposal-creation snapshot. The
@@ -1367,7 +1370,7 @@ class Consensus {
             // tell a genuine fresh install from an unreadable persisted seq.
             // Rethrow so start() aborts rather than participate with the guard
             // reset to 0. A true fresh install reads zero rows, not an error.
-            console.error('Error loading consensus sequence:', e);
+            logger.error(nodeUtil.format('Error loading consensus sequence:', e));
             throw e;
         }
     }
@@ -1376,7 +1379,7 @@ class Consensus {
         try {
             await this.db.setConsensusState('last_seq', String(seq), String(seq));
         } catch (e) {
-            console.error('Error saving consensus sequence:', e);
+            logger.error(nodeUtil.format('Error saving consensus sequence:', e));
             throw e;   // surface so checkCommitQuorum rejects rather than diverging
         }
     }

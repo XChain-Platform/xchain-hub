@@ -60,6 +60,8 @@ const Database = require('../db');
 const bcmath   = require('../bcmath.js');
 const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('../xchainPrice.js');
 const { getWindowFills } = require('../xchainPriceQuery.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 const { PRICE_MAX, XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
         XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC, XCHAIN_PRICE_MIN_BTC_VOLUME,
         DERIVED_PAIRS } = require('../constants.js');
@@ -134,7 +136,7 @@ class XchainPriceSource {
             let raw = config[key];
             let isSet = raw !== undefined && raw !== null && String(raw) !== '';
             if (isSet && diverges) {
-                console.log('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
+                logger.info('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
                     (network || '<unset>') + '; using the consensus-pinned value (' +
                     (pinned === null ? 'DISABLED' : pinned) +
                     '). The XCHAIN/USD derivation parameters are consensus-uniform and move ' +
@@ -239,7 +241,7 @@ class XchainPriceSource {
             // arbitrary early block range. Deriving a fee input off that is worse than
             // publishing nothing, so an unreliable anchor is a LOCAL failure.
             if (ctx.chainTipReliable === false) {
-                console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
+                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
                     ' - BTC chain-tip fallback active, reference height is not a real height');
                 return null;
             }
@@ -253,7 +255,7 @@ class XchainPriceSource {
             // there is nothing to multiply by, so abstain rather than invent one.
             let btcUsd = ctx.btcUsdPrice ? String(ctx.btcUsdPrice) : null;
             if (!btcUsd || !bcmath.bcgt(btcUsd, '0')) {
-                console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - no local ' + BTC_PAIR + ' this round');
+                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - no local ' + BTC_PAIR + ' this round');
                 return null;
             }
 
@@ -302,7 +304,7 @@ class XchainPriceSource {
             if (!carryForward) {
                 carryForward = toUsd(bcmath, this.bootstrapXchainBtc, refBtcUsd);
                 if (!carryForward) {
-                    console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
+                    logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
                         ' - bootstrap is satoshi-denominated and no finalized ' + BTC_PAIR +
                         ' exists below round ' + round + ' to convert it with');
                     return null;
@@ -323,7 +325,7 @@ class XchainPriceSource {
             // coin). Abstain: publishing carry-forward here would assert "I looked and
             // the market was quiet" when in fact this hub could not look at all.
             if (!selection.ok) {
-                console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' + selection.error);
+                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' + selection.error);
                 return null;
             }
 
@@ -389,7 +391,7 @@ class XchainPriceSource {
         } catch (err) {
             // Never propagate: this pair is appended to a submission carrying 36
             // others, and a throw here would take the whole round's fetch down.
-            console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' +
+            logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' +
                 ((err && err.message) || err));
             return null;
         }
@@ -419,12 +421,12 @@ class XchainPriceSource {
         try {
             value = bcmath.bcformat(price, 8);
             if (!bcmath.bcgt(value, '0') || !bcmath.bclt(value, String(PRICE_MAX))) {
-                console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - computed value ' +
+                logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - computed value ' +
                     price + ' failed the ingestion bound (0 < value < ' + PRICE_MAX + ')');
                 return null;
             }
         } catch (e) {
-            console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ingestion bound threw on value ' +
+            logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ingestion bound threw on value ' +
                 price + ' - ' + ((e && e.message) || e));
             return null;
         }

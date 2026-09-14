@@ -81,6 +81,8 @@ function krakenResultCandidates(altname) {
 // invalid coin. Pinned to the v1 fence and to the indexer config by
 // test/unit/constants_conformance.test.js (#7215).
 const coins = require('../coins');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 
@@ -173,7 +175,7 @@ class PriceFetcher {
         // working counter in the warn line below.
         this._boundRejects[sourceKey] = (this._boundRejects[sourceKey] || 0) + rejected.length;
         let sample = rejected.slice(0, BOUND_REJECT_SAMPLE);
-        console.warn('PriceFetcher: ' + label + ' returned ' + rejected.length +
+        logger.warn('PriceFetcher: ' + label + ' returned ' + rejected.length +
             ' value(s) outside the ingestion bound (0 < value < ' + PRICE_MAX + ') this fetch; ' +
             'dropped from those pairs\' medians: ' + sample.join(', ') +
             (rejected.length > sample.length ? ', ...' : '') +
@@ -262,7 +264,7 @@ class PriceFetcher {
         }
 
         if (liveSources < 2) {
-            console.warn('PriceFetcher: only ' + liveSources + ' live price source(s) this round ' +
+            logger.warn('PriceFetcher: only ' + liveSources + ' live price source(s) this round ' +
                 '(need at least 2 uncorrelated sources for a healthy oracle). ' +
                 'Check CoinGecko / Kraken / Coinbase reachability' +
                 (this.coinmarketcapApiKey ? ' / CoinMarketCap API key.' : '.'));
@@ -283,7 +285,7 @@ class PriceFetcher {
                 // Surface a pair every source stopped returning: without
                 // this the pair silently vanishes from the submission, masking a per-hub
                 // degradation while the round still looks healthy.
-                console.warn('Oracle PriceFetcher: no source returned a value for ' + pair
+                logger.warn('Oracle PriceFetcher: no source returned a value for ' + pair
                     + ' this fetch; omitting it from the submission');
             }
         }
@@ -310,7 +312,7 @@ class PriceFetcher {
                     // incompatibility (e.g. multi-currency /convert requires a paid
                     // CMC plan). Log a distinct warning so operators can distinguish
                     // this from a transient network error and upgrade their plan.
-                    console.warn('CoinMarketCap returned 400 (possible plan-tier limit: multi-currency convert may require a paid plan). Skipping CMC this round.');
+                    logger.warn('CoinMarketCap returned 400 (possible plan-tier limit: multi-currency convert may require a paid plan). Skipping CMC this round.');
                     break;
                 }
                 let retryable = status === 429 || status === 503;
@@ -351,7 +353,7 @@ class PriceFetcher {
         try {
             response = await this.fetchWithRetry(url, { timeout: this.timeout, headers });
         } catch (err) {
-            console.warn('CoinGecko fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            logger.warn('CoinGecko fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             return null;
         }
 
@@ -407,7 +409,7 @@ class PriceFetcher {
             } catch (err) {
                 // Per-coin failure only. One coin erroring must not discard the two
                 // that answered, the same fail-soft rule the other sources follow.
-                console.warn('Coinbase fetch failed after retries for ' + coin + ': ' +
+                logger.warn('Coinbase fetch failed after retries for ' + coin + ': ' +
                              (err ? err.message : 'unknown error'));
                 continue;
             }
@@ -454,7 +456,7 @@ class PriceFetcher {
         try {
             response = await this.fetchWithRetry(url, { timeout: this.timeout });
         } catch (err) {
-            console.warn('Kraken fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            logger.warn('Kraken fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             return null;
         }
 
@@ -463,7 +465,7 @@ class PriceFetcher {
         // treat it as a failed round for this source rather than a partial parse.
         let body = response.data;
         if (!body || (Array.isArray(body.error) && body.error.length > 0)) {
-            console.warn('Kraken returned error: ' + (body && body.error ? JSON.stringify(body.error) : 'no body'));
+            logger.warn('Kraken returned error: ' + (body && body.error ? JSON.stringify(body.error) : 'no body'));
             return null;
         }
         let result = body.result;
@@ -518,7 +520,7 @@ class PriceFetcher {
             if (status === 400) {
                 this._cmc400Count++;
                 if (this._cmc400Count >= this._cmc400AlertThreshold) {
-                    console.error(
+                    logger.error(
                         'CoinMarketCap has returned HTTP 400 for ' + this._cmc400Count + ' consecutive rounds. ' +
                         'The configured COINMARKETCAP_API_KEY likely does not support multi-currency convert ' +
                         '(a paid plan feature). Price oracle is running on CoinGecko only. ' +
@@ -526,7 +528,7 @@ class PriceFetcher {
                     );
                 }
             } else {
-                console.warn('CoinMarketCap fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+                logger.warn('CoinMarketCap fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             }
             return null;
         }

@@ -44,6 +44,9 @@ const snapWrite         = require('../lib/capability_snapshot_write.js');
 const { noteDrop, noteRoundLost } = require('../consensus/diagnostics');
 const ah                = require('../lib/admission_height.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -256,7 +259,7 @@ class OracleConsensus extends EventEmitter {
         // What the hatch must not be is SILENT, so a sub-floor setting announces itself on any
         // network that is not regtest, naming the defense it stands down.
         if (this.minSubmissions < 2 && !(this.hub && this.hub.network === 'regtest')) {
-            console.log('WARNING: ORACLE_MIN_SUBMISSIONS=' + this.minSubmissions + ' on ' +
+            logger.info('WARNING: ORACLE_MIN_SUBMISSIONS=' + this.minSubmissions + ' on ' +
                 (((this.hub && this.hub.network) || '<unset>')) + '; the 2-hub price diversity floor ' +
                 'is STOOD DOWN on this hub, so one submitter can carry a federation-signed round. ' +
                 'Intended only for a deliberate single-host deployment.');
@@ -301,7 +304,7 @@ class OracleConsensus extends EventEmitter {
         let allowUnverifiedEnv = String(hubConfig.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
         let isRegtest          = !!(this.hub && this.hub.network === 'regtest');
         if (allowUnverifiedEnv && !isRegtest) {
-            console.log('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
+            logger.info('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
                 (((this.hub && this.hub.network) || '<unset>')) + '; unverifiable-pair co-sign ' +
                 'stays fail-closed. This hatch is honored only on regtest single-host bring-up.');
         }
@@ -356,7 +359,7 @@ class OracleConsensus extends EventEmitter {
 
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
-        console.log('Oracle consensus engine started');
+        logger.info('Oracle consensus engine started');
     }
 
     // Populate _lastFinalizedPrices with the most-recently-finalized price per
@@ -383,10 +386,10 @@ class OracleConsensus extends EventEmitter {
                 }
             }
             if (seeded > 0 && !(opts && opts.quiet))
-                console.log('Oracle: seeded last-finalized-price cache with ' + seeded + ' pair(s) from price_snapshots');
+                logger.info('Oracle: seeded last-finalized-price cache with ' + seeded + ' pair(s) from price_snapshots');
         } catch (e) {
-            console.warn('Oracle: could not seed last-finalized-price cache (continuing with empty cache):',
-                e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('Oracle: could not seed last-finalized-price cache (continuing with empty cache):',
+                e && e.message ? e.message : e));
         }
     }
 
@@ -420,14 +423,14 @@ class OracleConsensus extends EventEmitter {
                 seat: (w && w.seat) || 'unknown', ...((w && w.seatInfo) || {}),
                 pending: this.pendingRounds.has(round)
             });
-            console.warn('Oracle: stopping with round ' + round + ' open and unfinalized; recording it as skipped');
+            logger.warn('Oracle: stopping with round ' + round + ' open and unfinalized; recording it as skipped');
         }
         if (inFlight.length) {
             await Promise.allSettled(inFlight.map(([round, w]) =>
                 this._storeSkippedRound(round, w && w.btcBlockHeight, w && w.btcBlockTime,
                     'hub stopped with round in flight').catch(err =>
-                    console.error('Oracle: Error storing in-flight round ' + round + ' at stop:',
-                        err && err.message ? err.message : err))));
+                    logger.error(nodeUtil.format('Oracle: Error storing in-flight round ' + round + ' at stop:',
+                        err && err.message ? err.message : err)))));
         }
         this.pendingRounds.clear();
         this.roundReadyAt.clear();
@@ -488,7 +491,7 @@ class OracleConsensus extends EventEmitter {
         this.earlyMessageTtl.delete(round);
         for (let env of arr) {
             try { this._handleMessage(env); }
-            catch (e) { console.error('Oracle: error replaying buffered message for round %s:', round, e.message); }
+            catch (e) { logger.error(nodeUtil.format('Oracle: error replaying buffered message for round %s:', round, e.message)); }
         }
     }
 
@@ -586,7 +589,7 @@ class OracleConsensus extends EventEmitter {
         }
 
         if (submissions.size < this.minSubmissions) {
-            console.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
+            logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
                 ' submission(s); minimum is ' + this.minSubmissions + ', skipping');
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'below minimum submissions threshold');
             return;
@@ -618,7 +621,7 @@ class OracleConsensus extends EventEmitter {
             // Counting only, never gating: the round's outcome is unchanged.
             this._singleSourceRounds++;
             this._lastSingleSourceRound = round;
-            console.warn('Oracle: Round ' + round + ' finalizing with single-source corroboration ' +
+            logger.warn('Oracle: Round ' + round + ' finalizing with single-source corroboration ' +
                 'on a normally-multi-source pair (minimum source count across the ' + submissions.size +
                 ' submissions, restricted to multi-source-capable pairs = ' + minRoundSources +
                 '); the federation lost its second uncorrelated price source this round. PRICE v0 is ' +
@@ -661,14 +664,14 @@ class OracleConsensus extends EventEmitter {
             // A single-node / regtest hub (no peers, _getQuorum()===0) has no peer to
             // split from, so it keeps the graceful count fallback below.
             if (this._getQuorum() > 0) {
-                console.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
+                logger.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
                     'unavailable while federated; skipping rather than downgrading to a count quorum ' +
                     'this hub\'s peers are not using.');
                 await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                     'weighted quorum active but weight snapshot unavailable');
                 return;
             }
-            console.warn('Oracle: Round ' + round + ' weighted mode active but snapshot has no validators; falling back to count-based quorum');
+            logger.warn('Oracle: Round ' + round + ' weighted mode active but snapshot has no validators; falling back to count-based quorum');
             weighted = false;
             snapshot = this.hub.capabilitySnapshot
                 ? await this.hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight)
@@ -690,7 +693,7 @@ class OracleConsensus extends EventEmitter {
         // not a new one. Genuine single-node / regtest bootstrap (_getQuorum() === 0)
         // keeps the self-finalize path, same federation test as the empty-set guard below.
         if (!this.hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
-            console.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
+            logger.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
                 'hub\'s live validator set, which peers do not share.');
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
@@ -705,7 +708,7 @@ class OracleConsensus extends EventEmitter {
         // single-node / regtest bootstrap (no federation) is unaffected and still
         // self-finalizes via the quorum===0 path.
         if (this.isEmptyFederationSnapshot(snapshot)) {
-            console.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
+            logger.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than self-finalizing a ' +
                 'single-signature round the indexer stake gate would reject.');
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'empty qualifying validator snapshot');
@@ -727,7 +730,7 @@ class OracleConsensus extends EventEmitter {
             return;
         }
         if (submissions.size < this.minSubmissions) {
-            console.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
+            logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
                 ' snapshot-member submission(s); minimum is ' + this.minSubmissions + ', skipping');
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                 'below minimum member submissions threshold');
@@ -769,7 +772,7 @@ class OracleConsensus extends EventEmitter {
             if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
                 soloAdmit = await this.resolveRoundAdmitBlocks();
                 if (!soloAdmit) {
-                    console.error('Oracle: refusing to finalize round ' + round + ' at anchor ' + btcBlockHeight +
+                    logger.error('Oracle: refusing to finalize round ' + round + ' at anchor ' + btcBlockHeight +
                         '; no fresh admission tip to stamp an admission height from');
                     return;
                 }
@@ -815,7 +818,7 @@ class OracleConsensus extends EventEmitter {
         if (isLeader) {
             this.noteRoundSeat(round, 'leader');
             this.proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
-                .catch(err => console.error('Oracle: proposal for round ' + round + ' failed:', err && err.message));
+                .catch(err => logger.error(nodeUtil.format('Oracle: proposal for round ' + round + ' failed:', err && err.message)));
             return;
         }
 
@@ -858,7 +861,7 @@ class OracleConsensus extends EventEmitter {
                     }
                     this.noteRoundSeat(round, 'fallback_proposer', { leader: leaderSubAddr });
                     this.proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
-                        .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
+                        .catch(err => logger.error(nodeUtil.format('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message)));
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
                 // Don't let an armed grace timer keep the process alive on its own;
                 // the hub stays up via its other listeners. Cleared on stop().
@@ -892,7 +895,7 @@ class OracleConsensus extends EventEmitter {
             }
             this.noteRoundSeat(round, 'fallback_proposer', { leader: null });
             this.proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
-                .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
+                .catch(err => logger.error(nodeUtil.format('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message)));
         }, FALLBACK_GRACE_MS);
         // Don't let this grace timer keep the process alive on its own; register
         // it so stop() can cancel it, matching the sibling timer above.
@@ -915,7 +918,7 @@ class OracleConsensus extends EventEmitter {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
             this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
-                console.error('Oracle: Error storing skipped round ' + round + ':', err.message));
+                logger.error(nodeUtil.format('Oracle: Error storing skipped round ' + round + ':', err.message)));
             return;
         }
 
@@ -923,7 +926,7 @@ class OracleConsensus extends EventEmitter {
         if (ah.isAdmissionEra(this.hub && this.hub.network, btcBlockHeight)) {
             admitBlocks = await this.resolveRoundAdmitBlocks();
             if (!admitBlocks) {
-                console.error('Oracle: refusing to propose round ' + round + ' at anchor ' + btcBlockHeight +
+                logger.error('Oracle: refusing to propose round ' + round + ' at anchor ' + btcBlockHeight +
                     '; no fresh admission tip to stamp an admission height from');
                 return;
             }
@@ -985,7 +988,7 @@ class OracleConsensus extends EventEmitter {
                 // NOT a _storeSkippedRound: that marks the round finalized locally
                 // and would refuse a late-arriving quorum, unlike the follower path.
                 this._roundTimeouts = (this._roundTimeouts || 0) + 1;
-                console.warn('Oracle: Finalization timeout for round ' + round + ' ('
+                logger.warn('Oracle: Finalization timeout for round ' + round + ' ('
                     + pending.prepares.size + ' prepares, '
                     + pending.commits.size + ' commits, quorum ' + pending.quorum + ')');
                 this.pendingRounds.delete(round);
@@ -1014,7 +1017,7 @@ class OracleConsensus extends EventEmitter {
         this.peerManager.broadcast(ORACLE_PROPOSE, proposeBody);
 
         let tag = isFallback ? '[FALLBACK] ' : '';
-        console.log('Oracle: ' + tag + 'Proposed round ' + round + ' with ' + aggregated.length +
+        logger.info('Oracle: ' + tag + 'Proposed round ' + round + ' with ' + aggregated.length +
             ' prices (' + submissions.size + ' submissions)');
 
         this.checkPrepareQuorum(round);
@@ -1128,9 +1131,9 @@ class OracleConsensus extends EventEmitter {
                 // snapshot at the round's block boundary via an indexer call.
                 // Errors are caught and logged; they never bubble up to the gossip layer.
                 this._handlePropose(envelope).catch(err =>
-                    console.error('Oracle: PROPOSE handler error for round %s:',
+                    logger.error(nodeUtil.format('Oracle: PROPOSE handler error for round %s:',
                         (envelope && envelope.data && envelope.data.round),
-                        err && err.message ? err.message : err));
+                        err && err.message ? err.message : err)));
                 break;
             case ORACLE_PREPARE: this._handlePrepare(envelope); break;
             case ORACLE_COMMIT:  this._handleCommit(envelope);  break;
@@ -1157,7 +1160,7 @@ class OracleConsensus extends EventEmitter {
         let blockHeight = btcBlockHeight;
         if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
             if (this._getQuorum() > 0) {
-                console.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
+                logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
                     'height in envelope on a federated hub; refusing to pin the price snapshot ' +
                     'at the round id (not a BTC block boundary), which would diverge from the ' +
                     'leader\'s snapshot for this round.');
@@ -1186,13 +1189,13 @@ class OracleConsensus extends EventEmitter {
                 ? await this.hub._resolveBtcLatestBlock()
                 : null;
             if (!Number.isFinite(Number(myTip))) {
-                console.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
+                logger.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
                     'our own BTC tip to bound the leader-supplied snapshot height ' +
                     '(federated hub).');
                 return null;
             }
             if (Math.abs(Number(myTip) - Number(blockHeight)) > this.snapshotToleranceBlocks) {
-                console.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
+                logger.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
                     blockHeight + ' deviates from our own BTC tip ' + myTip + ' by more than ' +
                     this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
                     'let the proposer select the price snapshot, the round leader, the ' +
@@ -1221,7 +1224,7 @@ class OracleConsensus extends EventEmitter {
         // Verify digest
         let computedDigest = this._digest(round, prices);
         if (computedDigest !== digest) {
-            console.warn('Oracle: PROPOSE digest mismatch from ' + envelope.sender + ' for round ' + round);
+            logger.warn('Oracle: PROPOSE digest mismatch from ' + envelope.sender + ' for round ' + round);
             return;
         }
 
@@ -1286,7 +1289,7 @@ class OracleConsensus extends EventEmitter {
                     // A single-node / regtest hub (_getQuorum()===0) has no peer to split
                     // from, so it keeps the graceful count fallback below.
                     if (this._getQuorum() > 0) {
-                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': weighted mode ' +
+                        logger.warn('Oracle: dropping PROPOSE for round ' + round + ': weighted mode ' +
                             'active but weight snapshot unavailable while federated; refusing to open a ' +
                             'count-mode pending round this hub\'s peers are not using.');
                         return;
@@ -1305,7 +1308,7 @@ class OracleConsensus extends EventEmitter {
                 // election is live-set rotation: three ways to disagree with every peer at
                 // the same height on nothing but its own indexer reachability.
                 if (!this.hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
-                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
+                    logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
                         'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
                         'pending round sized from this hub\'s live validator set.');
                     return;
@@ -1320,7 +1323,7 @@ class OracleConsensus extends EventEmitter {
                 // it. Genuine single-node hubs receive no PROPOSEs, and a healthy
                 // federation snapshot is non-empty, so this only bites the bad case.
                 if (this.isEmptyFederationSnapshot(snap)) {
-                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': empty price-qualifying ' +
+                    logger.warn('Oracle: dropping PROPOSE for round ' + round + ': empty price-qualifying ' +
                         'snapshot at block ' + blockHeight + ' on a federated hub (a legitimate leader skips ' +
                         'such a round; not accepting a single-signature finalization).');
                     return;
@@ -1392,12 +1395,12 @@ class OracleConsensus extends EventEmitter {
         }
 
         if (!isRealLeader && !isFallback) {
-            console.warn('Oracle: PROPOSE from non-leader ' + envelope.sender + ' for round ' + round);
+            logger.warn('Oracle: PROPOSE from non-leader ' + envelope.sender + ' for round ' + round);
             return;
         }
 
         if (isFallback) {
-            console.log('Oracle: Accepting [FALLBACK] PROPOSE from ' + envelope.sender +
+            logger.info('Oracle: Accepting [FALLBACK] PROPOSE from ' + envelope.sender +
                 ' for round ' + round + ' (leader ' + (leader ? leader.addr : 'unknown') + ' has no submission)');
         }
 
@@ -1461,7 +1464,7 @@ class OracleConsensus extends EventEmitter {
                 ? this.oracleRound.canonicalPairs
                 : null;
             let reject = (coinPair, detail, extra) => {
-                console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
+                logger.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
                     ': ' + coinPair + ' ' + detail);
                 this.emit('oracle:propose-rejected', Object.assign({ round, sender: envelope.sender, coinPair }, extra || {}));
             };
@@ -1623,14 +1626,14 @@ class OracleConsensus extends EventEmitter {
             let era = ah.isAdmissionEra(net, blockHeight);
             let has = admitBlocks !== null && admitBlocks !== undefined;
             if (era !== has) {
-                console.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender + ': ' +
+                logger.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender + ': ' +
                     (era ? 'admission-era round carries no admission map' : 'legacy-era round carries an admission map'));
                 return;
             }
             if (era) {
                 let verdict = await this.checkProposedAdmit(admitBlocks);
                 if (!verdict.ok) {
-                    console.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender +
+                    logger.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender +
                         ': admission map ' + verdict.reason);
                     return;
                 }
@@ -1665,7 +1668,7 @@ class OracleConsensus extends EventEmitter {
                     let p = this.pendingRounds.get(round);
                     if (p && !p.finalized) {
                         this._roundTimeouts = (this._roundTimeouts || 0) + 1;
-                        console.warn('Oracle: PROPOSE round ' + round + ' timed out before commit quorum ('
+                        logger.warn('Oracle: PROPOSE round ' + round + ' timed out before commit quorum ('
                             + (p.prepares ? p.prepares.size : 0) + ' prepares, '
                             + (p.commits ? p.commits.size : 0) + ' commits, quorum ' + p.quorum + ')');
                     }
@@ -1693,14 +1696,14 @@ class OracleConsensus extends EventEmitter {
         // the config engine fixed. COMMIT quorum still guards finalization, but
         // we should not mutate prepares or broadcast at all for a conflicting digest.
         if (pending.digest !== digest) {
-            console.warn('Oracle: PROPOSE digest conflict for round ' + round +
+            logger.warn('Oracle: PROPOSE digest conflict for round ' + round +
                 ' from ' + envelope.sender + ': expected ' + pending.digest + ', got ' + digest);
             return;
         }
         // A second PROPOSE for a round already pending must carry the SAME map, or two
         // leaders are collecting signatures over two byte strings under one digest.
         if (this.spellAdmit(pending.admitBlocks) !== this.spellAdmit(proposedAdmit)) {
-            console.warn('Oracle: PROPOSE admission-map conflict for round ' + round + ' from ' + envelope.sender);
+            logger.warn('Oracle: PROPOSE admission-map conflict for round ' + round + ' from ' + envelope.sender);
             return;
         }
         this.addVote(pending.prepares, envelope);
@@ -1893,7 +1896,7 @@ class OracleConsensus extends EventEmitter {
                 this.markFinalized(round);
                 this.pendingRounds.delete(round);
                 this.clearRoundTracking(round);
-                console.log('Oracle: Round ' + round + ' finalized (' +
+                logger.info('Oracle: Round ' + round + ' finalized (' +
                     pending.prepares.size + ' prepares, ' +
                     pending.commits.size + ' commits)' +
                     (attempt > 1 ? ' after ' + attempt + ' store attempts' : ''));
@@ -1921,7 +1924,7 @@ class OracleConsensus extends EventEmitter {
                 });
                 return;
             } catch (err) {
-                console.error('Oracle: Error storing snapshot for round %s (attempt %d/%d):', round, attempt, maxAttempts, err.message);
+                logger.error(nodeUtil.format('Oracle: Error storing snapshot for round %s (attempt %d/%d):', round, attempt, maxAttempts, err.message));
                 if (attempt < maxAttempts) {
                     // Linear backoff between retries for a transient DB hiccup.
                     await new Promise(resolve => setTimeout(resolve, 500 * attempt));
@@ -1936,7 +1939,7 @@ class OracleConsensus extends EventEmitter {
         // pending.finalized=true: resetting it lets a subsequent replayed COMMIT
         // re-enter checkCommitQuorum and re-drive finalization once the DB recovers,
         // rather than the quorum-signed round being silently and permanently dropped.
-        console.error('Oracle: Round ' + round + ' snapshot store failed after ' +
+        logger.error('Oracle: Round ' + round + ' snapshot store failed after ' +
             maxAttempts + ' attempts; retaining round state and re-driving on a timer ' +
             '(round NOT dropped).');
         let stillPending = this.pendingRounds.get(round);
@@ -1969,12 +1972,12 @@ class OracleConsensus extends EventEmitter {
             // start a second finalize and emit round:finalized twice.
             p.finalized = true;
             Promise.resolve(this.finalizeCommittedRound(round)).catch(err =>
-                console.error('Oracle: re-finalize of round %s threw:', round, err && err.message));
+                logger.error(nodeUtil.format('Oracle: re-finalize of round %s threw:', round, err && err.message)));
         }, delay);
         // Never hold the process open on a retry that may re-arm indefinitely; stop() is
         // what tears it down on a clean shutdown.
         if (pending.timer && typeof pending.timer.unref === 'function') pending.timer.unref();
-        console.warn('Oracle: re-finalize of round ' + round + ' scheduled in ' + delay + 'ms');
+        logger.warn('Oracle: re-finalize of round ' + round + ' scheduled in ' + delay + 'ms');
     }
 
     _aggregateAll(submissions) {
@@ -2042,7 +2045,7 @@ class OracleConsensus extends EventEmitter {
             // Surface the drop (item #180): without this line a pair whose every
             // submission fails the >0 / <PRICE_MAX clamp (or is absent) vanishes
             // from the round with no signal at all.
-            console.warn('Oracle: dropping ' + coinPair + ' this round: no usable submission '
+            logger.warn('Oracle: dropping ' + coinPair + ' this round: no usable submission '
                 + 'values (all missing, non-numeric, or outside the price clamp)');
             return null;
         }
@@ -2063,7 +2066,7 @@ class OracleConsensus extends EventEmitter {
         // if trimming ever empties the array, surface the drop instead of
         // silently omitting the pair (item #180).
         if (values.length === 0) {
-            console.warn('Oracle: dropping ' + coinPair + ' this round: trimming emptied the value set');
+            logger.warn('Oracle: dropping ' + coinPair + ' this round: trimming emptied the value set');
             return null;
         }
 
@@ -2144,7 +2147,7 @@ class OracleConsensus extends EventEmitter {
         // pair rather than federation-sign a 0.00000000. Unreachable from an 8-decimal
         // producer, which already refuses a value that formats to zero.
         if (!bcmath.bcgt(median, '0')) {
-            console.warn('Oracle: dropping ' + coinPair + ' this round: the aggregate rounds to '
+            logger.warn('Oracle: dropping ' + coinPair + ' this round: the aggregate rounds to '
                 + median + ' at 8 decimals, which is not a publishable price');
             return null;
         }
@@ -2165,7 +2168,7 @@ class OracleConsensus extends EventEmitter {
             // would withhold on, whatever later sub-ulp divergence reaches this point.
             if (devband.exceedsBand(lo, median, ORACLE_DEVIATION_THRESHOLD, 18) ||
                 devband.exceedsBand(hi, median, ORACLE_DEVIATION_THRESHOLD, 18)) {
-                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
+                logger.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
                     + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
                     + lo + ' vs ' + hi + '), so the published price ' + median
                     + ' would put every submitter outside the band');
@@ -2201,13 +2204,13 @@ class OracleConsensus extends EventEmitter {
         let hi = bcmath.bcadd(last, maxDelta, 8);
         let lo = bcmath.bcsub(last, maxDelta, 8);
         if (bcmath.bcgt(price, hi)) {
-            console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+            logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(hi, 8) + ' (last finalized ' + last + ', max +' +
                 (pct * 100) + '%/round)');
             return bcmath.bcformat(hi, 8);
         }
         if (bcmath.bclt(price, lo)) {
-            console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+            logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(lo, 8) + ' (last finalized ' + last + ', max -' +
                 (pct * 100) + '%/round)');
             return bcmath.bcformat(lo, 8);
@@ -2280,13 +2283,13 @@ class OracleConsensus extends EventEmitter {
             let finalizedPairs = new Set(prices.map(p => p.coinPair));
             let missingPairs = this.markerPairs(round).filter(pair => !finalizedPairs.has(pair));
             if (missingPairs.length) {
-                console.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
+                logger.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
                     + ' configured pair(s): ' + missingPairs.join(', ')
                     + '; recording per-pair skipped snapshot(s)');
                 await this.db.setSkippedPriceSnapshotRound(round, missingPairs, referenceBlock, blockTimestamp);
             }
         } catch (e) {
-            console.error('Oracle: error recording per-pair skipped snapshot(s) for round %s:', round, e.message);
+            logger.error(nodeUtil.format('Oracle: error recording per-pair skipped snapshot(s) for round %s:', round, e.message));
         }
 
         // Update the in-memory last-finalized-price cache so the co-sign gate in
@@ -2316,7 +2319,7 @@ class OracleConsensus extends EventEmitter {
                 let rows = await this.db.findPriceSnapshotsForRound(round);
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
             } catch (e) {
-                console.error('Oracle: post-commit price-round broadcast failed for round ' + round
+                logger.error('Oracle: post-commit price-round broadcast failed for round ' + round
                     + '; forcing subscriber resync: ' + (e && e.message));
                 try { this.hub.hubDbBroadcaster.dropAllForResync('price-round broadcast gap'); }
                 catch (err) { /* the repair itself must not fail finalize */ }
@@ -2390,7 +2393,7 @@ class OracleConsensus extends EventEmitter {
         // through the same predicate as everything else. Keep this in lockstep with the
         // other capability_snapshots writers.
         if (validators && validators.truncated === true) {
-            console.warn('Oracle: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('Oracle: refusing to persist a TRUNCATED ' + capability +
                 ' capability snapshot at block ' + block +
                 ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
@@ -2458,7 +2461,7 @@ class OracleConsensus extends EventEmitter {
         // 'finalized'. markFinalized would have frozen this round's NULL price here.
         this.markLocallySkipped(round);
         this.clearRoundTracking(round);
-        console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
+        logger.info('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
     }
 
     // Build the canonical signable payload for a PRICE v0 round.
@@ -2476,7 +2479,7 @@ class OracleConsensus extends EventEmitter {
         if (!hub || typeof hub.resolveAdmitBlocks !== 'function') return null;
         try { return await hub.resolveAdmitBlocks('price_snapshots', ah.ADMIT_COLUMN_CHAINS.slice()); }
         catch (e) {
-            console.error('Oracle: admission tip read failed:', e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('Oracle: admission tip read failed:', e && e.message ? e.message : e));
             return null;
         }
     }
@@ -2611,7 +2614,7 @@ class OracleConsensus extends EventEmitter {
             let sigHex  = identity.sign(payload);
             return { pubkey: identity.getPubkeyHex(), sig: sigHex };
         } catch (e) {
-            console.warn('Oracle: failed to sign PRICE v0 payload:', e);
+            logger.warn(nodeUtil.format('Oracle: failed to sign PRICE v0 payload:', e));
             return null;
         }
     }
@@ -2634,7 +2637,7 @@ class OracleConsensus extends EventEmitter {
         pubkeyHex = String(pubkeyHex).toLowerCase();
         if (pending.signatures.has(pubkeyHex)) return false; // already collected
         if (pending.round === undefined || pending.round === null) {
-            console.warn('Oracle: cannot verify sig: pending round has no round number');
+            logger.warn('Oracle: cannot verify sig: pending round has no round number');
             return false;
         }
         try {
@@ -2648,11 +2651,11 @@ class OracleConsensus extends EventEmitter {
                 pending.signatures.set(pubkeyHex, sigHex);
                 return true;
             } else {
-                console.warn('Oracle: invalid PRICE v0 signature from ' + pubkeyHex.substring(0, 16) + '... for round ' + pending.round);
+                logger.warn('Oracle: invalid PRICE v0 signature from ' + pubkeyHex.substring(0, 16) + '... for round ' + pending.round);
                 return false;
             }
         } catch (e) {
-            console.warn('Oracle: signature verification error:', e);
+            logger.warn(nodeUtil.format('Oracle: signature verification error:', e));
             return false;
         }
     }
@@ -2869,7 +2872,7 @@ class OracleConsensus extends EventEmitter {
         this.roundWatchdogs.delete(round);
         this._abandonedRounds++;
         this._lastAbandonedRound = round;
-        console.warn('Oracle: Round ' + round + ' opened here but never finalized; ' +
+        logger.warn('Oracle: Round ' + round + ' opened here but never finalized; ' +
             'recording it as abandoned so this hub holds a durable record of the round.');
         // Structured twin of the line above: seat and anchor as fields, plus the counter.
         noteRoundLost({
@@ -2882,8 +2885,8 @@ class OracleConsensus extends EventEmitter {
         // federation quorum still upgrades these rows to 'finalized' (#7).
         this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
             'round abandoned before finalization').catch(err =>
-                console.error('Oracle: Error storing abandoned round ' + round + ':',
-                    err && err.message ? err.message : err));
+                logger.error(nodeUtil.format('Oracle: Error storing abandoned round ' + round + ':',
+                    err && err.message ? err.message : err)));
     }
 
     // Hub F3: when the round has a block-locked snapshot, the leader

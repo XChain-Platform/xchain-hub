@@ -71,6 +71,8 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isRetractionSigningActive } = require('../retraction_signing_activation.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XRETRACT_SIGN_REQ  = 'XRETRACT_SIGN_REQ';
 const XRETRACT_SIGN      = 'XRETRACT_SIGN';
@@ -214,7 +216,7 @@ class RetractionConsensus {
                 // Liveness over the signature tier: mirrors past the gate refuse the
                 // unsigned event anyway (fail closed there), mirrors below it still
                 // converge under the activation fences. Never silently drop a retraction.
-                console.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
+                logger.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
                     pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
                 this.broadcastUnsigned(evt);
             }
@@ -232,9 +234,9 @@ class RetractionConsensus {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XRETRACT_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
+            case XRETRACT_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
             case XRETRACT_SIGN:      this._handleSign(envelope); break;
-            case XRETRACT_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
+            case XRETRACT_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
         }
     }
 
@@ -325,7 +327,7 @@ class RetractionConsensus {
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XRETRACT_FINALIZED, { retraction: pending.evt, signatures: sigs });
         this.finalize(pending.evt, pending.canonical, id, sigs, true)
-            .catch(e => console.error('RetractionConsensus: finalize error: ' + (e && e.message)));
+            .catch(e => logger.error('RetractionConsensus: finalize error: ' + (e && e.message)));
     }
 
     // Every hub streams the finalized signed deletion to ITS OWN mirror
@@ -393,13 +395,13 @@ class RetractionConsensus {
         try {
             persistedRows = await this._persistCapabilitySnapshot('cross_chain', evt.snapshot_block);
         } catch(e){
-            console.error('RetractionConsensus: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+            logger.error('RetractionConsensus: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           'signed retraction ' + label + ', nothing streamed): ' + (e && e.message));
             this.forgetFinalized(id);
             return false;
         }
         if(!persistedRows){
-            console.error('RetractionConsensus: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+            logger.error('RetractionConsensus: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           evt.snapshot_block + ' (degraded/empty/truncated validator set; fail-closed, deferring ' +
                           'signed retraction ' + label + ', nothing streamed)');
             this.forgetFinalized(id);
@@ -407,7 +409,7 @@ class RetractionConsensus {
         }
         if(this.broadcaster)
             this.broadcaster.broadcastDeletion(Object.assign({}, evt, { retraction_signatures: sigs }));
-        console.log('RetractionConsensus: ' + (isInitiator ? 'finalized' : 'adopted') + ' signed retraction ' +
+        logger.info('RetractionConsensus: ' + (isInitiator ? 'finalized' : 'adopted') + ' signed retraction ' +
                     evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
                     ' (' + sigs.length + ' sigs, snapshot ' + evt.snapshot_block + ')');
         return true;
@@ -441,7 +443,7 @@ class RetractionConsensus {
         // under-counted denominator this class itself rejects at the `vset.truncated`
         // check in handleFinalized. Keep every writer's guard in lockstep.
         if(validators && validators.truncated === true){
-            console.warn('RetractionConsensus: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('RetractionConsensus: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;

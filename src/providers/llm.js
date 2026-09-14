@@ -62,6 +62,9 @@ const { resolveLlmVendorAuth } = require('../lib/hub_credentials');
 const { runClaudePrint } = require('../lib/claude_spawn');
 const SpendGuard = require('../lib/spend_guard.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are
 // arbitrary attacker-chosen bytes (only the sender's signature over them is
@@ -131,8 +134,8 @@ function appendSpendRecord(record) {
         _auditFaults.consecutive++;
         _auditFaults.total++;
         _auditFaults.lastError = e && e.message ? String(e.message) : String(e);
-        console.warn('llm: spend-audit write failed (' + _spendLogPath() + '); ' +
-                     'falling back to ' + _fallbackSpendLogPath() + ':', _auditFaults.lastError);
+        logger.warn(nodeUtil.format('llm: spend-audit write failed (' + _spendLogPath() + '); ' +
+                     'falling back to ' + _fallbackSpendLogPath() + ':', _auditFaults.lastError));
     }
     // Second sink: a different filesystem in most deployments, so the common
     // faults (missing dir, read-only mount, wrong owner on ./data) do not take
@@ -144,13 +147,13 @@ function appendSpendRecord(record) {
         _auditFaults.toFallback++;
         return;
     } catch (e2) {
-        console.warn('llm: fallback spend-audit write failed (' + _fallbackSpendLogPath() + '):',
-                     e2 && e2.message ? e2.message : e2);
+        logger.warn(nodeUtil.format('llm: fallback spend-audit write failed (' + _fallbackSpendLogPath() + '):',
+                     e2 && e2.message ? e2.message : e2));
     }
     // Last resort: stderr under a stable, greppable prefix, so a log collector
     // still holds the dispatch identity even with no writable filesystem at all.
     _auditFaults.toStderr++;
-    console.error('LLM-SPEND-AUDIT ' + line.trim());
+    logger.error('LLM-SPEND-AUDIT ' + line.trim());
 }
 
 // Record the intent to spend, BEFORE dispatch. Returns the record (whose id
@@ -492,7 +495,7 @@ exports._setConfig = (def) => {
         if (Number.isInteger(mt) && mt > 0)
             MAX_TOKENS_DEFAULT = mt;
         else
-            console.warn('llm: ignoring additional_config.max_completion_tokens ' + ac.max_completion_tokens +
+            logger.warn('llm: ignoring additional_config.max_completion_tokens ' + ac.max_completion_tokens +
                 ' (must be a positive integer); keeping ' + MAX_TOKENS_DEFAULT);
     }
     // Range-check the governance default against the cross-vendor intersection. This one
@@ -509,7 +512,7 @@ exports._setConfig = (def) => {
             ac.default_temperature >= 0 && ac.default_temperature <= 1)
             DEFAULT_TEMPERATURE = ac.default_temperature;
         else
-            console.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
+            logger.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
                 ' (must be a number in [0, 1]); keeping ' + DEFAULT_TEMPERATURE);
     }
     // Positive-integer rule for the envelope-version ceiling, same warn-and-keep as the
@@ -523,7 +526,7 @@ exports._setConfig = (def) => {
         if (Number.isInteger(ev) && ev > 0)
             PROMPT_ENVELOPE_VERSION = ev;
         else
-            console.warn('llm: ignoring additional_config.prompt_envelope_version ' + ac.prompt_envelope_version +
+            logger.warn('llm: ignoring additional_config.prompt_envelope_version ' + ac.prompt_envelope_version +
                 ' (must be a positive integer); keeping ' + PROMPT_ENVELOPE_VERSION);
     }
     // Governance kill switch and per-call spend cap.
@@ -561,7 +564,7 @@ function warnUnconsumedKeys(ac) {
     if (signature === LAST_UNCONSUMED_WARNED) return;
     LAST_UNCONSUMED_WARNED = signature;
     if (unknown.length === 0) return;
-    console.warn('llm: additional_config key(s) not consumed by this build (ignored): ' +
+    logger.warn('llm: additional_config key(s) not consumed by this build (ignored): ' +
         unknown.join(', '));
 }
 exports._CONSUMED_CONFIG_KEYS = CONSUMED_CONFIG_KEYS;
@@ -782,12 +785,12 @@ function canonicalMeta(proposals, idx, options){
     // Deliberately strict about type: a non-string meta (object, Buffer, number)
     // is not something this allowlist can reason about, so it is unrecognized.
     if (typeof raw !== 'string' || raw === ''){
-        console.warn('llm: winning proposal carries a non-string/empty meta; failing closed');
+        logger.warn('llm: winning proposal carries a non-string/empty meta; failing closed');
         markInconclusive(options, 'meta_unrecognized');
         return null;
     }
     if (!approvedMetaSet(options).has(raw)){
-        console.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
+        logger.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
             'failing closed rather than canonicalizing an unvouched value on-chain');
         markInconclusive(options, 'meta_unrecognized');
         return null;
@@ -795,7 +798,7 @@ function canonicalMeta(proposals, idx, options){
     if (proposals.length > 1){
         let agreeing = proposals.filter(p => typeof p.meta === 'string' && p.meta === raw).length;
         if (agreeing < META_MIN_CORROBORATION){
-            console.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
+            logger.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
                 ' of ' + proposals.length + ' proposals; failing closed');
             markInconclusive(options, 'meta_uncorroborated');
             return null;
@@ -888,7 +891,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
     let judgeChain = [judgeModel, ...JUDGE_FALLBACK_MODELS.filter(m => m && m !== judgeModel)]
         .filter(m => {
             if (modelCarriesSystemRole(m)) return true;
-            console.warn('llm: judge model ' + m + ' cannot carry a system/developer role; skipping from judge chain');
+            logger.warn('llm: judge model ' + m + ' cannot carry a system/developer role; skipping from judge chain');
             return false;
         });
     let judgeText  = null;
@@ -912,7 +915,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
         if (deadlineAt !== null) {
             let remaining = deadlineAt - Date.now();
             if (remaining < REMAINING_FLOOR_MS) {
-                console.warn('llm: judge budget exhausted before reaching model ' + jm + '; stopping fallback chain');
+                logger.warn('llm: judge budget exhausted before reaching model ' + jm + '; stopping fallback chain');
                 break;
             }
             attemptTimeoutMs = remaining;
@@ -945,7 +948,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
             reached = true;
             judgeInfo.answered = jm;
             if (jm !== judgeModel)
-                console.warn('llm: judge fell back to ' + jm + ' (pinned ' + judgeModel + ' unreachable)');
+                logger.warn('llm: judge fell back to ' + jm + ' (pinned ' + judgeModel + ' unreachable)');
             break;
         } catch (e) {
             // Transport-only invariant: a REACHED judge's outcome (a model
@@ -956,12 +959,12 @@ async function agreeJudged(proposals, options, judgeInfo) {
             // A spent budget is neither: the guard is hub-global, so every later
             // model in the chain is refused too. Stop here (see the pre-loop gate).
             if (e && e.budgetExhausted) {
-                console.warn('llm: judge ' + jm + ' refused by the spend budget; stopping fallback chain');
+                logger.warn('llm: judge ' + jm + ' refused by the spend budget; stopping fallback chain');
                 markInconclusive(options, 'budget_exhausted');
                 return null;
             }
             if (e && (e.kind === 'refusal' || e.transient === false)) {
-                console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
+                logger.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
                 // Three buckets, not two. The chain-advance
                 // decision is the same for all of them, but the recorded reason is
@@ -976,7 +979,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
                 markInconclusive(options, reason);
                 return null;
             }
-            console.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
+            logger.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
         }
     }
     if (!reached) {
@@ -1026,7 +1029,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
             // unseen tail carries arbitrary payload). Fail closed to no_quorum
             // rather than finalize an unjudged tail.
             if (truncated[idx]) {
-                console.warn('llm: judge selected a truncated candidate (index ' + (idx + 1) +
+                logger.warn('llm: judge selected a truncated candidate (index ' + (idx + 1) +
                     '); failing to no_quorum to avoid finalizing bytes the judge never evaluated');
                 markInconclusive(options, 'truncated_pick');
                 return null;
@@ -1100,7 +1103,7 @@ exports.agree = async (proposals, options) => {
     }
 
     if (verdict === _AGREE_BUDGET_SPENT) {
-        console.warn('llm: agree() budget of ' + budgetMs + 'ms spent before a verdict' +
+        logger.warn('llm: agree() budget of ' + budgetMs + 'ms spent before a verdict' +
             (judgeInfo.model ? ' (last judge dialled ' + judgeInfo.model + ')' : '') + '; inconclusive');
         markInconclusive(options, 'judge_timeout');
         verdict = null;
@@ -1110,7 +1113,7 @@ exports.agree = async (proposals, options) => {
     // logs. Only the multi-proposal path dials a vendor, and only that path has a
     // latency worth recording; the redundancy=1 short-circuit stays silent.
     if (judgeInfo.attempted) {
-        console.warn('llm: agree() returned in ' + (Date.now() - startedAt) + 'ms' +
+        logger.warn('llm: agree() returned in ' + (Date.now() - startedAt) + 'ms' +
             ' (judge=' + (judgeInfo.answered || (judgeInfo.model ? judgeInfo.model + ':no-answer' : 'none')) +
             ', verdict=' + (verdict ? 'winner' : 'null') + ')');
     }

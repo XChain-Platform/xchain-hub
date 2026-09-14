@@ -26,6 +26,9 @@
  ********************************************************************/
 
 const path = require('path');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const DEFAULTS = {
     http_get: {
@@ -208,7 +211,7 @@ class ProviderRegistry {
             // defaults anyway has no other way to see why: the read is skipped, not failed.
             if (!this._warnedNoNetwork) {
                 this._warnedNoNetwork = true;
-                console.warn('ProviderRegistry: hub has no network (standalone); '
+                logger.warn('ProviderRegistry: hub has no network (standalone); '
                     + 'ATTESTATION_PROVIDER rows are not read and built-in defaults apply');
             }
             return;
@@ -232,7 +235,7 @@ class ProviderRegistry {
             for (let [providerId, group] of byProvider) {
                 let distinct = new Set(group.map((r) => String(r.param_value)));
                 if (distinct.size > 1) {
-                    console.warn('ProviderRegistry: ATTESTATION_PROVIDER:' + providerId
+                    logger.warn('ProviderRegistry: ATTESTATION_PROVIDER:' + providerId
                         + ' has conflicting definitions under coins '
                         + group.map((r) => r.coin).join(', ')
                         + '; keeping the built-in default rather than resolving the ambiguity');
@@ -244,11 +247,11 @@ class ProviderRegistry {
                     if (!def.provider_id) def.provider_id = providerId;
                     this.providers.set(providerId, def);
                 } catch (e) {
-                    console.warn('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId, e);
+                    logger.warn(nodeUtil.format('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId, e));
                 }
             }
         } catch (e) {
-            console.warn('ProviderRegistry: failed to read configs table:', e);
+            logger.warn(nodeUtil.format('ProviderRegistry: failed to read configs table:', e));
         }
     }
 
@@ -260,7 +263,7 @@ class ProviderRegistry {
         for (let [providerId, mod] of this.modules){
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId, e); }
+                catch (e) { logger.warn(nodeUtil.format('ProviderRegistry: _setConfig (reload) failed for ' + providerId, e)); }
             }
         }
     }
@@ -435,7 +438,7 @@ class ProviderRegistry {
             // fresh hub" case: log so a startup-time DB error is visible in the log
             // and the hub doesn't silently serve pre-governance model config for
             // post-governance blocks.
-            console.warn('ProviderRegistry: loadGovernanceHistory failed, hub may use genesis-only provider config:', e && e.message);
+            logger.warn(nodeUtil.format('ProviderRegistry: loadGovernanceHistory failed, hub may use genesis-only provider config:', e && e.message));
             return;
         }
         for (let r of rows){
@@ -475,7 +478,7 @@ class ProviderRegistry {
             let mod = require(path.join(__dirname, '..', 'providers', providerId + '.js'));
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId, e); }
+                catch (e) { logger.warn(nodeUtil.format('ProviderRegistry: _setConfig failed for ' + providerId, e)); }
             }
             // Sibling hook for a provider that spends real money OFF-chain (llm bills the
             // operator's own vendor account rather than broadcasting a fee). Hands it this
@@ -486,13 +489,13 @@ class ProviderRegistry {
             if (typeof mod.armSpendGuard === 'function'){
                 try { mod.armSpendGuard((this.hub && this.hub.p2pConfig) || {},
                                         !!(this.hub && this.hub.peerManager)); }
-                catch (e) { console.warn('ProviderRegistry: armSpendGuard failed for ' + providerId +
-                                         '; its budget still binds this process but resets on restart', e); }
+                catch (e) { logger.warn(nodeUtil.format('ProviderRegistry: armSpendGuard failed for ' + providerId +
+                                         '; its budget still binds this process but resets on restart', e)); }
             }
             this.modules.set(providerId, mod);
             return mod;
         } catch (e) {
-            console.warn('ProviderRegistry: module load failed for ' + providerId, e);
+            logger.warn(nodeUtil.format('ProviderRegistry: module load failed for ' + providerId, e));
             return null;
         }
     }

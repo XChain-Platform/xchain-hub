@@ -68,6 +68,9 @@ const mathjs             = require('mathjs');
 const fs                 = require('fs');
 const axios              = require('axios');
 const hubConfig = require('./config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('./observability');
+const logger = getLogger();
 // self_sync rides the same string-parameter path as the rest of this list: it
 // marks a checkpoint-schema descriptor (coin/network module "checkpoint",
 // row 39 / #4138 decoupling) as one the explorer's own HubMirrorSyncManager
@@ -192,7 +195,7 @@ class XChainHub {
         // writer already owns those rows; see PriceAggregator.runsOracleConsensus for
         // why that decision is deferred to the first pass rather than taken here.
         this.priceAggregator.startPriceCapabilityDerivation();
-        console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
+        logger.info('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
     // Advance the oracle clamp reference on finalized rounds that arrive by PUSH.
@@ -207,8 +210,8 @@ class XChainHub {
                 this.oracleConsensus.noteIngestedPriceRow(event.row);
             }
         } catch (e){
-            console.warn('Oracle: could not fold an ingested price row into the clamp reference:',
-                e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('Oracle: could not fold an ingested price row into the clamp reference:',
+                e && e.message ? e.message : e));
         }
     }
 
@@ -217,7 +220,7 @@ class XChainHub {
 
         if(this.p2pConfig.SIGNING_PRIVKEY_HEX){
             this.identity = new ValidatorIdentity(this.p2pConfig.SIGNING_PRIVKEY_HEX);
-            console.log('Validator identity loaded (pubkey: ' + this.identity.getPubkeyHex().substring(0, 16) + '...)');
+            logger.info('Validator identity loaded (pubkey: ' + this.identity.getPubkeyHex().substring(0, 16) + '...)');
         }
 
         this.peerManager = new PeerManager(this.p2pConfig, this.db);
@@ -241,9 +244,9 @@ class XChainHub {
         // Option A transport auth: best-effort immediate refresh plus a periodic poll,
         // inert on a hub with no chain validator set. Rationale at refreshTransportSignerSet.
         let refreshMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_REFRESH_MS) || 30000;
-        this.refreshTransportSignerSet().catch(e => console.error('Initial transport signer-set refresh failed:', e));
+        this.refreshTransportSignerSet().catch(e => logger.error(nodeUtil.format('Initial transport signer-set refresh failed:', e)));
         this._transportSetTimer = setInterval(() => {
-            this.refreshTransportSignerSet().catch(e => console.error('Transport signer-set refresh failed:', e));
+            this.refreshTransportSignerSet().catch(e => logger.error(nodeUtil.format('Transport signer-set refresh failed:', e)));
         }, refreshMs);
     }
 
@@ -291,12 +294,12 @@ class XChainHub {
         if(inSet === this._ownPubkeyInSignerSet) return;
         this._ownPubkeyInSignerSet = inSet;
         if(inSet){
-            console.log('XChainHub: this hub\'s signing pubkey is now in the chain-effective signer ' +
+            logger.info('XChainHub: this hub\'s signing pubkey is now in the chain-effective signer ' +
                 'set; peers will accept its messages (pubkey ' + pubkey + ')');
             return;
         }
         let blocks = PeerManager.stakeActivationBlocks(this.network);
-        console.warn('XChainHub: this hub\'s signing pubkey is NOT in the chain-effective signer set, ' +
+        logger.warn('XChainHub: this hub\'s signing pubkey is NOT in the chain-effective signer set, ' +
             'so it runs as an observer (mirroring and serving, authoring nothing) until a STAKE ' +
             'for it confirms and activates' +
             (blocks === null ? '' : ' (' + blocks + ' blocks after the transaction confirms)') +
@@ -308,7 +311,7 @@ class XChainHub {
     warnTransportStale(why){
         let maxAgeMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_MAX_AGE_MS) || 600000;
         if(this._transportSignerSetAt && (Date.now() - this._transportSignerSetAt) > maxAgeMs){
-            console.warn('XChainHub: transport signer set STALE (' + why + '); retaining last-known-good set of ' +
+            logger.warn('XChainHub: transport signer set STALE (' + why + '); retaining last-known-good set of ' +
                 this._transportSignerSet.size + ' pubkey(s); registry remains the auth floor');
         }
     }
@@ -372,7 +375,7 @@ class XChainHub {
                     participantPubkeys, validators
                 );
             } catch (e){
-                console.error('round:finalized reward/slash handling failed for round %s:', (event && event.round), e && e.message ? e.message : e);
+                logger.error(nodeUtil.format('round:finalized reward/slash handling failed for round %s:', (event && event.round), e && e.message ? e.message : e));
             }
         });
 
@@ -397,7 +400,7 @@ class XChainHub {
         // publisher whose chain the module does not declare.
         let signerHooks = loadSignerHooks();
         if(signerHooks && applySignerHooks(this.oraclePublisher, signerHooks, 'DOGE')){
-            console.log('OraclePublisher: operator signer wired (' + signerHooks.source + ')');
+            logger.info('OraclePublisher: operator signer wired (' + signerHooks.source + ')');
         }
         await this.oraclePublisher.start();
     }
@@ -434,7 +437,7 @@ class XChainHub {
         // AttestationPublisher/AttestationRelay files are owned elsewhere right now.
         let attestationSignerHooks = loadSignerHooks();
         if(attestationSignerHooks && applySignerHooks(this.attestationPublisher, attestationSignerHooks, 'DOGE')){
-            console.log('AttestationPublisher: operator signer wired (' + attestationSignerHooks.source + ')');
+            logger.info('AttestationPublisher: operator signer wired (' + attestationSignerHooks.source + ')');
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
@@ -483,7 +486,7 @@ class XChainHub {
                     if(this.attestationConsensus && typeof this.attestationConsensus.checkNonOkSizingFloor === 'function')
                         this.attestationConsensus.checkNonOkSizingFloor();
                 }).catch(e =>
-                    console.error('ProviderRegistry hot-reload failed:', e));
+                    logger.error(nodeUtil.format('ProviderRegistry hot-reload failed:', e)));
             });
 
             // A passed MIN_STAKE proposal updates the in-memory capConfig and re-evaluates
@@ -491,18 +494,18 @@ class XChainHub {
             // on the same qualified set without a restart. No-op for non-capability params.
             this.governance.on('proposal:finalized', (ev) => {
                 this.applyCapabilityGovernanceChange(ev).catch(e =>
-                    console.error('Capability config hot-reload failed:', e));
+                    logger.error(nodeUtil.format('Capability config hot-reload failed:', e)));
             });
 
             // Append block-anchored ATTESTATION_PROVIDER changes so the fetch/judge model
             // resolves deterministically at the request's block. No-op otherwise.
             this.governance.on('proposal:finalized', (ev) => {
                 this.applyProviderGovernanceChange(ev).catch(e =>
-                    console.error('Provider config history update failed:', e));
+                    logger.error(nodeUtil.format('Provider config history update failed:', e)));
             });
         }
 
-        console.log('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
+        logger.info('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
 
         // Full-node challenge round (verified-validator tier). Without a broadcast hook
         // the elected leader assembles verdicts it cannot post, so it stays observe-only.
@@ -515,7 +518,7 @@ class XChainHub {
         // key and burning a DOGE fee on it.
         let fnSignerHooks = loadSignerHooks();
         if(fnSignerHooks && applySignerHooks(this.fullNodeChallenge, fnSignerHooks, 'BTC')){
-            console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
+            logger.info('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
         }
         await this.fullNodeChallenge.start();
 
@@ -530,7 +533,7 @@ class XChainHub {
         this.rollcallRound = new RollcallRound(this);
         let rcSignerHooks = loadSignerHooks();
         if(rcSignerHooks && applySignerHooks(this.rollcallRound, rcSignerHooks, 'DOGE')){
-            console.log('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
+            logger.info('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
         }
         await this.rollcallRound.start();
     }
@@ -629,8 +632,8 @@ class XChainHub {
         this.slashGovernance = new SlashGovernance(this);
         this.governance.on('proposal:finalized', (ev) => {
             this.slashGovernance.applyFinalized(ev).catch(e =>
-                console.error('SlashGovernance: penalty execution failed for %s:',
-                    (ev && ev.proposalId), e && e.message ? e.message : e));
+                logger.error(nodeUtil.format('SlashGovernance: penalty execution failed for %s:',
+                    (ev && ev.proposalId), e && e.message ? e.message : e)));
         });
     }
 
@@ -735,7 +738,7 @@ class XChainHub {
                         if(nextValue === null || nextValue === undefined) continue;
 
                         if (typeof nextValue !== 'string') {
-                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
+                            logger.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
                             nextValue = String(nextValue);
                         }
                         if (nextValue.length > 1024) {
@@ -756,7 +759,7 @@ class XChainHub {
                         if(nextValue === null || nextValue === undefined) continue;
 
                         if (typeof nextValue !== 'string') {
-                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
+                            logger.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
                             nextValue = String(nextValue);
                         }
                         if (nextValue.length > 1024) {
@@ -838,7 +841,7 @@ class XChainHub {
         await this._loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
-        console.log('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
+        logger.info('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
         return true;
     }
 
@@ -861,7 +864,7 @@ class XChainHub {
         await this._loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
-        console.log('Validator rotated at ' + addr + ' → ' + newSigningPubkey.substring(0, 16) + '...');
+        logger.info('Validator rotated at ' + addr + ' → ' + newSigningPubkey.substring(0, 16) + '...');
         return true;
     }
 
@@ -883,7 +886,7 @@ class XChainHub {
         await this.propagateValidatorSet();
 
         let n = (res && res.affectedRows != null) ? res.affectedRows : '?';
-        console.log('Validator deregistered (' +
+        logger.info('Validator deregistered (' +
             (signingPubkey ? 'pubkey ' + signingPubkey.substring(0, 16) + '...' : 'addr ' + addr) + '), rows=' + n);
         return true;
     }
@@ -913,7 +916,7 @@ class XChainHub {
             }
             this.peerManager.setValidatorPubkeys(pubkeyMap);
         } catch(e){
-            console.error('Error loading validator pubkeys:', e);
+            logger.error(nodeUtil.format('Error loading validator pubkeys:', e));
             // Fail closed: propagate so startP2P never opens the listener with a null
             // registry, which would make verifySignature accept any signed message.
             // Reload callers already hold a non-null registry, so they just see an error.
@@ -926,7 +929,7 @@ class XChainHub {
             let rows = await this.db.findActiveValidators();
             return rows.map(r => ({ pubkey: r.signing_pubkey, addr: r.addr }));
         } catch(e){
-            console.error('Error loading validator set:', e);
+            logger.error(nodeUtil.format('Error loading validator set:', e));
             return [];
         }
     }
@@ -956,7 +959,7 @@ class XChainHub {
                 }
             }
         } catch(e) {
-            console.error('Error loading chain-pair validators:', e);
+            logger.error(nodeUtil.format('Error loading chain-pair validators:', e));
         }
         return chainPairMap;
     }
@@ -1031,7 +1034,7 @@ class XChainHub {
         // quote and every health poll, so a per-call line would bury the log.
         if (v !== pinned && !this._warnedOracleMaxAgeOverride) {
             this._warnedOracleMaxAgeOverride = true;
-            console.log('WARNING: ORACLE_MAX_PRICE_AGE_SECONDS=' + v + ' is set but IGNORED on ' +
+            logger.info('WARNING: ORACLE_MAX_PRICE_AGE_SECONDS=' + v + ' is set but IGNORED on ' +
                 (this.network || '<unset>') + '; using the consensus-pinned bound (' + pinned + '). ' +
                 'To change the staleness gate, change the pinned coin bundle.');
         }
@@ -1097,7 +1100,7 @@ class XChainHub {
         await this._loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
-        console.log('Validators synced: ' + validators.length + ' entries');
+        logger.info('Validators synced: ' + validators.length + ' entries');
         return true;
     }
 
@@ -1131,7 +1134,7 @@ class XChainHub {
         let key = coin + '/' + network + '/' + param;
         if (this._feeConfigInertWarned.has(key)) return;
         this._feeConfigInertWarned.add(key);
-        console.warn('XChainHub.getFeeQuote: configs row ' + key + ' = ' + rowValue
+        logger.warn('XChainHub.getFeeQuote: configs row ' + key + ' = ' + rowValue
             + ' disagrees with the pinned bundle (' + pinnedValue + ') and is IGNORED. '
             + 'Indexers meter fees from their own pinned bundle and never from a hub '
             + 'overlay, so honouring this row would quote a fee no indexer accepts. '
@@ -1261,7 +1264,7 @@ class XChainHub {
             this.capabilityRegistry.seedGenesisHistory();
             this.capabilityRegistry.disabled  = new Set(this.p2pConfig.DISABLED_CAPABILITIES || []);
         }
-        console.log('Loaded capability config from ' + configFilePath +
+        logger.info('Loaded capability config from ' + configFilePath +
             ' (thresholds: ' + Object.keys(this.p2pConfig.CAPABILITIES || {}).join(', ') + ')');
     }
 
@@ -1282,7 +1285,7 @@ class XChainHub {
     _assertCanonicalMinStakes(caps){
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
         if(hubConfig.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
-            console.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +
+            logger.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +
                 'assertion. Divergent thresholds fork the qualified validator set; ' +
                 'only bypass on a venue where every hub runs the SAME override.');
             return;
@@ -1295,7 +1298,7 @@ class XChainHub {
             let cfg = coins.getCoinConfig('BTC', network);
             canonicalCaps = (cfg.STAKING && cfg.STAKING.CAPABILITIES) ? cfg.STAKING.CAPABILITIES : null;
         } catch(e){
-            console.warn('Canonical MIN_STAKE assertion skipped: could not resolve BTC coin config for network "' +
+            logger.warn('Canonical MIN_STAKE assertion skipped: could not resolve BTC coin config for network "' +
                 network + '": ' + e.message);
             return;
         }
@@ -1305,7 +1308,7 @@ class XChainHub {
             let canonical = canonicalCaps[cap];
             if(!canonical){
                 // Unknown to the canonical registry: nothing to assert against.
-                console.warn('Capability "' + cap + '" is not in the canonical coins registry; ' +
+                logger.warn('Capability "' + cap + '" is not in the canonical coins registry; ' +
                     'MIN_STAKE not asserted.');
                 continue;
             }
@@ -1343,7 +1346,7 @@ class XChainHub {
             // Surface any threshold mismatches too, so one boot attempt shows the
             // operator every edit the file needs rather than one per restart.
             if(mismatches.length > 0){
-                console.warn('Capability MIN_STAKE mismatches in the same config: ' + mismatches.join('; '));
+                logger.warn('Capability MIN_STAKE mismatches in the same config: ' + mismatches.join('; '));
             }
             throw err;
         }
@@ -1360,7 +1363,7 @@ class XChainHub {
             err.code = 'MIN_STAKE_MISMATCH';
             throw err;
         }
-        console.warn('MIN_STAKE mismatch (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
+        logger.warn('MIN_STAKE mismatch (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
     }
 
     // Canonical FULLNODE block for this hub's network, or null when unresolvable. The
@@ -1371,7 +1374,7 @@ class XChainHub {
             let cfg = coins.getCoinConfig('BTC', network);
             return cfg.FULLNODE || null;
         } catch(e){
-            console.warn('Canonical FULLNODE resolution skipped: could not resolve BTC coin config for network "' +
+            logger.warn('Canonical FULLNODE resolution skipped: could not resolve BTC coin config for network "' +
                 network + '": ' + e.message);
             return null;
         }
@@ -1384,7 +1387,7 @@ class XChainHub {
     assertCanonicalFullnode(fn){
         if(!fn || typeof fn !== 'object' || Array.isArray(fn)) return;
         if(hubConfig.XCHAIN_HUB_SKIP_FULLNODE_ASSERT === '1'){
-            console.warn('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1: skipping canonical FULLNODE ' +
+            logger.warn('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1: skipping canonical FULLNODE ' +
                 'assertion. Divergent NODEPROOF knobs fork the challenge schedule, the ' +
                 'verifier quorum and the oracle reward split; only bypass on a venue where every ' +
                 'hub runs the SAME override.');
@@ -1409,7 +1412,7 @@ class XChainHub {
             err.code = 'FULLNODE_CONFIG_MISMATCH';
             throw err;
         }
-        console.warn('FULLNODE config problem (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
+        logger.warn('FULLNODE config problem (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
     }
 
     // Seed p2pConfig.FULLNODE from the canonical coin bundle, operator keys on top.
@@ -1437,13 +1440,13 @@ class XChainHub {
                 // warn-and-degrade path, where self-tests fail "config missing".
                 if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH' ||
                          e.code === 'CAPABILITY_UNCONFIGURED')) throw e;
-                console.warn('Could not load capability config from ' + configFilePath + ': ', e);
+                logger.warn(nodeUtil.format('Could not load capability config from ' + configFilePath + ': ', e));
             }
         }
         // Seed even with no operator config file, then report the tier's activation state
         // once at boot so an operator can see whether this hub thinks it is on.
         this.seedCanonicalFullnode();
-        console.log('NODEPROOF full-node tier: ' +
+        logger.info('NODEPROOF full-node tier: ' +
             fullnodeActivation.describeActivation(this.p2pConfig && this.p2pConfig.FULLNODE));
         this.capabilityRegistry = new CapabilityRegistry(this);
         // Rebuild block-anchored MIN_STAKE history so a restart resolves the same
@@ -1453,7 +1456,7 @@ class XChainHub {
         if(this.peerManager){
             this.peerManager.on('capability', (envelope) => {
                 this.handleCapabilityMessage(envelope).catch(e => {
-                    console.error('Capability message handler error:', e);
+                    logger.error(nodeUtil.format('Capability message handler error:', e));
                 });
             });
         }
@@ -1465,7 +1468,7 @@ class XChainHub {
             let intervalMs = (this.p2pConfig && this.p2pConfig.CAPABILITY_RECHECK_MS) ? this.p2pConfig.CAPABILITY_RECHECK_MS : 60000;
             this._capabilityRecheckTimer = setInterval(() => {
                 this.runOwnCapabilityCheck(pubkey).catch(e => {
-                    console.error('Capability re-check failed:', e);
+                    logger.error(nodeUtil.format('Capability re-check failed:', e));
                 });
             }, intervalMs);
 
@@ -1477,15 +1480,15 @@ class XChainHub {
                             // Re-read the file into p2pConfig and the live registry: the
                             // watcher used to re-run self-tests against stale config.
                             try { this.loadCapabilityConfigFile(configFilePath); }
-                            catch(e){ console.warn('Capability config reload failed: ', e); }
+                            catch(e){ logger.warn(nodeUtil.format('Capability config reload failed: ', e)); }
                             this.runOwnCapabilityCheck(pubkey).catch(e => {
-                                console.error('Capability config-watch re-check failed:', e);
+                                logger.error(nodeUtil.format('Capability config-watch re-check failed:', e));
                             });
                         }, 500);
                     });
-                    console.log('Capability config watcher attached to ' + configFilePath);
+                    logger.info('Capability config watcher attached to ' + configFilePath);
                 } catch(e){
-                    console.warn('Could not attach capability config watcher to ' + configFilePath + ':', e);
+                    logger.warn(nodeUtil.format('Could not attach capability config watcher to ' + configFilePath + ':', e));
                 }
             }
 
@@ -1495,21 +1498,21 @@ class XChainHub {
             let initialUrl = await this._resolveBtcIndexerUrl();
             if(initialUrl){
                 this.pollOwnStake(pubkey).catch(e => {
-                    console.error('Initial stake poll failed:', e);
+                    logger.error(nodeUtil.format('Initial stake poll failed:', e));
                 });
                 let stakePollMs = (this.p2pConfig && this.p2pConfig.STAKE_POLL_MS) ? this.p2pConfig.STAKE_POLL_MS : 60000;
                 this._stakePollTimer = setInterval(() => {
                     this.pollOwnStake(pubkey).catch(e => {
-                        console.error('Stake poll failed:', e);
+                        logger.error(nodeUtil.format('Stake poll failed:', e));
                     });
                 }, stakePollMs);
-                console.log('Stake-amount poll attached to ' + initialUrl + ' (every ' + stakePollMs + 'ms)');
+                logger.info('Stake-amount poll attached to ' + initialUrl + ' (every ' + stakePollMs + 'ms)');
             } else {
-                console.log('Stake-amount poll disabled (no BTC indexer URL: set BTC_INDEXER_API_URL or push via updateconfig)');
+                logger.info('Stake-amount poll disabled (no BTC indexer URL: set BTC_INDEXER_API_URL or push via updateconfig)');
             }
         }
 
-        console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity; peer-receive only)'));
+        logger.info('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity; peer-receive only)'));
 
         // Surface the genesis MIN_STAKE per capability so an operator can check it against
         // the indexer's frozen configs/<COIN>.js constants; a mismatch would fork.
@@ -1517,7 +1520,7 @@ class XChainHub {
             let genesis = this.capabilityRegistry.getCapabilities()
                 .map(cap => cap + '=' + String(this.capabilityRegistry.getMinStake(cap)))
                 .join(', ');
-            console.log('Capability MIN_STAKE (genesis, pinned #4352): ' + genesis +
+            logger.info('Capability MIN_STAKE (genesis, pinned #4352): ' + genesis +
                 ' (must equal the indexer configs/<COIN>.js constants)');
         } catch (e) { /* best-effort operator log */ }
 
@@ -1565,10 +1568,10 @@ class XChainHub {
             if(status === 401 || status === 403){
                 // Auth failure is distinct from the indexer being down; name it so the
                 // operator fixes the key mismatch instead of chasing a network issue.
-                console.error('_pollOwnStake: HTTP ' + status + ' from BTC indexer at ' + url +
+                logger.error('_pollOwnStake: HTTP ' + status + ' from BTC indexer at ' + url +
                     ': check that BTC_INDEXER_API_KEY on this hub matches INDEXER_API_KEY on the indexer');
             } else {
-                console.error('Stake poll failed:', err && err.message ? err.message : err);
+                logger.error(nodeUtil.format('Stake poll failed:', err && err.message ? err.message : err));
             }
             return;
         }
@@ -1590,7 +1593,7 @@ class XChainHub {
         // rather than crashing the scheduler tick that called it.
         let network;
         try { network = await this._resolveBtcNetwork(); }
-        catch (err) { console.error('XChainHub: cannot resolve BTC latest block:', err.message); return null; }
+        catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve BTC latest block:', err.message)); return null; }
         // Held past the block below: a rejected tip is still the only block_time the hub
         // has, and the direct path is dated against it.
         let pushedTip = null;
@@ -1617,7 +1620,7 @@ class XChainHub {
             let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
             if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
             if(result.lag != null && Number(result.lag) > maxLag){
-                console.warn('XChainHub: BTC indexer lag ' + result.lag +
+                logger.warn('XChainHub: BTC indexer lag ' + result.lag +
                     ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip');
                 return null;
             }
@@ -1625,7 +1628,7 @@ class XChainHub {
             if(directHeight && !this.btcDirectTipAcceptable(directHeight, pushedTip)) return null;
             return directHeight;
         } catch (err) {
-            console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
+            logger.error(nodeUtil.format('XChainHub: failed to resolve BTC latest block from indexer:', err));
             return null;
         }
     }
@@ -1649,7 +1652,7 @@ class XChainHub {
         if(!Number.isFinite(maxAge) || maxAge <= 0) maxAge = 7200;
         let ageS = Math.floor(Date.now() / 1000) - blockTime;
         if(ageS <= maxAge) return true;
-        console.warn('XChainHub: direct BTC tip (height ' + directHeight + ') has not advanced past a tip ' +
+        logger.warn('XChainHub: direct BTC tip (height ' + directHeight + ') has not advanced past a tip ' +
             ageS + 's old, exceeding MAX_DIRECT_TIP_AGE_S (' + maxAge + '); treating the BTC stack as halted');
         return false;
     }
@@ -1666,7 +1669,7 @@ class XChainHub {
         }
         let blockTime = Number(tip.blockTime);
         if(!Number.isFinite(blockTime) || blockTime <= 0){
-            console.warn('XChainHub: pushed BTC tip (height ' + tip.blockHeight +
+            logger.warn('XChainHub: pushed BTC tip (height ' + tip.blockHeight +
                 ') has no stored block_time; treating as unverifiable and falling through to the direct indexer path');
             return false;
         }
@@ -1675,7 +1678,7 @@ class XChainHub {
             // Info, not warn: a 1200s bound refuses ~13.5% of live mainnet blocks, the
             // direct path answers one call later, and btcDirectTipAcceptable is the
             // gate that warns when the chain has actually stopped.
-            console.log('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
+            logger.info('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
                 's old, past MAX_TIP_AGE_S (' + maxAge + '): a long block gap, taking the direct indexer path');
             return false;
         }
@@ -1708,12 +1711,12 @@ class XChainHub {
     async resolveAdmissionTip(coin){
         let c = admissionHeight.normalizeChain(coin);
         if(c === null){
-            console.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
+            logger.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
             return null;
         }
         let url = await this._resolveIndexerUrl(c);
         if(!url){
-            console.warn('XChainHub: no ' + c + ' indexer URL configured; no admission tip for ' + c +
+            logger.warn('XChainHub: no ' + c + ' indexer URL configured; no admission tip for ' + c +
                 '. Rows read by ' + c + ' cannot be finalized above the admission activation.');
             return null;
         }
@@ -1725,7 +1728,7 @@ class XChainHub {
             }, { timeout: 5000 });
             result = res && res.data && res.data.result;
         } catch (err) {
-            console.error('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message);
+            logger.error(nodeUtil.format('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message));
             return null;
         }
         if(!result || result.error) return null;
@@ -1746,7 +1749,7 @@ class XChainHub {
         if(!Number.isSafeInteger(tip) || tip < 0){
             // A v6 indexer, or one that has not decoded a block yet. Refused, not
             // guessed: falling back to block_index here would reintroduce the circularity.
-            console.warn('XChainHub: ' + c + ' indexer returned no usable decoder_block (' +
+            logger.warn('XChainHub: ' + c + ' indexer returned no usable decoder_block (' +
                 JSON.stringify(result.decoder_block) + '); no admission tip for ' + c);
             return null;
         }
@@ -1781,7 +1784,7 @@ class XChainHub {
             maxAgeS = XChainHub.ADMISSION_TIP_STALL_BLOCKS * blockIntervalS(c);
         let ageS = Math.floor((nowMs - Number(prev.atMs)) / 1000);
         if(ageS > maxAgeS){
-            console.warn('XChainHub: the ' + c + ' decoder tip has not advanced past height ' + Number(tip) +
+            logger.warn('XChainHub: the ' + c + ' decoder tip has not advanced past height ' + Number(tip) +
                 ' in ' + ageS + 's, exceeding this chain\'s ' + maxAgeS + 's admission stall window; ' +
                 'refusing to stamp an admission height for ' + c + ' rather than guessing one');
             return false;
@@ -1819,7 +1822,7 @@ class XChainHub {
         let tips;
         try { tips = await this._resolveAdmissionTips(readSet); }
         catch (err) {
-            console.error('XChainHub: admission tip read failed for ' + String(table) + ':', err.message);
+            logger.error(nodeUtil.format('XChainHub: admission tip read failed for ' + String(table) + ':', err.message));
             return null;
         }
         let missing = admissionHeight.missingAdmissionTips(readSet, tips);
@@ -1827,13 +1830,13 @@ class XChainHub {
             // Per chain, because that is the operator's whole diagnosis: which chain's
             // decoder went away, and therefore which rails stopped finalizing.
             for(let c of missing)
-                console.error('XChainHub: no fresh admission tip for ' + c + '; refusing to finalize ' +
+                logger.error('XChainHub: no fresh admission tip for ' + c + '; refusing to finalize ' +
                     String(table) + ' rows read by ' + c + ' until one is available');
             return null;
         }
         try { return admissionHeight.admitBlocks(readSet, tips, table); }
         catch (err) {
-            console.error('XChainHub: cannot stamp an admission map for ' + String(table) + ':', err.message);
+            logger.error(nodeUtil.format('XChainHub: cannot stamp an admission map for ' + String(table) + ':', err.message));
             return null;
         }
     }
@@ -1850,7 +1853,7 @@ class XChainHub {
         let configs;
         try { configs = await this.db.getAllConfigs(); }
         catch (err) {
-            console.error('XChainHub: failed to resolve BTC network from configs:', err);
+            logger.error(nodeUtil.format('XChainHub: failed to resolve BTC network from configs:', err));
             return this.network || 'mainnet';
         }
         let btc = configs && configs['bitcoin'];
@@ -1931,7 +1934,7 @@ class XChainHub {
             return false;
         }
         this._indexerCoinVerdicts.set(key, { verdict: 'mismatch', at: Date.now() });
-        console.error('XChainHub: the resolved ' + want + ' indexer at ' + url + ' is a ' + coin +
+        logger.error('XChainHub: the resolved ' + want + ' indexer at ' + url + ' is a ' + coin +
             ' indexer, not ' + want + '. ' + want + '-anchored reads (capability snapshots, the ' +
             'publisher election, snapshot_block) would silently use another chain\'s state, so ' +
             'they are DISABLED until this is fixed. Set ' + want + '_INDEXER_API_URL to a real ' +
@@ -1949,7 +1952,7 @@ class XChainHub {
         if(!this.db) return null;
         let configs;
         try { configs = await this.db.getAllConfigs(); }
-        catch (err) { console.error('XChainHub: failed to resolve ' + coin + ' indexer URL from configs:', err); return null; }
+        catch (err) { logger.error(nodeUtil.format('XChainHub: failed to resolve ' + coin + ' indexer URL from configs:', err)); return null; }
         const COIN_CONFIG_KEY = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
         let cc = configs && configs[COIN_CONFIG_KEY[coin] || coin.toLowerCase()];
         if(!cc) return null;
@@ -1995,7 +1998,7 @@ class XChainHub {
                 qualified = false;
                 if(!this._warnedMissingMinStake) this._warnedMissingMinStake = new Set();
                 if(!this._warnedMissingMinStake.has(cap)){
-                    console.warn('Capability "' + cap + '": no MIN_STAKE configured ' +
+                    logger.warn('Capability "' + cap + '": no MIN_STAKE configured ' +
                         '(set CAPABILITIES.' + cap + '.MIN_STAKE in HUB_CAPABILITY_CONFIG); ' +
                         'treating as NOT qualified until a threshold is provided.');
                     this._warnedMissingMinStake.add(cap);
@@ -2024,12 +2027,12 @@ class XChainHub {
             // the threshold: the indexer accepts against a frozen constant, so a hub-side
             // move forks the federation. Lift with MIN_STAKE_GOVERNANCE_DISABLED.
             if(CapabilityRegistry.MIN_STAKE_GOVERNANCE_DISABLED){
-                console.warn('Governance MIN_STAKE change for ' + parsed.capability +
+                logger.warn('Governance MIN_STAKE change for ' + parsed.capability +
                     ' ignored: hub governance MIN_STAKE changes are disabled pre-launch (#4352)');
                 return;
             }
             if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
-                console.warn('Governance MIN_STAKE change for ' + parsed.capability +
+                logger.warn('Governance MIN_STAKE change for ' + parsed.capability +
                     ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
                 return;
             }
@@ -2055,7 +2058,7 @@ class XChainHub {
         let providerId = ProviderRegistry.parseAttestationProviderParam(ev.parameter);
         if(!providerId) return;
         if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
-            console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
+            logger.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
                 ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
             return;
         }
@@ -2070,8 +2073,8 @@ class XChainHub {
             // The PBFT consensus_strategy rides it too, on the same both-paths rule.
             cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
         } catch (e) {
-            console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
-                ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e);
+            logger.warn(nodeUtil.format('Governance ATTESTATION_PROVIDER change for ' + providerId +
+                ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e));
             return;
         }
         this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms, cs);
@@ -2129,7 +2132,7 @@ class XChainHub {
         let senderPubkey = this.peerManager && this.peerManager.validatorPubkeys
             ? this.peerManager.validatorPubkeys.get(envelope.sender) : null;
         if(senderPubkey && String(data.pubkey).toLowerCase() !== String(senderPubkey).toLowerCase()){
-            console.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey + ' but sender is registered as ' + senderPubkey + '; dropping');
+            logger.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey + ' but sender is registered as ' + senderPubkey + '; dropping');
             return;
         }
         if(envelope.type === 'CAPABILITY_SELF_TEST'){
@@ -2146,7 +2149,7 @@ class XChainHub {
                     ? await this.capabilitySnapshot.getSnapshot(data.capability, data.block_at)
                     : null;
                 if(snap && !this.capabilitySnapshot.isInSnapshot(snap, data.pubkey)){
-                    console.warn('Capability activation from ' + envelope.sender + ' for "' + data.capability +
+                    logger.warn('Capability activation from ' + envelope.sender + ' for "' + data.capability +
                         '" rejected: pubkey ' + data.pubkey + ' is not in the indexer stake snapshot at block ' +
                         data.block_at + ' (claimed qualification it is not staked for).');
                     qualified = false;

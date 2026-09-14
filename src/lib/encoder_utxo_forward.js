@@ -44,6 +44,8 @@
  **********************************************************************/
 
 'use strict';
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // xchain-encoder/src/validator.js MAX_UTXO_COUNT. Duplicated rather than
 // imported: the encoder is a separate service reached over JSON-RPC, not a
@@ -64,7 +66,7 @@ const ENCODER_MAX_UTXO_COUNT = 500;
 function forwardableUtxos(utxos, label){
     if (!Array.isArray(utxos)) return utxos;
     if (utxos.length <= ENCODER_MAX_UTXO_COUNT) return utxos;
-    console.warn((label || 'publisher') + ': spend address holds ' + utxos.length +
+    logger.warn((label || 'publisher') + ': spend address holds ' + utxos.length +
         ' UTXOs, past the encoder\'s caller-supplied cap of ' + ENCODER_MAX_UTXO_COUNT +
         '; letting the encoder select from its own fetch instead. Consolidate the wallet: ' +
         'every extra input adds fee weight.');

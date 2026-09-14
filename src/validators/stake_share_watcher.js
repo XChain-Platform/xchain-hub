@@ -41,6 +41,8 @@
 const axios = require('axios');
 const coins = require('../coins');
 const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('../lib/stake_share_monitor.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Capabilities whose weighted gate can halt a user-visible rail. `price` is the
 // commit gate for oracle price rounds (a prior halt) and `oracle_publish`
@@ -75,7 +77,7 @@ class StakeShareWatcher {
         opts = opts || {};
         this.hub  = hub;
         this.env  = opts.env || process.env;
-        this._log = typeof opts.log === 'function' ? opts.log : (msg) => console.error(msg);
+        this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
         this._axios = opts.axios || axios;
 
         this.pollMs = Number.isFinite(opts.pollMs) ? opts.pollMs

@@ -97,6 +97,9 @@ const { knownGateKeys }          = require('../consensus_rules_digest.js');
 const { buildRollcallCanonical } = require('./rollcall_canonical.js');
 const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The one gossip type this engine adds. PeerManager.broadcast has no type
 // registry, so a new type is this constant plus one `case` in _handleMessage.
@@ -240,7 +243,7 @@ class RollcallRound {
         if(raw === undefined || raw === null || raw === '') return fallback;
         let n = parseInt(raw, 10);
         if(!Number.isFinite(n) || n < 0){
-            console.warn('RollcallRound: ' + name + ' "' + raw + '" is not a non-negative integer; ' +
+            logger.warn('RollcallRound: ' + name + ' "' + raw + '" is not a non-negative integer; ' +
                          'using the ' + this.network + ' default (' + fallback + ')');
             return fallback;
         }
@@ -256,11 +259,11 @@ class RollcallRound {
 
     async start(){
         if(!this.enabled){
-            console.log('RollcallRound: disabled');
+            logger.info('RollcallRound: disabled');
             return;
         }
         if(!Number.isFinite(this.interval) || this.interval <= 0){
-            console.warn('RollcallRound: no ROLLCALL_INTERVAL_BLOCKS for network ' +
+            logger.warn('RollcallRound: no ROLLCALL_INTERVAL_BLOCKS for network ' +
                          JSON.stringify(this.network) + '; the engine stays idle');
             return;
         }
@@ -273,7 +276,7 @@ class RollcallRound {
         // nothing, not emit a recurring warning that reads as a fault.
         let armedAt = rca.ROLLCALL_ACTIVATION[this.network];
         if(!Number.isFinite(armedAt)){
-            console.log('RollcallRound: inert on ' + JSON.stringify(this.network) +
+            logger.info('RollcallRound: inert on ' + JSON.stringify(this.network) +
                         ' (no activation height set); the engine stays idle');
             return;
         }
@@ -285,11 +288,11 @@ class RollcallRound {
         this.spendGuard.persistTo();
         let tick = async () => {
             try { await this._tick(); }
-            catch(e){ console.warn('RollcallRound tick:', e && e.message ? e.message : e); }
+            catch(e){ logger.warn(nodeUtil.format('RollcallRound tick:', e && e.message ? e.message : e)); }
         };
         this._timer = setInterval(tick, this.pollMs);
         await tick();
-        console.log('RollcallRound started (interval=' + this.interval + ' blocks, window=' + this.acceptWindow +
+        logger.info('RollcallRound started (interval=' + this.interval + ' blocks, window=' + this.acceptWindow +
                     ', publish delay=' + this.publishDelayBlocks + ', ladder step=' + this.electionToleranceBlocks +
                     ', self-publish=' + this.selfPublishBlocks +
                     ', broadcast=' + (this.broadcastCapable() ? 'yes' : 'NO (sign-and-gossip only)') + ', ' +
@@ -447,7 +450,7 @@ class RollcallRound {
             for(let [e, state] of this.rounds){
                 if(tipBlock - e > this.acceptWindow + ROUND_RETENTION_BLOCKS){ this.rounds.delete(e); continue; }
                 try { await this.advance(state, tipBlock); }
-                catch(err){ console.warn('RollcallRound: epoch ' + e + ' advance failed:', err && err.message ? err.message : err); }
+                catch(err){ logger.warn(nodeUtil.format('RollcallRound: epoch ' + e + ' advance failed:', err && err.message ? err.message : err)); }
             }
         } finally {
             this._ticking = false;
@@ -479,7 +482,7 @@ class RollcallRound {
         let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
         let ledgerHash = (bh && bh.ledger_hash) ? String(bh.ledger_hash).toLowerCase() : '';
         if(!/^[0-9a-f]{64}$/.test(ledgerHash)){
-            console.warn('RollcallRound: epoch=' + epoch + ' skipped (no ledger_hash from the BTC indexer)');
+            logger.warn('RollcallRound: epoch=' + epoch + ' skipped (no ledger_hash from the BTC indexer)');
             return;
         }
 
@@ -497,7 +500,7 @@ class RollcallRound {
         // absence is an eviction.
         let snap = await this.capabilitySnapshot.getActiveWeightSnapshot(epoch);
         if(!snap || !Array.isArray(snap.validators)){
-            console.warn('RollcallRound: epoch=' + epoch + ' skipped (whole-federation snapshot unresolved; ' +
+            logger.warn('RollcallRound: epoch=' + epoch + ' skipped (whole-federation snapshot unresolved; ' +
                          'ABSTAINING rather than collecting against a partial member set)');
             return;
         }
@@ -566,7 +569,7 @@ class RollcallRound {
         for(let e of this._earlySigs.keys()) if(e < epoch) this._earlySigs.delete(e);
         if(early) for(let [pk, sig] of early) this.onSign({ epoch, pubkey: pk, sig });
 
-        console.log('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
+        logger.info('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
                     '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity') +
                     ' v=' + (gates === null ? '0' : '1' + ' gates=' + gates.split(',').length));
     }
@@ -658,7 +661,7 @@ class RollcallRound {
                     keys = snap.validators.map(v => String(v.pubkey).toLowerCase());
             }
         } catch(e){
-            console.warn('RollcallRound: epoch=' + epoch + ' election set unresolved (' +
+            logger.warn('RollcallRound: epoch=' + epoch + ' election set unresolved (' +
                          (e && e.message ? e.message : e) + '); abstaining from publishing');
             return null;
         }
@@ -765,7 +768,7 @@ class RollcallRound {
     async publishPairs(state, myPubkey, pairs, kind){
         let key = kind === 'self' ? (state.epoch + ':self') : String(state.epoch);
         if(this._committed.has(key)){
-            console.warn('RollcallRound: epoch ' + state.epoch + ' (' + kind + ') already carries a committed ' +
+            logger.warn('RollcallRound: epoch ' + state.epoch + ' (' + kind + ') already carries a committed ' +
                          'publish spend in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
             return 'held';
         }
@@ -785,7 +788,7 @@ class RollcallRound {
         }
         let g = this.spendGuard.check(balance === undefined ? {} : { balance });
         if(!g.ok){
-            console.warn('RollcallRound: ' + g.reason + ' (epoch ' + state.epoch + ', ' + kind + '); deferring publish');
+            logger.warn('RollcallRound: ' + g.reason + ' (epoch ' + state.epoch + ', ' + kind + '); deferring publish');
             return 'retry';
         }
 
@@ -795,7 +798,7 @@ class RollcallRound {
         // size, so the refusal has to happen here rather than there.
         let maxPairs = RollcallRound.maxPairsForGates(state.gates);
         if(maxPairs < 1){
-            console.error('RollcallRound: the GATES field is ' + String(state.gates).length +
+            logger.error('RollcallRound: the GATES field is ' + String(state.gates).length +
                           ' bytes, leaving no room for a signature pair inside the ' +
                           ACTION_DATA_CEILING + '-byte action-data ceiling (epoch ' + state.epoch +
                           ', ' + kind + '); refusing to publish an action the decoder would drop');
@@ -821,7 +824,7 @@ class RollcallRound {
                 // ceiling that was never the one in the way.
                 let why = this.spendGuard.noteBlocked();
                 for(let t of tokens) this.spendGuard.release(t);
-                console.warn('RollcallRound: ' + why + ' (epoch ' + state.epoch +
+                logger.warn('RollcallRound: ' + why + ' (epoch ' + state.epoch +
                              ', ' + kind + ', ' + chunks.length + ' chunk(s)); deferring publish');
                 return 'retry';
             }
@@ -834,7 +837,7 @@ class RollcallRound {
         // must leave no orphan intent line behind.
         if(!this._recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
             for(let t of tokens) this.spendGuard.release(t);
-            console.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
+            logger.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the publish for epoch ' + state.epoch +
                           ' rather than spending a DOGE fee with no durable record');
             return 'retry';
@@ -861,7 +864,7 @@ class RollcallRound {
                 this._recordSpend({ phase: 'failed', epoch: state.epoch, kind,
                                     delivered: state.sent.size, remaining: chunks.length - i,
                                     error: 'operator pause: ' + this.spendGuard.noteBlocked() });
-                console.warn(this.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
+                logger.warn(this.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
                              ', ' + kind + '); ' + (chunks.length - i) + ' of ' + chunks.length +
                              ' chunk(s) not broadcast');
                 this._committed.delete(key);
@@ -883,7 +886,7 @@ class RollcallRound {
                 }
                 this._recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
                                     rank: state.myRank });
-                console.log('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
+                logger.info('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
                             (txid ? ' txid=' + txid : '') +
                             (state.myRank > 0 ? ' [SWEEPER: rank ' + state.myRank + ' of ' + state.order.length +
                                                 '; the elected leader left these signatures off chain]' : ''));
@@ -897,8 +900,8 @@ class RollcallRound {
                     // reconciling on chain has the epoch without stdout retention.
                     this._recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
                                         error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
-                    console.warn('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
-                                 '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
+                    logger.warn(nodeUtil.format('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
+                                 '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
                     return 'held';
                 }
                 // Definitive: nothing left this chunk, so it consumes no budget, and
@@ -907,8 +910,8 @@ class RollcallRound {
                 for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
                 this._recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
-                console.warn('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
-                             e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
+                             e && e.message ? e.message : e));
                 this._committed.delete(key);
                 return 'retry';
             }
@@ -992,7 +995,7 @@ class RollcallRound {
         if(this.broadcastCapable()) return true;
         if(!this._loggedNoBroadcast){
             this._loggedNoBroadcast = true;
-            console.warn('RollcallRound: this hub signs and gossips roll calls but cannot PUBLISH one: ' +
+            logger.warn('RollcallRound: this hub signs and gossips roll calls but cannot PUBLISH one: ' +
                          'HUB_SIGNER_MODULE exports no broadcast(payload), and every ROLLCALL is a two-phase ' +
                          'P2SH action the built-in encoder pipeline fails closed on. Its own presence still ' +
                          'reaches the chain through the sweepers. See examples/doge-signer.example.js.');
@@ -1037,7 +1040,7 @@ class RollcallRound {
             finally { fs.closeSync(fd); }
             return true;
         } catch(e){
-            console.error('RollcallRound: failed to write ' + file + ':', e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('RollcallRound: failed to write ' + file + ':', e && e.message ? e.message : e));
             return false;
         }
     }

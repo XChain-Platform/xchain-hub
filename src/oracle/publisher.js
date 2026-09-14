@@ -119,6 +119,9 @@ const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
         PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
 const ah = require('../lib/admission_height.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -180,7 +183,7 @@ function nonNegativeIntConfig(raw, dflt, name) {
     if (raw === undefined || raw === null || raw === '') return dflt;
     let n = parseInt(raw, 10);
     if (Number.isInteger(n) && n >= 0) return n;
-    console.warn('config: ' + name + '="' + raw + '" is not a non-negative integer; using the default (' + dflt + ')');
+    logger.warn('config: ' + name + '="' + raw + '" is not a non-negative integer; using the default (' + dflt + ')');
     return dflt;
 }
 
@@ -484,7 +487,7 @@ class OraclePublisher {
             cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
             'ORACLE_BATCH_WINDOW_ROUNDS');
         if (cadence.ceiling !== null && this.batchWindowRounds > cadence.ceiling) {
-            console.warn('config: ORACLE_BATCH_WINDOW_ROUNDS=' + this.batchWindowRounds +
+            logger.warn('config: ORACLE_BATCH_WINDOW_ROUNDS=' + this.batchWindowRounds +
                 ' would leave the newest price snapshot up to ' +
                 Math.round(worstCaseSnapshotAgeMs(this.batchWindowRounds, {
                     roundIntervalMs: this.roundIntervalMs, graceMs: this.batchGraceMs,
@@ -495,7 +498,7 @@ class OraclePublisher {
             this.batchWindowRounds = cadence.ceiling;
         }
         if (cadence.ceiling !== null && !cadence.satisfiable) {
-            console.warn('OraclePublisher: no batch window fits the ' +
+            logger.warn('OraclePublisher: no batch window fits the ' +
                 Math.round(this.oracleMaxPriceAgeMs / 1000) + 's fee-price staleness bound at a ' +
                 Math.round(this.roundIntervalMs / 1000) + 's round interval with a ' +
                 Math.round(this.batchGraceMs / 1000) + 's grace and a ' +
@@ -828,8 +831,8 @@ class OraclePublisher {
         try {
             utxos = await this.encoder.getUtxos(this.dogeAddress);
         } catch (err) {
-            console.warn('OraclePublisher: UTXO reserve check failed (confirmation state unknown ' +
-                'this pass; publishing is not blocked on it): ', err);
+            logger.warn(nodeUtil.format('OraclePublisher: UTXO reserve check failed (confirmation state unknown ' +
+                'this pass; publishing is not blocked on it): ', err));
             return null;
         }
         if (!Array.isArray(utxos)) return null;
@@ -867,7 +870,7 @@ class OraclePublisher {
             this.checkPublishedConfirmations().catch((e) => {
                 // Unreachable in practice (the check swallows its own faults); kept so a
                 // future edit inside it can never reject into an unhandled rejection.
-                console.warn('OraclePublisher: confirmation watchdog tick failed: ', e);
+                logger.warn(nodeUtil.format('OraclePublisher: confirmation watchdog tick failed: ', e));
             });
         }, this.confirmCheckIntervalMs);
         if (this._confirmTimer.unref) this._confirmTimer.unref();
@@ -930,7 +933,7 @@ class OraclePublisher {
 
         let oldest = this.oldestUnconfirmedPublish();
         if (oldest && oldest.ageMs >= this.confirmStaleMs) {
-            console.warn('OraclePublisher: UNCONFIRMED_PUBLISH - ' + this._pendingConfirmations.size +
+            logger.warn('OraclePublisher: UNCONFIRMED_PUBLISH - ' + this._pendingConfirmations.size +
                 ' broadcast(s) have never been seen confirmed; oldest is round ' + oldest.round +
                 ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
                 'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
@@ -962,14 +965,14 @@ class OraclePublisher {
         try {
             fs.mkdirSync(dir, { recursive: true });
         } catch (e) {
-            console.warn('OraclePublisher: failed to create queue directory ' + dir + ':', e);
+            logger.warn(nodeUtil.format('OraclePublisher: failed to create queue directory ' + dir + ':', e));
         }
 
         // Touch queue file
         try {
             if (!fs.existsSync(this.queuePath)) fs.writeFileSync(this.queuePath, '');
         } catch (e) {
-            console.warn('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e);
+            logger.warn(nodeUtil.format('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e));
         }
 
         // Reload the v2 round buffer. A restart between a round finalizing and its
@@ -989,8 +992,8 @@ class OraclePublisher {
             try {
                 await this.hydratePublishedMarkers();
             } catch (e) {
-                console.error('OraclePublisher: failed to hydrate durable publish markers on startup ' +
-                    '(the in-process guard still covers this lifetime): ', e);
+                logger.error(nodeUtil.format('OraclePublisher: failed to hydrate durable publish markers on startup ' +
+                    '(the in-process guard still covers this lifetime): ', e));
             }
         }
 
@@ -998,7 +1001,7 @@ class OraclePublisher {
         if (this.hub.oracleConsensus) {
             this.hub.oracleConsensus.on('round:finalized', (event) => {
                 this.onRoundFinalized(event).catch(err => {
-                    console.error('OraclePublisher: onRoundFinalized error:', err);
+                    logger.error(nodeUtil.format('OraclePublisher: onRoundFinalized error:', err));
                 });
             });
         }
@@ -1027,7 +1030,7 @@ class OraclePublisher {
         // leaves the rail reporting a healthy lastPublishedTxid indefinitely.
         this.startConfirmationWatchdog();
 
-        console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
+        logger.info('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
         // The publish cadence next to the bound it has to fit inside, because a rail
         // that is publishing perfectly on a cadence too slow for the fee gate looks
         // healthy in every other line this class logs.
@@ -1035,7 +1038,7 @@ class OraclePublisher {
             roundIntervalMs:  this.roundIntervalMs,
             graceMs:          this.batchGraceMs,
             landingReserveMs: this.batchLandingReserveMs });
-        console.log('OraclePublisher PRICE batch cadence: ' + this.batchWindowRounds +
+        logger.info('OraclePublisher PRICE batch cadence: ' + this.batchWindowRounds +
             ' round(s)/batch = one wire per ' +
             Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000) + 's' +
             (this.batchWindowRoundsCeiling === null
@@ -1070,7 +1073,7 @@ class OraclePublisher {
         // Skip rather than queue-for-later so a disabled publisher does not silently
         // build a backlog that floods on-chain the moment it is re-enabled.
         if (!this.enabled) {
-            console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
+            logger.info('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
             return;
         }
         // PRICE v0 BATCH RAIL, unconditional. A finalized round never rides its own
@@ -1104,7 +1107,7 @@ class OraclePublisher {
         if (this._snapshotDark) return;
         this._snapshotDark = true;
         let suffix = err ? (': ' + (err && err.message ? err.message : err)) : '';
-        console.warn('OraclePublisher: oracle_publish capability snapshot ' + detail +
+        logger.warn('OraclePublisher: oracle_publish capability snapshot ' + detail +
             '; failing closed, this hub will not publish until it resolves' + suffix);
     }
 
@@ -1167,7 +1170,7 @@ class OraclePublisher {
             let sigHex  = this.identity.sign(payload);
             return [{ pubkey: this.identity.getPubkeyHex(), sig: sigHex }];
         } catch (e) {
-            console.warn('OraclePublisher: failed to build local sig:', e);
+            logger.warn(nodeUtil.format('OraclePublisher: failed to build local sig:', e));
             return [];
         }
     }
@@ -1219,7 +1222,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to enqueue round %s:', round.round, e);
+            logger.error(nodeUtil.format('OraclePublisher: failed to enqueue round %s:', round.round, e));
             // Fail loud: refuse to ack if queue is unwritable
             throw e;
         }
@@ -1239,7 +1242,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to write dead-letter record for round %s:', entry.round, e);
+            logger.error(nodeUtil.format('OraclePublisher: failed to write dead-letter record for round %s:', entry.round, e));
         }
     }
 
@@ -1280,7 +1283,7 @@ class OraclePublisher {
             fs.closeSync(fd);
             return true;
         } catch (e) {
-            console.error('OraclePublisher: failed to rewrite queue:', e);
+            logger.error(nodeUtil.format('OraclePublisher: failed to rewrite queue:', e));
             return false;
         }
     }
@@ -1337,7 +1340,7 @@ class OraclePublisher {
         let prior = this._buffer.get(entry.round);
         if (prior && this.sameBufferedRound(prior, entry)) return;
         if (prior) {
-            console.warn('OraclePublisher: round ' + entry.round + ' re-finalized with different ' +
+            logger.warn('OraclePublisher: round ' + entry.round + ' re-finalized with different ' +
                 'content; replacing the buffered copy so the batch rail proposes what ' +
                 'price_snapshots actually holds');
         }
@@ -1349,7 +1352,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to buffer round %s for batching:', entry.round, e);
+            logger.error(nodeUtil.format('OraclePublisher: failed to buffer round %s for batching:', entry.round, e));
             throw e;
         }
         this._buffer.set(entry.round, entry);
@@ -1402,8 +1405,8 @@ class OraclePublisher {
             fs.closeSync(fd);
             return true;
         } catch (e) {
-            console.error('OraclePublisher: failed to rewrite the v2 round buffer at ' +
-                this.bufferPath + ':', e);
+            logger.error(nodeUtil.format('OraclePublisher: failed to rewrite the v2 round buffer at ' +
+                this.bufferPath + ':', e));
             return false;
         }
     }
@@ -1420,7 +1423,7 @@ class OraclePublisher {
             this._buffer.set(r, e);
         }
         if (this._buffer.size > 0) {
-            console.log('OraclePublisher: reloaded ' + this._buffer.size +
+            logger.info('OraclePublisher: reloaded ' + this._buffer.size +
                 ' buffered oracle round(s) from ' + this.bufferPath);
         }
         this.enforceBufferBound();
@@ -1436,7 +1439,7 @@ class OraclePublisher {
         let ordered = Array.from(this._buffer.keys()).sort((a, b) => a - b);
         let drop    = ordered.slice(0, this._buffer.size - this.batchBufferMaxRounds);
         for (let r of drop) this._buffer.delete(r);
-        console.warn('OraclePublisher: v2 round buffer hit ORACLE_BATCH_BUFFER_MAX_ROUNDS (' +
+        logger.warn('OraclePublisher: v2 round buffer hit ORACLE_BATCH_BUFFER_MAX_ROUNDS (' +
             this.batchBufferMaxRounds + '); dropped ' + drop.length + ' round(s) up to ' +
             drop[drop.length - 1] + ' without publishing them');
         this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
@@ -1479,8 +1482,8 @@ class OraclePublisher {
         try {
             rows = await this.db.findPriceSnapshotsByRoundNumberAndConsensusProof(first, last);
         } catch (e) {
-            console.warn('OraclePublisher: cannot check for an on-chain batch covering rounds ' +
-                first + '..' + last + '; leaving them buffered: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot check for an on-chain batch covering rounds ' +
+                first + '..' + last + '; leaving them buffered: ', e && e.message));
             return 0;
         }
         // Prune the whole range each observed batch CLAIMS, not just the rows that
@@ -1503,7 +1506,7 @@ class OraclePublisher {
         }
         if (pruned > 0) {
             this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
-            console.log('OraclePublisher: pruned ' + pruned + ' buffered round(s) in ' + first +
+            logger.info('OraclePublisher: pruned ' + pruned + ' buffered round(s) in ' + first +
                 '..' + last + ' after observing their batch on-chain');
         }
         return pruned;
@@ -1526,7 +1529,7 @@ class OraclePublisher {
         let timer = setTimeout(() => {
             this._takeoverTimers.delete(windowIndex);
             this.attemptTakeover(windowIndex).catch(err =>
-                console.error('OraclePublisher: takeover attempt for window ' + windowIndex + ' failed:', err));
+                logger.error(nodeUtil.format('OraclePublisher: takeover attempt for window ' + windowIndex + ' failed:', err)));
         }, delay);
         if (timer.unref) timer.unref();
         this._takeoverTimers.set(windowIndex, timer);
@@ -1553,7 +1556,7 @@ class OraclePublisher {
         if (!(await this.observationFeedProven())) {
             if (!this._takeoverDarkWarned) {
                 this._takeoverDarkWarned = true;
-                console.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
+                logger.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
                     'later one: this hub has never observed an on-chain PRICE batch, so it cannot tell a ' +
                     'silent leader from a deaf follower. Point this network\'s indexer HUB_API_URL at this ' +
                     'federation so landed batches are pushed back, then takeover arms itself.');
@@ -1577,7 +1580,7 @@ class OraclePublisher {
             if (waited < this.takeoverAmbiguousCooldownMs) {
                 this.takeoverDeferred++;
                 let remaining = this.takeoverAmbiguousCooldownMs - waited;
-                console.warn('OraclePublisher: deferring takeover of window ' + windowIndex +
+                logger.warn('OraclePublisher: deferring takeover of window ' + windowIndex +
                     ' for ~' + Math.ceil(remaining / 1000) + 's: a batch covering rounds ' + first +
                     '..' + last + ' may already be in flight (evidence ~' + Math.round(waited / 1000) +
                     's ago), and re-publishing over an unmined leader tx pays the DOGE fee twice');
@@ -1624,8 +1627,8 @@ class OraclePublisher {
             try {
                 ts = signer.coSignedAt(first, last);
             } catch (e) {
-                console.warn('OraclePublisher: cannot read the batch signer\'s co-signature memo ' +
-                    'for rounds ' + first + '..' + last + ': ', e && e.message);
+                logger.warn(nodeUtil.format('OraclePublisher: cannot read the batch signer\'s co-signature memo ' +
+                    'for rounds ' + first + '..' + last + ': ', e && e.message));
                 ts = null;
             }
             if (Number.isFinite(ts) && (newest === null || ts > newest)) newest = ts;
@@ -1652,7 +1655,7 @@ class OraclePublisher {
         let timer = setTimeout(() => {
             this._takeoverTimers.delete(windowIndex);
             this.attemptTakeover(windowIndex).catch(err =>
-                console.error('OraclePublisher: deferred takeover attempt for window ' + windowIndex + ' failed:', err));
+                logger.error(nodeUtil.format('OraclePublisher: deferred takeover attempt for window ' + windowIndex + ' failed:', err)));
         }, Math.max(1, delay));
         if (timer.unref) timer.unref();
         this._takeoverTimers.set(windowIndex, timer);
@@ -1667,8 +1670,8 @@ class OraclePublisher {
             let rows = await this.db.hasPriceSnapshotsByRoundNumber(first, last);
             return !!(rows && rows.length);
         } catch (e) {
-            console.warn('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
-                ' are already on chain; declining takeover: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
+                ' are already on chain; declining takeover: ', e && e.message));
             return true;
         }
     }
@@ -1684,8 +1687,8 @@ class OraclePublisher {
             let rows = await this.db.hasPriceSnapshotsByConsensusProof();
             if (rows && rows.length) this._observationProven = true;
         } catch (e) {
-            console.warn('OraclePublisher: cannot confirm the on-chain observation feed; ' +
-                'takeover stays disarmed: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot confirm the on-chain observation feed; ' +
+                'takeover stays disarmed: ', e && e.message));
         }
         return this._observationProven;
     }
@@ -1736,7 +1739,7 @@ class OraclePublisher {
     queueWindowAssembly(windowIndex) {
         this._windowChain = this._windowChain.then(() =>
             this._assembleWindow(windowIndex).catch(e =>
-                console.error('OraclePublisher: window ' + windowIndex + ' assembly failed:', e)));
+                logger.error(nodeUtil.format('OraclePublisher: window ' + windowIndex + ' assembly failed:', e))));
         return this._windowChain;
     }
 
@@ -1754,9 +1757,9 @@ class OraclePublisher {
     // when the reconcile cannot, or a hub with no indexer would never catch up.
     async reconcileThenSweep() {
         try { await this.reconcileBacklogAgainstChain(); }
-        catch (e) { console.error('OraclePublisher: backlog reconcile against the chain failed:', e); }
+        catch (e) { logger.error(nodeUtil.format('OraclePublisher: backlog reconcile against the chain failed:', e)); }
         try { return this.sweepBufferCatchup(); }
-        catch (e) { console.error('OraclePublisher: buffer catch-up sweep failed:', e); return 0; }
+        catch (e) { logger.error(nodeUtil.format('OraclePublisher: buffer catch-up sweep failed:', e)); return 0; }
     }
 
     // ----- Landed-batch pruning -----
@@ -1798,7 +1801,7 @@ class OraclePublisher {
             this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
             let via = info && info.sourceChain ? ' pushed from ' + info.sourceChain +
                 (info.actionIndex !== undefined && info.actionIndex !== null ? ' action ' + info.actionIndex : '') : '';
-            console.log('OraclePublisher: shed ' + pruned + ' buffered round(s) in [' + f + ',' + l +
+            logger.info('OraclePublisher: shed ' + pruned + ' buffered round(s) in [' + f + ',' + l +
                 '] after their batch landed on chain' + via);
         }
         return pruned;
@@ -1830,7 +1833,7 @@ class OraclePublisher {
         if (pruned > 0) {
             this.chainReconcilePrunedRounds += pruned;
             let remaining = this.pendingCatchupWindows().length;
-            console.log('OraclePublisher: ' + pruned + ' buffered round(s) in [' + first + ',' + last +
+            logger.info('OraclePublisher: ' + pruned + ' buffered round(s) in [' + first + ',' + last +
                 '] are already carried by ' + answer.batches.length + ' valid PRICE batch(es) on ' +
                 PRICE_LANDING_COIN + '; ' + (windowsBefore - remaining) + ' of ' + windowsBefore +
                 ' pending window(s) shed without re-publishing' +
@@ -1886,7 +1889,7 @@ class OraclePublisher {
         this.chainReconcileFailures++;
         if (this._chainReconcileWarned !== reason) {
             this._chainReconcileWarned = reason;
-            console.warn('OraclePublisher: cannot check the buffered backlog against the chain (' + reason +
+            logger.warn('OraclePublisher: cannot check the buffered backlog against the chain (' + reason +
                 '); the catch-up sweep will re-propose windows the chain may already carry');
         }
         return null;
@@ -1916,8 +1919,8 @@ class OraclePublisher {
         try {
             rows = await this.db.findV0PriceSnapshotsForRounds(want, 'finalized');
         } catch (e) {
-            console.warn('OraclePublisher: cannot restore retracted round(s) ' + want.join(',') +
-                ' to the buffer from price_snapshots; they cannot be re-published: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot restore retracted round(s) ' + want.join(',') +
+                ' to the buffer from price_snapshots; they cannot be re-published: ', e && e.message));
             return 0;
         }
         let derived = new Map();
@@ -1944,7 +1947,7 @@ class OraclePublisher {
         }
         if (restored > 0) {
             this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
-            console.log('OraclePublisher: restored ' + restored + ' retracted round(s) to the buffer from ' +
+            logger.info('OraclePublisher: restored ' + restored + ' retracted round(s) to the buffer from ' +
                 'price_snapshots so their window can be re-published');
         }
         return restored;
@@ -2048,7 +2051,7 @@ class OraclePublisher {
         if (take.length > 0) this._catchupCursor = take[take.length - 1] + 1;
 
         if (pending.length > take.length) {
-            console.warn('OraclePublisher: ' + pending.length + ' closed window(s) are still ' +
+            logger.warn('OraclePublisher: ' + pending.length + ' closed window(s) are still ' +
                 'buffered and unpublished; re-proposing ' + take.length + ' of them this sweep ' +
                 '(from window ' + (take.length ? take[0] : '-') + ', resuming at ' +
                 this._catchupCursor + ' next sweep)' +
@@ -2077,7 +2080,7 @@ class OraclePublisher {
         let last  = first + this.batchWindowRounds - 1;
         this.batchCatchupRetiredWindows++;
         this.noteAssembled(windowIndex);   // also clears the attempt record
-        console.warn('OraclePublisher: window [' + first + ',' + last + '] has failed ' + seen.count +
+        logger.warn('OraclePublisher: window [' + first + ',' + last + '] has failed ' + seen.count +
             ' batch-signing round(s) over ' + Math.round((Date.now() - seen.firstAt) / 60000) +
             ' minute(s) and is retired from the catch-up sweep: no quorum of the price-capable set ' +
             'will reproduce its content, so re-proposing it only starves the windows behind it. Its ' +
@@ -2133,7 +2136,7 @@ class OraclePublisher {
             // sweep's worth onto the chain behind them.
             await this._windowChain;
         } catch (e) {
-            console.error('OraclePublisher: buffer catch-up sweep failed:', e);
+            logger.error(nodeUtil.format('OraclePublisher: buffer catch-up sweep failed:', e));
         }
         if (this._stopped) return;
         let backlog = this.pendingCatchupWindows().length;
@@ -2230,7 +2233,7 @@ class OraclePublisher {
 
         let signer = this.getBatchSigner();
         if (!signer) {
-            console.warn('OraclePublisher: no OracleBatchSigner available; window [' + first + ',' +
+            logger.warn('OraclePublisher: no OracleBatchSigner available; window [' + first + ',' +
                 last + '] stays unpublished');
             return;
         }
@@ -2259,7 +2262,7 @@ class OraclePublisher {
         if (wires.length === 0) return;
         if (takeover) {
             this.takeoverPublished++;
-            console.warn('OraclePublisher: TAKING OVER window [' + first + ',' + last + '] from its ' +
+            logger.warn('OraclePublisher: TAKING OVER window [' + first + ',' + last + '] from its ' +
                 'silent leader (rank ' + leaderRank + '); this hub is rank ' + myRank + ' and has seen no ' +
                 'on-chain batch covering it');
         }
@@ -2267,7 +2270,7 @@ class OraclePublisher {
             // Counted at assembly, not at broadcast: splitting is a decision this code
             // makes, and it stays worth seeing even if the wires then fail to send.
             this.batchSplitCount += wires.length - 1;
-            console.log('OraclePublisher: window [' + first + ',' + last + '] split into ' +
+            logger.info('OraclePublisher: window [' + first + ',' + last + '] split into ' +
                 wires.length + ' PRICE v0 wires to fit ' + PRICE_WIRE_MAX_BYTES + ' bytes');
         }
 
@@ -2315,8 +2318,8 @@ class OraclePublisher {
         try {
             rows = await this.db.findPriceSnapshotsByRoundNumber(first, last, 'finalized');
         } catch (e) {
-            console.warn('OraclePublisher: cannot reconcile the buffered copy of window [' + first +
-                ',' + last + '] against price_snapshots; proposing the buffer as-is: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot reconcile the buffered copy of window [' + first +
+                ',' + last + '] against price_snapshots; proposing the buffer as-is: ', e && e.message));
             return 0;
         }
 
@@ -2347,7 +2350,7 @@ class OraclePublisher {
             if (entry.batchSourced) {
                 this._buffer.delete(r);
                 changed++;
-                console.warn('OraclePublisher: dropping buffered round ' + r + ' from window [' + first +
+                logger.warn('OraclePublisher: dropping buffered round ' + r + ' from window [' + first +
                     ',' + last + ']: it came from a batch that already landed on chain, so it needs ' +
                     'no re-publishing and its own BTC anchor is no longer recoverable here');
                 continue;
@@ -2358,7 +2361,7 @@ class OraclePublisher {
             // than overwrite good content with a header the canonical builder would
             // turn into NaN.
             if (!this.wellFormedRound(entry)) {
-                console.warn('OraclePublisher: skipping reconcile of buffered round ' + r +
+                logger.warn('OraclePublisher: skipping reconcile of buffered round ' + r +
                     ': its price_snapshots rows did not read back as a complete round');
                 continue;
             }
@@ -2366,7 +2369,7 @@ class OraclePublisher {
             entry.bufferedAt = Date.now();
             this._buffer.set(r, entry);
             changed++;
-            console.warn('OraclePublisher: buffered round ' + r + ' disagreed with this hub\'s own ' +
+            logger.warn('OraclePublisher: buffered round ' + r + ' disagreed with this hub\'s own ' +
                 'price_snapshots; refreshed it from the DB so the batch proposal is something ' +
                 'peers can reproduce');
         }
@@ -2402,8 +2405,8 @@ class OraclePublisher {
         try {
             rows = await this.db.findPriceSnapshotsByRoundNumberAndStatus(first, last, 'finalized');
         } catch (e) {
-            console.warn('OraclePublisher: cannot self-check window [' + first + ',' + last +
-                '] against price_snapshots; withholding the batch (fail closed): ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: cannot self-check window [' + first + ',' + last +
+                '] against price_snapshots; withholding the batch (fail closed): ', e && e.message));
             return false;
         }
         let have    = new Set(rounds.map(r => parseInt(r.round)));
@@ -2414,7 +2417,7 @@ class OraclePublisher {
             missing.push(r);
         }
         if (missing.length > 0) {
-            console.warn('OraclePublisher: window [' + first + ',' + last + '] has finalized round(s) ' +
+            logger.warn('OraclePublisher: window [' + first + ',' + last + '] has finalized round(s) ' +
                 missing.join(', ') + ' with no buffered copy; withholding the batch rather than ' +
                 'publishing a signed claim that they did not finalize');
             return false;
@@ -2521,15 +2524,15 @@ class OraclePublisher {
             try {
                 result = await signer.collectBatchSignatures(first, last, anchor, candidate);
             } catch (e) {
-                console.error('OraclePublisher: batch-signing round for [' + first + ',' + last +
-                    '] threw; window stays unpublished: ', e);
+                logger.error(nodeUtil.format('OraclePublisher: batch-signing round for [' + first + ',' + last +
+                    '] threw; window stays unpublished: ', e));
                 return null;
             }
             // met:false means quorum was not reached. Those signatures are observability
             // only; publishing them would put a wire on chain that no indexer accepts and
             // spend a DOGE fee for it.
             if (!result || result.met !== true || !Array.isArray(result.sigs) || result.sigs.length === 0) {
-                console.warn('OraclePublisher: no signing quorum for batch [' + first + ',' + last +
+                logger.warn('OraclePublisher: no signing quorum for batch [' + first + ',' + last +
                     ']; window stays unpublished (a later leader re-proposes it)');
                 return null;
             }
@@ -2560,7 +2563,7 @@ class OraclePublisher {
                       (emitted.compressed ? 'compressed' : 'uncompressed') + ')'
                     : 'the reader\'s inflated-body cap (' + emitted.bodyBytes + ' body bytes; ' +
                       'the wire itself is only ' + emitted.bytes + ')';
-                console.error('OraclePublisher: CRITICAL - PRICE v0 round ' + first +
+                logger.error('OraclePublisher: CRITICAL - PRICE v0 round ' + first +
                     ' alone does not fit with ' + result.sigs.length + ' signature(s): it breaches ' +
                     bound + ', over the ' + PRICE_WIRE_MAX_BYTES + '-byte limit. No split can fit ' +
                     'it: this federation has outgrown the PRICE wire. The round is dead-lettered to ' +
@@ -2642,8 +2645,8 @@ class OraclePublisher {
                 return { wire: packed, bytes: packedBytes, compressed: true, bodyBytes: bodyBytes };
             }
         } catch (e) {
-            console.warn('OraclePublisher: deflate of the PRICE v0 body failed; ' +
-                'emitting the uncompressed form: ', e && e.message);
+            logger.warn(nodeUtil.format('OraclePublisher: deflate of the PRICE v0 body failed; ' +
+                'emitting the uncompressed form: ', e && e.message));
         }
         return { wire: plain, bytes: plainBytes, compressed: false, bodyBytes: bodyBytes };
     }
@@ -2671,7 +2674,7 @@ class OraclePublisher {
             this._ownedBatchSigner.start();
             return this._ownedBatchSigner;
         } catch (e) {
-            console.error('OraclePublisher: cannot construct an OracleBatchSigner:', e);
+            logger.error(nodeUtil.format('OraclePublisher: cannot construct an OracleBatchSigner:', e));
             return null;
         }
     }
@@ -2701,12 +2704,12 @@ class OraclePublisher {
         // landed. Without the material back, an un-suppressed window has nothing to
         // propose.
         try { await this.restoreBufferedRounds(list); }
-        catch (e) { console.warn('OraclePublisher: restoring retracted rounds to the buffer failed:', e && e.message); }
+        catch (e) { logger.warn(nodeUtil.format('OraclePublisher: restoring retracted rounds to the buffer failed:', e && e.message)); }
 
         if (!this.db) return list.length;
         let result = await this.db.deleteOraclePublishedRoundsByRounds(list);
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
-        console.log('OraclePublisher: cleared publish markers for ' + list.length +
+        logger.info('OraclePublisher: cleared publish markers for ' + list.length +
             ' retracted batch round(s) (' + deleted + ' durable row(s) removed); the recovery ' +
             're-publish is no longer suppressed');
         return deleted;
@@ -2743,9 +2746,9 @@ class OraclePublisher {
         try {
             await this.db.updateOraclePublishedRound(txid, round);
         } catch (e) {
-            console.error('OraclePublisher: broadcast for round ' + round + ' succeeded but its durable ' +
+            logger.error(nodeUtil.format('OraclePublisher: broadcast for round ' + round + ' succeeded but its durable ' +
                 'sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this round. ' +
-                'Operator: confirm the txid on-chain. Error: ', e);
+                'Operator: confirm the txid on-chain. Error: ', e));
         }
     }
 
@@ -2797,7 +2800,7 @@ class OraclePublisher {
             }
         }
         if (quarantined.length > 0) {
-            console.error('OraclePublisher: ' + quarantined.length + ' round(s) have a publish-intent marker ' +
+            logger.error('OraclePublisher: ' + quarantined.length + ' round(s) have a publish-intent marker ' +
                 'with no confirmation (rounds ' + quarantined.join(', ') + '); their on-chain state is unknown ' +
                 'after a crash. They will NOT be re-broadcast automatically (fail closed). Operator: verify each ' +
                 'round on-chain and replay manually if absent.');
@@ -2848,7 +2851,7 @@ class OraclePublisher {
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
         if (deleted > 0) {
             this.publishedRoundsPruned += deleted;
-            console.log('OraclePublisher: published-rounds retention pruned ' + deleted +
+            logger.info('OraclePublisher: published-rounds retention pruned ' + deleted +
                 ' confirmed marker row(s) older than round ' + cutoff + ' (keep ' +
                 this.publishedRoundsRetentionRounds + ' rounds; quarantined intent-only ' +
                 'rows are never pruned)');
@@ -2872,7 +2875,7 @@ class OraclePublisher {
     // this hub leads.
     async _processQueue() {
         if (this._sweeping) {
-            console.warn('OraclePublisher: publish pass still in flight; skipping this pass ' +
+            logger.warn('OraclePublisher: publish pass still in flight; skipping this pass ' +
                 '(entries stay on the durable queue and publish on the next pass)');
             return;
         }
@@ -2890,7 +2893,7 @@ class OraclePublisher {
         // path, so a disabled publisher spends nothing. Entries stay on the durable
         // queue untouched and resume only when re-enabled and re-swept.
         if (!this.enabled) {
-            console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping queue processing');
+            logger.info('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping queue processing');
             return;
         }
 
@@ -2910,12 +2913,12 @@ class OraclePublisher {
         let hasBalanceSource = !!(this.getBalanceFn || (this.encoder && this.dogeAddress));
         if (hasBalanceSource) {
             if (balance === null) {
-                console.warn('OraclePublisher: DOGE balance unreadable; skipping publish this pass (fail-closed), ' +
+                logger.warn('OraclePublisher: DOGE balance unreadable; skipping publish this pass (fail-closed), ' +
                     entries.length + ' round(s) remain queued');
                 return;
             }
             if (balance < this.lowBalanceThreshold) {
-                console.warn('OraclePublisher: DOGE balance ' + balance.toFixed(4) + ' below floor ' +
+                logger.warn('OraclePublisher: DOGE balance ' + balance.toFixed(4) + ' below floor ' +
                     this.lowBalanceThreshold + '; skipping publish (fail-closed), ' + entries.length + ' round(s) remain queued');
                 return;
             }
@@ -2933,7 +2936,7 @@ class OraclePublisher {
             this.noConfirmedUtxoDeferrals++;
             this.lastNoConfirmedUtxoAt = Date.now();
             let seen = this.lastUtxoReserve || { unconfirmed: 0 };
-            console.warn('OraclePublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
+            logger.warn('OraclePublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
                 ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
                 'an unconfirmed chain); deferring this publish pass, ' + entries.length +
                 ' round(s) remain queued and retry once a publish confirms');
@@ -2954,7 +2957,7 @@ class OraclePublisher {
             // queue rewrite. The finalized round stays recoverable for manual replay,
             // and the give-up is counted (abandonedCount) instead of only logged.
             if (entry.attempts >= this.maxAttempts) {
-                console.error('OraclePublisher: round ' + entry.round + ' exceeded max attempts (' +
+                logger.error('OraclePublisher: round ' + entry.round + ' exceeded max attempts (' +
                     this.maxAttempts + '), moving to dead-letter file ' + this.deadLetterPath);
                 this._deadLetter(entry, 'exceeded max attempts (' + this.maxAttempts + ')');
                 continue;
@@ -2972,7 +2975,7 @@ class OraclePublisher {
             // failed to truncate it. Re-broadcasting would spend DOGE twice, so drop
             // the stale entry (do not push to remaining) instead of sending again.
             if (entryRounds.some(r => this._publishedRounds.has(r))) {
-                console.warn('OraclePublisher: round ' + entry.round + ' already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
+                logger.warn('OraclePublisher: round ' + entry.round + ' already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
                 continue;
             }
 
@@ -2980,7 +2983,7 @@ class OraclePublisher {
             // whose on-chain state is unknown). NEVER re-broadcast: drop the stale queue
             // entry and leave it for operator replay. Surfaced at startup in hydratePublishedMarkers.
             if (entryRounds.some(r => this._quarantinedRounds.has(r))) {
-                console.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
+                logger.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
                 continue;
             }
 
@@ -2998,8 +3001,8 @@ class OraclePublisher {
                     try {
                         marker = await this.getPublishedMarker(r);
                     } catch (e) {
-                        console.error('OraclePublisher: cannot read durable publish marker for round ' + r +
-                            '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e);
+                        logger.error(nodeUtil.format('OraclePublisher: cannot read durable publish marker for round ' + r +
+                            '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e));
                         failed = true;
                         break;
                     }
@@ -3011,7 +3014,7 @@ class OraclePublisher {
                     // a rewrite failed before restart. Drop without re-sending. ANY contained
                     // round being marked condemns the whole wire: the rounds it carries are
                     // already on chain, and a batch is atomic.
-                    console.warn('OraclePublisher: round ' + sent.round + ' has a durable sent marker (txid ' +
+                    logger.warn('OraclePublisher: round ' + sent.round + ' has a durable sent marker (txid ' +
                         (sent.txid || '<none>') + '); dropping stale queue entry without re-broadcast');
                     for (let r of entryRounds) this._publishedRounds.mark(r);
                     continue;
@@ -3032,7 +3035,7 @@ class OraclePublisher {
             // intent is recorded: nothing can leave the process on this branch, so it
             // must consume no reservation and leave no crash marker behind.
             if (!canBroadcast) {
-                console.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
+                logger.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
                 entry.attempts++;
                 remaining.push(entry);
                 continue;
@@ -3054,7 +3057,7 @@ class OraclePublisher {
             // never be called on this path.
             let spendToken = this.spendGuard.reserve();
             if (!spendToken) {
-                console.warn(this.spendGuard.noteBlocked() + ' (round ' + entry.round + ')');
+                logger.warn(this.spendGuard.noteBlocked() + ' (round ' + entry.round + ')');
                 remaining.push(entry);
                 continue;
             }
@@ -3070,8 +3073,8 @@ class OraclePublisher {
                     try {
                         await this.recordPublishIntent(r);
                     } catch (e) {
-                        console.error('OraclePublisher: cannot record durable publish intent for round ' + r +
-                            '; deferring broadcast (fail closed): ', e);
+                        logger.error(nodeUtil.format('OraclePublisher: cannot record durable publish intent for round ' + r +
+                            '; deferring broadcast (fail closed): ', e));
                         intentFailed = true;
                         break;
                     }
@@ -3105,7 +3108,7 @@ class OraclePublisher {
                     await this.markPublished(r, (result && result.txid) || null);
                 }
                 if (entry.batch) {
-                    console.log('OraclePublisher: published PRICE batch [' + entry.batch.firstRound + ',' +
+                    logger.info('OraclePublisher: published PRICE batch [' + entry.batch.firstRound + ',' +
                         entry.batch.lastRound + '] carrying ' + entryRounds.length + ' round(s)' +
                         (entry.batch.compressed ? ' (compressed)' : '') + ' (txid: ' + (result && result.txid) + ')');
                     // A window counts once no matter how many wires it split into, so the
@@ -3115,7 +3118,7 @@ class OraclePublisher {
                     }
                     this.lastPublishedWindow = entry.batch.windowIndex;
                 } else {
-                    console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
+                    logger.info('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
                 }
                 this.publishedCount++;
                 publishedThisPass       = true;
@@ -3153,9 +3156,9 @@ class OraclePublisher {
                     // for it, which fails closed; releasing would hand back budget for a
                     // spend nothing will ever re-attempt.
                     this.spendGuard.commit(spendToken);
-                    console.error('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
+                    logger.error(nodeUtil.format('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
                         ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
-                        'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err);
+                        'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err));
                     this._deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
                     // The same tx that must not be auto-retried here must not
                     // be re-published by this hub's own takeover of the window either.
@@ -3167,9 +3170,9 @@ class OraclePublisher {
                 // the old post-send record() gave for free).
                 this.spendGuard.release(spendToken);
                 entry.attempts++;
-                console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err);
+                logger.error(nodeUtil.format('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err));
                 if (balance !== null && balance < 0.01) {
-                    console.error('OraclePublisher: insufficient DOGE balance for round ' + entry.round);
+                    logger.error('OraclePublisher: insufficient DOGE balance for round ' + entry.round);
                 }
                 remaining.push(entry);
             }
@@ -3210,7 +3213,7 @@ class OraclePublisher {
         if (rewritten) {
             this._publishedRounds.clear();
         } else {
-            console.error('OraclePublisher: CRITICAL - queue rewrite failed after publishing; ' +
+            logger.error('OraclePublisher: CRITICAL - queue rewrite failed after publishing; ' +
                 'published rounds remain on the durable queue at ' + this.queuePath + '. The in-process ' +
                 'dedup guard prevents re-broadcast for this process lifetime, but a restart before the ' +
                 'queue file is repaired would re-broadcast already-published rounds (duplicate DOGE spend). ' +
@@ -3225,8 +3228,8 @@ class OraclePublisher {
         if (this.db && publishedThisPass && this.lastPublishedRound !== null) {
             this._retentionSweep = this.prunePublishedRounds(this.lastPublishedRound)
                 .catch((e) => {
-                    console.warn('OraclePublisher: published-rounds retention sweep failed ' +
-                        '(marker table keeps growing until it succeeds): ', e);
+                    logger.warn(nodeUtil.format('OraclePublisher: published-rounds retention sweep failed ' +
+                        '(marker table keeps growing until it succeeds): ', e));
                     return 0;
                 });
         }
@@ -3408,7 +3411,7 @@ class OraclePublisher {
             try {
                 balance = await this.getBalanceFn();
             } catch (err) {
-                console.warn('OraclePublisher: custom balance check failed:', err);
+                logger.warn(nodeUtil.format('OraclePublisher: custom balance check failed:', err));
                 return null;
             }
         } else if (this.encoder && this.dogeAddress) {
@@ -3422,7 +3425,7 @@ class OraclePublisher {
                 let utxos = await this.encoder.getUtxos(this.dogeAddress);
                 if (Array.isArray(utxos)) balance = sumUtxosCoins(utxos);
             } catch (err) {
-                console.warn('OraclePublisher: encoder balance check failed:', err);
+                logger.warn(nodeUtil.format('OraclePublisher: encoder balance check failed:', err));
                 return null;
             }
         }
@@ -3432,7 +3435,7 @@ class OraclePublisher {
             if (balance < this.lowBalanceThreshold) {
                 // Estimate rounds remaining at typical fee rate (~0.003 DOGE per tx)
                 let est = Math.floor(balance / 0.003);
-                console.warn('OraclePublisher: DOGE balance LOW (' + balance.toFixed(4) + ' DOGE, ~' + est + ' rounds remaining)');
+                logger.warn('OraclePublisher: DOGE balance LOW (' + balance.toFixed(4) + ' DOGE, ~' + est + ' rounds remaining)');
             }
         }
         return balance;

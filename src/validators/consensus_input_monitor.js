@@ -38,6 +38,8 @@
 
 // Failure taxonomy. Kept as constants so callers cannot invent a reason by
 // typo (which would fragment the throttle and the /health counters).
+const { getLogger } = require('../observability');
+const logger = getLogger();
 const REASONS = {
     UNREACHABLE:  'unreachable',          // network error / timeout, no HTTP response
     AUTH:         'auth',                 // 401/403: hub key does not match the indexer key
@@ -70,7 +72,7 @@ class ConsensusInputMonitor {
         this.alertAfterFailures   = Number.isInteger(opts.alertAfterFailures) && opts.alertAfterFailures > 0
             ? opts.alertAfterFailures : DEFAULT_ALERT_AFTER_FAILURES;
         this._now = typeof opts.now === 'function' ? opts.now : () => Date.now();
-        this._log = typeof opts.log === 'function' ? opts.log : (msg) => console.error(msg);
+        this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
 
         this.ok            = 0;
         this.failures      = 0;

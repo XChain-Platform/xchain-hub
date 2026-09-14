@@ -56,6 +56,9 @@ const ah                = require('../lib/admission_height.js');
 const { isMirrorAdmissionProducerActive } = require('../mirror_admission_activation.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -195,7 +198,7 @@ class PriceAggregator extends EventEmitter {
         this.lastImplausibleRound = Number(round);
         // Never silent: an out-of-band round is either a corrupt row upstream or a
         // peer with a broken clock, and both need naming rather than a quiet drop.
-        console.warn('PriceAggregator: refusing ' + what + ' from ' +
+        logger.warn('PriceAggregator: refusing ' + what + ' from ' +
                      (sourceChain || 'unknown') + ': ' +
                      roundBandLib.describeImplausibleRound(round, band));
         return 'implausible round';
@@ -253,7 +256,7 @@ class PriceAggregator extends EventEmitter {
         let suppressed = state.suppressed;
         state.last = now;
         state.suppressed = 0;
-        console.warn('PriceAggregator: round ' + round + ' from ' + chain + ' arrived without '
+        logger.warn('PriceAggregator: round ' + round + ' from ' + chain + ' arrived without '
             + missingPairs.length + ' pair(s) this chain had been sending: ' + missingPairs.join(', ')
             + '. Consumers keep serving the previous round for each one until it returns.'
             + ' ' + state.rounds + ' round(s) from this chain have been short a pair so far'
@@ -300,7 +303,7 @@ class PriceAggregator extends EventEmitter {
         }
         let suppressed = state ? state.suppressed : 0;
         this._fenceWarnState.set(chain, { last: now, suppressed: 0 });
-        console.warn('PriceAggregator: WARNING: DROPPED ' + kind + ' price push from ' + chain
+        logger.warn('PriceAggregator: WARNING: DROPPED ' + kind + ' price push from ' + chain
             + ' at the ingest fence (push_generation ' + pushGeneration + ' <= retraction_generation '
             + wm.retraction_generation + ' AND action_index ' + actionIndex + ' >= from_action_index '
             + wm.from_action_index + ').'
@@ -719,7 +722,7 @@ class PriceAggregator extends EventEmitter {
                 await this.db.setPushedPriceSnapshotRound(round, roundData.pairs, referenceBlock, sourceChain || null, timestamp,
                     validatorCount, proofJson, sourceActionIndex, pushGeneration, createdAt, admitCols);
             } catch (err) {
-                console.error('PriceAggregator: error inserting round ' + round + ':', err);
+                logger.error(nodeUtil.format('PriceAggregator: error inserting round ' + round + ':', err));
                 return { accepted: false, reason: 'db error' };
             }
         }
@@ -729,7 +732,7 @@ class PriceAggregator extends EventEmitter {
             this.emit('row:inserted', { table: 'price_snapshots', row: row });
         }
 
-        console.log('PriceAggregator: accepted round ' + round + ' from ' + (sourceChain || 'unknown') + ' (' + roundData.pairs.length + ' pairs, ' + validatorCount + ' sigs)');
+        logger.info('PriceAggregator: accepted round ' + round + ' from ' + (sourceChain || 'unknown') + ' (' + roundData.pairs.length + ' pairs, ' + validatorCount + ' sigs)');
 
         // Per-pair coverage check (item 5335): name any pair this chain had been sending and
         // this round did not carry, so an ingest hub's silent pair drop is as visible as the
@@ -738,7 +741,7 @@ class PriceAggregator extends EventEmitter {
         try {
             this.checkIngestPairCoverage(sourceChain, round, roundData.pairs);
         } catch (e) {
-            console.warn('PriceAggregator: pair-coverage check failed for round ' + round + ':', e.message);
+            logger.warn(nodeUtil.format('PriceAggregator: pair-coverage check failed for round ' + round + ':', e.message));
         }
 
         return { accepted: true };
@@ -774,8 +777,8 @@ class PriceAggregator extends EventEmitter {
             // reads as NOT LANDED, which fails fee pricing closed rather than pricing
             // against a round the chain has not shown. Loud, because a hub that cannot
             // stamp holds the fee gate shut for its own indexers once the bound is armed.
-            console.error('PriceAggregator: could not stamp the landing clock for round ' +
-                round + ':', err);
+            logger.error(nodeUtil.format('PriceAggregator: could not stamp the landing clock for round ' +
+                round + ':', err));
             return 0;
         }
     }
@@ -1045,7 +1048,7 @@ class PriceAggregator extends EventEmitter {
             // The era rule firing: an admission-era round with no map, or a legacy round
             // handed one. Never silent, or an operator reading only "rejected" hunts a
             // signature bug on a rail the activation just armed.
-            console.warn('PriceAggregator: refusing PRICE batch [' + firstRound + '..' + lastRound +
+            logger.warn('PriceAggregator: refusing PRICE batch [' + firstRound + '..' + lastRound +
                 '] at anchor ' + btcBlockHeight + ' on ' + String(network) + ': ' + (e && e.message));
             return refuse('admission map does not match the round\'s era');
         }
@@ -1161,7 +1164,7 @@ class PriceAggregator extends EventEmitter {
                 await this.db.setBatchPriceSnapshotRound(r.round, r.pairs, referenceBlock, sourceChain || null, r.timestamp,
                     validatorCount, proofJson, sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols);
             } catch (err) {
-                console.error('PriceAggregator: error inserting batch round ' + r.round + ':', err);
+                logger.error(nodeUtil.format('PriceAggregator: error inserting batch round ' + r.round + ':', err));
                 return {
                     accepted: false, stored, duplicates,
                     rejected: rounds.length - stored - duplicates,
@@ -1181,11 +1184,11 @@ class PriceAggregator extends EventEmitter {
             try {
                 this.checkIngestPairCoverage(sourceChain, r.round, r.pairs);
             } catch (e) {
-                console.warn('PriceAggregator: pair-coverage check failed for round ' + r.round + ':', e.message);
+                logger.warn(nodeUtil.format('PriceAggregator: pair-coverage check failed for round ' + r.round + ':', e.message));
             }
         }
 
-        console.log('PriceAggregator: accepted batch [' + firstRound + '..' + lastRound + '] from '
+        logger.info('PriceAggregator: accepted batch [' + firstRound + '..' + lastRound + '] from '
             + (sourceChain || 'unknown') + ' (' + stored + ' stored, ' + duplicates + ' duplicate round(s), '
             + validatorCount + ' sigs)');
 
@@ -1202,8 +1205,8 @@ class PriceAggregator extends EventEmitter {
                 landedPublisher.noteBatchLanded(firstRound, lastRound,
                     { sourceChain: sourceChain, actionIndex: batchData.action_index });
             } catch (e) {
-                console.warn('PriceAggregator: could not hand the landed batch [' + firstRound + '..' +
-                    lastRound + '] to the publisher; its rounds stay buffered:', e && e.message);
+                logger.warn(nodeUtil.format('PriceAggregator: could not hand the landed batch [' + firstRound + '..' +
+                    lastRound + '] to the publisher; its rounds stay buffered:', e && e.message));
             }
         }
 
@@ -1240,7 +1243,7 @@ class PriceAggregator extends EventEmitter {
             // a weaker stamp, it is an unverifiable one.
             readSet = ah.admissionReadSet('oracle_prices', { source_chain: sourceChain });
         } catch (e) {
-            console.warn('PriceAggregator: no admission read set for this PRICE v1 row (' +
+            logger.warn('PriceAggregator: no admission read set for this PRICE v1 row (' +
                 (e && e.message) + '); storing it as a legacy row.');
             return null;
         }
@@ -1251,7 +1254,7 @@ class PriceAggregator extends EventEmitter {
         try {
             tip = await this.hub.resolveAdmissionTip(chain);
         } catch (e) {
-            console.warn('PriceAggregator: the ' + chain + ' admission tip threw (' + (e && e.message) +
+            logger.warn('PriceAggregator: the ' + chain + ' admission tip threw (' + (e && e.message) +
                 '); storing this PRICE v1 row as a legacy row.');
             return null;
         }
@@ -1267,7 +1270,7 @@ class PriceAggregator extends EventEmitter {
             // this rail cannot drift from the margin the barrier certifies it against.
             return ah.admitBlocks(readSet, { [chain]: tip }, 'oracle_prices')[chain];
         } catch (e) {
-            console.warn('PriceAggregator: could not stamp an admission height for a ' + chain +
+            logger.warn('PriceAggregator: could not stamp an admission height for a ' + chain +
                 ' PRICE v1 row (' + (e && e.message) + '); storing it as a legacy row.');
             return null;
         }
@@ -1431,7 +1434,7 @@ class PriceAggregator extends EventEmitter {
                 admit_block:     admitBlock
             });
         } catch (err) {
-            console.error('PriceAggregator: error inserting oracle price:', err);
+            logger.error(nodeUtil.format('PriceAggregator: error inserting oracle price:', err));
             return { accepted: false, reason: 'db error' };
         }
 
@@ -1455,7 +1458,7 @@ class PriceAggregator extends EventEmitter {
             }
         });
 
-        console.log('PriceAggregator: accepted PRICE v1 from ' + priceData.source_address + ' (' + priceData.coin + '/' + priceData.tick + '/' + priceData.fiat + ' = ' + priceData.value + ', effective_at=' + effectiveAt + ')');
+        logger.info('PriceAggregator: accepted PRICE v1 from ' + priceData.source_address + ' (' + priceData.coin + '/' + priceData.tick + '/' + priceData.fiat + ' = ' + priceData.value + ', effective_at=' + effectiveAt + ')');
         return { accepted: true };
     }
 
@@ -1504,7 +1507,7 @@ class PriceAggregator extends EventEmitter {
         let publisher = this.hub && this.hub.oraclePublisher;
         let canClearMarkers = !!(publisher && typeof publisher.clearPublishedMarkers === 'function');
         if (publisher && !canClearMarkers) {
-            console.warn('PriceAggregator: OraclePublisher is wired but exposes no clearPublishedMarkers(rounds);'
+            logger.warn('PriceAggregator: OraclePublisher is wired but exposes no clearPublishedMarkers(rounds);'
                 + ' a retracted PRICE batch will stay marked as published and the at-most-once guard will'
                 + ' suppress the recovery re-publish, costing an hour of price history rather than a round.');
         }
@@ -1517,7 +1520,7 @@ class PriceAggregator extends EventEmitter {
                     if (Number.isFinite(n)) batchRounds.push(n);
                 }
             } catch (e) {
-                console.error('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message);
+                logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
             }
         }
 
@@ -1541,7 +1544,7 @@ class PriceAggregator extends EventEmitter {
             try {
                 await this.db.bumpPriceIngestWatermark(sourceChain, gen, from, this.fenceNetwork());
             } catch (e) {
-                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
+                logger.error(nodeUtil.format('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message));
                 return { error: 'ingest fence not persisted for ' + sourceChain
                     + ' (' + ((e && e.message) || 'unknown error') + ')' };
             }
@@ -1581,12 +1584,12 @@ class PriceAggregator extends EventEmitter {
             try {
                 await publisher.clearPublishedMarkers(batchRounds);
             } catch (e) {
-                console.error('PriceAggregator: clearing published markers for retracted batch rounds '
-                    + batchRounds.join(',') + ' failed:', e && e.message);
+                logger.error(nodeUtil.format('PriceAggregator: clearing published markers for retracted batch rounds '
+                    + batchRounds.join(',') + ' failed:', e && e.message));
             }
         }
 
-        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
+        logger.info('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };
     }
 
@@ -1694,7 +1697,7 @@ class PriceAggregator extends EventEmitter {
     startPriceCapabilityDerivation() {
         if (this._priceCapDeriveTimer) return false;
         if (!this.priceCapabilityDerivationEnabled()) {
-            console.warn('PriceAggregator: HUB_PRICE_CAPABILITY_DERIVE=off, so this hub will not derive '
+            logger.warn('PriceAggregator: HUB_PRICE_CAPABILITY_DERIVE=off, so this hub will not derive '
                 + 'capability snapshots (' + DERIVED_CAPABILITIES.join(', ') + '). For every one of them '
                 + 'whose consensus writer does not run here, nothing else writes them: every on-chain '
                 + 'PRICE batch and every ATTEST its '
@@ -1709,8 +1712,8 @@ class PriceAggregator extends EventEmitter {
         // hub before the signals that identify it exist. See runsOracleConsensus.
         this._priceCapDeriveTimer = setInterval(() => {
             this.runPriceCapabilityDerivation().catch(e => {
-                console.error('PriceAggregator: `price` capability derivation pass failed:',
-                    e && e.message ? e.message : e);
+                logger.error(nodeUtil.format('PriceAggregator: `price` capability derivation pass failed:',
+                    e && e.message ? e.message : e));
             });
         }, intervalS * 1000);
         // Never hold the process open: this is a background repair, not work anyone waits on.
@@ -1750,7 +1753,7 @@ class PriceAggregator extends EventEmitter {
             // one of those means this hub cannot know the qualifying set at any height.
             // Deriving from a guessed height would mirror a set nobody can verify.
             if (!Number.isFinite(t) || t <= 0) {
-                console.error('PriceAggregator: cannot derive capability snapshots: the '
+                logger.error('PriceAggregator: cannot derive capability snapshots: the '
                     + 'configured Bitcoin view returned no usable tip. Nothing written. Until it '
                     + 'answers, every on-chain PRICE batch and every ATTEST this node parses reads '
                     + '`invalid: insufficient signer stake` and every ANCHOR archive head is stored '
@@ -1822,7 +1825,7 @@ class PriceAggregator extends EventEmitter {
                     let warned = this.coveredBlocks(this._capWarnedBlocks, capability);
                     if (!warned.has(block)) {
                         warned.add(block);
-                        console.warn('PriceAggregator: no `' + capability + '` capability snapshot written at '
+                        logger.warn('PriceAggregator: no `' + capability + '` capability snapshot written at '
                             + 'BTC block ' + block + ' (' + res.status + (res.detail ? ': ' + res.detail : '') + '). '
                             + 'An action anchored there that needs the `' + capability + '` set will read '
                             + '`invalid: insufficient signer stake` (or be stored `unverified`) until this '
@@ -1838,7 +1841,7 @@ class PriceAggregator extends EventEmitter {
                     .filter(c => byCapability[c].written > 0)
                     .map(c => c + ' ' + byCapability[c].written)
                     .join(', ');
-                console.log('PriceAggregator: derived capability snapshots for ' + written
+                logger.info('PriceAggregator: derived capability snapshots for ' + written
                     + ' (capability, BTC block) pair(s) (' + rows + ' rows) in [' + from + ', ' + t + ']'
                     + (per ? ' [' + per + ']' : '')
                     + (empty ? ', ' + empty + ' pair(s) resolved empty' : '')
@@ -1940,7 +1943,7 @@ class PriceAggregator extends EventEmitter {
         // the mirror empty, so that read yields S=0 and fails closed through the same
         // predicate as everything else.
         if (validators.truncated === true) {
-            console.warn('PriceAggregator: refusing to persist a TRUNCATED ' + capability + ' capability '
+            logger.warn('PriceAggregator: refusing to persist a TRUNCATED ' + capability + ' capability '
                 + 'snapshot at block ' + block + ' (over the source cap; raise VALIDATOR_QUERY_LIMIT '
                 + 'fleet-wide). No rows mirrored.');
             return { status: 'truncated', rows: 0 };
@@ -1967,7 +1970,7 @@ class PriceAggregator extends EventEmitter {
                 }
             }
         } catch (e) {
-            console.error('PriceAggregator: mirroring the derived ' + capability + ' capability snapshot at '
+            logger.error('PriceAggregator: mirroring the derived ' + capability + ' capability snapshot at '
                 + 'block ' + block + ' to subscribers failed: ' + (e && e.message));
         }
         return { status: 'written', rows: rows.length };

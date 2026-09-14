@@ -79,6 +79,9 @@ const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence
@@ -246,7 +249,7 @@ class AttestationPublisher {
             fs.mkdirSync(path.dirname(this.queuePath), { recursive: true });
             if (!fs.existsSync(this.queuePath)) fs.writeFileSync(this.queuePath, '');
         } catch (e) {
-            console.warn('AttestationPublisher: queue file unwritable at ' + this.queuePath + ':', e);
+            logger.warn(nodeUtil.format('AttestationPublisher: queue file unwritable at ' + this.queuePath + ':', e));
         }
 
         if (this.hub.attestationConsensus){
@@ -257,7 +260,7 @@ class AttestationPublisher {
             // reason.
             this._finalizedHandler = (event) => {
                 this.onRequestFinalized(event).catch(err => {
-                    console.error('AttestationPublisher: onRequestFinalized error: ' + (err && err.message ? err.message : err));
+                    logger.error('AttestationPublisher: onRequestFinalized error: ' + (err && err.message ? err.message : err));
                 });
             };
             this.hub.attestationConsensus.on('request:finalized', this._finalizedHandler);
@@ -267,22 +270,22 @@ class AttestationPublisher {
         // sweep below, or that first sweep is exactly the pass that re-broadcasts a
         // response the pre-crash process already sent.
         await this.hydratePublishedMarkers().catch(err =>
-            console.error('AttestationPublisher: durable publish-marker hydration failed; the in-process guard is ' +
+            logger.error('AttestationPublisher: durable publish-marker hydration failed; the in-process guard is ' +
                           'the only cover this lifetime: ' + (err && err.message ? err.message : err)));
 
         // Crash recovery: replay any finalized responses that survived a restart
         // (a leader that crashed between the queue write and the broadcast).
         await this._processQueue().catch(err =>
-            console.error('AttestationPublisher: startup replay error: ' + (err && err.message ? err.message : err)));
+            logger.error('AttestationPublisher: startup replay error: ' + (err && err.message ? err.message : err)));
 
         // Ongoing failover sweep: retries failed leader broadcasts and lets
         // followers step in once the leader has been silent past the window.
         this._sweepTimer = setInterval(() => {
             this._processQueue().catch(err =>
-                console.error('AttestationPublisher: sweep error: ' + (err && err.message ? err.message : err)));
+                logger.error('AttestationPublisher: sweep error: ' + (err && err.message ? err.message : err)));
         }, this.failoverPollMs);
 
-        console.log('AttestationPublisher started (queue: ' + this.queuePath +
+        logger.info('AttestationPublisher started (queue: ' + this.queuePath +
                     ', failover window: ' + this.failoverWindowBlocks + ' block(s))');
     }
 
@@ -316,7 +319,7 @@ class AttestationPublisher {
         // than queue-for-later so a disabled publisher does not build a backlog that
         // floods BTC broadcasts the moment it is re-enabled.
         if (!this.enabled){
-            console.log('AttestationPublisher: disabled (ATTEST_ENABLED=false); skipping finalized response for ' +
+            logger.info('AttestationPublisher: disabled (ATTEST_ENABLED=false); skipping finalized response for ' +
                         String(event.requestId).substring(0,16) + '...');
             return;
         }
@@ -343,7 +346,7 @@ class AttestationPublisher {
         }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if (!event.signatures || event.signatures.length === 0){
-            console.warn('AttestationPublisher: no sigs in finalized event for ' + event.requestId.substring(0,16) + '...; skipping broadcast');
+            logger.warn('AttestationPublisher: no sigs in finalized event for ' + event.requestId.substring(0,16) + '...; skipping broadcast');
             return;
         }
 
@@ -364,7 +367,7 @@ class AttestationPublisher {
         // the operator can shrink the provider's response body.
         let payloadBytes = Buffer.byteLength(payload, 'utf8');
         if (payloadBytes > ATTEST_WIRE_MAX_BYTES) {
-            console.error('AttestationPublisher: ATTEST v1 wire for ' + rid.substring(0, 16) +
+            logger.error('AttestationPublisher: ATTEST v1 wire for ' + rid.substring(0, 16) +
                 '... is ' + payloadBytes + ' bytes, exceeds encoder limit of ' + ATTEST_WIRE_MAX_BYTES +
                 '; dropping broadcast. Reduce the attestation response body size for this provider.');
             return;
@@ -433,7 +436,7 @@ class AttestationPublisher {
             leaderPubkey: leaderPubkey || undefined
         });
         if (!queued){
-            console.error('AttestationPublisher: durable enqueue FAILED for ' + rid.substring(0,16) +
+            logger.error('AttestationPublisher: durable enqueue FAILED for ' + rid.substring(0,16) +
                           '...; skipping broadcast (no BTC spend without a durable record). ' +
                           'Other responsible nodes that enqueued cover this response; the deadline-expiry ' +
                           'path is the terminal backstop. Fix the queue file writability now.');
@@ -443,14 +446,14 @@ class AttestationPublisher {
         if (!isLeader){
             // Followers persist and wait. If the leader stays silent, the
             // failover sweep promotes the next responsible validator in turn.
-            console.log('AttestationPublisher: [FOLLOWER] persisted finalized response for ' + rid.substring(0,16) +
+            logger.info('AttestationPublisher: [FOLLOWER] persisted finalized response for ' + rid.substring(0,16) +
                         '...; will step in after ' + this.failoverWindowBlocks + ' silent block(s) if leader does not broadcast');
             return;
         }
 
         let broadcaster = this.getBroadcaster();
         if (!broadcaster){
-            console.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '...; entry queued for later replay');
+            logger.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '...; entry queued for later replay');
             return;
         }
         // At-most-once guard: a re-finalized event for a request already broadcast
@@ -458,7 +461,7 @@ class AttestationPublisher {
         // durable queue) must not spend a second BTC fee. The stale queue entry is
         // dropped by the sweep's matching guard.
         if (this.isPublishedInProcess(rid, responseStatus)){
-            console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + responseStatus + ') already broadcast this ' +
+            logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + responseStatus + ') already broadcast this ' +
                          'process lifetime; skipping duplicate live broadcast');
             return;
         }
@@ -479,7 +482,7 @@ class AttestationPublisher {
         // in this synchronous turn and is handed back only if the send never went out.
         let spendToken = this.spendGuard.reserve();
         if (!spendToken){
-            console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
+            logger.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
             return;
         }
         // The send is now committed to, so the intent is durable from here
@@ -491,7 +494,7 @@ class AttestationPublisher {
         }
         try {
             let result = await broadcaster(payload, event);
-            console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
+            logger.info('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             this._broadcastSucceeded++;
             this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
             this._ambiguousSends.delete(rid);
@@ -514,15 +517,15 @@ class AttestationPublisher {
                 // Same rule AttestationRelay states at its own ambiguous branch.
                 this.spendGuard.commit(spendToken);
                 this._ambiguousSends.set(rid, Date.now());
-                console.error('AttestationPublisher: AMBIGUOUS broadcast failure for %s... (tx may have reached the BTC node); sweep will defer re-broadcast for ~%ds before retrying:',
-                              rid.substring(0,16), Math.ceil(this.ambiguousCooldownMs / 1000), e);
+                logger.error(nodeUtil.format('AttestationPublisher: AMBIGUOUS broadcast failure for %s... (tx may have reached the BTC node); sweep will defer re-broadcast for ~%ds before retrying:',
+                              rid.substring(0,16), Math.ceil(this.ambiguousCooldownMs / 1000), e));
             } else {
                 // Definitively no send, so it consumes no budget and the intent is
                 // withdrawn: leaving it would quarantine an ordinary RPC rejection at
                 // the next restart.
                 this.spendGuard.release(spendToken);
                 await this.clearPublishIntent(rid, responseStatus);
-                console.error('AttestationPublisher: broadcast failed for %s... (will retry via sweep):', rid.substring(0,16), e);
+                logger.error(nodeUtil.format('AttestationPublisher: broadcast failed for %s... (will retry via sweep):', rid.substring(0,16), e));
             }
         }
     }
@@ -543,8 +546,8 @@ class AttestationPublisher {
             return true;
         } catch (e) {
             this._enqueueFailures++;
-            console.error('AttestationPublisher: CRITICAL - failed to durably enqueue %s... to %s; broadcast will be SKIPPED to preserve no-spend-without-a-durable-record:',
-                          String(entry.requestId).substring(0,16), this.queuePath, e);
+            logger.error(nodeUtil.format('AttestationPublisher: CRITICAL - failed to durably enqueue %s... to %s; broadcast will be SKIPPED to preserve no-spend-without-a-durable-record:',
+                          String(entry.requestId).substring(0,16), this.queuePath, e));
             return false;
         }
     }
@@ -562,8 +565,8 @@ class AttestationPublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('AttestationPublisher: failed to write spend-audit record for %s... to %s:',
-                          String(rid).substring(0,16), this.spendLogPath, e);
+            logger.error(nodeUtil.format('AttestationPublisher: failed to write spend-audit record for %s... to %s:',
+                          String(rid).substring(0,16), this.spendLogPath, e));
         }
     }
 
@@ -646,9 +649,9 @@ class AttestationPublisher {
             // retention sweep has to age out; arm it for the next sweep pass.
             this._markersAddedSinceSweep = true;
         } catch (e) {
-            console.error('AttestationPublisher: broadcast for %s... succeeded but its ' +
+            logger.error(nodeUtil.format('AttestationPublisher: broadcast for %s... succeeded but its ' +
                 'durable sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this request. ' +
-                'Operator: confirm the txid on-chain. Error:', String(rid).substring(0,16), e);
+                'Operator: confirm the txid on-chain. Error:', String(rid).substring(0,16), e));
         }
     }
 
@@ -686,7 +689,7 @@ class AttestationPublisher {
             }
         }
         if (quarantined.length > 0){
-            console.error('AttestationPublisher: ' + quarantined.length + ' publication(s) have a publish-intent marker ' +
+            logger.error('AttestationPublisher: ' + quarantined.length + ' publication(s) have a publish-intent marker ' +
                 'with no confirmation (' + quarantined.join(', ') + '); their on-chain state is unknown after a crash. ' +
                 'They will NOT be re-broadcast automatically (fail closed). Operator: verify each on-chain and replay ' +
                 'manually if absent.');
@@ -709,9 +712,9 @@ class AttestationPublisher {
             await db.updateAttestPublishedRequestByRequestIdAndIntentStatus(rid, String(status || 'ok'));
             await db.deleteAttestPublishedRequest(rid);
         } catch (e) {
-            console.error('AttestationPublisher: could not withdraw the publish-intent marker for %s... ' +
+            logger.error(nodeUtil.format('AttestationPublisher: could not withdraw the publish-intent marker for %s... ' +
                 'after a definitive send failure; a restart will QUARANTINE it ' +
-                'and it will need an operator replay. Error:', String(rid).substring(0,16), e);
+                'and it will need an operator replay. Error:', String(rid).substring(0,16), e));
         }
     }
 
@@ -784,7 +787,7 @@ class AttestationPublisher {
             if (rid) queued.push(rid);
         }
         if (queued.length > PUBLISHED_RETENTION_QUEUE_MAX){
-            console.warn('AttestationPublisher: skipping the published-requests retention sweep; ' +
+            logger.warn('AttestationPublisher: skipping the published-requests retention sweep; ' +
                 queued.length + ' entries are still on the durable queue at ' + this.queuePath +
                 ' (over the ' + PUBLISHED_RETENTION_QUEUE_MAX + ' exclusion cap). The queue is not draining; ' +
                 'fix that first, retention is the lesser problem.');
@@ -801,7 +804,7 @@ class AttestationPublisher {
         let deleted = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
         if (deleted > 0){
             this.publishedRequestsPruned += deleted;
-            console.log('AttestationPublisher: published-requests retention pruned ' + deleted +
+            logger.info('AttestationPublisher: published-requests retention pruned ' + deleted +
                 ' settled marker row(s) older than ' + windowSec + 's (rows holding a quarantined intent and ' +
                 'anything still on the durable queue are never pruned)');
         }
@@ -819,8 +822,8 @@ class AttestationPublisher {
         this._markersAddedSinceSweep = false;
         this._retentionSweep = this.prunePublishedRequests()
             .catch((e) => {
-                console.warn('AttestationPublisher: published-requests retention sweep failed ' +
-                    '(the marker table keeps growing until it succeeds): ', e);
+                logger.warn(nodeUtil.format('AttestationPublisher: published-requests retention sweep failed ' +
+                    '(the marker table keeps growing until it succeeds): ', e));
                 return 0;
             });
     }
@@ -845,7 +848,7 @@ class AttestationPublisher {
     async durableSendGate(rid, status){
         let st = String(status || 'ok');
         if (this._quarantinedRequests.has(rid) || this._quarantinedRequests.has(this._publicationKey(rid, st))){
-            console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') is quarantined (publish intent ' +
+            logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') is quarantined (publish intent ' +
                 'recorded before a crash, on-chain state unknown); not re-broadcasting, awaiting operator replay');
             return 'sent';
         }
@@ -854,8 +857,8 @@ class AttestationPublisher {
         try {
             marker = await this.getPublishedMarker(rid);
         } catch (e) {
-            console.error('AttestationPublisher: cannot read the durable publish marker for %s...; deferring broadcast (fail closed to avoid a duplicate BTC spend):',
-                rid.substring(0,16), e);
+            logger.error(nodeUtil.format('AttestationPublisher: cannot read the durable publish marker for %s...; deferring broadcast (fail closed to avoid a duplicate BTC spend):',
+                rid.substring(0,16), e));
             return 'defer';
         }
         if (marker && marker.sent_at !== null && marker.sent_at !== undefined){
@@ -865,7 +868,7 @@ class AttestationPublisher {
             // second paid response to a question already settled.
             let sent = this.parseSentStatuses(marker.sent_statuses);
             if (sent === null || sent.has(st) || sent.has('ok')){
-                console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') has a durable sent marker (txid ' +
+                logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') has a durable sent marker (txid ' +
                     (marker.txid || '<none>') + ', published ' + (sent === null ? '<unrecorded>' : Array.from(sent).join(',')) +
                     '); not re-broadcasting');
                 this._publishedRequests.mark(this._publicationKey(rid, st));
@@ -887,8 +890,8 @@ class AttestationPublisher {
             await this.recordPublishIntent(rid, status);
             return true;
         } catch (e) {
-            console.error('AttestationPublisher: cannot record durable publish intent for %s...; deferring broadcast (fail closed):',
-                rid.substring(0,16), e);
+            logger.error(nodeUtil.format('AttestationPublisher: cannot record durable publish intent for %s...; deferring broadcast (fail closed):',
+                rid.substring(0,16), e));
             return false;
         }
     }
@@ -922,7 +925,7 @@ class AttestationPublisher {
             fs.closeSync(fd);
             return true;
         } catch (e) {
-            console.error('AttestationPublisher: failed to rewrite queue:', e);
+            logger.error(nodeUtil.format('AttestationPublisher: failed to rewrite queue:', e));
             return false;
         }
     }
@@ -942,7 +945,7 @@ class AttestationPublisher {
             // dedup guard can be reset to bound its growth.
             this._publishedRequests.clear();
         } else {
-            console.error('AttestationPublisher: CRITICAL - queue rewrite failed after broadcast; ' +
+            logger.error('AttestationPublisher: CRITICAL - queue rewrite failed after broadcast; ' +
                 'published entries remain on the durable queue at ' + this.queuePath + '. The in-process ' +
                 'dedup guard prevents re-broadcast for this process lifetime, but a restart before the ' +
                 'queue file is repaired would re-broadcast already-landed attestations (duplicate BTC fee spend). ' +
@@ -1092,7 +1095,7 @@ class AttestationPublisher {
     // only this timer ever drains the WAL.
     async _processQueue(){
         if (this._sweeping){
-            console.warn('AttestationPublisher: queue sweep still in flight; skipping this pass');
+            logger.warn('AttestationPublisher: queue sweep still in flight; skipping this pass');
             return;
         }
         this._sweeping = true;
@@ -1114,7 +1117,7 @@ class AttestationPublisher {
         // live path, or a paused publisher would still drain the queue and spend BTC.
         // Entries stay on the durable WAL untouched and resume only when re-enabled.
         if (!this.enabled){
-            console.log('AttestationPublisher: disabled (ATTEST_ENABLED=false); skipping queue sweep');
+            logger.info('AttestationPublisher: disabled (ATTEST_ENABLED=false); skipping queue sweep');
             return;
         }
 
@@ -1128,7 +1131,7 @@ class AttestationPublisher {
         if (pendingIds === null){
             // Indexer unreachable; we can't tell which entries already landed,
             // so we defer rather than risk a double-broadcast. Retried next sweep.
-            console.warn('AttestationPublisher: indexer unreachable; deferring queue replay (' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ' retained)');
+            logger.warn('AttestationPublisher: indexer unreachable; deferring queue replay (' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ' retained)');
             return;
         }
 
@@ -1148,7 +1151,7 @@ class AttestationPublisher {
             // failed to truncate it. Re-broadcasting would spend a BTC fee twice, so
             // drop the stale entry without re-sending (mirrors OraclePublisher).
             if (this.isPublishedInProcess(rid, entryStatus)){
-                console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + entryStatus + ') already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
+                logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + entryStatus + ') already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
                 drop.add(rid);
                 continue;
             }
@@ -1195,7 +1198,7 @@ class AttestationPublisher {
             let ambTs = this._ambiguousSends.get(rid);
             if (ambTs !== undefined){
                 if ((now - ambTs) < this.ambiguousCooldownMs){
-                    console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... had an ambiguous send ~' +
+                    logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... had an ambiguous send ~' +
                                  Math.round((now - ambTs) / 1000) + 's ago; deferring re-broadcast to avoid a double spend');
                     continue;
                 }
@@ -1203,7 +1206,7 @@ class AttestationPublisher {
             }
 
             if (!broadcaster){
-                console.warn('AttestationPublisher: no broadcast pipeline configured; ' + rid.substring(0,16) + '... retained for later replay');
+                logger.warn('AttestationPublisher: no broadcast pipeline configured; ' + rid.substring(0,16) + '... retained for later replay');
                 continue;
             }
 
@@ -1223,7 +1226,7 @@ class AttestationPublisher {
             // allow() this pass already passed.
             let spendToken = this.spendGuard.reserve();
             if (!spendToken){
-                console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
+                logger.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
                 continue;
             }
             // Intent goes durable only here, past every no-send exit above
@@ -1245,7 +1248,7 @@ class AttestationPublisher {
                 this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');
                 replayed++;
                 drop.add(rid);
-                console.log('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
+                logger.info('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
                             ' for ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             } catch (e) {
                 // Classify BEFORE settling the reservation, exactly as the live path
@@ -1257,22 +1260,22 @@ class AttestationPublisher {
                     // for it rather than handed the allowance back.
                     this.spendGuard.commit(spendToken);
                     this._ambiguousSends.set(rid, Date.now());
-                    console.error('AttestationPublisher: AMBIGUOUS replay failure for ' + rid.substring(0,16) +
-                                  '... (tx may have reached the BTC node); deferring re-broadcast: ', e);
+                    logger.error(nodeUtil.format('AttestationPublisher: AMBIGUOUS replay failure for ' + rid.substring(0,16) +
+                                  '... (tx may have reached the BTC node); deferring re-broadcast: ', e));
                 } else {
                     // Definitively no send, so it consumes no budget; withdraw the intent
                     // so the retry this line promises is not cancelled by a quarantine
                     // after a restart.
                     this.spendGuard.release(spendToken);
                     await this.clearPublishIntent(rid, entryStatus);
-                    console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
+                    logger.error(nodeUtil.format('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e));
                 }
                 // keep; not added to drop
             }
         }
 
         if (drop.size > 0) this.removeFromQueue(drop);
-        if (replayed > 0) console.log('AttestationPublisher: replay/failover re-broadcast ' + replayed + ' finalized response(s)');
+        if (replayed > 0) logger.info('AttestationPublisher: replay/failover re-broadcast ' + replayed + ' finalized response(s)');
     }
 
     // Sweep the indexer's pending attestation_requests into a Set of request IDs.
@@ -1300,7 +1303,7 @@ class AttestationPublisher {
                     params:  params
                 }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             } catch (e) {
-                console.warn('AttestationPublisher: pending-request fetch failed:', (e && e.message ? e.message : e));
+                logger.warn(nodeUtil.format('AttestationPublisher: pending-request fetch failed:', (e && e.message ? e.message : e)));
                 return null;
             }
             let result = res && res.data && res.data.result;

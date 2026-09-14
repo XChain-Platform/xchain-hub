@@ -100,6 +100,9 @@ const ccr                   = require('../cross_chain_royalty_activation.js');
 const ar                    = require('../anchor_reward_activation.js');
 const ark                   = require('./anchor_reward_key.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The reward types the indexer re-derives from chain above a flag-day, split by WHICH
 // flag-day judges them. One definition, read by both forms of the eligibility rule
@@ -709,7 +712,7 @@ class StateAnchorPublisher {
     }
 
     async start(){
-        if(!this.enabled){ console.log('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
+        if(!this.enabled){ logger.info('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
         // The per-window spend ceilings were memory-only, so every restart
         // restored a full allowance. Reload the saved window before anything anchors.
         this.spendGuard.persistTo();
@@ -733,7 +736,7 @@ class StateAnchorPublisher {
         if(this.hub.crossChainDex){
             this._matchHandler = () => {
                 if(++this._pendingMatches >= this.batchSize)
-                    this.flush().catch(err => console.error('StateAnchorPublisher: size-trigger flush error:', err && err.message));
+                    this.flush().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: size-trigger flush error:', err && err.message)));
             };
             // Engine-level event; fires after the match row is written (the archive
             // round reads cross_chain_matches), unlike the consensus-level event.
@@ -743,22 +746,22 @@ class StateAnchorPublisher {
             // XCALL relay rows share the size trigger: they ride the same archive.
             this._callHandler = () => {
                 if(++this._pendingMatches >= this.batchSize)
-                    this.flush().catch(err => console.error('StateAnchorPublisher: size-trigger flush error:', err && err.message));
+                    this.flush().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: size-trigger flush error:', err && err.message)));
             };
             this.hub.crossChainCalls.on('call:dispatch', this._callHandler);
             this.hub.crossChainCalls.on('call:result',   this._callHandler);
         }
         this._timer = setInterval(() => {
-            this.flush().catch(err => console.error('StateAnchorPublisher: interval flush error:', err && err.message));
+            this.flush().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: interval flush error:', err && err.message)));
         }, this.intervalMs);
         if(this._timer.unref) this._timer.unref();
         // Separate, much shorter cadence than the (daily by default) flush: a queued
         // BUNDLE_DONE has to be re-checked on the order of the DOGE confirmation window,
         // not the anchor publishing window.
         this._deferTimer = setInterval(() => {
-            this.drainDeferredBundleDone().catch(err => console.error('StateAnchorPublisher: deferred BUNDLE_DONE drain error:', err && err.message));
-            this.drainDeferredFinalized().catch(err => console.error('StateAnchorPublisher: deferred FINALIZED drain error:', err && err.message));
-            this._drainDeferredRewardAttest().catch(err => console.error('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message));
+            this.drainDeferredBundleDone().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred BUNDLE_DONE drain error:', err && err.message)));
+            this.drainDeferredFinalized().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred FINALIZED drain error:', err && err.message)));
+            this._drainDeferredRewardAttest().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message)));
         }, this.announceRetryMs);
         if(this._deferTimer.unref) this._deferTimer.unref();
         // The failover wake. Re-runs flush in failover-only mode so a
@@ -766,7 +769,7 @@ class StateAnchorPublisher {
         // instead of leaving a dead leader's work stranded for a whole cycle.
         this._rankWakeTimer = setInterval(() => {
             this.flush(this.wakeFlushOpts())
-                .catch(err => console.error('StateAnchorPublisher: failover-wake flush error:', err && err.message));
+                .catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: failover-wake flush error:', err && err.message)));
         }, this.rankWakeMs);
         if(this._rankWakeTimer.unref) this._rankWakeTimer.unref();
         this.startConfirmationWatchdog();
@@ -776,11 +779,11 @@ class StateAnchorPublisher {
         if(this.startupFlushMs > 0){
             this._startupTimer = setTimeout(() => {
                 this._startupTimer = null;
-                this.flush().catch(err => console.error('StateAnchorPublisher: startup flush error:', err && err.message));
+                this.flush().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: startup flush error:', err && err.message)));
             }, this.startupFlushMs);
             if(this._startupTimer.unref) this._startupTimer.unref();
         }
-        console.log('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
+        logger.info('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
                     (this.startupFlushMs > 0 ? 'in ' + this.startupFlushMs + 'ms' : 'off') +
                     ', batch ' + this.batchSize + ', address ' + (this.dogeAddress || '<unset>') + ')');
     }
@@ -846,7 +849,7 @@ class StateAnchorPublisher {
         this.lastNoConfirmedUtxoAt = Date.now();
         this._leaderRetryDue = true;
         let seen = this.lastUtxoReserve || { unconfirmed: 0 };
-        console.warn('StateAnchorPublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
+        logger.warn('StateAnchorPublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
                      ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
                      'an unconfirmed chain); deferring ' + what + ', retried on the next rank wake once an output confirms');
     }
@@ -861,7 +864,7 @@ class StateAnchorPublisher {
         let utxos;
         try { utxos = await signer.encoder.getUtxos(this.dogeAddress); }
         catch(err){
-            console.warn('StateAnchorPublisher: UTXO reserve check failed (confirmation state unknown this pass; ' +
+            logger.warn('StateAnchorPublisher: UTXO reserve check failed (confirmation state unknown this pass; ' +
                          'publishing is not blocked on it): ' + (err && err.message));
             return null;
         }
@@ -898,17 +901,17 @@ class StateAnchorPublisher {
             // it (the whole point of the suppression signal). Never let a drain error
             // abort the flush: the queue is bookkeeping, publishing is the job.
             await this.drainDeferredBundleDone()
-                .catch(err => console.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
+                .catch(err => logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
             await this.drainDeferredFinalized()
-                .catch(err => console.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
+                .catch(err => logger.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
             await this._drainDeferredRewardAttest()
-                .catch(err => console.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
+                .catch(err => logger.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
             let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
 
             let signer = this.resolveSigner();
             if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
                 if(!this._loggedNoPipeline){
-                    console.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
+                    logger.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
                     this._loggedNoPipeline = true;
                 }
                 return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
@@ -927,11 +930,11 @@ class StateAnchorPublisher {
             let hasBalanceSource = !!(signer.getBalanceFn || (signer.encoder && this.dogeAddress));
             if(hasBalanceSource){
                 if(balance === null){
-                    console.warn('StateAnchorPublisher: DOGE balance unreadable; skipping this flush (fail-closed)');
+                    logger.warn('StateAnchorPublisher: DOGE balance unreadable; skipping this flush (fail-closed)');
                     return { anchored: [], archive: 'none', skipped: 'balance_unreadable' };
                 }
                 if(balance < this.lowBalanceThreshold){
-                    console.warn('StateAnchorPublisher: DOGE balance ' + Number(balance).toFixed(4) + ' below floor ' +
+                    logger.warn('StateAnchorPublisher: DOGE balance ' + Number(balance).toFixed(4) + ' below floor ' +
                                  this.lowBalanceThreshold + '; skipping publish this flush (fail-closed)');
                     return { anchored: [], archive: 'none', skipped: 'below_balance_floor' };
                 }
@@ -954,11 +957,11 @@ class StateAnchorPublisher {
             // on the leader path (the fe3aedbf kill-switch was inert on the primary
             // path; this closes it).
             if(this.spendGuard.isPaused()){
-                console.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+                logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
                 return { anchored: [], archive: 'none', skipped: 'paused' };
             }
             if(!this.spendGuard.allow()){
-                console.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+                logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
                 return { anchored: [], archive: 'none', skipped: 'spend_ceiling' };
             }
 
@@ -971,7 +974,7 @@ class StateAnchorPublisher {
             this.sweepAnchorMarkerRetention();
             return { anchored: anchored, archive: archive };
         } catch(e){
-            console.error('StateAnchorPublisher: flush failed:', e && e.message);
+            logger.error(nodeUtil.format('StateAnchorPublisher: flush failed:', e && e.message));
             return { anchored: [], archive: 'none', error: e && e.message };
         } finally {
             this._flushing = false;
@@ -1080,7 +1083,7 @@ class StateAnchorPublisher {
             // a rootless fallback wire.
             if(row.state_root == null || row.block_merkle_root == null ||
                row.state_root_version == null || row.block_merkle_version == null){
-                console.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
+                logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
                              row.block_index + ' (seq ' + row.checkpoint_seq + ') carries no light-client roots; ' +
                              'skipped, an ANCHOR v0 section is root-bearing by construction');
                 continue;
@@ -1102,7 +1105,7 @@ class StateAnchorPublisher {
             // every hub to anchor independently (a guaranteed N-way double-anchor + DOGE
             // burn). Skip until the set resolves.
             if(!eligible || eligible.length === 0){
-                console.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
+                logger.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
                              ' deferred: empty oracle_publish set (fail closed)');
                 continue;
             }
@@ -1120,7 +1123,7 @@ class StateAnchorPublisher {
             let split = this.splitBundle(sections, me, attestTail);
             for(let refused of split.oversize){
                 this._bundlesOversize++;
-                console.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
+                logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
                               ' @ ' + refused.block_index + ': the section alone is ' + refused.bytes +
                               ' bytes at ' + attestTail + ' attesting signer(s), past the ' +
                               ANCHOR_BUNDLE_MAX_BYTES + '-byte budget. The decoder DROPS an oversize ' +
@@ -1136,7 +1139,7 @@ class StateAnchorPublisher {
         // log at its natural cadence. The 15-minute wake stays silent: its skips are
         // the designed steady state and the counters above carry them.
         if(!failoverOnly && skipped.rows > 0 && anchored.length === 0){
-            console.log('StateAnchorPublisher: ' + skipped.rows + ' pending checkpoint(s) belong to another hub\'s election ' +
+            logger.info('StateAnchorPublisher: ' + skipped.rows + ' pending checkpoint(s) belong to another hub\'s election ' +
                         '(or our backup rank is still locked); nothing anchored by this hub');
         }
         return anchored;
@@ -1168,7 +1171,7 @@ class StateAnchorPublisher {
             // licence for every hub to anchor independently. Defer rather than borrow a set
             // resolved at another height.
             if(!eligible || eligible.length === 0){
-                console.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
                              ' deferred: empty oracle_publish set at the bundle\'s own snapshot block (fail closed)');
                 return;
             }
@@ -1211,7 +1214,7 @@ class StateAnchorPublisher {
                 try { mined = await this._findExistingBundle(group); }
                 catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
                 if(!(mined && mined.exists)){
-                    console.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                    logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
                                  ' held: a broadcast intent for ' + held.section.chain + ' recorded at ' +
                                  String(held.intent.intent_at) + (held.intent.txid ? ' (txid ' + held.intent.txid + ')' : '') +
                                  ' has no mined anchor yet; not rebuilding a second transaction until it ' +
@@ -1252,7 +1255,7 @@ class StateAnchorPublisher {
                 } else {
                     this.unattestedDeferrals++;
                     this.lastUnattestedDeferralAt = Date.now();
-                    console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for bundle ' +
+                    logger.warn('StateAnchorPublisher: publisher-attestation quorum not reached for bundle ' +
                                  chains + '/' + network + ' @ ' + snapshotBlock +
                                  '; DEFERRING (a v0 bundle with ATTEST_SIG_COUNT 0 is rejected by the ' +
                                  'indexer, so publishing would spend a fee to land an invalid anchor). ' +
@@ -1272,7 +1275,7 @@ class StateAnchorPublisher {
             let payloadBytes = Buffer.byteLength(payload, 'utf8');
             if(payloadBytes > ANCHOR_BUNDLE_MAX_BYTES){
                 this._bundlesOversize++;
-                console.error('StateAnchorPublisher: v0 bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                logger.error('StateAnchorPublisher: v0 bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
                               ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
                               ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
                               'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
@@ -1310,7 +1313,7 @@ class StateAnchorPublisher {
                 // announcement anyway (handleBundleDone early-returns on !d.txid).
                 // The intents are NOT withdrawn: an empty return from broadcast_tx is not
                 // proof nothing was sent, so the markers hold the sections for the TTL.
-                console.error('StateAnchorPublisher: v0 bundle broadcast returned no txid for ' + chains + '/' +
+                logger.error('StateAnchorPublisher: v0 bundle broadcast returned no txid for ' + chains + '/' +
                               network + ' @ ' + snapshotBlock + '; treating as failed publish (rows stay pending)');
                 return;
             }
@@ -1346,7 +1349,7 @@ class StateAnchorPublisher {
                 this._anchorsPublished++;
                 this._sectionsAnchored += group.length;
             }
-            console.log('StateAnchorPublisher: ' + (adopted ? 'adopted' : 'anchored') + ' bundle ' +
+            logger.info('StateAnchorPublisher: ' + (adopted ? 'adopted' : 'anchored') + ' bundle ' +
                         network + ' @ ' + snapshotBlock +
                         ' with ' + group.length + ' section(s) [' + chains + '] (txid ' + txid + ')' +
                         (!adopted && myRank > 0
@@ -1364,7 +1367,7 @@ class StateAnchorPublisher {
                 // Adoption path: we did not pay for THIS bundle in this call (a prior
                 // lost-ACK broadcast or a peer did). The on-chain payload, not the one we
                 // just built, names the earner. Stamp + announce, but never push.
-                console.log('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
+                logger.info('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
                             snapshotBlock + '; reward push skipped');
             } else if(attested || !ar.isAnchorRewardActive(snapshotBlock, network)){
                 // ONE anchor_bundle reward per bundle, round_reference = SNAPSHOT_BLOCK (D3, D21).
@@ -1386,7 +1389,7 @@ class StateAnchorPublisher {
                         federate: true
                     });
             } else {
-                console.log('StateAnchorPublisher: degraded bundle (no attestation) at/above the reward flag-day for ' +
+                logger.info('StateAnchorPublisher: degraded bundle (no attestation) at/above the reward flag-day for ' +
                             network + ' @ ' + snapshotBlock + '; reward withheld (no live indexer derives it)');
             }
 
@@ -1408,7 +1411,7 @@ class StateAnchorPublisher {
             // confirmed output. Not a failure of anything; the sections stay pending and
             // the next wake retries them as a normal flush.
             if(e && e.anchorNoConfirmedUtxo) this.noteNoConfirmedUtxo('the ' + network + ' bundle');
-            else console.error('StateAnchorPublisher: v0 bundle publish failed for ' + network + ': ' + (e && e.message));
+            else logger.error('StateAnchorPublisher: v0 bundle publish failed for ' + network + ': ' + (e && e.message));
         }
     }
 
@@ -1429,7 +1432,7 @@ class StateAnchorPublisher {
         if(!pubkey) return;
         this.hub.rewardTracker
             .recordAnchorReward(rewardType, roundNumber, String(pubkey).toLowerCase(), Number.isFinite(blockIndex) ? blockIndex : 0, network)
-            .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
+            .catch(e => logger.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
     }
 
     // Option C (derive-on-BTC-side): after a v0/v1 anchor lands on-chain, publish
@@ -1490,7 +1493,7 @@ class StateAnchorPublisher {
         try {
             await this.db.createAnchorRewardAttestation(rowChain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid);
         } catch(err){
-            console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
+            logger.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
                          rewardType + '/' + roundReference + '): ' + (err && err.message));
             throw err;   // nothing to federate: peers must not be told about a row we failed to hold
         }
@@ -1525,7 +1528,7 @@ class StateAnchorPublisher {
         } catch(err){
             failure = (err && err.message) ? err.message : String(err);
         }
-        console.error('StateAnchorPublisher: could not stream a committed anchor_reward_attestations row ' +
+        logger.error('StateAnchorPublisher: could not stream a committed anchor_reward_attestations row ' +
                       'to mirror subscribers (' + failure + '); forcing subscriber resync');
         try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('anchor_reward_attestations mirror gap'); }
         catch(_e){ /* the repair itself must never fail a committed attestation row */ }
@@ -1667,7 +1670,7 @@ class StateAnchorPublisher {
             met = signers.length >= bftQuorumOrSingle(pubkeys.size, 1);
         }
         if(!met){
-            console.warn('StateAnchorPublisher: federated reward attestation ' + rewardType + '/' + roundRef +
+            logger.warn('StateAnchorPublisher: federated reward attestation ' + rewardType + '/' + roundRef +
                          ' from ' + sender + ' failed local XANCPUB re-verification (' + signers.length +
                          ' of ' + pubkeys.size + ' local oracle_publish signers); dropped');
             return;
@@ -1715,11 +1718,11 @@ class StateAnchorPublisher {
         if(this._deferredRewardAttest.size >= this.announceQueueMax){
             let oldest = this._deferredRewardAttest.keys().next().value;
             this._deferredRewardAttest.delete(oldest);
-            console.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
+            logger.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
         this._deferredRewardAttest.set(key, Object.assign({}, e, { at: Date.now() }));
-        console.log('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
+        logger.info('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
                     ' held until anchor ' + e.txid + ' is ' + this.dogeConfirmations + ' deep on DOGE (' +
                     this._deferredRewardAttest.size + ' pending)');
     }
@@ -1790,7 +1793,7 @@ class StateAnchorPublisher {
         for(let [key, e] of [...this._deferredRewardAttest]){
             if(Date.now() - e.at > this.announceRetryTtlMs){
                 this._deferredRewardAttest.delete(key);
-                console.warn('StateAnchorPublisher: deferred reward attestation ' + key + ' expired after ' +
+                logger.warn('StateAnchorPublisher: deferred reward attestation ' + key + ' expired after ' +
                              this.announceRetryTtlMs + 'ms without its anchor confirming; dropped (no reward is ' +
                              'derived for an anchor that never landed)');
                 continue;
@@ -1819,20 +1822,20 @@ class StateAnchorPublisher {
                                                             Number(e.snapshotBlock), e.publisher, e.attestSigs,
                                                             String(e.txid).toLowerCase(), e);
                     } catch(werr){
-                        console.warn('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE ' +
+                        logger.warn('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE ' +
                                      'but its row FAILED to persist (' + (werr && werr.message) + '); entry retained ' +
                                      'for a later drain (no reward is lost to a transient write error)');
                         continue;
                     }
                     this._deferredRewardAttest.delete(key);
-                    console.log('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
+                    logger.info('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
                 } else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     this._deferredRewardAttest.delete(key);
-                    console.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
+                    logger.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
                                  v + '); dropped, no reward');
                 }
             } catch(err){
-                console.warn('StateAnchorPublisher: reward attestation ' + key +
+                logger.warn('StateAnchorPublisher: reward attestation ' + key +
                              ' re-verification error: ' + (err && err.message));
             }
         }
@@ -1941,7 +1944,7 @@ class StateAnchorPublisher {
         }
         if(current.length > 0) bundles.push(current);
         if(bundles.length > 1)
-            console.log('StateAnchorPublisher: bundle for ' + (ordered[0] ? ordered[0].network : '') +
+            logger.info('StateAnchorPublisher: bundle for ' + (ordered[0] ? ordered[0].network : '') +
                         ' exceeds the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget at ' + attestSigCount +
                         ' attesting signers; split chain-ascending into ' + bundles.length + ' bundles [' +
                         bundles.map(b => b.map(s => String(s.chain)).join('+')).join(', ') + ']');
@@ -2002,7 +2005,7 @@ class StateAnchorPublisher {
         try {
             signingSet = await this._resolveCapabilitySet('oracle_publish', Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));
         } catch(e){
-            console.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
+            logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(b.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
                          'publisher-attestation round (unattested bundle, no reward) rather than blocking the anchor');
             return { met: false, sigs: [] };
@@ -2027,7 +2030,7 @@ class StateAnchorPublisher {
         // live-vs-recovered ledger fork the reward gates exist to prevent. An unattested
         // bundle is degraded, not divergent.
         if(snapCount === 0){
-            console.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
                          Number(b.snapshot_block) + '; abstaining from the publisher-attestation round ' +
                          '(unattested bundle, no reward) rather than self-attesting');
             return { met: false, sigs: [] };
@@ -2065,7 +2068,7 @@ class StateAnchorPublisher {
                 if(this._attestRound === round && !round.done){
                     round.done = true;
                     this._attestRound = null;
-                    console.warn('StateAnchorPublisher: publisher-attestation round (bundle ' + b.network + ' @ ' +
+                    logger.warn('StateAnchorPublisher: publisher-attestation round (bundle ' + b.network + ' @ ' +
                                  b.snapshot_block + ') timed out at ' + round.signatures.size + '/' + quorum +
                                  ' sigs; unattested fallback');
                     resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })) });
@@ -2216,7 +2219,7 @@ class StateAnchorPublisher {
         try {
             signingSet = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         } catch(e){
-            console.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
+            logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
                          'archive publisher-attestation round (ATTEST_SIG_COUNT 0, no reward) rather than ' +
                          'discarding the archive');
@@ -2235,7 +2238,7 @@ class StateAnchorPublisher {
         // here would emit a v1 whose lone signature every indexer rejects while this hub
         // banks and archives the archive-anchor reward locally.
         if(snapCount === 0){
-            console.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
                          Number(cp.snapshot_block) + '; abstaining from the archive publisher-attestation ' +
                          'round (ATTEST_SIG_COUNT 0, no reward) rather than self-attesting');
             return { met: false, sigs: [] };
@@ -2273,7 +2276,7 @@ class StateAnchorPublisher {
             if(displaced && !displaced.done){
                 displaced.done = true;
                 if(displaced.timer) clearTimeout(displaced.timer);
-                console.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' +
+                logger.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' +
                              displaced.batchSeq + ') displaced by batch ' + batchSeq +
                              '; settling it unattested so its publish is not stranded');
                 if(displaced.resolve) displaced.resolve({ met: false, sigs: [] });
@@ -2286,7 +2289,7 @@ class StateAnchorPublisher {
                 if(!round.done){
                     round.done = true;
                     if(this._archiveAttestRound === round) this._archiveAttestRound = null;
-                    console.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' + batchSeq +
+                    logger.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' + batchSeq +
                                  ') timed out at ' + round.signatures.size + '/' + quorum +
                                  ' sigs; ATTEST_SIG_COUNT 0 fallback');
                     resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })) });
@@ -2432,7 +2435,7 @@ class StateAnchorPublisher {
         // fail-closed idiom as the empty-set defer below; rows stay pending for the next
         // flush, exactly like the balance and spend-guard gates in flush().
         if(!Number.isFinite(electionBlock)){
-            console.warn('StateAnchorPublisher: BTC tip unresolved (' + electionBlock +
+            logger.warn('StateAnchorPublisher: BTC tip unresolved (' + electionBlock +
                          '); deferring archive round rather than electing over the ' +
                          'block-unpinned live registry (fail closed)');
             return 'none';
@@ -2449,13 +2452,13 @@ class StateAnchorPublisher {
         // archive round, not let every hub drive it independently (each would
         // broadcast a competing v1 + burn DOGE for the same batch slot).
         if(electionPubkeys.length === 0){
-            console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+            logger.info('StateAnchorPublisher: archive election at block ' + electionBlock +
                         ': empty oracle_publish set, deferring round (fail closed)');
             return 'none';
         }
         if(!me) return 'none';
         if(!electionPubkeys.includes(me)){
-            console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+            logger.info('StateAnchorPublisher: archive election at block ' + electionBlock +
                         ': own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
             return 'none';                                               // not an eligible publisher right now
         }
@@ -2530,7 +2533,7 @@ class StateAnchorPublisher {
             ? await this.db.getStateCheckpointByNetwork(this.network)
             : await this.db.getLatestStateCheckpoint();
         if(!cps || cps.length === 0){
-            console.log('StateAnchorPublisher: no state checkpoint yet; archive deferred');
+            logger.info('StateAnchorPublisher: no state checkpoint yet; archive deferred');
             return 'none';
         }
         let cp = this.cpFromRow(cps[0]);
@@ -2552,7 +2555,7 @@ class StateAnchorPublisher {
         // relayed would stall archiving forever.
         let liveIntent = await this.getLiveArchiveIntent(network);
         if(this._anchorIntentHolds(liveIntent)){
-            console.warn('StateAnchorPublisher: archive round for ' + network + ' held: batch ' +
+            logger.warn('StateAnchorPublisher: archive round for ' + network + ' held: batch ' +
                          liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
                          (liveIntent.txid ? ' (v1 txid ' + liveIntent.txid + ')' : '') +
                          ' and never finished its bookkeeping; not rebuilding a second archive until that ' +
@@ -2578,7 +2581,7 @@ class StateAnchorPublisher {
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
                 // indistinguishable from a broken publisher without this.
-                console.log('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
+                logger.info('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
                             ': rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
                             order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
                             this.electionToleranceBlocks + ' blocks), not publishing');
@@ -2596,7 +2599,7 @@ class StateAnchorPublisher {
                 ? await this.hub.rewardTracker.resolveSourceByPubkey(String(r.validator_pubkey), Number(r.block_index))
                 : null;
             if(!source){
-                console.warn('StateAnchorPublisher: reward ' + r.reward_type + '/#' + r.round_number +
+                logger.warn('StateAnchorPublisher: reward ' + r.reward_type + '/#' + r.round_number +
                              ' source unresolved for ' + String(r.validator_pubkey).substring(0, 12) + '... deferred to a later batch');
                 continue;
             }
@@ -2663,7 +2666,7 @@ class StateAnchorPublisher {
         // ledger fork. Returning 'none' leaves every row pending, so a later flush
         // re-archives them under a fresh batch seq once the set resolves.
         if(snapCount === 0){
-            console.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+            logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
                          Number(cp.snapshot_block) + ' (batch ' + batchSeq + '); deferring the archive ' +
                          'round rather than self-publishing an empty-set v1 (rows stay pending)');
             return 'none';
@@ -2721,7 +2724,7 @@ class StateAnchorPublisher {
             // a later flush re-archives them under a fresh batch seq, either once the signing
             // set resolves to include this hub or under a leader that is already a member.
             if(signatures.size < quorum){
-                console.warn('StateAnchorPublisher: single-member oracle_publish set at snapshot_block ' +
+                logger.warn('StateAnchorPublisher: single-member oracle_publish set at snapshot_block ' +
                              Number(cp.snapshot_block) + ' (batch ' + batchSeq + ') does not contain this ' +
                              'publisher; deferring the archive round rather than self-publishing a v1 the ' +
                              'indexer records invalid (rows stay pending)');
@@ -2744,7 +2747,7 @@ class StateAnchorPublisher {
         this._archiveRound = round;
         round.timer = setTimeout(() => {
             if(this._archiveRound === round && !round.done){
-                console.warn('StateAnchorPublisher: archive round (batch ' + batchSeq + ') timed out at ' +
+                logger.warn('StateAnchorPublisher: archive round (batch ' + batchSeq + ') timed out at ' +
                              round.signatures.size + '/' + quorum + ' sigs; retrying next flush');
                 this._archiveRound = null;
             }
@@ -2806,7 +2809,7 @@ class StateAnchorPublisher {
         let s = Number(seq);
         if(!Number.isFinite(s) || s <= this._observedConsumedBatchSeq) return;
         this._observedConsumedBatchSeq = s;
-        console.warn('StateAnchorPublisher: batch seq ' + s + ' is already consumed by the federation (' +
+        logger.warn('StateAnchorPublisher: batch seq ' + s + ' is already consumed by the federation (' +
                      why + '); the next archive round will draw above it rather than rebuilding under a ' +
                      'stale local seq');
     }
@@ -3024,15 +3027,15 @@ class StateAnchorPublisher {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
-            case XANC_SIGN:      this._handleSign(envelope).catch(e => console.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
-            case XANC_FINALIZED: this.handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
-            case XANC_BUNDLE_DONE:   this.handleBundleDone(envelope).catch(e => console.error('StateAnchorPublisher: BUNDLE_DONE error: ' + (e && e.message)));     break;
-            case XANCPUB_SIGN_REQ: this.handleAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
-            case XANCPUB_SIGN:     this.handleAttestSign(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN error: ' + (e && e.message)));         break;
-            case XANCARCHPUB_SIGN_REQ: this.handleArchiveAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCARCHPUB_SIGN_REQ error: ' + (e && e.message))); break;
-            case XANCARCHPUB_SIGN:     this.handleArchiveAttestSign(envelope).catch(e => console.error('StateAnchorPublisher: XANCARCHPUB_SIGN error: ' + (e && e.message)));         break;
-            case XANCREWARD:           this.handleRewardAttestation(envelope).catch(e => console.error('StateAnchorPublisher: XANCREWARD error: ' + (e && e.message)));               break;
+            case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
+            case XANC_SIGN:      this._handleSign(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
+            case XANC_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
+            case XANC_BUNDLE_DONE:   this.handleBundleDone(envelope).catch(e => logger.error('StateAnchorPublisher: BUNDLE_DONE error: ' + (e && e.message)));     break;
+            case XANCPUB_SIGN_REQ: this.handleAttestSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
+            case XANCPUB_SIGN:     this.handleAttestSign(envelope).catch(e => logger.error('StateAnchorPublisher: XANCPUB_SIGN error: ' + (e && e.message)));         break;
+            case XANCARCHPUB_SIGN_REQ: this.handleArchiveAttestSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: XANCARCHPUB_SIGN_REQ error: ' + (e && e.message))); break;
+            case XANCARCHPUB_SIGN:     this.handleArchiveAttestSign(envelope).catch(e => logger.error('StateAnchorPublisher: XANCARCHPUB_SIGN error: ' + (e && e.message)));         break;
+            case XANCREWARD:           this.handleRewardAttestation(envelope).catch(e => logger.error('StateAnchorPublisher: XANCREWARD error: ' + (e && e.message)));               break;
         }
     }
 
@@ -3099,7 +3102,7 @@ class StateAnchorPublisher {
             verdicts.push(await this.verifyAnchorOnChain(row, { txid: String(d.txid), rejectVersions: [1, 2] }));
         let rejected = verdicts.find(v => String(v).startsWith('rejected'));
         if(rejected){
-            console.warn('StateAnchorPublisher: BUNDLE_DONE for ' + network + ' @ ' + snapshotBlock +
+            logger.warn('StateAnchorPublisher: BUNDLE_DONE for ' + network + ' @ ' + snapshotBlock +
                          ' REJECTED on-chain (' + rejected + '); skipping stamp + reward');
             return;
         }
@@ -3129,11 +3132,11 @@ class StateAnchorPublisher {
         if(this._deferredBundleDone.size >= this.announceQueueMax){
             let oldest = this._deferredBundleDone.keys().next().value;
             this._deferredBundleDone.delete(oldest);
-            console.warn('StateAnchorPublisher: deferred BUNDLE_DONE queue full (' + this.announceQueueMax +
+            logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
         this._deferredBundleDone.set(key, { d: d, sender: sender, at: Date.now() });
-        console.log('StateAnchorPublisher: BUNDLE_DONE for ' + d.network + ' @ ' + d.snapshot_block +
+        logger.info('StateAnchorPublisher: BUNDLE_DONE for ' + d.network + ' @ ' + d.snapshot_block +
                     ' not yet buried (' + reason + '); queued for re-verification (' +
                     this._deferredBundleDone.size + ' pending)');
     }
@@ -3150,7 +3153,7 @@ class StateAnchorPublisher {
             let d = entry.d;
             if(Date.now() - entry.at > this.announceRetryTtlMs){
                 this._deferredBundleDone.delete(key);
-                console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' expired after ' +
+                logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' expired after ' +
                              this.announceRetryTtlMs + 'ms without confirming; dropping so the failover ' +
                              'ladder can re-anchor if the bundle is still pending');
                 continue;
@@ -3174,17 +3177,17 @@ class StateAnchorPublisher {
                 let rejected = verdicts.find(v => String(v).startsWith('rejected'));
                 if(rejected){
                     this._deferredBundleDone.delete(key);
-                    console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' REJECTED on re-verification (' +
+                    logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' REJECTED on re-verification (' +
                                  rejected + '); dropped');
                     continue;
                 }
                 if(verdicts.every(v => v === 'verified')){
                     this._deferredBundleDone.delete(key);
                     await this.applyBundleDone(d, entry.sender, rows);
-                    console.log('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' confirmed on DOGE; stamped');
+                    logger.info('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' confirmed on DOGE; stamped');
                 }
             } catch(e){
-                console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' re-verification error: ' + (e && e.message));
+                logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' re-verification error: ' + (e && e.message));
             }
         }
     }
@@ -3283,7 +3286,7 @@ class StateAnchorPublisher {
             if(want.version != null)     params.version = Number(want.version);
             res = await this._indexerCall('DOGE', 'getanchoraction', params);
         } catch(e){
-            console.warn('StateAnchorPublisher: getanchoraction unreachable for ' + cp.chain + '/' + cp.network +
+            logger.warn('StateAnchorPublisher: getanchoraction unreachable for ' + cp.chain + '/' + cp.network +
                          ' @ ' + cp.block_index + '/' + cp.checkpoint_seq + ': ' + (e && e.message));
             return 'unreachable';
         }
@@ -3434,7 +3437,7 @@ class StateAnchorPublisher {
         let myNextSeq = await this._getNextBatchSeq();
         if(Number(d.batch_seq) < myNextSeq){
             let consumed = myNextSeq - 1;
-            console.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
+            logger.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
                          ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
                          consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
                          'behind on the archive back-fill; answering with a stale-seq refusal');
@@ -3485,7 +3488,7 @@ class StateAnchorPublisher {
         // decides which oracle_publish group the completeness check requires, and `mine`
         // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
-            console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
+            logger.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
         }
         // The body byte-matches our own rows, so its membership is the authority on which
@@ -3528,7 +3531,7 @@ class StateAnchorPublisher {
                 delete localTerms.validator_signatures;
                 delete archivedTerms.validator_signatures;
                 if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
-                    console.warn("StateAnchorPublisher: archive match " + String(am.match_id).substring(0, 16) +
+                    logger.warn("StateAnchorPublisher: archive match " + String(am.match_id).substring(0, 16) +
                                  "... TERMS differ from our row; local " + JSON.stringify(localTerms).substring(0, 120) +
                                  " vs archived " + JSON.stringify(archivedTerms).substring(0, 120));
                     return false;
@@ -3540,14 +3543,14 @@ class StateAnchorPublisher {
                 // OUR OWN resolved cross_chain set at the row's snapshot_block)
                 // is the same proof full-parse recovery accepts, so absence is
                 // not divergence. A forged row cannot carry those signatures.
-                console.log('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                logger.info('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                             '... predates our local history; accepting on signature quorum alone');
             }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block), resolveQuorumNetwork(am, this.network));
             let sigs = this._parseSigs(am.validator_signatures);
             if(!this.quorumVerified(this._matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), resolveQuorumNetwork(am, this.network)))){   // RECORD network
-                console.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                logger.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                              '... fails signature quorum against the cross_chain set at block ' + am.snapshot_block);
                 return false;
             }
@@ -3562,20 +3565,20 @@ class StateAnchorPublisher {
                 delete localTerms.validator_signatures;
                 delete archivedTerms.validator_signatures;
                 if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
-                    console.warn("StateAnchorPublisher: archive call " + String(ac.call_id).substring(0, 16) +
+                    logger.warn("StateAnchorPublisher: archive call " + String(ac.call_id).substring(0, 16) +
                                  "... (" + ac.phase + ") TERMS differ from our row; local " + JSON.stringify(localTerms).substring(0, 160) +
                                  " vs archived " + JSON.stringify(archivedTerms).substring(0, 160));
                     return false;
                 }
             } else {
-                console.log('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                logger.info('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                             '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
             }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network));
             let sigs = this._parseSigs(ac.validator_signatures);
             if(!this.quorumVerified(this.callCanonical(ac), sigs, set, swq.isStakeWeightedQuorumActive(Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network)))){   // RECORD network
-                console.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                logger.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                              '... (' + ac.phase + ') fails signature quorum against the cross_chain set at block ' + ac.snapshot_block);
                 return false;
             }
@@ -3598,7 +3601,7 @@ class StateAnchorPublisher {
         for(let rr of (archive.rewards || [])){
             let tag = (rr && rr.reward_type) + '/#' + (rr && rr.round_number);
             if(!rr || !/^anchor_[A-Za-z_]+$/.test(String(rr.reward_type || ''))){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type; NOT signing');
+                logger.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type; NOT signing');
                 return false;
             }
             let pubkey = String(rr.validator_pubkey || '').toLowerCase();
@@ -3617,7 +3620,7 @@ class StateAnchorPublisher {
             let recordNetwork = resolveQuorumNetwork(archive, this.network);
             let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index), recordNetwork);
             if(!set.some(v => v.pubkey === pubkey)){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
+                logger.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
                              '... is not in the oracle_publish set at block ' + rr.block_index + '; NOT signing');
                 return false;
             }
@@ -3644,7 +3647,7 @@ class StateAnchorPublisher {
                 ? ar.ARCHIVE_REWARD_AMOUNT
                 : (this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null);
             if(expectedAmount !== null && String(rr.amount) !== expectedAmount){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + rr.amount +
+                logger.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + rr.amount +
                              ' != expected ' + expectedAmount + '; NOT signing');
                 return false;
             }
@@ -3652,7 +3655,7 @@ class StateAnchorPublisher {
                 ? await this.hub.rewardTracker.resolveSourceByPubkey(pubkey, Number(rr.block_index))
                 : null;
             if(!mySource || String(rr.source) !== mySource){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + rr.source +
+                logger.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + rr.source +
                              ' does not match our resolution (' + mySource + '); NOT signing');
                 return false;
             }
@@ -3681,7 +3684,7 @@ class StateAnchorPublisher {
             if(local && local.length > 0){
                 let mine = local.find(r => String(r.validator_pubkey).toLowerCase() === pubkey);
                 if(!mine){
-                    console.warn('StateAnchorPublisher: archive reward ' + tag + ' credits ' + pubkey.substring(0, 12) +
+                    logger.warn('StateAnchorPublisher: archive reward ' + tag + ' credits ' + pubkey.substring(0, 12) +
                                  '... but our local rows for this round credit ' +
                                  local.map(r => String(r.validator_pubkey).substring(0, 12) + '...').join(',') +
                                  '; NOT signing');
@@ -3689,13 +3692,13 @@ class StateAnchorPublisher {
                 }
                 if(String(mine.amount) !== String(rr.amount) ||
                    (mine.block_index != null && Number(mine.block_index) !== Number(rr.block_index))){
-                    console.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
+                    logger.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
                                  String(mine.validator_pubkey).substring(0, 12) + '.../' + mine.amount + '/' + mine.block_index +
                                  ' vs ' + pubkey.substring(0, 12) + '.../' + rr.amount + '/' + rr.block_index + '); NOT signing');
                     return false;
                 }
             } else {
-                console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history; accepting on re-derivation alone');
+                logger.info('StateAnchorPublisher: archive reward ' + tag + ' predates our local history; accepting on re-derivation alone');
             }
         }
         // Key the inner map on `pubkey|source`, NOT pubkey alone. At/above
@@ -3740,7 +3743,7 @@ class StateAnchorPublisher {
             // An honest builder always emits a finite height; a non-numeric one is a
             // malformed archive, and letting it through would resolve a NaN-keyed set.
             if(!Number.isFinite(Number(w.block))){
-                console.warn('StateAnchorPublisher: archive requires a ' + w.capability +
+                logger.warn('StateAnchorPublisher: archive requires a ' + w.capability +
                              ' snapshot group at a non-numeric block (' + w.block + '); NOT signing');
                 return false;
             }
@@ -3751,7 +3754,7 @@ class StateAnchorPublisher {
             let [block, capability] = key.split('|');
             let resolved = await this._resolveCapabilitySet(capability, Number(block), resolveQuorumNetwork(archive, this.network));
             if(resolved.length !== archived.size){
-                console.warn("StateAnchorPublisher: archive snapshot group " + key + " size " + archived.size +
+                logger.warn("StateAnchorPublisher: archive snapshot group " + key + " size " + archived.size +
                              " differs from our resolution (" + resolved.length + ")");
                 return false;
             }
@@ -3759,7 +3762,7 @@ class StateAnchorPublisher {
                 let vSource = String(v.source != null ? v.source : '');
                 let a = archived.get(v.pubkey + '|' + vSource);
                 if(!a || a.amount !== v.amount || a.source !== vSource){
-                    console.warn("StateAnchorPublisher: archive snapshot group " + key + " diverges for pubkey " +
+                    logger.warn("StateAnchorPublisher: archive snapshot group " + key + " diverges for pubkey " +
                                  v.pubkey.substring(0, 12) + "... (local amount/source " + v.amount + "/" + vSource +
                                  ", archived " + (a ? (a.amount + "/" + a.source) : "<absent>") + ")");
                     return false;
@@ -3809,7 +3812,7 @@ class StateAnchorPublisher {
             if(!electionPubkeys.includes(pubkey)) return;
             if(!ValidatorIdentity.verify(this._seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;
-            console.warn('StateAnchorPublisher: archive round (batch ' + round.batchSeq + ') refused by ' +
+            logger.warn('StateAnchorPublisher: archive round (batch ' + round.batchSeq + ') refused by ' +
                          pubkey.substring(0, 12) + '..., which holds batch seq ' + Number(d.consumed_seq) +
                          ' as consumed; abandoning the round rather than publishing a second archive under ' +
                          'seq ' + round.batchSeq + ' (rows stay pending and re-archive above the learned seq)');
@@ -3873,7 +3876,7 @@ class StateAnchorPublisher {
         // than spending against publish history it could not read.
         let liveIntent = await this.getLiveArchiveIntent(network);
         if(this._anchorIntentHolds(liveIntent)){
-            console.warn('StateAnchorPublisher: archive batch ' + round.batchSeq + ' NOT published: batch ' +
+            logger.warn('StateAnchorPublisher: archive batch ' + round.batchSeq + ' NOT published: batch ' +
                          liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
                          ' that never finished; rows stay pending and re-archive under a fresh seq once it ' +
                          'settles or ages past ' + this.anchorIntentTtlMs + 'ms');
@@ -3896,7 +3899,7 @@ class StateAnchorPublisher {
                 attestSigs = attest.sigs;
                 attested = true;
             } else {
-                console.warn('StateAnchorPublisher: archive publisher-attestation quorum not reached for batch ' +
+                logger.warn('StateAnchorPublisher: archive publisher-attestation quorum not reached for batch ' +
                              round.batchSeq + '; publishing v1 with ATTEST_SIG_COUNT 0 (archive lands, no reward)');
             }
         }
@@ -3968,7 +3971,7 @@ class StateAnchorPublisher {
         let chunkSeq = (result && result.archiveAnchor && result.archiveAnchor.match_batch_seq != null)
             ? Number(result.archiveAnchor.match_batch_seq) : round.batchSeq;
         if(chunkSeq !== round.batchSeq){
-            console.log('StateAnchorPublisher: adopted an already-published archive head (txid ' + txid +
+            logger.info('StateAnchorPublisher: adopted an already-published archive head (txid ' + txid +
                         ', batch ' + chunkSeq + ') for round ' + round.batchSeq +
                         '; remaining chunks go out under the adopted seq');
             // Stale-seq convergence: the chain itself says this batch landed under a HIGHER seq than the
@@ -3995,7 +3998,7 @@ class StateAnchorPublisher {
             catch(e){
                 lostChunks++;
                 this._archiveChunkLosses++;
-                console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (e && e.message));
+                logger.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (e && e.message));
             }
         }
 
@@ -4044,15 +4047,15 @@ class StateAnchorPublisher {
             callIds   = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
             if(lostChunks > 0)
-                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
+                logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
                               ' chunk(s) on-chain; rows stay pending and re-archive under a new batch seq' +
                               ' (cumulative chunk losses: ' + this._archiveChunkLosses + ')');
             if(!onChainValid)
-                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive will NOT reach quorum over ' +
+                logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive will NOT reach quorum over ' +
                               'oracle_publish @ snapshot_block ' + round.cp.snapshot_block + '; on-chain v1 would be ' +
                               'invalid, rows stay pending and re-archive under a new batch seq');
             if(noTxid)
-                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive v1 broadcast returned no ' +
+                logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive v1 broadcast returned no ' +
                               'txid; rows stay pending and re-archive under a new batch seq');
         }
         await this.backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
@@ -4076,7 +4079,7 @@ class StateAnchorPublisher {
             });
         }
         if(lostChunks === 0 && onChainValid && !noTxid){
-            console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
+            logger.info('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
                         ((round.callIds && round.callIds.length) || 0) + ' calls + ' +
                         ((round.rewardIds && round.rewardIds.length) || 0) + ' rewards (batch ' + round.batchSeq +
                         ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
@@ -4109,7 +4112,7 @@ class StateAnchorPublisher {
                         });
                 }
             } else {
-                console.log('StateAnchorPublisher: degraded v1 archive (ATTEST_SIG_COUNT 0) at/above the ' +
+                logger.info('StateAnchorPublisher: degraded v1 archive (ATTEST_SIG_COUNT 0) at/above the ' +
                             'archive-reward flag-day for batch ' + round.batchSeq +
                             '; reward withheld (no live indexer derives it)');
             }
@@ -4165,7 +4168,7 @@ class StateAnchorPublisher {
         let calls   = Array.isArray(d.calls)   ? d.calls   : [];
         let rewards = Array.isArray(d.rewards) ? d.rewards : [];
         if(!(await this.verifyFinalizedAgainstLocal(d.matches, calls, rewards))){
-            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces content ' +
+            logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces content ' +
                          'diverging from our DB; ignoring back-fill (rows re-archive under a fresh seq)');
             return;
         }
@@ -4190,7 +4193,7 @@ class StateAnchorPublisher {
         // peer's head.
         let stray = this.finalizedOutsideObservedArchive(Number(d.batch_seq), sender, d.matches, calls, rewards);
         if(stray){
-            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces ' + stray +
+            logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces ' + stray +
                          ', which the archive we co-signed for this batch does not carry; ignoring the ' +
                          'back-fill (rows stay pending and re-archive under a fresh seq)');
             return;
@@ -4221,7 +4224,7 @@ class StateAnchorPublisher {
                                 calls.some(c => c && c.status !== '__partial__') ||
                                 rewards.length > 0;
         if(!d.txid && terminalAnnounced){
-            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') carries NO txid but ' +
+            logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') carries NO txid but ' +
                          'announces non-__partial__ rows; an honest publish marks every row __partial__ when ' +
                          'the broadcast returned no txid, so this cannot be a real archive. Ignoring the ' +
                          'back-fill (rows stay pending and re-archive under a fresh seq)');
@@ -4293,7 +4296,7 @@ class StateAnchorPublisher {
             return;
         }
         if(String(archiveOnChain).startsWith('rejected')){
-            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head REJECTED ' +
+            logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head REJECTED ' +
                          'on-chain (' + archiveOnChain + '); stamping nothing (rows stay pending and ' +
                          're-archive under a fresh seq)');
             return;
@@ -4327,7 +4330,7 @@ class StateAnchorPublisher {
             // (a fabricated block index fails the membership resolution).
             let setAtSnap = await this._getActiveOraclePublishPubkeys(Number(d.snapshot_block));
             if(!setAtSnap.includes(sender)){
-                console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') sender not in the ' +
+                logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') sender not in the ' +
                              'oracle_publish set at announced snapshot_block ' + d.snapshot_block +
                              '; NOT mirroring the archive reward');
             } else {
@@ -4364,7 +4367,7 @@ class StateAnchorPublisher {
                 if(archiveVerified === 'verified')
                     this.recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block), cpNet);
                 else
-                    console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive checkpoint ' +
+                    logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive checkpoint ' +
                                  'not on-chain verified (' + archiveVerified + '); NOT mirroring the archive reward');
             }
         }
@@ -4382,11 +4385,11 @@ class StateAnchorPublisher {
         if(this._deferredFinalized.size >= this.announceQueueMax){
             let oldest = this._deferredFinalized.keys().next().value;
             this._deferredFinalized.delete(oldest);
-            console.warn('StateAnchorPublisher: deferred FINALIZED queue full (' + this.announceQueueMax +
+            logger.warn('StateAnchorPublisher: deferred FINALIZED queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
         this._deferredFinalized.set(key, { d: d, sender: sender, calls: calls, rewards: rewards, at: Date.now() });
-        console.log('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head not yet buried (' +
+        logger.info('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head not yet buried (' +
                     reason + '); seq staged under the __partial__ sentinel, queued for re-verification (' +
                     this._deferredFinalized.size + ' pending)');
     }
@@ -4403,7 +4406,7 @@ class StateAnchorPublisher {
             let d = entry.d;
             if(Date.now() - entry.at > this.announceRetryTtlMs){
                 this._deferredFinalized.delete(key);
-                console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' expired after ' +
+                logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' expired after ' +
                              this.announceRetryTtlMs + 'ms without confirming; dropping (the staged rows are ' +
                              'still archive-eligible and re-archive under a fresh seq)');
                 continue;
@@ -4414,19 +4417,19 @@ class StateAnchorPublisher {
                 if(v === 'verified'){
                     this._deferredFinalized.delete(key);
                     if(!(await this.verifyFinalizedAgainstLocal(d.matches, entry.calls, entry.rewards))){
-                        console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
+                        logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
                                      'announced content no longer matches our DB; dropping the back-fill');
                         continue;
                     }
                     await this.applyFinalized(d, entry.sender, entry.calls, entry.rewards);
-                    console.log('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE; stamped');
+                    logger.info('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE; stamped');
                 } else if(String(v).startsWith('rejected')){
                     this._deferredFinalized.delete(key);
-                    console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' REJECTED on re-verification (' +
+                    logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' REJECTED on re-verification (' +
                                  v + '); dropped');
                 }
             } catch(e){
-                console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' re-verification error: ' + (e && e.message));
+                logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' re-verification error: ' + (e && e.message));
             }
         }
     }
@@ -4445,7 +4448,7 @@ class StateAnchorPublisher {
             if(m.status === '__partial__') continue;
             let rows = await this.db.getCrossChainMatchByMatchId(m.match_id);
             if(rows && rows.length > 0 && String(rows[0].status) !== String(m.status)){
-                console.warn('StateAnchorPublisher: FINALIZED match ' + String(m.match_id).substring(0, 16) +
+                logger.warn('StateAnchorPublisher: FINALIZED match ' + String(m.match_id).substring(0, 16) +
                              "... announces status '" + m.status + "' but our row holds '" + rows[0].status + "'");
                 return false;
             }
@@ -4455,14 +4458,14 @@ class StateAnchorPublisher {
             if(c.status === '__partial__') continue;
             let rows = await this.db.getCrossChainCallByCallIdAndPhase(c.call_id, c.phase);
             if(rows && rows.length > 0 && String(rows[0].status) !== String(c.status)){
-                console.warn('StateAnchorPublisher: FINALIZED call ' + String(c.call_id).substring(0, 16) +
+                logger.warn('StateAnchorPublisher: FINALIZED call ' + String(c.call_id).substring(0, 16) +
                              "... (" + c.phase + ") announces status '" + c.status + "' but our row holds '" + rows[0].status + "'");
                 return false;
             }
         }
         for(let r of (rewards || [])){
             if(!r || !/^anchor_[A-Za-z_]+$/.test(String(r.reward_type || ''))){
-                console.warn('StateAnchorPublisher: FINALIZED reward list carries a non-anchor reward_type; rejecting');
+                logger.warn('StateAnchorPublisher: FINALIZED reward list carries a non-anchor reward_type; rejecting');
                 return false;
             }
         }
@@ -4723,7 +4726,7 @@ class StateAnchorPublisher {
                 for(let row of rows)
                     this.hub.hubDbBroadcaster.broadcastRow({ table: 'cross_chain_matches', row: row });
             } catch(e){
-                console.warn('StateAnchorPublisher: anchor-stamp re-broadcast failed (mirrors converge on next bootstrap):', e.message);
+                logger.warn(nodeUtil.format('StateAnchorPublisher: anchor-stamp re-broadcast failed (mirrors converge on next bootstrap):', e.message));
             }
         }
         for(let c of (callIds || [])){
@@ -4760,12 +4763,12 @@ class StateAnchorPublisher {
         let floor = this._observedConsumedBatchSeq + 1;
         if(!(floor > local)) return local;
         if(floor - local > this._archiveSeqFloorMaxJump){
-            console.warn('StateAnchorPublisher: observed consumed batch seq ' + this._observedConsumedBatchSeq +
+            logger.warn('StateAnchorPublisher: observed consumed batch seq ' + this._observedConsumedBatchSeq +
                          ' is more than ' + this._archiveSeqFloorMaxJump + ' above our own next seq ' + local +
                          '; ignoring it as implausible and keeping the row-derived seq');
             return local;
         }
-        console.warn('StateAnchorPublisher: own rows give next batch seq ' + local + ' but the federation has ' +
+        logger.warn('StateAnchorPublisher: own rows give next batch seq ' + local + ' but the federation has ' +
                      'already consumed ' + this._observedConsumedBatchSeq + '; drawing ' + floor +
                      ' (this hub is behind on an archive back-fill)');
         return floor;
@@ -4869,7 +4872,7 @@ class StateAnchorPublisher {
             // election gates treat an empty set as "do not act"), but it must be
             // loud: an unresolved membership here surfaces as zero broadcasts with
             // no error anywhere, which reads as a healthy idle publisher.
-            console.warn('StateAnchorPublisher: oracle_publish membership unresolved at block ' +
+            logger.warn('StateAnchorPublisher: oracle_publish membership unresolved at block ' +
                 Number(blockIndex) + ' (capability snapshot unavailable' +
                 (this.network === 'regtest' ? ' and the local capability_snapshots table has no rows'
                                             : '; the local-table fallback is regtest-only') +
@@ -4980,7 +4983,7 @@ class StateAnchorPublisher {
                     try { found = await existsCheck(); }
                     catch(e){ found = undefined; }   // undetermined
                     if(found && found.exists){
-                        console.log('StateAnchorPublisher: anchor already on-chain (txid ' +
+                        logger.info('StateAnchorPublisher: anchor already on-chain (txid ' +
                                     (found.txid || '?') + '); adopting instead of re-broadcasting');
                         this.spendGuard.release(token);   // nothing was sent in this call
                         return found;
@@ -5040,7 +5043,7 @@ class StateAnchorPublisher {
                                 let found = null;
                                 try { found = await existsCheck(); } catch(_e){ found = null; }
                                 if(found && found.exists){
-                                    console.log('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
+                                    logger.info('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
                                                 (found.txid || '?') + '); adopting');
                                     this.spendGuard.commit(token);   // our send is what landed
                                     return found;
@@ -5063,7 +5066,7 @@ class StateAnchorPublisher {
                         }
                         rateLimitWaits++;
                         delayMs = rlWaitMs;
-                        console.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
+                        logger.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
                                      'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
                                      this.rateLimitMaxWaitMs + 'ms), ' +
                                      (this.rateLimitMaxWaits - rateLimitWaits) + ' rate-limit wait(s) left ' +
@@ -5117,7 +5120,7 @@ class StateAnchorPublisher {
         if(!this.confirmCheckIntervalMs) return;
         this._confirmTimer = setInterval(() => {
             this.checkPublishedConfirmations().catch(e =>
-                console.warn('StateAnchorPublisher: confirmation watchdog tick failed: ' + (e && e.message)));
+                logger.warn('StateAnchorPublisher: confirmation watchdog tick failed: ' + (e && e.message)));
         }, this.confirmCheckIntervalMs);
         if(this._confirmTimer.unref) this._confirmTimer.unref();
     }
@@ -5160,7 +5163,7 @@ class StateAnchorPublisher {
         }
         let oldest = this.oldestUnconfirmedPublish();
         if(oldest && oldest.ageMs >= this.confirmStaleMs){
-            console.warn('StateAnchorPublisher: UNCONFIRMED_ANCHOR - ' + this._pendingConfirmations.size +
+            logger.warn('StateAnchorPublisher: UNCONFIRMED_ANCHOR - ' + this._pendingConfirmations.size +
                          ' broadcast(s) have never been seen confirmed; oldest is ' + oldest.kind + ' ' + oldest.ref +
                          ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
                          'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
@@ -5405,7 +5408,7 @@ class StateAnchorPublisher {
         // would leave the rows pending and adopt the same txid-less head again every
         // flush (a livelock, not a saving). Treat it as absent and republish instead.
         if(!res.txid){
-            console.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc +
+            logger.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc +
                          ' is on-chain but carries no resolvable txid; treating as absent');
             return null;
         }
@@ -5414,7 +5417,7 @@ class StateAnchorPublisher {
         // changed chunk size across the restart) would make our chunk bytes land in
         // slots the head never declared, and the batch would fail reassembly on-chain.
         if(Number(res.total_chunks) !== Number(round.chunks.length)){
-            console.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc + ' declares ' +
+            logger.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc + ' declares ' +
                          res.total_chunks + ' chunk(s) but this round built ' + round.chunks.length +
                          '; not adopting (republishing the batch whole)');
             return null;
@@ -5509,9 +5512,9 @@ class StateAnchorPublisher {
         try {
             await this.db.updateAnchorPublishedCheckpoint(txid || null, row.chain, row.network, Number(row.checkpoint_seq));
         } catch(e){
-            console.error('StateAnchorPublisher: anchor for ' + row.chain + '/' + row.network + ' @ ' +
+            logger.error(nodeUtil.format('StateAnchorPublisher: anchor for ' + row.chain + '/' + row.network + ' @ ' +
                           row.block_index + ' broadcast as ' + txid + ' but its durable sent marker could not be ' +
-                          'persisted; the intent still holds the row, so nothing re-broadcasts. Error:', e && e.message);
+                          'persisted; the intent still holds the row, so nothing re-broadcasts. Error:', e && e.message));
         }
     }
 
@@ -5524,7 +5527,7 @@ class StateAnchorPublisher {
         try {
             await this.db.deleteAnchorPublishedCheckpoint(row.chain, row.network, Number(row.checkpoint_seq));
         } catch(e){
-            console.warn('StateAnchorPublisher: could not withdraw the broadcast intent for ' + row.chain + '/' +
+            logger.warn('StateAnchorPublisher: could not withdraw the broadcast intent for ' + row.chain + '/' +
                          row.network + ' @ ' + row.block_index + '; it will hold the row until the TTL expires: ' +
                          (e && e.message));
         }
@@ -5576,9 +5579,9 @@ class StateAnchorPublisher {
         try {
             await this.db.updateAnchorPublishedArchiveByNetwork(txid || null, String(network), Number(batchSeq));
         } catch(e){
-            console.error('StateAnchorPublisher: archive batch ' + batchSeq + ' broadcast as ' + txid +
+            logger.error(nodeUtil.format('StateAnchorPublisher: archive batch ' + batchSeq + ' broadcast as ' + txid +
                           ' but its durable sent marker could not be persisted; the intent still holds the ' +
-                          'network, so nothing re-archives. Error:', e && e.message);
+                          'network, so nothing re-archives. Error:', e && e.message));
         }
     }
 
@@ -5590,7 +5593,7 @@ class StateAnchorPublisher {
         try {
             await this.db.updateAnchorPublishedArchiveByNetworkAndBatchSeq(String(network), Number(batchSeq));
         } catch(e){
-            console.warn('StateAnchorPublisher: could not settle the archive intent for batch ' + batchSeq +
+            logger.warn('StateAnchorPublisher: could not settle the archive intent for batch ' + batchSeq +
                          '; it will hold ' + network + ' archiving until the TTL expires: ' + (e && e.message));
         }
     }
@@ -5604,7 +5607,7 @@ class StateAnchorPublisher {
         try {
             await this.db.deleteAnchorPublishedArchive(String(network), Number(batchSeq));
         } catch(e){
-            console.warn('StateAnchorPublisher: could not withdraw the archive broadcast intent for batch ' +
+            logger.warn('StateAnchorPublisher: could not withdraw the archive broadcast intent for batch ' +
                          batchSeq + '; it will hold ' + network + ' archiving until the TTL expires: ' +
                          (e && e.message));
         }
@@ -5663,7 +5666,7 @@ class StateAnchorPublisher {
         deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
         if(deleted > 0){
             this.anchorMarkersPruned += deleted;
-            console.log('StateAnchorPublisher: anchor-marker retention pruned ' + deleted +
+            logger.info('StateAnchorPublisher: anchor-marker retention pruned ' + deleted +
                         ' confirmed marker row(s) older than ' + windowSec + 's (intent-only rows, which are ' +
                         'the ambiguous-send record, are never pruned)');
         }
@@ -5677,7 +5680,7 @@ class StateAnchorPublisher {
         if(!this.db || !this.anchorMarkerRetentionMs) return;
         this._retentionSweep = this.pruneAnchorMarkers()
             .catch(e => {
-                console.warn('StateAnchorPublisher: anchor-marker retention sweep failed ' +
+                logger.warn('StateAnchorPublisher: anchor-marker retention sweep failed ' +
                              '(the marker tables keep growing until it succeeds): ' + (e && e.message));
                 return 0;
             });
@@ -5700,7 +5703,7 @@ class StateAnchorPublisher {
             this._lastBalanceAt = Date.now();
         }
         if(balance !== null && balance < this.lowBalanceThreshold)
-            console.warn('StateAnchorPublisher: DOGE balance LOW (' + Number(balance).toFixed(4) + ' DOGE)');
+            logger.warn('StateAnchorPublisher: DOGE balance LOW (' + Number(balance).toFixed(4) + ' DOGE)');
         return balance;
     }
 }

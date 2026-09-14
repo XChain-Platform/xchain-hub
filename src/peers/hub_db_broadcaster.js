@@ -34,6 +34,9 @@ const { admitMarginBlocks } = require('../mirror_admission_activation.js');
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
 const { bigIntReplacer } = require('../lib/bigint_replacer.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // ---------------------------------------------------------------------------
 // The per-table per-chain admission height watermark
@@ -471,7 +474,7 @@ class HubDbBroadcaster {
         if (this._admissionTimer) return true;
         let tick = () => {
             this.sampleAdmission().catch((e) =>
-                console.error('HubDbBroadcaster: admission watermark sample failed:', e && e.message ? e.message : e));
+                logger.error(nodeUtil.format('HubDbBroadcaster: admission watermark sample failed:', e && e.message ? e.message : e)));
         };
         this._admissionTimer = setInterval(tick, this.admissionSampleMs);
         if (this._admissionTimer.unref) this._admissionTimer.unref();
@@ -494,9 +497,9 @@ class HubDbBroadcaster {
             if (this.db && typeof this.db.getAdmissionWatermarkFloor === 'function') {
                 try { w.setFloor(await this.db.getAdmissionWatermarkFloor(hub.network)); }
                 catch (e) {
-                    console.warn('HubDbBroadcaster: could not read the admission watermark floor; this hub '
+                    logger.warn(nodeUtil.format('HubDbBroadcaster: could not read the admission watermark floor; this hub '
                         + 'publishes no heights until its own tip observations age past one round window:',
-                        e && e.message ? e.message : e);
+                        e && e.message ? e.message : e));
                 }
             }
         }
@@ -518,8 +521,8 @@ class HubDbBroadcaster {
         if (this.db && typeof this.db.saveAdmissionWatermarkFloor === 'function') {
             try { await this.db.saveAdmissionWatermarkFloor(hub.network, w.heights()); }
             catch (e) {
-                console.warn('HubDbBroadcaster: could not persist the admission watermark floor; a restart '
-                    + 'will republish nothing for one round window:', e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('HubDbBroadcaster: could not persist the admission watermark floor; a restart '
+                    + 'will republish nothing for one round window:', e && e.message ? e.message : e));
             }
         }
     }
@@ -538,7 +541,7 @@ class HubDbBroadcaster {
             if (stats.maxGapMs === null || gapMs > stats.maxGapMs) stats.maxGapMs = gapMs;
             if (gapMs > this.watermarkLateThresholdMs) {
                 stats.lateTicks++;
-                console.warn('HubDbBroadcaster: watermark heartbeat late (' + gapMs + 'ms since previous, interval '
+                logger.warn('HubDbBroadcaster: watermark heartbeat late (' + gapMs + 'ms since previous, interval '
                     + this.watermarkIntervalMs + 'ms, late ticks ' + stats.lateTicks + ')');
             }
         }
@@ -625,7 +628,7 @@ class HubDbBroadcaster {
         ws.on('close', () => this.removeSubscriber(ws));
         ws.on('error', () => this.removeSubscriber(ws));
 
-        console.log('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
+        logger.info('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
 
         let maxIds = {};
         if (this.db) {
@@ -706,7 +709,7 @@ class HubDbBroadcaster {
                 ipSet.delete(ws);
                 if (ipSet.size === 0) this.ipConnections.delete(ip);
             }
-            console.log('HubDbBroadcaster: subscriber removed (' + this.subscribers.size + ' remaining)');
+            logger.info('HubDbBroadcaster: subscriber removed (' + this.subscribers.size + ' remaining)');
         }
     }
 
@@ -728,7 +731,7 @@ class HubDbBroadcaster {
             dropped++;
         }
         if (dropped > 0)
-            console.warn('HubDbBroadcaster: dropped ' + dropped + ' subscriber(s) for resync (' + why + ')');
+            logger.warn('HubDbBroadcaster: dropped ' + dropped + ' subscriber(s) for resync (' + why + ')');
         return dropped;
     }
 
@@ -744,7 +747,7 @@ class HubDbBroadcaster {
         if (this.admissionWatermark && event) {
             let late = this.admissionWatermark.isLateFinalization(event.table, event.row);
             if (late) {
-                console.error('HubDbBroadcaster: REFUSING to broadcast a ' + event.table + ' row admissible at '
+                logger.error('HubDbBroadcaster: REFUSING to broadcast a ' + event.table + ' row admissible at '
                     + late.admitBlock + ' on ' + late.chain + '; the height watermark already claims '
                     + late.watermark + ' there (' + late.reason + '), so the mirror has been told that round '
                     + 'terminated. Broadcasting it would bind a row below a certified height.');
@@ -757,7 +760,7 @@ class HubDbBroadcaster {
             // DDL change it has not migrated yet, rather than silently dropping columns.
             message = JSON.stringify({ type: 'row:inserted', table: event.table, row: event.row, schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer);
         } catch (e) {
-            console.error('HubDbBroadcaster: serialization error:', e);
+            logger.error(nodeUtil.format('HubDbBroadcaster: serialization error:', e));
             return;
         }
         for (let ws of this.subscribers) {
@@ -798,7 +801,7 @@ class HubDbBroadcaster {
                 payload.retraction_signatures = event.retraction_signatures;
             message = JSON.stringify(payload, bigIntReplacer);
         } catch (e) {
-            console.error('HubDbBroadcaster: serialization error:', e);
+            logger.error(nodeUtil.format('HubDbBroadcaster: serialization error:', e));
             return;
         }
         for (let ws of this.subscribers) {
@@ -817,7 +820,7 @@ class HubDbBroadcaster {
             ws._hubBuffered = 0;
         }
         if (ws._hubBuffered > this.maxBufferedMessages) {
-            console.log('HubDbBroadcaster: subscriber backpressure exceeded, closing');
+            logger.info('HubDbBroadcaster: subscriber backpressure exceeded, closing');
             try { ws.close(1008, 'Backpressure'); } catch (e) { /* ignore */ }
             this.removeSubscriber(ws);
             return false;
@@ -825,7 +828,7 @@ class HubDbBroadcaster {
         try {
             ws.send(message);
         } catch (e) {
-            console.warn('HubDbBroadcaster: send error:', e);
+            logger.warn(nodeUtil.format('HubDbBroadcaster: send error:', e));
             this.removeSubscriber(ws);
             return false;
         }

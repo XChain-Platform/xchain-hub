@@ -32,6 +32,9 @@ const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admiss
 const { roundBand, describeImplausibleRound } = require('./oracle_round_band.js');
 const { canonicalPrice } = require('./canonical_price.js');
 const { noteRoundLost } = require('../consensus/diagnostics');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Burned round numbers per scheduler gap that also get a skipped row; a wider gap
 // is an outage, recorded once by range rather than as a flood of rows on return.
@@ -304,7 +307,7 @@ class OracleRound {
         // Start the round timer; it handles both the first run and the aligned cadence
         this._startRoundTimer();
 
-        console.log('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
+        logger.info('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
     }
 
     // Rehydrate consecutiveSkippedRounds and lastSuccessfulRoundTime from
@@ -336,7 +339,7 @@ class OracleRound {
         } catch (err) {
             // Non-fatal: a hydration failure must not block oracle startup. Leave the
             // constructor defaults (0 / null) in place and continue.
-            console.warn('Oracle: failed to hydrate freshness counters on start:', err);
+            logger.warn(nodeUtil.format('Oracle: failed to hydrate freshness counters on start:', err));
         }
     }
 
@@ -377,12 +380,12 @@ class OracleRound {
             let btcBlockTime   = this.currentBtcBlockTime;
             await Promise.allSettled(inFlight.map(round => {
                 noteRoundLost({ phase: 'shutdown', round, cause: 'stopped_before_finalization' });
-                console.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
+                logger.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
                 if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return null;
                 return this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                     'hub stopped before finalization').catch(err =>
-                    console.error('Oracle: Failed to store skipped round ' + round + ' at stop:',
-                        err && err.message ? err.message : err));
+                    logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ' at stop:',
+                        err && err.message ? err.message : err)));
             }));
         }
     }
@@ -455,7 +458,7 @@ class OracleRound {
         } catch (err) {
             // Non-fatal: diagnostics still return the in-memory state if the read fails
             skippedRoundsReadError = true;
-            console.warn('Oracle: failed to read skipped rounds for diagnostics:', err);
+            logger.warn(nodeUtil.format('Oracle: failed to read skipped rounds for diagnostics:', err));
         }
         try {
             // Per-pair drops (item #180): pairs skipped inside a round that
@@ -466,7 +469,7 @@ class OracleRound {
             droppedPairs = rows.map(r => ({ round: Number(r.round_number), coinPair: r.coin_pair }));
         } catch (err) {
             droppedPairsReadError = true;
-            console.warn('Oracle: failed to read per-pair drops for diagnostics:', err);
+            logger.warn(nodeUtil.format('Oracle: failed to read per-pair drops for diagnostics:', err));
         }
 
         // Rounds ALREADY STORED outside the plausible band.
@@ -493,7 +496,7 @@ class OracleRound {
                 // Same additive-marker contract as the two reads above: without it a
                 // failed read serves the same empty array as a clean table.
                 implausibleRoundsReadError = true;
-                console.warn('Oracle: failed to read out-of-band rounds for diagnostics:', err);
+                logger.warn(nodeUtil.format('Oracle: failed to read out-of-band rounds for diagnostics:', err));
             }
             // EDGE-LATCHED on the highest out-of-band round, same posture as
             // _submissionsPruneDark: diagnostics are polled, so an unlatched warn
@@ -501,7 +504,7 @@ class OracleRound {
             // A NEW out-of-band round (a higher one) re-announces itself.
             if (implausibleRounds.length && implausibleRounds[0] !== this._lastImplausibleRoundWarned) {
                 this._lastImplausibleRoundWarned = implausibleRounds[0];
-                console.warn('Oracle: price_snapshots carries ' + implausibleRounds.length +
+                logger.warn('Oracle: price_snapshots carries ' + implausibleRounds.length +
                              ' round(s) past the plausible band: ' +
                              describeImplausibleRound(implausibleRounds[0], band));
             }
@@ -623,7 +626,7 @@ class OracleRound {
         // (process exit), so every timer-driven round execution catches here.
         const runRound = () => {
             this._executeRound().catch(err =>
-                console.error('OracleRound: round execution error:', err && err.message ? err.message : err));
+                logger.error(nodeUtil.format('OracleRound: round execution error:', err && err.message ? err.message : err)));
         };
 
         let initialDelay = 5000;
@@ -668,7 +671,7 @@ class OracleRound {
     // must not wedge the oracle for the process lifetime.
     async _executeRound() {
         if (this._roundInFlight) {
-            console.warn('Oracle: previous round still in flight; skipping this round tick');
+            logger.warn('Oracle: previous round still in flight; skipping this round tick');
             return;
         }
         this._roundInFlight = true;
@@ -746,9 +749,9 @@ class OracleRound {
                     this.chainTipFetchFailures++;
                     if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
                     if (this.chainTipFetchFailures > 1) {
-                        console.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor');
+                        logger.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor');
                     } else {
-                        console.warn('Oracle: BTC chain tip unavailable; using round number as fallback anchor');
+                        logger.warn('Oracle: BTC chain tip unavailable; using round number as fallback anchor');
                     }
                     this.currentBtcBlockHeight = this.currentRound;
                     this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
@@ -759,9 +762,9 @@ class OracleRound {
             this.chainTipFetchFailures++;
             if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
             if (this.chainTipFetchFailures > 1) {
-                console.error('Oracle: Failed to read BTC chain tip (failure ' + this.chainTipFetchFailures + '):', err);
+                logger.error(nodeUtil.format('Oracle: Failed to read BTC chain tip (failure ' + this.chainTipFetchFailures + '):', err));
             } else {
-                console.warn('Oracle: Failed to read BTC chain tip:', err);
+                logger.warn(nodeUtil.format('Oracle: Failed to read BTC chain tip:', err));
             }
             this.currentBtcBlockHeight = this.currentRound;
             this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
@@ -790,7 +793,7 @@ class OracleRound {
             prices = await this.priceFetcher.fetchPrices();
         } catch (err) {
             this.fetchFailures++;
-            console.error('Oracle: Price fetch failed for round ' + this.currentRound + ':', err);
+            logger.error(nodeUtil.format('Oracle: Price fetch failed for round ' + this.currentRound + ':', err));
             // Still schedule finalization so the round leaves a durable record.
             // If peers gossiped submissions the round can be salvaged; if nobody
             // has prices, OracleConsensus writes a 'skipped' price_snapshots row
@@ -804,7 +807,7 @@ class OracleRound {
         }
 
         if (!prices || prices.length === 0) {
-            console.warn('Oracle: No prices available for round ' + this.currentRound);
+            logger.warn('Oracle: No prices available for round ' + this.currentRound);
             // Same rationale as the fetch-failure path above: record the gap, and
             // let the durable skip write advance the streak.
             this.scheduleFinalization(this.currentRound);
@@ -840,7 +843,7 @@ class OracleRound {
                 // every other pair and the canonical payload stays byte-identical.
                 let { meta, ...wire } = entry;
                 prices.push(wire);
-                console.log('Oracle: derived ' + wire.coinPair + '=' + wire.price +
+                logger.info('Oracle: derived ' + wire.coinPair + '=' + wire.price +
                     ' ' + formatXchainPriceMeta(meta));
             }
         }
@@ -848,7 +851,7 @@ class OracleRound {
         // Count total sources across all pairs
         let totalSources = prices.reduce((sum, p) => sum + p.sources, 0);
 
-        console.log('Oracle: Round ' + this.currentRound + ' - fetched ' + prices.length +
+        logger.info('Oracle: Round ' + this.currentRound + ' - fetched ' + prices.length +
             ' pairs from ' + totalSources + ' source queries');
 
         // Broadcast our submission via gossip
@@ -891,7 +894,7 @@ class OracleRound {
             from: from, to: to, count: count,
             last_executed: from - 1, resumed_at: to + 1
         });
-        console.warn('Oracle: scheduler stepped from round ' + (from - 1) + ' to ' + (to + 1) +
+        logger.warn('Oracle: scheduler stepped from round ' + (from - 1) + ' to ' + (to + 1) +
             ', burning ' + count + ' round number(s) ' + from + '..' + to +
             ' (forward clock step or a tick more than a round late); recording them as skipped');
         if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return;
@@ -900,8 +903,8 @@ class OracleRound {
             let nominalStart = Math.floor((this.epochStart + r * this.roundInterval) / 1000);
             this.oracleConsensus._storeSkippedRound(r, null, nominalStart,
                 'round number skipped by the scheduler (clock step or late tick)').catch(err =>
-                console.error('Oracle: Failed to store scheduler-skipped round ' + r + ':',
-                    err && err.message ? err.message : err));
+                logger.error(nodeUtil.format('Oracle: Failed to store scheduler-skipped round ' + r + ':',
+                    err && err.message ? err.message : err)));
         }
     }
 
@@ -923,7 +926,7 @@ class OracleRound {
                 if (this.chainTipFallbackActive) {
                     let lastGoodTip = this.lastSuccessfulChainTipFetchAt ?? this._startTime;
                     if ((Date.now() - lastGoodTip) > this.roundInterval) {
-                        console.error('Oracle: Skipping finalization for round ' + round +
+                        logger.error('Oracle: Skipping finalization for round ' + round +
                             '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
                             's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
                         // _storeSkippedRound emits 'round:skipped' once the row is
@@ -932,7 +935,7 @@ class OracleRound {
                         // had already failed.
                         this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                             'chain-tip fallback active, anchor unreliable').catch(err => {
-                            console.error('Oracle: Failed to store skipped round ' + round + ':', err.message);
+                            logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
                             noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
                                 err: err && err.message ? err.message : String(err) });
                         });
@@ -940,12 +943,12 @@ class OracleRound {
                     }
                 }
                 this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
-                    console.error('Oracle: Finalization error for round ' + round + ':', err.message);
+                    logger.error(nodeUtil.format('Oracle: Finalization error for round ' + round + ':', err.message));
                     noteRoundLost({ phase: 'finalize', round, cause: 'finalize_rejected',
                         err: err && err.message ? err.message : String(err) });
                 });
             } catch (err) {
-                console.error('Oracle: Finalization threw for round ' + round + ':', err && err.message ? err.message : err);
+                logger.error(nodeUtil.format('Oracle: Finalization threw for round ' + round + ':', err && err.message ? err.message : err));
                 noteRoundLost({ phase: 'finalize', round, cause: 'finalize_threw',
                     err: err && err.message ? err.message : String(err) });
             }
@@ -984,7 +987,7 @@ class OracleRound {
         let elapsed = Date.now() - this.roundStartTime;
         if (round === this.currentRound && elapsed > this.submissionWindow) {
             // Late submission: still record it but log
-            console.log('Oracle: Late submission from ' + envelope.sender + ' for round ' + round);
+            logger.info('Oracle: Late submission from ' + envelope.sender + ' for round ' + round);
         }
 
         // Initialize submission map for this round if needed
@@ -1008,7 +1011,7 @@ class OracleRound {
         if (senderPubkey) {
             for (let sub of roundSubs.values()) {
                 if (sub && sub.pubkey === senderPubkey) {
-                    console.warn('Oracle: dropping duplicate submission for round ' + round +
+                    logger.warn('Oracle: dropping duplicate submission for round ' + round +
                         ' from ' + envelope.sender + ': pubkey ' + senderPubkey.substring(0, 16) +
                         '... already submitted under another sender');
                     return;
@@ -1018,7 +1021,7 @@ class OracleRound {
 
         // Enforce max submissions per round
         if (roundSubs.size >= this.maxSubmissionsPerRound) {
-            console.warn('Oracle: Max submissions per round reached for round ' + round + '; dropping from ' + envelope.sender);
+            logger.warn('Oracle: Max submissions per round reached for round ' + round + '; dropping from ' + envelope.sender);
             return;
         }
 
@@ -1047,10 +1050,10 @@ class OracleRound {
         // degrading pair coverage; a zero-valid drop masks the true cause of a
         // below-minimum-submissions round skip.
         if (validPrices.length < prices.length)
-            console.warn('Oracle: dropped ' + (prices.length - validPrices.length) + ' invalid/non-canonical pair(s) from '
+            logger.warn('Oracle: dropped ' + (prices.length - validPrices.length) + ' invalid/non-canonical pair(s) from '
                 + envelope.sender + ' for round ' + round);
         if (validPrices.length === 0) {
-            console.warn('Oracle: submission from ' + envelope.sender + ' for round ' + round
+            logger.warn('Oracle: submission from ' + envelope.sender + ' for round ' + round
                 + ' had zero valid pairs (of ' + prices.length + '); discarding entire submission');
             return;
         }
@@ -1065,7 +1068,7 @@ class OracleRound {
             pubkey:    senderPubkey
         });
 
-        console.log('Oracle: Received submission from ' + envelope.sender +
+        logger.info('Oracle: Received submission from ' + envelope.sender +
             ' for round ' + round + ' (' + roundSubs.size + ' total)');
 
         // Resolve sender's validator pubkey. Drop the DB persist if unresolved:
@@ -1112,10 +1115,10 @@ class OracleRound {
                 return;
             }
         } catch (e) {
-            console.warn('Oracle: stake-weight lookup failed for sender ' + envelope.sender +
+            logger.warn('Oracle: stake-weight lookup failed for sender ' + envelope.sender +
                 ' on round ' + round + ': ' + ((e && e.message) ? e.message : e));
         }
-        console.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
+        logger.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
             ' (call syncvalidators to register the peer)');
     }
 
@@ -1146,7 +1149,7 @@ class OracleRound {
         for (let r of results) {
             if (r.status === 'rejected') {
                 failed++;
-                console.error('Oracle: Error persisting submission:', r.reason);
+                logger.error(nodeUtil.format('Oracle: Error persisting submission:', r.reason));
             }
         }
         if (failed > 0) {
@@ -1178,7 +1181,7 @@ class OracleRound {
         let result = await this.db.deleteOracleSubmission(cutoff);
         let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
         if (deleted > 0) {
-            console.log('Oracle submissions retention: pruned ' + deleted +
+            logger.info('Oracle submissions retention: pruned ' + deleted +
                 ' rows older than round ' + cutoff + ' (keep ' +
                 this.submissionsRetentionRounds + ' rounds)');
         }
@@ -1187,7 +1190,7 @@ class OracleRound {
         // evidence that a dark DB is reachable again.
         if (this._submissionsPruneDark) {
             this._submissionsPruneDark = false;
-            console.warn('Oracle submissions retention: prune recovered at round ' +
+            logger.warn('Oracle submissions retention: prune recovered at round ' +
                 this.currentRound + ' (' + this.submissionsPruneFailures +
                 ' failure(s) since start)');
         }
@@ -1207,7 +1210,7 @@ class OracleRound {
         this.lastSubmissionsPruneFailureRound = round != null ? round : this.currentRound;
         if (this._submissionsPruneDark) return;
         this._submissionsPruneDark = true;
-        console.warn('Oracle submissions retention: prune FAILED at round ' +
+        logger.warn('Oracle submissions retention: prune FAILED at round ' +
             this.lastSubmissionsPruneFailureRound +
             '; the oracle_submissions audit table will grow until it recovers: ' +
             ((err && err.message) ? err.message : err));

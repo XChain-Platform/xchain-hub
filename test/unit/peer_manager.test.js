@@ -304,8 +304,14 @@ describe('PeerManager', function () {
             identity = new ValidatorIdentity(keypair.privkeyHex);
             mockWs   = { _peerAddr: 'ws://peer:10001', _remoteIp: '203.0.113.9', send: sinon.stub() };
 
+            // Observed through the logger, which is where the rejection line
+            // goes now that PeerManager no longer calls console. The stub calls
+            // through rather than swallowing, because the PEER_REJECT record
+            // rides the same method and rejects() reads it off the sink.
             warnings = [];
-            sinon.stub(console, 'warn').callsFake((m) => warnings.push(String(m)));
+            const log = observability.getLogger();
+            const through = log.warn.bind(log);
+            sinon.stub(log, 'warn').callsFake((m, f) => { warnings.push(String(m)); return through(m, f); });
         });
 
         afterEach(function () {

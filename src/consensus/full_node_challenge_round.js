@@ -62,6 +62,9 @@ const activation        = require('../lib/fullnode_activation.js');
 // parameters. See the constructor.
 const coins             = require('../coins/index.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
 const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';
@@ -175,7 +178,7 @@ class FullNodeChallengeRound {
                                 .filter(p => /^[0-9a-fA-F]{64}$/.test(String(p)))
                                 .map(p => String(p).toLowerCase()));
         if(this.genesis.size !== rawGenesis.length)
-            console.warn('FullNodeChallengeRound: ignored ' + (rawGenesis.length - this.genesis.size) +
+            logger.warn('FullNodeChallengeRound: ignored ' + (rawGenesis.length - this.genesis.size) +
                 ' of ' + rawGenesis.length + ' GENESIS_VERIFIERS entries (not a 64-hex Ed25519 pubkey, ' +
                 'or a duplicate); using ' + this.genesis.size + '. The verifier quorum is computed over ' +
                 'the surviving set.');
@@ -267,7 +270,7 @@ class FullNodeChallengeRound {
 
     async start(){
         if(!this.enabled){
-            console.log('FullNodeChallengeRound: disabled');
+            logger.info('FullNodeChallengeRound: disabled');
             return;
         }
         if(this.peerManager) this.peerManager.on('message', this._handler);
@@ -276,10 +279,10 @@ class FullNodeChallengeRound {
         // the spend window is reloaded here and not lazily.
         this.loadSpendLog();
         this.spendGuard.persistTo();
-        let tick = async () => { try { await this._tick(); } catch(e){ console.warn('FullNodeChallengeRound tick:', e && e.message ? e.message : e); } };
+        let tick = async () => { try { await this._tick(); } catch(e){ logger.warn(nodeUtil.format('FullNodeChallengeRound tick:', e && e.message ? e.message : e)); } };
         this._timer = setInterval(tick, this.pollMs);
         await tick();
-        console.log('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
+        logger.info('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
                     ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ', tier=' +
                     activation.describeActivation(this.cfg.FULLNODE) + ', ' +
                     this._committedEpochs.size + ' epoch(s) already spent per the spend log)');
@@ -353,7 +356,7 @@ class FullNodeChallengeRound {
                     if(!st.closed || rank > st.leadRank){
                         st.closed = true;
                         st.leadRank = rank;
-                        this.closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+                        this.closeCollection(e).catch(err => logger.warn(nodeUtil.format('FullNodeChallengeRound close:', err && err.message)));
                     }
                 }
                 if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
@@ -387,7 +390,7 @@ class FullNodeChallengeRound {
         // broadcasts a verdict; a later tick re-attempts once the indexer recovers
         // (while still inside the verdict-accept window).
         if(eligible === null){
-            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (eligible-verifier set unresolved; abstaining rather than running on a genesis-only subset)');
+            logger.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (eligible-verifier set unresolved; abstaining rather than running on a genesis-only subset)');
             return;
         }
         let claimants = await this.claimantSet(epoch);
@@ -395,7 +398,7 @@ class FullNodeChallengeRound {
         // epoch alongside the eligible-set gate above, rather than lock an empty
         // (full_node, epoch) universe that diverges from hubs whose snapshot resolved.
         if(claimants === null){
-            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (claimant set unresolved; abstaining rather than locking an empty full_node set)');
+            logger.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (claimant set unresolved; abstaining rather than locking an empty full_node set)');
             return;
         }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
@@ -438,11 +441,11 @@ class FullNodeChallengeRound {
                     });
                 }
             } catch(e){
-                console.warn('FullNodeChallengeRound: own answer failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('FullNodeChallengeRound: own answer failed (epoch ' + epoch + '):', e && e.message ? e.message : e));
             }
         }
 
-        console.log('FullNodeChallengeRound: epoch=' + epoch + ' challenge=' + challengeId.substring(0,16) +
+        logger.info('FullNodeChallengeRound: epoch=' + epoch + ' challenge=' + challengeId.substring(0,16) +
                     '... target=' + target + ' eligible=' + eligible.size + ' claimants=' + claimants.size +
                     ' leader=' + (this._isLeader(state, myPubkey) ? 'me' : 'peer'));
 
@@ -629,7 +632,7 @@ class FullNodeChallengeRound {
         // returning, so the reconstructed round stops re-entering every incoming sig.
         if(this._committedEpochs.has(epoch)){
             state.finalized = true;
-            console.warn('FullNodeChallengeRound: epoch ' + epoch + ' already carries a committed verdict spend ' +
+            logger.warn('FullNodeChallengeRound: epoch ' + epoch + ' already carries a committed verdict spend ' +
                          'in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
             return;
         }
@@ -644,7 +647,7 @@ class FullNodeChallengeRound {
         // claim the round. Warned once, then the round simply stays observe-only.
         let chainMismatch = this.signerChainMismatch();
         if(chainMismatch){
-            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; logger.warn(chainMismatch); }
             return;
         }
 
@@ -655,7 +658,7 @@ class FullNodeChallengeRound {
         // paused publisher never claims-then-reverts, and never spends on the leader
         // path (the enabled kill-switch only gated start(), not this send).
         let g = this.spendGuard.check();
-        if(!g.ok){ console.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
+        if(!g.ok){ logger.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
 
         // RESERVE on top of that check: broadcastVerdict is AWAITED, and the pure
         // predicate pair check()/record() leaves a window in which every epoch that
@@ -667,7 +670,7 @@ class FullNodeChallengeRound {
         // lib/idempotent_broadcast.broadcastOnce use.
         let spendToken = this.spendGuard.reserve();
         if(!spendToken){
-            console.warn('FullNodeChallengeRound: ' + this.spendGuard.noteBlocked() +
+            logger.warn('FullNodeChallengeRound: ' + this.spendGuard.noteBlocked() +
                          ' (epoch ' + epoch + '); deferring verdict broadcast');
             return;
         }
@@ -692,7 +695,7 @@ class FullNodeChallengeRound {
             // Nothing was broadcast, so the reservation goes back; keeping it would
             // charge the window for a verdict this tick deliberately did not send.
             this.spendGuard.release(spendToken);
-            console.error('FullNodeChallengeRound: spend-audit path unwritable at ' + this.spendLogPath +
+            logger.error('FullNodeChallengeRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the verdict broadcast for epoch ' + epoch +
                           ' rather than spending a BTC fee with no durable record');
             return;
@@ -715,7 +718,7 @@ class FullNodeChallengeRound {
             let leadRank = Number(state.leadRank) || 0;
             this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid, leadRank });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
-            console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
+            logger.info('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : '') +
                         (leadRank > 0
                             ? ' [FAILOVER: broadcast at backup rank ' + leadRank + ' of ' + state.eligible.size +
@@ -741,8 +744,8 @@ class FullNodeChallengeRound {
                 this.spendGuard.commit(spendToken);
                 this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
-                console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
-                             '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
+                             '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
             } else {
                 // Definitive: nothing left this process, so the budget goes back and a
                 // later tick can retry inside the same window.
@@ -750,7 +753,7 @@ class FullNodeChallengeRound {
                 this._recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 state.finalized = false;   // definitive failure; unlock so a later sig/tick retries
-                console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+                logger.warn(nodeUtil.format('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e));
             }
         }
     }
@@ -774,8 +777,8 @@ class FullNodeChallengeRound {
             }
             return true;
         } catch (e) {
-            console.error('FullNodeChallengeRound: failed to write spend-audit record to ' +
-                          this.spendLogPath + ':', e && e.message ? e.message : e);
+            logger.error(nodeUtil.format('FullNodeChallengeRound: failed to write spend-audit record to ' +
+                          this.spendLogPath + ':', e && e.message ? e.message : e));
             return false;
         }
     }
@@ -897,7 +900,7 @@ class FullNodeChallengeRound {
                 let now = Date.now();
                 if (now - this._truncWarnAt > TRUNC_WARN_THROTTLE_MS){
                     this._truncWarnAt = now;
-                    console.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
+                    logger.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
                         'verified-full-node set at epoch ' + epoch + ' (' +
                         ((verified.validators && verified.validators.length) || 0) + ' verifier(s) returned): it hit ' +
                         'VALIDATOR_QUERY_LIMIT, so the eligible set is CAPPED below the true verifier universe and the ' +
@@ -914,9 +917,9 @@ class FullNodeChallengeRound {
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                console.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+                logger.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
             else
-                console.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+                logger.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
             return null;
         }
         return set;
@@ -943,7 +946,7 @@ class FullNodeChallengeRound {
         try {
             let snap = await this.capabilitySnapshot.getSnapshot('full_node', epoch);
             if(!snap || !Array.isArray(snap.validators)){
-                console.warn('FullNodeChallengeRound: claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
+                logger.warn('FullNodeChallengeRound: claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
                 return null;
             }
             for(let v of snap.validators){
@@ -953,9 +956,9 @@ class FullNodeChallengeRound {
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                console.warn('FullNodeChallengeRound: claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
+                logger.warn('FullNodeChallengeRound: claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
             else
-                console.warn('FullNodeChallengeRound: claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
+                logger.warn('FullNodeChallengeRound: claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
             return null;
         }
         return set;
@@ -967,7 +970,7 @@ class FullNodeChallengeRound {
         // UTXO, so a wrong-chain wiring costs nothing.
         let chainMismatch = this.signerChainMismatch();
         if(chainMismatch){
-            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; logger.warn(chainMismatch); }
             throw new Error(chainMismatch);
         }
         if(this.broadcastFn) return await this.broadcastFn(wire);

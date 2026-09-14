@@ -25,6 +25,9 @@ const ar     = require('../anchor_reward_activation.js');
 const ark    = require('./anchor_reward_key.js');
 const bcmath = require('../bcmath.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 class RewardTracker {
 
@@ -79,10 +82,10 @@ class RewardTracker {
             // createValidatorRoundReward is an INSERT IGNORE, so concurrent writes from
             // multiple hubs collapse to one row per (validator, round).
             await this.db.createValidatorRoundReward(pubkey, round, perValidator)
-                .catch(e => console.error('Error recording reward for ' + pubkey + ':', e));
+                .catch(e => logger.error(nodeUtil.format('Error recording reward for ' + pubkey + ':', e)));
         }
 
-        console.log('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
+        logger.info('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
     // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
@@ -192,7 +195,7 @@ class RewardTracker {
         // Cross-pubkey dedup guard: inspect any rows already holding this logical
         // anchor (round_number, reward_type, qualifier) regardless of pubkey.
         let existing = await this.db.findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier)
-            .catch(e => { console.error('Error reading anchor reward for ' + lcPubkey + ':', e); return null; });
+            .catch(e => { logger.error(nodeUtil.format('Error reading anchor reward for ' + lcPubkey + ':', e)); return null; });
         existing = existing || [];
 
         if (existing.some(r => String(r.validator_pubkey).toLowerCase() === lcPubkey)) return;   // already ours (idempotent)
@@ -207,13 +210,13 @@ class RewardTracker {
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
             // supersedes the local-only incumbent(s); every hub makes the same call.
             await this.db.deleteValidatorReward(roundNumber, rewardType, qualifier)
-                .catch(e => console.error('Error consolidating anchor reward for ' + lcPubkey + ':', e));
+                .catch(e => logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)));
         }
 
         await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
-            .catch(e => console.error('Error recording anchor reward for ' + lcPubkey + ':', e));
+            .catch(e => logger.error(nodeUtil.format('Error recording anchor reward for ' + lcPubkey + ':', e)));
 
-        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
+        logger.info('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
         // The row above is hub-local, and that is the end of it: the hub never writes a
         // reward anywhere else. Every anchor reward is derived from on-chain bytes by the
@@ -241,7 +244,7 @@ class RewardTracker {
                 let url = await this.hub._resolveBtcIndexerUrl();
                 if (url) return String(url);
             } catch (err) {
-                console.warn('Rewards: BTC indexer URL resolution via hub failed:', err && err.message);
+                logger.warn(nodeUtil.format('Rewards: BTC indexer URL resolution via hub failed:', err && err.message));
             }
         }
         return this.btcIndexerApiUrl || '';
@@ -263,7 +266,7 @@ class RewardTracker {
             let result = res && res.data ? res.data.result : null;
             return (result && result.source) ? String(result.source) : null;
         } catch (err) {
-            console.warn('Rewards: source resolution failed for ' + String(pubkey).substring(0, 16) + '…:', err && err.message);
+            logger.warn(nodeUtil.format('Rewards: source resolution failed for ' + String(pubkey).substring(0, 16) + '…:', err && err.message));
             return null;
         }
     }

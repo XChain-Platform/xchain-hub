@@ -63,6 +63,9 @@ const { allCanonicalInts }   = require('../lib/canonical_int.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
 const coins                  = require('../coins');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -230,7 +233,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         });
         this.transferConsensus.on('match:finalized', (ev) => {
             this.writeFinalizedTransfer(ev).catch(err =>
-                console.error('CrossChainBridge: write finalized transfer error:', err && err.message));
+                logger.error(nodeUtil.format('CrossChainBridge: write finalized transfer error:', err && err.message)));
         });
         this.transferConsensus.on('match:abandoned', (ev) => {
             this.releaseSourceLegGuard(String(ev.matchId));
@@ -250,7 +253,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         });
         this.policyConsensus.on('match:finalized', (ev) => {
             this.writeFinalizedPolicy(ev).catch(err =>
-                console.error('CrossChainBridge: write finalized policy snapshot error:', err && err.message));
+                logger.error(nodeUtil.format('CrossChainBridge: write finalized policy snapshot error:', err && err.message)));
         });
         this.policyConsensus.on('match:abandoned', (ev) => {
             this._inflight.delete(String(ev.matchId));
@@ -275,17 +278,17 @@ class CrossChainBridgeEngine extends EventEmitter {
         }
         for(const coin of Object.keys(this.indexers || {})){
             if(!this.indexers[coin] || !this.indexers[coin].url)
-                console.warn('CrossChainBridge: no indexer URL for chain ' + coin + ' (set ' + coin +
+                logger.warn('CrossChainBridge: no indexer URL for chain ' + coin + ' (set ' + coin +
                              '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); ' +
                              'this chain is skipped every tick until configured');
         }
         await this.transferConsensus.start();
         await this.policyConsensus.start();
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => console.error('CrossChainBridge: poll error:', err && err.message));
+            this._poll().catch(err => logger.error(nodeUtil.format('CrossChainBridge: poll error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
-        console.log('CrossChainBridge: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
+        logger.info('CrossChainBridge: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
                     ALLOWED_CHAINS.map(c => c + '=' + this.confirmations[c]).join(' ') + ')');
     }
 
@@ -314,7 +317,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(typeof fn !== 'function'){
             if(!this._idleLogged[name]){
                 this._idleLogged[name] = true;
-                console.warn('CrossChainBridge: the ' + name + ' activation module is not readable in this hub; ' +
+                logger.warn('CrossChainBridge: the ' + name + ' activation module is not readable in this hub; ' +
                              'the engine stays idle for that family (fail closed) until the flag-day twin is vendored');
             }
             return false;
@@ -344,7 +347,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             for(let coin of ALLOWED_CHAINS){
                 if(!this.indexers[coin] || !this.indexers[coin].url) continue;
                 try { await this.pollPendingTransfers(coin, snapshotBlock, pending); }
-                catch(e){ console.warn('CrossChainBridge: pending poll failed on ' + coin + ': ' + (e && e.message)); }
+                catch(e){ logger.warn('CrossChainBridge: pending poll failed on ' + coin + ': ' + (e && e.message)); }
             }
             // Swap the in-flight view in only after a full sweep, so a chain that failed
             // mid-pass cannot drop its legs out of the invariant and turn a healthy read
@@ -352,7 +355,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             this._pendingInFlight = pending;
             if(this.gateActive('policy', snapshotBlock, 'BTC')){
                 try { await this.pollPolicySnapshots(snapshotBlock); }
-                catch(e){ console.warn('CrossChainBridge: policy poll failed: ' + (e && e.message)); }
+                catch(e){ logger.warn('CrossChainBridge: policy poll failed: ' + (e && e.message)); }
             }
         } finally {
             this._polling = false;
@@ -383,7 +386,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             // and the destination has not minted it.
             this.recordPending(pendingOut, t);
             try { await this.maybeFinalizeTransfer(coin, network, latest, snapshotBlock, t); }
-            catch(e){ console.warn('CrossChainBridge: transfer round failed for ' + coin + ':' +
+            catch(e){ logger.warn('CrossChainBridge: transfer round failed for ' + coin + ':' +
                                    String(t && t.src_action_index) + ': ' + (e && e.message)); }
         }
     }
@@ -437,7 +440,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(this._earlyReturnLogged.size >= 10000)
             this._earlyReturnLogged.delete(this._earlyReturnLogged.values().next().value);
         this._earlyReturnLogged.add(key);
-        console.log('CrossChainBridge: not proposing ' + leg + ' (' + reason + ')');
+        logger.info('CrossChainBridge: not proposing ' + leg + ' (' + reason + ')');
     }
 
     async maybeFinalizeTransfer(coin, network, latestBlock, snapshotBlock, t){
@@ -582,7 +585,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         let network = this.network;
         for(let pair of await this.policyPairs(network)){
             try { await this.maybeSnapshotPolicy(pair, network, snapshotBlock); }
-            catch(e){ console.warn('CrossChainBridge: policy round failed for ' + pair.origin_chain + ':' +
+            catch(e){ logger.warn('CrossChainBridge: policy round failed for ' + pair.origin_chain + ':' +
                                    pair.tick + ': ' + (e && e.message)); }
         }
     }
@@ -617,7 +620,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // stays in force and the watch raises WARN, so an oversized list can never be
         // materialized onto a copy but also never wedges the tick's existing policy.
         if(shaped.oversized){
-            console.warn('CrossChainBridge: declining to sign a policy snapshot for ' + originChain + ':' +
+            logger.warn('CrossChainBridge: declining to sign a policy snapshot for ' + originChain + ':' +
                          pair.tick + ' (a list exceeds XPOLICY_MAX_MEMBERS=' + XPOLICY_MAX_MEMBERS +
                          '); the previous snapshot stays in force');
             return;
@@ -627,7 +630,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // refused by every destination. Recompute rather than trust the read.
         let hash = this._policyHash(shaped.allow, shaped.block, shaped.sleeping);
         if(String(policy.policy_hash || '').toLowerCase() !== hash){
-            console.warn('CrossChainBridge: gettokenpolicy for ' + originChain + ':' + pair.tick +
+            logger.warn('CrossChainBridge: gettokenpolicy for ' + originChain + ':' + pair.tick +
                          ' returned a policy_hash that does not match its own membership; not signing');
             return;
         }
@@ -779,7 +782,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             map = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
                 ? await this.hub.resolveAdmitBlocks(table, readSet) : null;
             if(!map){
-                console.error('CrossChainBridge: refusing to open the round for ' + label +
+                logger.error('CrossChainBridge: refusing to open the round for ' + label +
                     ' at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' +
                     readSet.join(' / '));
                 return false;
@@ -1026,7 +1029,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             inserted = await this.db.insertBridgeTransfer(row);
         }
         catch(e){
-            console.error('CrossChainBridge: finalized transfer write FAILED (fail-closed; deferring ' +
+            logger.error('CrossChainBridge: finalized transfer write FAILED (fail-closed; deferring ' +
                           String(row.transfer_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.defer(row.transfer_id, this.transferConsensus);
             return;
@@ -1034,7 +1037,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         this.releaseSourceLegGuard(row.transfer_id);
         if(!inserted) return;
         await this.mirrorRow('bridge_transfers', 'transfer_id', row.transfer_id);
-        console.log('CrossChainBridge: finalized transfer ' + String(row.transfer_id).substring(0, 16) + '... ' +
+        logger.info('CrossChainBridge: finalized transfer ' + String(row.transfer_id).substring(0, 16) + '... ' +
                     row.src_chain + ':' + row.src_action_index + ' -> ' + row.dest_chain + ' ' +
                     row.amount + ' ' + row.tick + ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('transfer:finalized', { transferId: row.transfer_id });
@@ -1049,7 +1052,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         let inserted;
         try { inserted = await this.db.insertPolicySnapshot(row); }
         catch(e){
-            console.error('CrossChainBridge: finalized policy snapshot write FAILED (fail-closed; deferring ' +
+            logger.error('CrossChainBridge: finalized policy snapshot write FAILED (fail-closed; deferring ' +
                           String(row.snapshot_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.defer(row.snapshot_id, this.policyConsensus);
             return;
@@ -1057,7 +1060,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         this._inflight.delete(row.snapshot_id);
         if(!inserted) return;
         await this.mirrorRow('policy_snapshots', 'snapshot_id', row.snapshot_id);
-        console.log('CrossChainBridge: finalized policy snapshot ' + String(row.snapshot_id).substring(0, 16) +
+        logger.info('CrossChainBridge: finalized policy snapshot ' + String(row.snapshot_id).substring(0, 16) +
                     '... ' + row.origin_chain + ':' + row.tick + ' seq ' + row.policy_seq +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('policy:finalized', { snapshotId: row.snapshot_id });
@@ -1078,13 +1081,13 @@ class CrossChainBridgeEngine extends EventEmitter {
         try {
             persisted = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
-            console.error('CrossChainBridge: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+            logger.error('CrossChainBridge: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           String(roundId).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.defer(roundId, consensus);
             return false;
         }
         if(!persisted){
-            console.error('CrossChainBridge: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+            logger.error('CrossChainBridge: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded or empty validator set; fail-closed, deferring ' +
                           String(roundId).substring(0, 16) + '... to a later round)');
             this.defer(roundId, consensus);
@@ -1130,7 +1133,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         } catch(e){
             failure = (e && e.message) ? e.message : String(e);
         }
-        console.error('CrossChainBridge: could not stream a committed ' + table + ' row to mirror subscribers (' +
+        logger.error('CrossChainBridge: could not stream a committed ' + table + ' row to mirror subscribers (' +
                       failure + '); forcing subscriber resync');
         try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync(table + ' mirror gap'); }
         catch(_e){ /* the repair itself must never fail a committed row */ }
@@ -1172,7 +1175,7 @@ class CrossChainBridgeEngine extends EventEmitter {
                 // unsigned broadcast otherwise.
                 if(this.hub && this.hub.retractionConsensus)
                     this.hub.retractionConsensus.submitLocal(evt).catch(e =>
-                        console.error('CrossChainBridge: retraction submit error: ' + (e && e.message)));
+                        logger.error('CrossChainBridge: retraction submit error: ' + (e && e.message)));
                 else
                     this.broadcaster.broadcastDeletion(evt);
             }
@@ -1342,7 +1345,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     logChainStateDegraded(coin, err){
         if(this._chainStateLogged[coin]) return;
         this._chainStateLogged[coin] = true;
-        console.warn('CrossChainBridge: getbridgebalances is unreadable on ' + coin + ' (' +
+        logger.warn('CrossChainBridge: getbridgebalances is unreadable on ' + coin + ' (' +
                      (err && err.message) + '); getbridgeinvariant serves escrow, supply and delta ' +
                      'as null for that chain until the indexer answers it');
     }
@@ -1396,7 +1399,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         // capped rows would let an off-BTC verifier read a partial set as COMPLETE. Zero rows
         // is the fail-closed answer in both directions.
         if(validators && validators.truncated === true){
-            console.warn('CrossChainBridge: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('CrossChainBridge: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;

@@ -49,6 +49,8 @@
  ********************************************************************/
 
 const coins = require('../coins');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 class StakeWeightFeed {
 
@@ -114,7 +116,7 @@ class StakeWeightFeed {
         try {
             return await cs.getWeightSnapshot(capability, blockIndex);
         } catch (e) {
-            console.warn('StakeWeightFeed: could not resolve the ' + capability + ' weight snapshot at block ' +
+            logger.warn('StakeWeightFeed: could not resolve the ' + capability + ' weight snapshot at block ' +
                 blockIndex + ': ' + ((e && e.message) ? e.message : e));
             return null;
         }
@@ -132,7 +134,7 @@ class StakeWeightFeed {
             let caps = (cfg.STAKING && cfg.STAKING.CAPABILITIES) ? cfg.STAKING.CAPABILITIES : null;
             entry = caps ? caps[capability] : null;
         } catch (e) {
-            console.warn('StakeWeightFeed: no canonical BTC staking bundle for network "' + network +
+            logger.warn('StakeWeightFeed: no canonical BTC staking bundle for network "' + network +
                 '" (' + ((e && e.message) ? e.message : e) + '); serving no floor for ' + capability + '.');
             return null;
         }

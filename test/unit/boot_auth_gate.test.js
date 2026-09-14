@@ -24,6 +24,9 @@ const { evaluateAuthPosture } = require('../../src/lib/auth_posture.js');
 const { ConsensusInputMonitor, REASONS } = require('../../src/validators/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub');
+// api.js boots through the logger, not bare console, so the boot lines are
+// observed where they are now written.
+const { getLogger } = require('../../src/observability');
 
 describe('boot auth posture', function () {
 
@@ -158,7 +161,7 @@ describe('boot auth posture', function () {
         afterEach(function () { sinon.restore(); });
 
         it('refuses to boot with no key and no declaration', async function () {
-            const err = sinon.stub(console, 'error');
+            const err = sinon.stub(getLogger(), 'error');
             const boot = await bootApi({});
             expect(boot.exits).to.deep.equal([1]);
             expect(err.getCalls().some(c => String(c.args[0]).indexOf('REFUSING TO BOOT') === 0))
@@ -166,7 +169,7 @@ describe('boot auth posture', function () {
         });
 
         it('refuses a keyless VALIDATOR hub too (unchanged from before)', async function () {
-            const err = sinon.stub(console, 'error');
+            const err = sinon.stub(getLogger(), 'error');
             const boot = await bootApi({ P2P_VALIDATOR_ADDR: 'bc1qexample' });
             // process.exit is stubbed, so the module keeps running and trips the
             // later validator-mode env requirements too. What matters is that the
@@ -177,7 +180,7 @@ describe('boot auth posture', function () {
         });
 
         it('boots when keyless is declared', async function () {
-            sinon.stub(console, 'warn');
+            sinon.stub(getLogger(), 'warn');
             const boot = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
             expect(boot.exits).to.deep.equal([]);
             expect(boot.methods).to.not.equal(null);

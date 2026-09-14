@@ -54,6 +54,8 @@
 
 const mathjs = require('mathjs');
 const { totalStake } = require('../stake_weighted_quorum.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Severity taxonomy. Held as constants so a caller cannot invent a level by
 // typo (which would silently fall out of every alert comparison below).
@@ -459,7 +461,7 @@ class StakeShareMonitor {
         opts = opts || {};
         this.throttleMs = Number.isFinite(opts.throttleMs) ? opts.throttleMs : DEFAULT_THROTTLE_MS;
         this._now = typeof opts.now === 'function' ? opts.now : () => Date.now();
-        this._log = typeof opts.log === 'function' ? opts.log : (msg) => console.error(msg);
+        this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
         // key -> { chain, capability, at, ...evaluation }
         this.entries = new Map();
         // key -> ms of the last line printed for this entry

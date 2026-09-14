@@ -1,5 +1,7 @@
 'use strict';
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 /*********************************************************************
  *
@@ -106,7 +108,7 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     // roster nears VALIDATOR_QUERY_LIMIT: either gate this refusal behind an activation
     // check at that point, or re-affirm the ungated ruling.
     if(validators && validators.truncated === true){
-        console.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
+        logger.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
                      ' capability snapshot at block ' + block +
                      ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
         return [];

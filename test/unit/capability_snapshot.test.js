@@ -16,11 +16,20 @@ const proxyquire   = require('proxyquire');
 
 describe('CapabilitySnapshot', function () {
 
-    let axiosStub, CapabilitySnapshot;
+    let axiosStub, CapabilitySnapshot, logStub;
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
+        // The module logs through the observability singleton, so the logger is
+        // injected rather than spied: proxyquire hands other suites their own
+        // copy of that module, and a spy on this file's copy then sees nothing.
+        logStub = { debug: sinon.stub(), info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', {
+            axios: axiosStub,
+            // @global so the monitor module this one loads logs to the same stub;
+            // its auth and ALERT lines are half of what these tests assert on.
+            '../observability': { getLogger: () => logStub, '@global': true }
+        });
     });
 
     afterEach(function () {
@@ -95,7 +104,7 @@ describe('CapabilitySnapshot', function () {
                 capability: 'attestation', block_index: 99, count: 1,
                 validators: [{ pubkey: 'ab', amount: '50000' }]
             } } });
-            sinon.stub(console, 'error');
+            logStub.error;
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
@@ -112,7 +121,7 @@ describe('CapabilitySnapshot', function () {
                 capability: 'oracle_publish', block_index: 100, count: 1,
                 validators: [{ pubkey: 'ab', amount: '50000' }]
             } } });
-            sinon.stub(console, 'error');
+            logStub.error;
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
@@ -126,7 +135,7 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.resolves({ data: { result: {
                 block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }]
             } } });
-            sinon.stub(console, 'error');
+            logStub.error;
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
@@ -138,7 +147,7 @@ describe('CapabilitySnapshot', function () {
                 capability: 'oracle_publish', block_index: 100, count: 1, source_count: 1,
                 validators: [{ pubkey: 'ab', source: 'src1', weight: '50000' }]
             } } });
-            sinon.stub(console, 'error');
+            logStub.error;
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
@@ -183,7 +192,7 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(null) };
             let snap = new CapabilitySnapshot(makeHub(registry));
-            let errStub = sinon.stub(console, 'error');
+            let errStub = logStub.error;
 
             let result = await snap.getSnapshot('attestation', 106);
 
@@ -196,7 +205,7 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(null) };
             let snap = new CapabilitySnapshot(makeHub(registry));
-            sinon.stub(console, 'error');
+            logStub.error;
 
             let result = await snap.getWeightSnapshot('attestation', 106);
 
@@ -385,7 +394,8 @@ describe('CapabilitySnapshot', function () {
 
         it('returns null AND logs a distinct auth warning on a 401', async function () {
             axiosStub.post.rejects(err401(401));
-            let spy = sinon.spy(console, 'error');
+            // The auth and alert lines are written through the logger now.
+            let spy = logStub.error;
             let snap = new CapabilitySnapshot(makeHub(null));
 
             let result = await snap.getSnapshot('attestation', 106);
@@ -400,7 +410,7 @@ describe('CapabilitySnapshot', function () {
 
         it('throttles repeated auth warnings (one per cache TTL window)', async function () {
             axiosStub.post.rejects(err401(401));
-            let spy = sinon.spy(console, 'error');
+            let spy = logStub.error;
             let snap = new CapabilitySnapshot(makeHub(null));
 
             // Distinct keys/methods so the 60s snapshot cache never short-circuits the call.
@@ -423,7 +433,7 @@ describe('CapabilitySnapshot', function () {
             // like a healthy hub with nothing to do. It must now be surfaced,
             // and still be distinguishable from an auth mismatch.
             axiosStub.post.rejects(new Error('ECONNREFUSED'));
-            let spy = sinon.spy(console, 'error');
+            let spy = logStub.error;
             let snap = new CapabilitySnapshot(makeHub(null));
 
             let result = await snap.getSnapshot('attestation', 106);
@@ -669,7 +679,7 @@ describe('CapabilitySnapshot', function () {
 
         it('rejects a malformed override loudly and falls back to the default', function () {
             process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
-            let errStub = sinon.stub(console, 'error');
+            let errStub = logStub.error;
             let snap = new CapabilitySnapshot(makeHub(null));
             expect(snap.reorgBufferBlocks).to.equal(6);
             expect(errStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
@@ -677,7 +687,7 @@ describe('CapabilitySnapshot', function () {
 
         it('rejects a negative override', function () {
             process.env.HUB_SNAPSHOT_REORG_BUFFER = '-3';
-            sinon.stub(console, 'error');
+            logStub.error;
             let snap = new CapabilitySnapshot(makeHub(null));
             expect(snap.reorgBufferBlocks).to.equal(6);
         });
@@ -721,7 +731,7 @@ describe('CapabilitySnapshot', function () {
 
             it('warns and accepts on regtest so venues can run deliberate depths', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                let warnStub = sinon.stub(console, 'warn');
+                let warnStub = logStub.warn;
                 let snap = new CapabilitySnapshot(networkedHub('regtest'));
                 expect(snap.reorgBufferBlocks).to.equal(0);
                 expect(warnStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
@@ -729,7 +739,7 @@ describe('CapabilitySnapshot', function () {
 
             it('warns and accepts in standalone mode (no network declared)', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
-                sinon.stub(console, 'warn');
+                logStub.warn;
                 let snap = new CapabilitySnapshot(makeHub(null));
                 expect(snap.reorgBufferBlocks).to.equal(12);
             });
@@ -737,7 +747,7 @@ describe('CapabilitySnapshot', function () {
             it('honors the loud one-off bypass on mainnet', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
                 process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
-                let warnStub = sinon.stub(console, 'warn');
+                let warnStub = logStub.warn;
                 let snap = new CapabilitySnapshot(networkedHub('mainnet'));
                 expect(snap.reorgBufferBlocks).to.equal(0);
                 expect(warnStub.calledWithMatch(/XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT/)).to.equal(true);
@@ -745,7 +755,7 @@ describe('CapabilitySnapshot', function () {
 
             it('still falls back to the canonical default on a typo, without throwing', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
-                sinon.stub(console, 'error');
+                logStub.error;
                 let snap = new CapabilitySnapshot(networkedHub('mainnet'));
                 expect(snap.reorgBufferBlocks).to.equal(6);
             });

@@ -50,6 +50,8 @@
  ********************************************************************/
 
 const crypto = require('crypto');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const SLASH_PENALTY_PREFIX = 'SLASH_PENALTY:';
 const PENALTY_ACTIONS      = ['suspend', 'dismiss'];
@@ -166,7 +168,7 @@ class SlashGovernance {
 
         let penalty = String(ev.newValue || '').toLowerCase();
         if (!PENALTY_ACTIONS.includes(penalty)) {
-            console.warn('SlashGovernance: finalized ' + ev.proposalId + ' carries unknown penalty "' +
+            logger.warn('SlashGovernance: finalized ' + ev.proposalId + ' carries unknown penalty "' +
                 ev.newValue + '"; not executing');
             return null;
         }
@@ -184,7 +186,7 @@ class SlashGovernance {
         try {
             rows = await this.pendingRows(pk);
         } catch (e) {
-            console.error('SlashGovernance: could not read pending evidence for validator ' +
+            logger.error('SlashGovernance: could not read pending evidence for validator ' +
                 pk.substring(0, 16) + '...; refusing to execute finalized ' + ev.proposalId +
                 ' against evidence rows (' + e.message + ')');
             return null;
@@ -195,7 +197,7 @@ class SlashGovernance {
         let newStatus = penalty === 'suspend' ? 'approved' : 'rejected';
         if (voted) {
             if (voted.length < rows.length) {
-                console.warn('SlashGovernance: ' + (rows.length - voted.length) + ' pending row(s) for validator ' +
+                logger.warn('SlashGovernance: ' + (rows.length - voted.length) + ' pending row(s) for validator ' +
                     pk.substring(0, 16) + '... were detected after proposal ' + ev.proposalId +
                     ' was created; leaving them pending (not covered by the voted evidence set)');
             }
@@ -207,7 +209,7 @@ class SlashGovernance {
             // on the evidence rows - they stay 'pending' for operator
             // reconciliation / a fresh proposal - instead of blessing an
             // unaudited sweep. For 'dismiss' that means nothing executes.
-            console.warn('SlashGovernance: no local pending-evidence subset matches voted hash ' +
+            logger.warn('SlashGovernance: no local pending-evidence subset matches voted hash ' +
                 parsed.evidenceHash + ' for validator ' + pk.substring(0, 16) +
                 '... (proposal ' + ev.proposalId + '); leaving all ' + rows.length +
                 ' pending row(s) untouched' +
@@ -230,7 +232,7 @@ class SlashGovernance {
             if (typeof this.hub.propagateValidatorSet === 'function') await this.hub.propagateValidatorSet();
         }
 
-        console.log('SlashGovernance: executed penalty "' + penalty + '" on validator ' +
+        logger.info('SlashGovernance: executed penalty "' + penalty + '" on validator ' +
             pk.substring(0, 16) + '...: ' + marked + ' evidence row(s) -> ' + newStatus +
             (penalty === 'suspend' ? (suspended ? '; validator suspended' : '; validator was not active') : ''));
 

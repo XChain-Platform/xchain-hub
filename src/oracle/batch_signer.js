@@ -43,6 +43,8 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../price_batch_compression.js');
 const ah                = require('../lib/admission_height.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
@@ -188,7 +190,7 @@ class OracleBatchSigner {
         try {
             canonical = this._canonical(first, last, anchor, rounds);
         } catch(e){
-            console.warn('OracleBatchSigner: cannot build the batch canonical for window [' + first + ',' + last +
+            logger.warn('OracleBatchSigner: cannot build the batch canonical for window [' + first + ',' + last +
                          '] (' + (e && e.message) + '); no batch for this window');
             return empty;
         }
@@ -201,7 +203,7 @@ class OracleBatchSigner {
         try {
             signingSet = await this.resolvePriceSet(anchor);
         } catch(e){
-            console.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
+            logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
                          ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
             return empty;
         }
@@ -215,7 +217,7 @@ class OracleBatchSigner {
         // the indexer resolves a non-empty set at the same anchor. Withhold instead:
         // the rounds are still in the buffer and a later window re-proposes them.
         if(snapCount === 0){
-            console.warn('OracleBatchSigner: zero price-capable validators at anchor ' + anchor +
+            logger.warn('OracleBatchSigner: zero price-capable validators at anchor ' + anchor +
                          '; withholding the batch for window [' + first + ',' + last + ']');
             return empty;
         }
@@ -260,7 +262,7 @@ class OracleBatchSigner {
                     round.done = true;
                     this._signRound = null;
                     this.stats.batchSignTimeouts++;
-                    console.warn('OracleBatchSigner: batch-signing round for window [' + first + ',' + last +
+                    logger.warn('OracleBatchSigner: batch-signing round for window [' + first + ',' + last +
                                  '] at anchor ' + anchor + ' timed out at ' + round.signatures.size + '/' +
                                  quorum + ' sigs; window stays unpublished');
                     resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })),
@@ -308,11 +310,11 @@ class OracleBatchSigner {
         switch(envelope.type){
             case XPRICEB_SIGN_REQ:
                 this._handleSignReq(envelope).catch(e =>
-                    console.error('OracleBatchSigner: XPRICEB_SIGN_REQ error: ' + (e && e.message)));
+                    logger.error('OracleBatchSigner: XPRICEB_SIGN_REQ error: ' + (e && e.message)));
                 break;
             case XPRICEB_SIGN:
                 this._handleSign(envelope).catch(e =>
-                    console.error('OracleBatchSigner: XPRICEB_SIGN error: ' + (e && e.message)));
+                    logger.error('OracleBatchSigner: XPRICEB_SIGN error: ' + (e && e.message)));
                 break;
         }
     }
@@ -454,7 +456,7 @@ class OracleBatchSigner {
 
     refuse(first, last, why){
         this.stats.batchSignRefusals++;
-        console.warn('OracleBatchSigner: refusing to co-sign batch [' + first + ',' + last + ']: ' + why);
+        logger.warn('OracleBatchSigner: refusing to co-sign batch [' + first + ',' + last + ']: ' + why);
     }
 
     // One bounded clause naming the FIRST real difference between a proposal and this

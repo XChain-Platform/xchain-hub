@@ -32,6 +32,9 @@ const { notePeerReject, stampRemoteIp } = require('../consensus/diagnostics');
 // The roster below credits RollcallRound only where the engine would really start,
 // so it reads the engine's own activation source rather than a copy of it.
 const rollcallActivation = require('../rollcall_activation.js');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Bootstrap peers every new hub can reach. One hostname per validator; the
 // PORT selects the network, so a seed on the wrong port reaches the wrong
@@ -370,7 +373,7 @@ class PeerManager extends EventEmitter {
             let remoteIp = req.socket.remoteAddress || 'unknown';
             let ipCount = this.ipConnectionCounts.get(remoteIp) || 0;
             if (ipCount >= this.maxConnectionsPerIp) {
-                console.warn('P2P: Connection limit per IP exceeded for ' + remoteIp + '; rejecting');
+                logger.warn('P2P: Connection limit per IP exceeded for ' + remoteIp + '; rejecting');
                 ws.close(1008, 'too many connections');
                 return;
             }
@@ -384,15 +387,15 @@ class PeerManager extends EventEmitter {
             ws.on('pong', () => { ws._isAlive = true; });
             ws.on('close', (code, reason) => {
                 let reasonStr = reason && reason.length ? reason.toString() : '';
-                console.log('Inbound ws closed from ' + (ws._peerAddr || 'unknown') + ' (code=' + code + ', reason="' + reasonStr + '")');
+                logger.info('Inbound ws closed from ' + (ws._peerAddr || 'unknown') + ' (code=' + code + ', reason="' + reasonStr + '")');
                 this.removeInboundPeer(ws);
             });
-            ws.on('error', (e) => console.error('Inbound peer error:', e));
+            ws.on('error', (e) => logger.error(nodeUtil.format('Inbound peer error:', e)));
         });
 
         await new Promise((resolve, reject) => {
             this.httpServer.listen(port, host, () => {
-                console.log('P2P listening on ' + host + ':' + port);
+                logger.info('P2P listening on ' + host + ':' + port);
                 resolve();
             });
             this.httpServer.on('error', reject);
@@ -409,7 +412,7 @@ class PeerManager extends EventEmitter {
             if (defaults.length) {
                 // Never dial ourselves: one of the five IS one of the five.
                 seeds = defaults.filter(a => !host || host === '0.0.0.0' ? true : !a.includes(host));
-                console.log('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
+                logger.info('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
                             ' default bootstrap seed(s) for ' + this.config.HUB_NETWORK);
             }
         }
@@ -491,7 +494,7 @@ class PeerManager extends EventEmitter {
         if (prev && prev.held === held && (!held || prev.fp === fp)) return;
         this._holdAnnounced = { held: held, fp: fp };
         if (held) {
-            console.log('PeerManager: this hub is not in the ' + set.size + '-member chain-effective ' +
+            logger.info('PeerManager: this hub is not in the ' + set.size + '-member chain-effective ' +
                 'signer set, so it will not author consensus messages or checkpoint rounds ' +
                 '(peers would drop them); receiving, relay and the mirror feed are unaffected' +
                 (me ? ' (pubkey ' + me + ')' : ''));
@@ -499,7 +502,7 @@ class PeerManager extends EventEmitter {
         }
         // A member hub says nothing at boot; only the return from a hold is news.
         if (prev) {
-            console.log('PeerManager: this hub is in the ' + set.size + '-member chain-effective ' +
+            logger.info('PeerManager: this hub is in the ' + set.size + '-member chain-effective ' +
                 'signer set; it is authoring consensus messages again');
         }
     }
@@ -678,7 +681,7 @@ class PeerManager extends EventEmitter {
     _send(ws, serialized) {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(serialized, (err) => {
-                if (err) console.error('WS send error:', err.message);
+                if (err) logger.error(nodeUtil.format('WS send error:', err.message));
             });
         }
     }
@@ -688,7 +691,7 @@ class PeerManager extends EventEmitter {
         try {
             envelope = JSON.parse(rawData);
         } catch (e) {
-            console.warn('P2P: Invalid JSON from peer:', e);
+            logger.warn(nodeUtil.format('P2P: Invalid JSON from peer:', e));
             return;
         }
 
@@ -742,7 +745,7 @@ class PeerManager extends EventEmitter {
         let ratePeer = knownAddr || ws._peerAddr || ws._remoteIp || envelope.sender;
         let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
         if (!this._checkMsgRate(ratePeer, rateCeil)) {
-            console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
+            logger.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
             notePeerReject({ peer: ratePeer, reason: 'rate_limit' });
             return;
         }
@@ -759,14 +762,14 @@ class PeerManager extends EventEmitter {
             let peer = ws._remoteIp || envelope.sender;
             if (verdict.reason === 'not_in_signer_set') {
                 let blocks = PeerManager.stakeActivationBlocks(this.config.HUB_NETWORK);
-                console.warn('P2P: sender not in signer set (no active stake or registry entry): ' +
+                logger.warn('P2P: sender not in signer set (no active stake or registry entry): ' +
                     envelope.sender + '; dropping message' +
                     (blocks === null ? '' : ' (a STAKE activates ' + blocks +
                         ' blocks after the transaction confirms)'));
                 notePeerReject({ peer: peer, reason: 'not_in_signer_set' });
                 return;
             }
-            console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
+            logger.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
             notePeerReject({ peer: peer, reason: 'invalid_signature' });
             return;
         }
@@ -843,7 +846,7 @@ class PeerManager extends EventEmitter {
         });
 
         this.emit('peer:connect', addr);
-        console.log('Inbound peer connected: ' + addr);
+        logger.info('Inbound peer connected: ' + addr);
     }
 
     removeInboundPeer(ws) {
@@ -864,7 +867,7 @@ class PeerManager extends EventEmitter {
                 peer.state = 'closed';
                 peer.ws = null;
                 this.emit('peer:disconnect', addr);
-                console.log('Inbound peer disconnected: ' + addr);
+                logger.info('Inbound peer disconnected: ' + addr);
 
                 // Clean up if it was inbound-only (no reconnect for inbound)
                 if (peer.inbound) {
@@ -888,7 +891,7 @@ class PeerManager extends EventEmitter {
     _connectToPeer(addr) {
         // Validate peer address format: optional ws:// or wss:// prefix, then host:port
         if (!/^(wss?:\/\/)?[\w.\-]+:\d+$/.test(addr)) {
-            console.warn('P2P: Invalid peer address format: ' + addr);
+            logger.warn('P2P: Invalid peer address format: ' + addr);
             return;
         }
 
@@ -917,7 +920,7 @@ class PeerManager extends EventEmitter {
         try {
             ws = new WebSocket(url, { maxPayload: maxPayload });
         } catch (e) {
-            console.error('Failed to create WebSocket to ' + addr + ':', e);
+            logger.error(nodeUtil.format('Failed to create WebSocket to ' + addr + ':', e));
             this.scheduleReconnect(addr);
             return;
         }
@@ -933,7 +936,7 @@ class PeerManager extends EventEmitter {
             peer.failures  = 0;
             peer.lastError = null;
             this.emit('peer:connect', addr);
-            console.log('Connected to peer: ' + addr);
+            logger.info('Connected to peer: ' + addr);
         });
 
         ws.on('message', (raw) => this.handleInbound(ws, raw, addr));
@@ -943,7 +946,7 @@ class PeerManager extends EventEmitter {
             if (peer.state === 'open') {
                 this.emit('peer:disconnect', addr);
                 let reasonStr = reason && reason.length ? reason.toString() : '';
-                console.log('Peer disconnected: ' + addr + ' (code=' + code + ', reason="' + reasonStr + '")');
+                logger.info('Peer disconnected: ' + addr + ' (code=' + code + ', reason="' + reasonStr + '")');
             }
             peer.state = 'closed';
             peer.ws = null;
@@ -998,7 +1001,7 @@ class PeerManager extends EventEmitter {
         // One line per backoff step, at warn, not one per dial at error. The rate
         // decays with the backoff itself, so an indefinitely dead peer settles at a
         // line per ceiling interval rather than a line a minute.
-        console.warn('P2P: peer ' + addr + ' unreachable (' + peer.failures +
+        logger.warn('P2P: peer ' + addr + ' unreachable (' + peer.failures +
             ' consecutive failure' + (peer.failures === 1 ? '' : 's') +
             (peer.lastError ? ', last error: ' + peer.lastError : '') +
             '); next attempt in ' + Math.round(totalDelay / 1000) + 's');
@@ -1069,7 +1072,7 @@ class PeerManager extends EventEmitter {
         let last = this._rulesWarnedAt.get(key) || 0;
         if (now - last < this.rulesWarnIntervalMs) return;
         this._rulesWarnedAt.set(key, now);
-        console.warn(message);
+        logger.warn(message);
     }
 
     // Snapshot for the operator-facing surfaces (hub status / health). `agree` is the
@@ -1134,7 +1137,7 @@ class PeerManager extends EventEmitter {
                 if (peer.inbound) continue;
                 if (peer.ws && peer.ws.readyState === WebSocket.OPEN) {
                     if (peer.ws._isAlive === false) {
-                        console.log('Peer ' + addr + ' failed ping/pong; terminating');
+                        logger.info('Peer ' + addr + ' failed ping/pong; terminating');
                         peer.ws.terminate();
                         return;
                     }
@@ -1188,7 +1191,7 @@ class PeerManager extends EventEmitter {
     recordPeer(addr, validatorId, isSeed) {
         if (!this.db) return;
         this.db.setP2pPeer(addr, validatorId, isSeed ? 1 : 0)
-            .catch(e => console.error('Error recording peer:', e));
+            .catch(e => logger.error(nodeUtil.format('Error recording peer:', e)));
     }
 }
 

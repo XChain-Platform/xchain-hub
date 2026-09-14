@@ -57,6 +57,9 @@ const { allCanonicalInts }   = require('../lib/canonical_int.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
 const coins                  = require('../coins');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
 // settlement pass rebuilds them from the mirrored BIGINT row. The fill and
@@ -166,7 +169,7 @@ class CrossChainDexEngine extends EventEmitter {
                     : (Number.isFinite(flatMinConf) && flatMinConf > 0 ? flatMinConf
                     : def);
             if(_confFloored && val < def){
-                console.warn('[CrossChainDex] XDEX_MIN_CONFIRMATIONS' + (Number.isFinite(perCoin) && perCoin > 0 ? '_' + tick : '') +
+                logger.warn('[CrossChainDex] XDEX_MIN_CONFIRMATIONS' + (Number.isFinite(perCoin) && perCoin > 0 ? '_' + tick : '') +
                     '=' + val + ' is below the ' + this.network + ' floor ' + def + '; clamping to ' + def +
                     ' (confirmation overrides may only raise the depth on mainnet and testnet; ' +
                     'regtest keeps the full override)');
@@ -180,7 +183,7 @@ class CrossChainDexEngine extends EventEmitter {
         this.consensus = new CrossChainDexConsensus(this);
         this.consensus.on('match:finalized', (ev) => {
             this.writeFinalizedMatch(ev).catch(err =>
-                console.error('CrossChainDex: write finalized match error:', err && err.message));
+                logger.error(nodeUtil.format('CrossChainDex: write finalized match error:', err && err.message)));
         });
         // Release the inflight slot for a round the consensus abandons (stale under
         // sustained message loss) so the next poll re-proposes it instead of the
@@ -209,14 +212,14 @@ class CrossChainDexEngine extends EventEmitter {
         }
         for(const coin of Object.keys(this.indexers || {})){
             if(!this.indexers[coin] || !this.indexers[coin].url)
-                console.warn('CrossChainDex: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
+                logger.warn('CrossChainDex: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
         }
         await this.rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
         this._pollTimer = setInterval(() => {
-            this._discoverAndMatch().catch(err => console.error('CrossChainDex: tick error:', err && err.message));
+            this._discoverAndMatch().catch(err => logger.error(nodeUtil.format('CrossChainDex: tick error:', err && err.message)));
         }, this.pollMs);
-        console.log('Cross-chain DEX engine started (poll ' + this.pollMs + 'ms)');
+        logger.info('Cross-chain DEX engine started (poll ' + this.pollMs + 'ms)');
     }
 
     async stop(){
@@ -243,7 +246,7 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){
             if(!isMissingTableError(e)){
                 this._committedReady = false;
-                console.error('CrossChainDex: reservation-ledger rebuild FAILED (' + ((e && e.message) || e) +
+                logger.error('CrossChainDex: reservation-ledger rebuild FAILED (' + ((e && e.message) || e) +
                               '); this hub proposes and co-signs NOTHING until it succeeds, ' +
                               'because an unrebuilt ledger re-offers escrow already reserved by finalized matches');
                 return false;
@@ -251,7 +254,7 @@ class CrossChainDexEngine extends EventEmitter {
             next = new Map();   // no table yet: an empty ledger is genuinely correct
         }
         if(!this._committedReady)
-            console.log('CrossChainDex: reservation ledger rebuilt (' + next.size + ' offer legs); matching resumes');
+            logger.info('CrossChainDex: reservation ledger rebuilt (' + next.size + ' offer legs); matching resumes');
         this.committed       = next;
         this._committedReady = true;
         return true;
@@ -363,7 +366,7 @@ class CrossChainDexEngine extends EventEmitter {
                 try {
                     await this._finalizeMatch(desc);
                 } catch(e){
-                    console.error('CrossChainDex: finalizeMatch error:', e && e.message);
+                    logger.error(nodeUtil.format('CrossChainDex: finalizeMatch error:', e && e.message));
                 }
             }
         } finally {
@@ -509,7 +512,7 @@ class CrossChainDexEngine extends EventEmitter {
         let takerDecimals = this.giveDecimals(taker);
         let makerDecimals = this.giveDecimals(maker);
         if(takerDecimals === null || makerDecimals === null){
-            console.warn('XDEX: skipping match, missing give_decimals on ' +
+            logger.warn('XDEX: skipping match, missing give_decimals on ' +
                          (takerDecimals === null ? 'taker' : 'maker') + ' offer ' +
                          (takerDecimals === null ? taker.home_coin + ':' + taker.action_index
                                                  : maker.home_coin + ':' + maker.action_index) +
@@ -681,7 +684,7 @@ class CrossChainDexEngine extends EventEmitter {
             admitMap = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
                 ? await this.hub.resolveAdmitBlocks('cross_chain_matches', readSet) : null;
             if(!admitMap){
-                console.error('CrossChainDex: refusing to finalize match ' + matchId.substring(0,16) +
+                logger.error('CrossChainDex: refusing to finalize match ' + matchId.substring(0,16) +
                     '... at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' +
                     readSet.join(' / '));
                 return;
@@ -738,13 +741,13 @@ class CrossChainDexEngine extends EventEmitter {
         try {
             persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
-            console.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
+            logger.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.deferFinalize(row);
             return;
         }
         if(!persistedRows){
-            console.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+            logger.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round)');
             this.deferFinalize(row);
@@ -758,7 +761,7 @@ class CrossChainDexEngine extends EventEmitter {
         try {
             inserted = await this._insertMatchRow(row);
         } catch(e){
-            console.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
+            logger.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.deferFinalize(row);
             return;
@@ -766,7 +769,7 @@ class CrossChainDexEngine extends EventEmitter {
         if(inserted) this._applyCommit(row, +1);
         this._inflight.delete(row.match_id);
         await this.mirrorMatchRow(row);
-        console.log('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
+        logger.info('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
                     row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
                     ' [' + row.a_kind + '/' + row.b_kind + '] fill ' + row.a_amount + '⇄' + row.b_amount +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
@@ -796,7 +799,7 @@ class CrossChainDexEngine extends EventEmitter {
         // whose ledger failed to rebuild would co-sign exactly the over-fill it would
         // have proposed. Refuse to sign rather than sign blind.
         if(!this._committedReady){
-            console.warn('CrossChainDex: refusing to co-sign a proposed match; the reservation ledger has not rebuilt');
+            logger.warn('CrossChainDex: refusing to co-sign a proposed match; the reservation ledger has not rebuilt');
             return false;
         }
         if(!row || row.a_chain === row.b_chain) return false;
@@ -986,7 +989,7 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){
             failure = (e && e.message) ? e.message : String(e);
         }
-        console.error('CrossChainDex: could not stream a committed cross_chain_matches row to mirror ' +
+        logger.error('CrossChainDex: could not stream a committed cross_chain_matches row to mirror ' +
                       'subscribers (' + failure + '); forcing subscriber resync');
         try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('cross_chain_matches mirror gap'); }
         catch(_e){ /* the repair itself must never fail a committed match */ }
@@ -1051,7 +1054,7 @@ class CrossChainDexEngine extends EventEmitter {
         // defines (callers defer the match instead of committing it). Parity with
         // StateCheckpointEngine/CrossChainCallEngine; keep the three in lockstep.
         if(validators && validators.truncated === true){
-            console.warn('CrossChainDex: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('CrossChainDex: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
@@ -1116,7 +1119,7 @@ class CrossChainDexEngine extends EventEmitter {
                 // Ride the retraction-signing round when active (the round
                 // dedups the per-row repeats by canonical); legacy unsigned otherwise.
                 if(this.hub && this.hub.retractionConsensus)
-                    this.hub.retractionConsensus.submitLocal(evt).catch(e => console.error('CrossChainDex: retraction submit error: ' + (e && e.message)));
+                    this.hub.retractionConsensus.submitLocal(evt).catch(e => logger.error('CrossChainDex: retraction submit error: ' + (e && e.message)));
                 else
                     this.broadcaster.broadcastDeletion(evt);
             }

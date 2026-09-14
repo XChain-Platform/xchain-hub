@@ -97,6 +97,8 @@ const snapWrite = require('../lib/capability_snapshot_write.js');
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
 const abw = require('../lib/attest_batch_wire.js');
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The two P2P envelope types this engine owns. There is no message-type registry on
 // the hub: every engine subscribes to PeerManager's 'message' event and switches on
@@ -248,7 +250,7 @@ class AttestationBatchPublisher {
 
     async start(){
         if(!this.isArmedNetwork()){
-            console.log('AttestationBatchPublisher: response mirror unarmed on ' +
+            logger.info('AttestationBatchPublisher: response mirror unarmed on ' +
                         (this.network || '<unset>') + '; not scheduling batch windows');
             return;
         }
@@ -260,7 +262,7 @@ class AttestationBatchPublisher {
         try {
             fs.mkdirSync(path.dirname(this.bufferPath), { recursive: true });
         } catch(e){
-            console.warn('AttestationBatchPublisher: cannot create the buffer directory ' +
+            logger.warn('AttestationBatchPublisher: cannot create the buffer directory ' +
                          path.dirname(this.bufferPath) + ': ' + (e && e.message));
         }
 
@@ -271,7 +273,7 @@ class AttestationBatchPublisher {
             await this.hydrateMarkers();
             this._floorWindow = await this._resolveFloorWindow();
         } catch(e){
-            console.error('AttestationBatchPublisher: could not hydrate durable batch markers ' +
+            logger.error('AttestationBatchPublisher: could not hydrate durable batch markers ' +
                           '(publishing is deferred until they read): ' + (e && e.message));
         }
 
@@ -283,7 +285,7 @@ class AttestationBatchPublisher {
 
         this._running = true;
         this.armWindowTimer();
-        console.log('AttestationBatchPublisher started (network: ' + this.network +
+        logger.info('AttestationBatchPublisher started (network: ' + this.network +
                     ', window: ' + this.windowS + 's' +
                     (this.windowS === ATTEST_BATCH_WINDOW_S ? '' : ' [regtest override]') +
                     ', address: ' + (this.dogeAddress || '<unset>') + ')');
@@ -344,7 +346,7 @@ class AttestationBatchPublisher {
         this._windowTimer = setTimeout(() => {
             this._windowTimer = null;
             this.sweep()
-                .catch(e => console.error('AttestationBatchPublisher: window sweep failed: ' + (e && e.message)))
+                .catch(e => logger.error('AttestationBatchPublisher: window sweep failed: ' + (e && e.message)))
                 .then(() => { if(this._running) this.armWindowTimer(); });
         }, this.msToNextBoundary());
         // Never hold a process open for a publishing cadence: the windows a stopped hub
@@ -360,7 +362,7 @@ class AttestationBatchPublisher {
     async sweep(nowSec){
         if(this._sweeping) return { attempted: 0 };
         if(!this.enabled){
-            console.log('AttestationBatchPublisher: disabled (ATTEST_BATCH_PUBLISH_ENABLED=false); ' +
+            logger.info('AttestationBatchPublisher: disabled (ATTEST_BATCH_PUBLISH_ENABLED=false); ' +
                         'skipping this window');
             return { attempted: 0 };
         }
@@ -429,7 +431,7 @@ class AttestationBatchPublisher {
                 if(!this._quarantined.has(start)){
                     this._quarantined.add(start);
                     this.stats.windowsQuarantined++;
-                    console.error('AttestationBatchPublisher: window ' + start + ' carries a publish-intent ' +
+                    logger.error('AttestationBatchPublisher: window ' + start + ' carries a publish-intent ' +
                         'marker with no outcome; its on-chain state is unknown after a crash. It will NOT ' +
                         're-publish automatically. Operator: check the DOGE address for an ATTEST v5 batch ' +
                         'covering this window and replay by hand if none landed.');
@@ -443,7 +445,7 @@ class AttestationBatchPublisher {
                !this._coverageGaps.has(start)){
                 this._coverageGaps.add(start);
                 this.stats.coverageGapsDetected++;
-                console.error('AttestationBatchPublisher: window ' + start + ' has no batch marker while ' +
+                logger.error('AttestationBatchPublisher: window ' + start + ' has no batch marker while ' +
                     'window ' + this._newestMarkerWindow + ' does; an earlier sweep left it behind. It is ' +
                     'being retried now, but a window that falls out of the ' + MAX_CATCHUP_WINDOWS +
                     '-window catch-up horizon needs a manual replay.');
@@ -462,7 +464,7 @@ class AttestationBatchPublisher {
         try {
             rows = await this._selectWindowRows(windowStart, windowEnd);
         } catch(e){
-            console.warn('AttestationBatchPublisher: cannot read window ' + windowStart +
+            logger.warn('AttestationBatchPublisher: cannot read window ' + windowStart +
                          ' from attestation_responses (' + (e && e.message) + '); deferring');
             this.stats.windowsDeferred++;
             return false;
@@ -475,7 +477,7 @@ class AttestationBatchPublisher {
         if(rows.length > abw.ATTEST_BATCH_MAX_ROWS){
             this._deadLetter({ window_start: windowStart, window_end: windowEnd, row_count: rows.length },
                 'row count ' + rows.length + ' exceeds ATTEST_BATCH_MAX_ROWS (' + abw.ATTEST_BATCH_MAX_ROWS + ')');
-            console.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
+            logger.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
                 ' holds ' + rows.length + ' terminal responses, over the ' + abw.ATTEST_BATCH_MAX_ROWS +
                 '-row consensus cap; the window is dead-lettered to ' + this.deadLetterPath +
                 ' and NOT published. Chain coverage for this window is missing until an operator splits it.');
@@ -506,7 +508,7 @@ class AttestationBatchPublisher {
         // key so the election is per window rather than per hub.
         let election = await this.electionRank(anchor, batchKey);
         if(election === null){
-            console.warn('AttestationBatchPublisher: cannot resolve the attestation set at anchor ' + anchor +
+            logger.warn('AttestationBatchPublisher: cannot resolve the attestation set at anchor ' + anchor +
                          '; deferring window ' + windowStart);
             this.stats.windowsDeferred++;
             return false;
@@ -528,7 +530,7 @@ class AttestationBatchPublisher {
             // with no marker: the rows are unchanged in the table, so a later attempt
             // rebuilds byte-identical content and asks again.
             this.stats.windowsDeferred++;
-            console.warn('AttestationBatchPublisher: window ' + windowStart + '-' + windowEnd +
+            logger.warn('AttestationBatchPublisher: window ' + windowStart + '-' + windowEnd +
                          ' reached no batch quorum; it stays unpublished and is retried');
             return false;
         }
@@ -539,7 +541,7 @@ class AttestationBatchPublisher {
             this._deadLetter({ window_start: windowStart, window_end: windowEnd,
                                row_count: rows.length, reason: encoded.reason },
                 'wire encoding refused the window: ' + encoded.status);
-            console.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
+            logger.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
                 ' cannot be encoded (' + encoded.status + '); dead-lettered to ' + this.deadLetterPath +
                 ' and NOT published. Chain coverage for this window is missing.');
             await this.recordDeadLetter(windowStart, windowEnd, rows.length);
@@ -677,7 +679,7 @@ class AttestationBatchPublisher {
         // with no chain_tips row should be able to see which height it anchored on.
         if(source !== this._anchorSource){
             this._anchorSource = source;
-            console.log('AttestationBatchPublisher: anchoring batches on the ' +
+            logger.info('AttestationBatchPublisher: anchoring batches on the ' +
                 (source === 'pushed' ? 'pushed BTC chain tip (chain_tips row)'
                                      : 'BTC tip observed by the attestation poll (no chain_tips row on this hub)'));
         }
@@ -693,7 +695,7 @@ class AttestationBatchPublisher {
         let why = this._anchorFailure || 'the BTC chain tip is unavailable';
         if(this._anchorWarned === why) return;
         this._anchorWarned = why;
-        console.warn('AttestationBatchPublisher: deferring window ' + windowStart +
+        logger.warn('AttestationBatchPublisher: deferring window ' + windowStart +
             ' because the batch has no BTC anchor: ' + why + '. The anchor is the height ' +
             'the batch quorum is sized at, so no window can publish until it resolves and ' +
             'chain coverage is missing for every window deferred this way. Each deferred ' +
@@ -757,7 +759,7 @@ class AttestationBatchPublisher {
         try {
             rows = await snapWrite.writeCapabilitySnapshotRows(db, 'attestation', a, set);
         } catch(e){
-            console.warn('AttestationBatchPublisher: could not mirror the attestation capability snapshot at anchor ' +
+            logger.warn('AttestationBatchPublisher: could not mirror the attestation capability snapshot at anchor ' +
                          a + ': ' + (e && e.message));
             return 0;
         }
@@ -847,7 +849,7 @@ class AttestationBatchPublisher {
                     round.done = true;
                     this._signRound = null;
                     this.stats.signTimeouts++;
-                    console.warn('AttestationBatchPublisher: batch-signing round for window ' +
+                    logger.warn('AttestationBatchPublisher: batch-signing round for window ' +
                         window.window_start + '-' + window.window_end + ' timed out at ' +
                         round.signatures.size + '/' + round.quorum + ' signatures; the window stays unpublished');
                     resolve({ met: false, sigs: [] });
@@ -889,11 +891,11 @@ class AttestationBatchPublisher {
         switch(envelope.type){
             case XATTESTB_SIGN_REQ:
                 this._handleSignReq(envelope).catch(e =>
-                    console.error('AttestationBatchPublisher: XATTESTB_SIGN_REQ error: ' + (e && e.message)));
+                    logger.error('AttestationBatchPublisher: XATTESTB_SIGN_REQ error: ' + (e && e.message)));
                 break;
             case XATTESTB_SIGN:
                 this._handleSign(envelope).catch(e =>
-                    console.error('AttestationBatchPublisher: XATTESTB_SIGN error: ' + (e && e.message)));
+                    logger.error('AttestationBatchPublisher: XATTESTB_SIGN error: ' + (e && e.message)));
                 break;
         }
     }
@@ -1056,7 +1058,7 @@ class AttestationBatchPublisher {
     refuse(windowStart, why, reasonClass){
         this.stats.signRefusals++;
         if(reasonClass === 'no_chain_tip') this.stats.signRefusalsNoChainTip++;
-        console.warn('AttestationBatchPublisher: refusing to co-sign the batch for window ' +
+        logger.warn('AttestationBatchPublisher: refusing to co-sign the batch for window ' +
                      windowStart + ': ' + why);
     }
 
@@ -1069,7 +1071,7 @@ class AttestationBatchPublisher {
     async broadcastWindow(window, batchKey, encoded){
         let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
         if(!canBroadcast){
-            console.warn('AttestationBatchPublisher: no broadcast pipeline configured ' +
+            logger.warn('AttestationBatchPublisher: no broadcast pipeline configured ' +
                 '(set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook); window ' +
                 window.window_start + ' stays unpublished');
             this.stats.windowsDeferred++;
@@ -1089,7 +1091,7 @@ class AttestationBatchPublisher {
             let token = this.spendGuard.reserve();
             if(!token){
                 for(let t of tokens) this.spendGuard.release(t);
-                console.warn(this.spendGuard.noteBlocked() + ' (attestation batch window ' +
+                logger.warn(this.spendGuard.noteBlocked() + ' (attestation batch window ' +
                              window.window_start + ', ' + encoded.wires.length + ' wire(s))');
                 this.stats.windowsDeferred++;
                 return false;
@@ -1103,7 +1105,7 @@ class AttestationBatchPublisher {
             await this.recordIntent(window, batchKey);
         } catch(e){
             for(let t of tokens) this.spendGuard.release(t);
-            console.error('AttestationBatchPublisher: cannot record publish intent for window ' +
+            logger.error('AttestationBatchPublisher: cannot record publish intent for window ' +
                 window.window_start + '; deferring (fail closed to avoid an unrecorded spend): ' + (e && e.message));
             this.stats.windowsDeferred++;
             return false;
@@ -1130,7 +1132,7 @@ class AttestationBatchPublisher {
                    await this.retryRefusedHead(window, e, tokens)) return false;
                 this.spendGuard.commit(tokens[i]);   // a send that may have left the process is a spend
                 for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                console.error('AttestationBatchPublisher: CRITICAL - wire ' + (i + 1) + '/' +
+                logger.error('AttestationBatchPublisher: CRITICAL - wire ' + (i + 1) + '/' +
                     encoded.wires.length + ' of window ' + window.window_start + '-' + window.window_end +
                     ' failed to broadcast' + (ambiguous ? ' AMBIGUOUSLY (it may still have landed)' : '') +
                     ': ' + (e && e.message) + '. The window keeps its intent marker and will NOT be ' +
@@ -1149,7 +1151,7 @@ class AttestationBatchPublisher {
         if(window.row_count === 0) this.stats.windowsEmpty++;
         this.stats.lastPublishedWindow = window.window_start;
         this.stats.lastPublishedTxid   = headTxid;
-        console.log('AttestationBatchPublisher: published window ' + window.window_start + '-' +
+        logger.info('AttestationBatchPublisher: published window ' + window.window_start + '-' +
             window.window_end + ' (' + window.row_count + ' row(s), ' + encoded.wires.length +
             ' wire(s), anchor ' + window.btc_block_height + ', txid ' + (headTxid || '<none>') + ')');
         return true;
@@ -1182,7 +1184,7 @@ class AttestationBatchPublisher {
             // The marker survives, so the window quarantines on the next sweep. Latching
             // now is the honest outcome, and the caller's CRITICAL line is the one an
             // operator should see.
-            console.error('AttestationBatchPublisher: window ' + window.window_start +
+            logger.error('AttestationBatchPublisher: window ' + window.window_start +
                 ' was refused before sending but its publish-intent marker could not be ' +
                 'removed (' + (err && err.message) + '); it will quarantine rather than retry.');
             return false;
@@ -1193,7 +1195,7 @@ class AttestationBatchPublisher {
         // window's ceiling for a transaction that does not exist.
         for(let t of tokens) this.spendGuard.release(t);
         this.stats.windowsRefusalRetried++;
-        console.warn('AttestationBatchPublisher: window ' + window.window_start + '-' +
+        logger.warn('AttestationBatchPublisher: window ' + window.window_start + '-' +
             window.window_end + ' was refused before its head could be sent (' + (e && e.message) +
             '); nothing left this process, so its publish-intent marker is withdrawn and the ' +
             'window is rebuilt on the next sweep (attempt ' + attempt + ' of ' +
@@ -1214,14 +1216,14 @@ class AttestationBatchPublisher {
         }
         if(balance === null || !Number.isFinite(balance)){
             if(this.getBalanceFn){
-                console.warn('AttestationBatchPublisher: DOGE balance unreadable; skipping this window ' +
+                logger.warn('AttestationBatchPublisher: DOGE balance unreadable; skipping this window ' +
                              '(fail closed)');
                 return false;
             }
             return true;   // no balance hook wired: nothing to enforce, as on the PRICE rail
         }
         if(balance < this.lowBalanceThreshold){
-            console.warn('AttestationBatchPublisher: DOGE balance ' + balance.toFixed(4) + ' below floor ' +
+            logger.warn('AttestationBatchPublisher: DOGE balance ' + balance.toFixed(4) + ' below floor ' +
                          this.lowBalanceThreshold + '; skipping this window (fail closed)');
             return false;
         }
@@ -1278,7 +1280,7 @@ class AttestationBatchPublisher {
         let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
         for(let r of (rows || [])) this._quarantined.add(Number(r.window_start));
         if(this._quarantined.size > 0)
-            console.error('AttestationBatchPublisher: ' + this._quarantined.size + ' window(s) carry a ' +
+            logger.error('AttestationBatchPublisher: ' + this._quarantined.size + ' window(s) carry a ' +
                 'publish-intent marker with no outcome; they are NOT re-published automatically. ' +
                 'Operator: verify each on chain and replay by hand if absent.');
     }
@@ -1309,7 +1311,7 @@ class AttestationBatchPublisher {
         try {
             await db.updateAttestPublishedBatch('sent', txid, rowCount, this.network, windowStart, 'intent');
         } catch(e){
-            console.error('AttestationBatchPublisher: window ' + windowStart + ' was broadcast but its ' +
+            logger.error('AttestationBatchPublisher: window ' + windowStart + ' was broadcast but its ' +
                 'durable sent marker could not be persisted; a restart will QUARANTINE (not re-publish) it. ' +
                 'Operator: confirm the txid on chain. Error: ' + (e && e.message));
         }
@@ -1322,7 +1324,7 @@ class AttestationBatchPublisher {
         try {
             await db.setAttestPublishedBatchByNetworkAndWindowStart(this.network, windowStart, windowEnd, rowCount, 'deadletter');
         } catch(e){
-            console.error('AttestationBatchPublisher: could not record the dead-letter marker for window ' +
+            logger.error('AttestationBatchPublisher: could not record the dead-letter marker for window ' +
                           windowStart + ': ' + (e && e.message));
         }
     }
@@ -1367,7 +1369,7 @@ class AttestationBatchPublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch(e){
-            console.error('AttestationBatchPublisher: failed to append to ' + file + ': ' + (e && e.message));
+            logger.error('AttestationBatchPublisher: failed to append to ' + file + ': ' + (e && e.message));
         }
     }
 

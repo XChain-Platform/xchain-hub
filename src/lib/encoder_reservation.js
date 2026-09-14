@@ -37,6 +37,8 @@
  ********************************************************************/
 
 'use strict';
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Release the input claims a successful create_tx minted, when the caller has
 // decided not to broadcast it. Best effort by contract: the caller is already on
@@ -54,7 +56,7 @@ async function abandonBuild(encoder, psbtResult, who){
         await encoder.releaseInputs(String(id));
         return true;
     } catch(e){
-        console.warn((who || 'publisher') + ': could not release the abandoned build\'s input ' +
+        logger.warn((who || 'publisher') + ': could not release the abandoned build\'s input ' +
                      'reservation (' + ((e && e.message) || e) + '); the encoder frees it on its own ' +
                      'TTL instead');
         return false;

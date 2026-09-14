@@ -31,6 +31,8 @@ const dns    = require('dns');
 const net    = require('net');
 const { URL } = require('url');
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const USER_AGENT = 'XChain-Attestation/1.0';
 
@@ -174,7 +176,7 @@ exports.fetch = async (payload, options) => {
     const network  = String(options.network || hubConfig.HUB_NETWORK || '').toLowerCase();
     if (hatchSet && network !== 'regtest' && !warnedHatchIgnored) {
         warnedHatchIgnored = true;
-        console.log('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +
+        logger.info('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +
             (network || '<unset>') + '; the http_get SSRF guard stays active. This hatch is ' +
             'honored only on regtest, where attesting a local endpoint is the point.');
     }

@@ -34,6 +34,9 @@ const devband = require('../lib/deviation_band.js');
 // in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
 // does not require this file, so there is no cycle.
 const { maxChangeForPair } = require('../oracle/consensus.js');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 
@@ -124,7 +127,7 @@ class SlashDetector {
                 'co-signed band. Remove the override or set it >= the oracle band.');
         }
         if (this.deviationThreshold !== ORACLE_DEVIATION_THRESHOLD) {
-            console.warn('SlashDetector: SLASH_DEVIATION_THRESHOLD=' + this.deviationThreshold +
+            logger.warn('SlashDetector: SLASH_DEVIATION_THRESHOLD=' + this.deviationThreshold +
                 ' diverges from the federation-uniform ORACLE_DEVIATION_THRESHOLD=' +
                 ORACLE_DEVIATION_THRESHOLD + '; deviations between the two bands will be ' +
                 'co-sign-rejected but never slashed.');
@@ -236,7 +239,7 @@ class SlashDetector {
                 if (devband.exceedsBand(String(p.price), String(finalPriceStr), band, 18)) {
                     let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
                     let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
-                    console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
+                    logger.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
                         pct + '% on ' + p.coinPair + ' in round ' + round);
 
                     deviatingPairs.push({
@@ -345,7 +348,7 @@ class SlashDetector {
             // was lost. The latch is set only after the row persists.
             if (!this.nonParticipationFired.get(v.pubkey)) {
                 let rate = ((entry.history.length - entry.missed) / entry.history.length).toFixed(4);
-                console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
+                logger.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
                     '... missed ' + entry.missed + ' of the last ' + entry.history.length +
                     ' rounds (participation rate ' + rate + ')');
 
@@ -414,7 +417,7 @@ class SlashDetector {
         // stays ≥3. The latch re-arms when pruning drops the window below 3.
         if (deviations.length >= 3) {
             if (!this.repeatedDeviationFired.get(pubkey)) {
-                console.warn('Slash: Validator ' + pubkey.substring(0, 16) +
+                logger.warn('Slash: Validator ' + pubkey.substring(0, 16) +
                     '... has 3+ price deviations in 24 hours');
 
                 // Latch optimistically BEFORE the await, then re-arm on a failed write.
@@ -442,14 +445,14 @@ class SlashDetector {
     // once-per-crossing offense on success and safely retry on a failed write.
     async recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
         if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
-            console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
+            logger.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
             return false;
         }
         try {
             await this.db.createSlashProposal(validatorPubkey, offenseType, round, evidence);
             return true;
         } catch (e) {
-            console.error('Error recording slash proposal:', e);
+            logger.error(nodeUtil.format('Error recording slash proposal:', e));
             return false;
         }
     }
@@ -533,7 +536,7 @@ class SlashDetector {
         if(!validatorPubkey || !requestId) return;
         let pk = String(validatorPubkey).toLowerCase();
         if(!/^[0-9a-fA-F]{64}$/.test(pk)){
-            console.warn('SlashDetector: Invalid pubkey for attestation divergence; skipping');
+            logger.warn('SlashDetector: Invalid pubkey for attestation divergence; skipping');
             return;
         }
         let evidence = JSON.stringify({

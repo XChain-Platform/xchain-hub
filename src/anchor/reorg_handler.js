@@ -41,6 +41,9 @@ const coins        = require('../coins');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { noteDrop } = require('../consensus/diagnostics');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
@@ -190,17 +193,17 @@ class ReorgHandler extends EventEmitter {
         }
         for(const coin of Object.keys(this.indexers || {})){
             if(!this.indexers[coin] || !this.indexers[coin].url)
-                console.warn('Reorg: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); self-verification abstains for this chain until configured');
+                logger.warn('Reorg: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); self-verification abstains for this chain until configured');
         }
         // The handlers are async (self-node verification awaits indexer RPC);
         // EventEmitter doesn't await listeners, so surface rejections here
         // instead of letting them become unhandled.
         this._messageHandler = (envelope) => {
             this._handleMessage(envelope).catch(err =>
-                console.error('Reorg: message handling error:', err && err.message));
+                logger.error(nodeUtil.format('Reorg: message handling error:', err && err.message)));
         };
         this.peerManager.on('message', this._messageHandler);
-        console.log('Reorg handler started');
+        logger.info('Reorg handler started');
     }
 
     async stop() {
@@ -417,7 +420,7 @@ class ReorgHandler extends EventEmitter {
 
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
-                console.warn('Reorg: Consensus timeout for ' + reorgId);
+                logger.warn('Reorg: Consensus timeout for ' + reorgId);
                 // Surface the discarded rollback before dropping it, so operators
                 // (and downstream consumers) can alert or retry. Without this, a
                 // stalled round silently leaves attestations un-deleted and price
@@ -512,7 +515,7 @@ class ReorgHandler extends EventEmitter {
                     if (!pending.finalized) {
                         // Same silent-discard fix as _initiateReorgConsensus: emit the
                         // dropped rollback so it isn't lost without a signal.
-                        console.warn('Reorg: Consensus timeout for ' + reorgId);
+                        logger.warn('Reorg: Consensus timeout for ' + reorgId);
                         this.emit('reorg:timeout', {
                             reorgId,
                             sourceChain:    pending.chain,
@@ -593,14 +596,14 @@ class ReorgHandler extends EventEmitter {
             ).then(() => {
                 this.pendingReorgs.delete(reorgId);
             }).catch(err => {
-                console.error('Reorg: Error executing rollback for %s:', reorgId, err.message);
+                logger.error(nodeUtil.format('Reorg: Error executing rollback for %s:', reorgId, err.message));
                 this.pendingReorgs.delete(reorgId);
             });
         }
     }
 
     async _executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
-        console.log('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
+        logger.info('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
 
         // Rollback bound: anchor to OUR OWN node's block_time for reorgHeight
         // (captured during self-verification) rather than the reporter-supplied
@@ -635,7 +638,7 @@ class ReorgHandler extends EventEmitter {
 
         this.processed.add(reorgId);
 
-        console.log('Reorg: Rollback complete for ' + reorgId +
+        logger.info('Reorg: Rollback complete for ' + reorgId +
             ': attestations and snapshots after ' + bound +
             (Number.isFinite(observedBlockTimeMs) ? ' (block_time-anchored)' : ' (reported timestamp)') +
             ' invalidated');
@@ -662,7 +665,7 @@ class ReorgHandler extends EventEmitter {
 
         let probe = this._probeOwnNode(chain, reorgHeight, oldHash, newHash)
             .catch(err => {
-                console.warn('Reorg: self-verification failed for %s:', key, err && err.message);
+                logger.warn(nodeUtil.format('Reorg: self-verification failed for %s:', key, err && err.message));
                 return false;
             });
         this._verifying.set(key, probe);
@@ -724,8 +727,8 @@ class ReorgHandler extends EventEmitter {
         try {
             hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
         } catch (err) {
-            console.warn('Reorg: getreorghistory probe failed for %s:%s:',
-                chain, reorgHeight, err && err.message);
+            logger.warn(nodeUtil.format('Reorg: getreorghistory probe failed for %s:%s:',
+                chain, reorgHeight, err && err.message));
             return false;
         }
         if (!hist || hist.error || !Array.isArray(hist.events)) return false;
@@ -751,13 +754,13 @@ class ReorgHandler extends EventEmitter {
         // orphaned blocks on mainnet carry a null hash (DOGE 6280198 + 6279100,
         // LTC 3137602), so the abstention cost of leaving this off is those heights.
         if (sawUnrecorded && String(hubConfig.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
-            console.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
+            logger.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
                 ' because REORG_ALLOW_UNRECORDED_OLDHASH=1 (the orphaned hash is unrecorded, so this ' +
                 'co-signs a claim this node cannot check)');
             return true;
         }
         if (sawUnrecorded)
-            console.warn('Reorg: abstaining at ' + chain + ':' + reorgHeight +
+            logger.warn('Reorg: abstaining at ' + chain + ':' + reorgHeight +
                 ': a reorg IS recorded at this height but its orphaned hash was never recorded, so the ' +
                 'claimed oldHash cannot be verified)');
         return false;

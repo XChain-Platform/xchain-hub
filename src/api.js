@@ -36,9 +36,12 @@ installCrashHandlers({ service: 'xchain-hub' });
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret_env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
+const nodeUtil = require('node:util');
+const { getLogger } = require('./observability');
+const logger = getLogger();
 for(const key of REQUIRED_ENV){
     if(!process.env[key]){
-        console.error('Missing required environment variable: ' + key);
+        logger.error('Missing required environment variable: ' + key);
         process.exit(1);
     }
 }
@@ -50,15 +53,15 @@ let HUB_DB_SECRET;
 try {
     HUB_DB_SECRET = resolveSecretEnv('HUB_DB_PASS');
 } catch (err) {
-    console.error(err.message);
+    logger.error(err.message);
     process.exit(1);
 }
 if(!HUB_DB_SECRET){
-    console.error('Missing required environment variable: HUB_DB_SECRET (deprecated name: HUB_DB_PASS)');
+    logger.error('Missing required environment variable: HUB_DB_SECRET (deprecated name: HUB_DB_PASS)');
     process.exit(1);
 }
 for(const { legacy, preferred } of deprecatedSecretEnvNames()){
-    console.warn('Deprecated env var name ' + legacy + ': rename it to ' + preferred +
+    logger.warn('Deprecated env var name ' + legacy + ': rename it to ' + preferred +
         '. Automatic secret redaction keys on the variable name, and ' + legacy +
         ' is not a name it matches, so anything that reads this env file prints the value in full.');
 }
@@ -339,14 +342,14 @@ const bootPosture = evaluateAuthPosture({
     validatorMode:        !!P2P_VALIDATOR_ADDR,
     sensitiveReadAuth:    SENSITIVE_READ_AUTH
 });
-for(const line of bootPosture.warnings) console.warn(line);
+for(const line of bootPosture.warnings) logger.warn(line);
 if(bootPosture.refuse){
-    console.error(bootPosture.fatal);
+    logger.error(bootPosture.fatal);
     process.exit(1);
 }
 
 if (P2P_VALIDATOR_ADDR && !hubConfig.ORACLE_EPOCH_START) {
-    console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
+    logger.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
     process.exit(1);
 }
 // HUB_NETWORK names the deployment network (mainnet|testnet|regtest) for the hub's
@@ -357,7 +360,7 @@ if (P2P_VALIDATOR_ADDR && !hubConfig.ORACLE_EPOCH_START) {
 const HUB_NETWORK = (hubConfig.HUB_NETWORK || '').toLowerCase();
 const HUB_NETWORKS = ['mainnet', 'testnet', 'regtest'];
 if (P2P_VALIDATOR_ADDR && !HUB_NETWORKS.includes(HUB_NETWORK)) {
-    console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
+    logger.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
     process.exit(1);
 }
 // A STANDALONE hub (no P2P_VALIDATOR_ADDR) runs no consensus of its own, but its
@@ -371,7 +374,7 @@ if (P2P_VALIDATOR_ADDR && !HUB_NETWORKS.includes(HUB_NETWORK)) {
 // deployment behaves exactly as before. SET must still name a real network, because a
 // typo would mis-gate the same rules that being blank mis-gated.
 if (!P2P_VALIDATOR_ADDR && HUB_NETWORK && !HUB_NETWORKS.includes(HUB_NETWORK)) {
-    console.error('Invalid optional environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for ingest activation gating on a standalone hub; leave it unset for a hub that judges no network-keyed content)');
+    logger.error('Invalid optional environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for ingest activation gating on a standalone hub; leave it unset for a hub that judges no network-keyed content)');
     process.exit(1);
 }
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
@@ -552,11 +555,11 @@ async function startApi(){
             let now = Date.now();
             if(now - rateLimitedLogged < facts.windowMs) return;
             rateLimitedLogged = now;
-            console.warn('Hub API rate limit: a caller exceeded ' + facts.limit +
+            logger.warn('Hub API rate limit: a caller exceeded ' + facts.limit +
                 ' req/' + Math.round(facts.windowMs / 1000) + 's; raise HUB_RATE_LIMIT_RPM if this is legitimate traffic');
         }
     })));
-    console.log('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP' +
+    logger.info('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP' +
         (HUB_RATE_LIMIT_EXEMPT_LOCAL
             ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
             : ' (enforced for every caller, including loopback and private-range)'));
@@ -2038,7 +2041,7 @@ async function startApi(){
             let rows = await hub.db.findPriceSnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2061,7 +2064,7 @@ async function startApi(){
             let rows = await hub.db[method](...params);
             res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2097,7 +2100,7 @@ async function startApi(){
             let rows = await hub.db.findCrossChainMatchesById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2111,7 +2114,7 @@ async function startApi(){
             let rows = await hub.db.findCapabilitySnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2137,7 +2140,7 @@ async function startApi(){
             let rows = await hub.db.findCrossChainCallsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2159,7 +2162,7 @@ async function startApi(){
             let rows = await hub.db.findStateCheckpointsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2183,7 +2186,7 @@ async function startApi(){
             let rows = await hub.db.findBridgeTransfers(since, limit);
             res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2203,7 +2206,7 @@ async function startApi(){
             let rows = await hub.db.findPolicySnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2221,7 +2224,7 @@ async function startApi(){
             let rows = await hub.db.findAnchorRewardAttestations(since, limit);
             res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2252,7 +2255,7 @@ async function startApi(){
             let rows = await hub.db.findAttestationResponsesById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
-            console.error('hub snapshot endpoint error:', err);
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
         }
     });
@@ -2265,7 +2268,7 @@ async function startApi(){
     const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
 
     if (TELEMETRY_ENABLED && !TELEMETRY_IP_SALT)
-        console.log('Telemetry: TELEMETRY_IP_SALT not set; ip_hash will be null (country/region still recorded)');
+        logger.info('Telemetry: TELEMETRY_IP_SALT not set; ip_hash will be null (country/region still recorded)');
 
     // Normalize, then derive only non-identifying values from the connecting IP. The raw IP
     // is used here and never returned or stored.
@@ -2410,7 +2413,7 @@ async function startApi(){
                 }).sort((a, b) => a.coin.localeCompare(b.coin) || a.network.localeCompare(b.network) || a.module.localeCompare(b.module)),
             });
         } catch (err) {
-            console.error('hub telemetry summary error:', err);
+            logger.error(nodeUtil.format('hub telemetry summary error:', err));
             res.status(500).json({ error: 'telemetry summary error' });
         }
     });
@@ -2464,7 +2467,7 @@ async function startApi(){
 
             res.json({ enabled: true, window_days: days, operators });
         } catch (err) {
-            console.error('hub telemetry operators error:', err);
+            logger.error(nodeUtil.format('hub telemetry operators error:', err));
             res.status(500).json({ error: 'telemetry operators error' });
         }
     });
@@ -2570,7 +2573,7 @@ async function startApi(){
         wss.handleUpgrade(request, socket, head, (ws) => {
             if (hub.hubDbBroadcaster) {
                 hub.hubDbBroadcaster.addSubscriber(ws, request).catch(e =>
-                    console.error('HubDbBroadcaster: addSubscriber failed:', e && e.message ? e.message : e));
+                    logger.error(nodeUtil.format('HubDbBroadcaster: addSubscriber failed:', e && e.message ? e.message : e)));
             } else {
                 try { ws.close(1011, 'Hub DB broadcaster not ready'); } catch (e) { /* ignore */ }
             }
@@ -2583,7 +2586,7 @@ async function startApi(){
             try {
                 let result = await hub.db.deleteTelemetryPing(TELEMETRY_RETENTION_DAYS);
                 let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
-                if (deleted > 0) console.log('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
+                if (deleted > 0) logger.info('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
             } catch (e) { /* best-effort; never crash the hub over retention */ }
         };
         // unref so these best-effort retention timers never keep the event loop
@@ -2623,23 +2626,23 @@ async function startApi(){
     // one, so an unkeyed hub simply keeps the port gossip-only.
     if (hub.peerManager && typeof hub.peerManager.setFeedHandlers === 'function') {
         if (!HUB_API_KEY) {
-            console.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
+            logger.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
                 '(fail closed; the port stays gossip-only)');
         } else if (String(hubConfig.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
-            console.log('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
+            logger.info('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
         } else {
             hub.peerManager.setFeedHandlers(
                 app,
                 (request, socket, head) => server.emit('upgrade', request, socket, head));
-            console.log('Hub DB feed also served on the P2P port ' +
+            logger.info('Hub DB feed also served on the P2P port ' +
                 (hub.p2pConfig && hub.p2pConfig.P2P_PORT ? hub.p2pConfig.P2P_PORT : '') +
                 ' (read-only, X-Api-Key required)');
         }
     }
 
     server.listen(HUB_PORT, HUB_HOST, () => {
-        console.log('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);
-        console.log('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
+        logger.info('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);
+        logger.info('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
     });
 
     // Graceful shutdown: release every timer, socket, and the DB pool, then exit.
@@ -2649,7 +2652,7 @@ async function startApi(){
     async function shutdown(signal) {
         if (shuttingDown) return;          // ignore a second signal
         shuttingDown = true;
-        console.log('Received ' + signal + '; shutting down hub...');
+        logger.info('Received ' + signal + '; shutting down hub...');
 
         // Stop the periodic work owned by this file.
         clearInterval(pingInterval);
@@ -2657,7 +2660,7 @@ async function startApi(){
 
         // Backstop: if any close hangs, exit anyway rather than linger forever.
         const forceTimer = setTimeout(() => {
-            console.error('Shutdown timed out after 10s; forcing exit');
+            logger.error('Shutdown timed out after 10s; forcing exit');
             process.exit(1);
         }, 10000);
         forceTimer.unref();
@@ -2695,7 +2698,7 @@ async function startApi(){
             // unless log shipping is enabled).
             await observability.shutdown();
         } catch (e) {
-            console.error('Error during shutdown:', e);
+            logger.error(nodeUtil.format('Error during shutdown:', e));
         } finally {
             clearTimeout(forceTimer);
             process.exit(0);

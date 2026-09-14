@@ -25,6 +25,8 @@
 
 const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
 const SELF_TESTS = require('../capabilities/index.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE into
 // { capability } (lowercased), or null if it is not a known-capability MIN_STAKE field.
@@ -187,7 +189,7 @@ class CapabilityRegistry {
             // A transient read failure here silently falls back to genesis-only
             // thresholds. Log the error so the operator can see it rather than
             // having the hub start with an incomplete threshold history.
-            console.warn('CapabilityRegistry: loadGovernanceHistory DB read failed, using genesis-only thresholds: ' + (e && e.message));
+            logger.warn('CapabilityRegistry: loadGovernanceHistory DB read failed, using genesis-only thresholds: ' + (e && e.message));
             return;
         }
         for (let r of rows) {
@@ -200,7 +202,7 @@ class CapabilityRegistry {
             // and warn so any stale row in the DB is visible. When the indexer
             // flag-day ships and this pin flips to false, the replay resumes.
             if (MIN_STAKE_GOVERNANCE_DISABLED) {
-                console.warn('CapabilityRegistry: loadGovernanceHistory skipping passed MIN_STAKE row for ' +
+                logger.warn('CapabilityRegistry: loadGovernanceHistory skipping passed MIN_STAKE row for ' +
                              parsed.capability + ' (activation_block ' + r.activation_block +
                              ') because MIN_STAKE_GOVERNANCE_DISABLED is set');
                 continue;

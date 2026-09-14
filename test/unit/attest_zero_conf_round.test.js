@@ -184,7 +184,8 @@ describe('AttestationRound zero-confirmation flip', function () {
         it('reports the tip, the effective count and the widen the drill greps for', async function () {
             let { ar, request } = makeRegtestRound();
             let logs = [];
-            sinon.stub(console, 'log').callsFake(l => logs.push(String(l)));
+            // The start line is written through the logger now, not bare console.
+            sinon.stub(require('../../src/observability').getLogger(), 'info').callsFake(l => logs.push(String(l)));
             await ar._startRound(request, 500);
             sinon.restore();
             let starting = logs.filter(l => l.indexOf('AttestationRound: starting ') === 0);

@@ -31,6 +31,9 @@ const { positiveIntConfig } = require('../lib/config_int.js');
 const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
 const { noteDrop } = require('../consensus/diagnostics');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -149,7 +152,7 @@ class CrossChainEngine extends EventEmitter {
         }
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
-        console.log('Cross-chain attestation engine started');
+        logger.info('Cross-chain attestation engine started');
     }
 
     // Stop the engine
@@ -373,7 +376,7 @@ class CrossChainEngine extends EventEmitter {
             return this._memberPubkeySet(
                 await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight));
         } catch (err) {
-            console.warn('CrossChain: could not resolve the cross_chain member set at block ' +
+            logger.warn('CrossChain: could not resolve the cross_chain member set at block ' +
                 btcBlockHeight + ' (' + (err && err.message) + '); tallying unfiltered');
             return null;
         }
@@ -416,9 +419,9 @@ class CrossChainEngine extends EventEmitter {
                 // indexer call. Errors are caught and logged; they never bubble up
                 // to the gossip layer (mirrors OracleConsensus).
                 this._handlePropose(envelope).catch(err =>
-                    console.error('CrossChain: PROPOSE handler error for %s:',
+                    logger.error(nodeUtil.format('CrossChain: PROPOSE handler error for %s:',
                         (envelope && envelope.data && envelope.data.attestationId),
-                        err && err.message));
+                        err && err.message)));
                 break;
             case XCHAIN_ATTEST_PREPARE: this._handlePrepare(envelope); break;
             case XCHAIN_ATTEST_COMMIT:  this._handleCommit(envelope);  break;
@@ -454,7 +457,7 @@ class CrossChainEngine extends EventEmitter {
         // indexer before co-signing. Fails closed (drop, don't sign) when the
         // action is missing, under-confirmed, or unverifiable.
         if (!(await this._verifySourceAction(sourceChain, sourceActionIndex))) {
-            console.warn('CrossChain: refusing to PREPARE ' + attestationId +
+            logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
                 ': source action not verified against local indexer');
             return;
         }
@@ -472,7 +475,7 @@ class CrossChainEngine extends EventEmitter {
                 // Fail closed: _resolveQuorum throws when federated but no
                 // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
                 // rather than PREPARE over a locally-derived quorum peers aren't using.
-                console.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
+                logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
                 return;
             }
             // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
@@ -486,7 +489,7 @@ class CrossChainEngine extends EventEmitter {
             // and the DEX engine was hardened against. Refuse; the round retries once the
             // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
             if (quorum === 0) {
-                console.warn('CrossChain: refusing to PREPARE ' + attestationId +
+                logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
                     ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
                 return;
             }
@@ -570,7 +573,7 @@ class CrossChainEngine extends EventEmitter {
 
         let ix = this.indexers[sourceChain];
         if (!ix || !ix.url) {
-            console.warn('CrossChain: no indexer endpoint for ' + sourceChain +
+            logger.warn('CrossChain: no indexer endpoint for ' + sourceChain +
                 ' (set ' + sourceChain + '_INDEXER_URL): cannot verify source action');
             return false;
         }
@@ -582,7 +585,7 @@ class CrossChainEngine extends EventEmitter {
         try {
             res = await this._indexerCall(sourceChain, 'getactionconfirmations', { action_index: idx });
         } catch (err) {
-            console.warn('CrossChain: source action lookup failed for ' + sourceChain + ':' + idx +
+            logger.warn('CrossChain: source action lookup failed for ' + sourceChain + ':' + idx +
                 ': ' + (err && err.message));
             return false;
         }
@@ -655,7 +658,7 @@ class CrossChainEngine extends EventEmitter {
                     this.markFinalized(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
-                    console.log('CrossChain: Attestation finalized: ' + attestationId +
+                    logger.info('CrossChain: Attestation finalized: ' + attestationId +
                         ' (' + pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits)');
 
                     // Emit for downstream processing
@@ -672,7 +675,7 @@ class CrossChainEngine extends EventEmitter {
                     // Reset the finalize flag so a retransmitted COMMIT does, and
                     // leave the round timer (never cleared above) as the terminal
                     // backstop that rejects and evicts the round.
-                    console.error('CrossChain: Error storing attestation after ' +
+                    logger.error('CrossChain: Error storing attestation after ' +
                         this.storeRetryAttempts + ' attempt(s), retaining round for retry: ' + err.message);
                     pending.finalized = false;
                 });
@@ -692,7 +695,7 @@ class CrossChainEngine extends EventEmitter {
                 return;
             } catch (err) {
                 if (attempt >= this.storeRetryAttempts) throw err;
-                console.warn('CrossChain: attestation store attempt ' + attempt + '/' +
+                logger.warn('CrossChain: attestation store attempt ' + attempt + '/' +
                     this.storeRetryAttempts + ' failed for ' + attestation.attestationId +
                     ' (' + err.message + '); retrying in ' + delay + 'ms');
                 await new Promise(resolve => setTimeout(resolve, delay));

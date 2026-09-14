@@ -72,6 +72,8 @@ const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 // same declared height with nothing logged.
 const { CANONICAL_REORG_BUFFER } = require('../snapshot_reorg_buffer.js');
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the
@@ -484,7 +486,7 @@ class CapabilitySnapshot {
             let now = Date.now();
             if (now - this._truncWarnAt > this.cacheTtlMs) {
                 this._truncWarnAt = now;
-                console.error('CapabilitySnapshot: quorum computed over a TRUNCATED validator-set snapshot ' +
+                logger.error('CapabilitySnapshot: quorum computed over a TRUNCATED validator-set snapshot ' +
                     '(capability=' + snapshot.capability + ' block=' + snapshot.blockIndex + ' count=' + snapshot.count +
                     '): the indexer hit VALIDATOR_QUERY_LIMIT, so N is CAPPED below the true federation size. ' +
                     'Quorum stays cross-hub deterministic (all indexers truncate identically) but is computed over a ' +
@@ -559,7 +561,7 @@ class CapabilitySnapshot {
         if (!this._feedFloorNoted) this._feedFloorNoted = new Set();
         if (this._feedFloorNoted.has(capability)) return;
         this._feedFloorNoted.add(capability);
-        console.log('CapabilitySnapshot: no configured MIN_STAKE for "' + capability +
+        logger.info('CapabilitySnapshot: no configured MIN_STAKE for "' + capability +
             '"; using the canonical federation floor ' + value + ' from the stake-weight feed. ' +
             'Set CAPABILITY_' + String(capability).toUpperCase() + '_MIN_STAKE in HUB_CAPABILITY_CONFIG ' +
             'to pin it locally.');
@@ -600,7 +602,7 @@ class CapabilitySnapshot {
         if (raw === undefined || raw === '') return undefined;
         let n = Number(raw);
         if (!Number.isInteger(n) || n < 1) {
-            console.error('CapabilitySnapshot: HUB_CONSENSUS_INPUT_ALERT_AFTER "' + raw + '" is not a positive ' +
+            logger.error('CapabilitySnapshot: HUB_CONSENSUS_INPUT_ALERT_AFTER "' + raw + '" is not a positive ' +
                 'integer; using the default consensus-input alert threshold.');
             return undefined;
         }
@@ -650,7 +652,7 @@ class CapabilitySnapshot {
         if (raw === undefined || raw === '') return CANONICAL_REORG_BUFFER;
         let n = Number(raw);
         if (!Number.isInteger(n) || n < 0) {
-            console.error('CapabilitySnapshot: HUB_SNAPSHOT_REORG_BUFFER "' + raw + '" is not a ' +
+            logger.error('CapabilitySnapshot: HUB_SNAPSHOT_REORG_BUFFER "' + raw + '" is not a ' +
                 'non-negative integer; using the default (' + CANONICAL_REORG_BUFFER + '). This value ' +
                 'is CONSENSUS-CRITICAL and must match across the federation.');
             return CANONICAL_REORG_BUFFER;
@@ -662,7 +664,7 @@ class CapabilitySnapshot {
             'validator sets and quorum N across the federation. Change it fleet-wide or not at all ' +
             '(XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 to bypass on a venue where every hub runs the SAME override).';
         if (hubConfig.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
-            console.warn('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1: skipping the canonical reorg-buffer ' +
+            logger.warn('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1: skipping the canonical reorg-buffer ' +
                 'assertion. ' + detail);
             return n;
         }
@@ -674,7 +676,7 @@ class CapabilitySnapshot {
             err.code = 'REORG_BUFFER_MISMATCH';
             throw err;
         }
-        console.warn('CapabilitySnapshot: reorg-buffer mismatch (non-strict on ' +
+        logger.warn('CapabilitySnapshot: reorg-buffer mismatch (non-strict on ' +
             (network || 'standalone') + '): ' + detail);
         return n;
     }

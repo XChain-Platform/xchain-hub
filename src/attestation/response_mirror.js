@@ -90,6 +90,8 @@ const ValidatorIdentity = require('../validators/identity.js');
 const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
 const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./attest_response_body_cap.js');
 const ah     = require('../lib/admission_height.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The mirrored column set, in the order the snapshot route (api.js
 // GET /hub-db/snapshot/attestation_responses) selects them. The INSERT and the
@@ -194,7 +196,7 @@ class AttestationResponseMirror {
     async start(){
         let consensus = this.hub && this.hub.attestationConsensus;
         if(!consensus || typeof consensus.on !== 'function'){
-            console.log('AttestationResponseMirror: no AttestationConsensus, skipping consensus wiring');
+            logger.info('AttestationResponseMirror: no AttestationConsensus, skipping consensus wiring');
             return;
         }
         if(this._messageHandler) return;   // idempotent start; never a second listener on one event
@@ -207,7 +209,7 @@ class AttestationResponseMirror {
                 row = this.buildRow(event);
             } catch (err) {
                 this.stats.errors++;
-                console.error('AttestationResponseMirror: row build failed for ' +
+                logger.error('AttestationResponseMirror: row build failed for ' +
                               this.shortRid(event) + ': ' + (err && err.message ? err.message : err));
                 return;
             }
@@ -225,7 +227,7 @@ class AttestationResponseMirror {
                 if(inserted) this.gossipRow(row);
             }).catch(err => {
                 this.stats.errors++;
-                console.error('AttestationResponseMirror: mirror write failed for ' +
+                logger.error('AttestationResponseMirror: mirror write failed for ' +
                               String(row.request_id).substring(0, 16) + '...: ' +
                               (err && err.message ? err.message : err));
             });
@@ -245,14 +247,14 @@ class AttestationResponseMirror {
             pm.on('message', this._peerHandler);
             this._retryTimer = setInterval(() => {
                 this.drainParked().catch(e =>
-                    console.error('AttestationResponseMirror: park drain error: ' + (e && e.message ? e.message : e)));
+                    logger.error('AttestationResponseMirror: park drain error: ' + (e && e.message ? e.message : e)));
             }, PARK_RETRY_MS);
             // Never hold the process (or a test runner) open for a cache of rows
             // whose only backstop is already the periodic on-chain batch.
             if(typeof this._retryTimer.unref === 'function') this._retryTimer.unref();
         }
 
-        console.log('AttestationResponseMirror started (network: ' + (this.hub && this.hub.network) + ')');
+        logger.info('AttestationResponseMirror started (network: ' + (this.hub && this.hub.network) + ')');
     }
 
     async stop(){
@@ -298,7 +300,7 @@ class AttestationResponseMirror {
         let status = String(event.status || 'ok');
         if(!TERMINAL_STATUSES.has(status)){
             this.stats.skipped++;
-            console.log('AttestationResponseMirror: skipping non-terminal round ' + rid.substring(0, 16) +
+            logger.info('AttestationResponseMirror: skipping non-terminal round ' + rid.substring(0, 16) +
                         '... (status=' + status + '); retryable rounds are deliberately not mirrored');
             return null;
         }
@@ -322,7 +324,7 @@ class AttestationResponseMirror {
             // resolves no quorum), so writing it would only put an unappliable row
             // in the stream and in the on-chain batch.
             this.stats.skipped++;
-            console.warn('AttestationResponseMirror: no signatures in finalized event for ' +
+            logger.warn('AttestationResponseMirror: no signatures in finalized event for ' +
                          rid.substring(0, 16) + '...; skipping mirror row');
             return null;
         }
@@ -344,7 +346,7 @@ class AttestationResponseMirror {
             ? NaN : Number(rawEffective);
         if(!Number.isInteger(effectiveTime)){
             this.stats.skipped++;
-            console.error('AttestationResponseMirror: mirror-era round ' + rid.substring(0, 16) +
+            logger.error('AttestationResponseMirror: mirror-era round ' + rid.substring(0, 16) +
                           '... (block ' + requestBlock + ') carries no signed effective_time; refusing to write ' +
                           'a row no verifier could rebuild');
             return null;
@@ -410,7 +412,7 @@ class AttestationResponseMirror {
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function'){
             this.stats.errors++;
-            console.warn('AttestationResponseMirror: no hub DB; dropping mirror row for ' +
+            logger.warn('AttestationResponseMirror: no hub DB; dropping mirror row for ' +
                          String(row.request_id).substring(0, 16) + '...');
             return false;
         }
@@ -444,7 +446,7 @@ class AttestationResponseMirror {
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored){
             this.stats.errors++;
-            console.error('AttestationResponseMirror: wrote ' + String(row.request_id).substring(0, 16) +
+            logger.error('AttestationResponseMirror: wrote ' + String(row.request_id).substring(0, 16) +
                           '... but could not read it back; not broadcasting a row with no id');
             return inserted;
         }
@@ -493,7 +495,7 @@ class AttestationResponseMirror {
         let rowCount = (batchData && Array.isArray(batchData.rows)) ? batchData.rows.length : 0;
         let refuse = (reason) => {
             this.stats.rejected++;
-            console.warn('AttestationResponseMirror: refusing pushed batch from ' +
+            logger.warn('AttestationResponseMirror: refusing pushed batch from ' +
                          (sourceChain || 'unknown') + ': ' + reason);
             return { accepted: false, stored: 0, duplicates: 0, linked: 0, rejected: rowCount, reason: reason };
         };
@@ -561,7 +563,7 @@ class AttestationResponseMirror {
                 inserted = await this.insertAndBroadcast(row);
             } catch(err){
                 this.stats.errors++;
-                console.error('AttestationResponseMirror: batch row ' + row.request_id.substring(0, 16) +
+                logger.error('AttestationResponseMirror: batch row ' + row.request_id.substring(0, 16) +
                               '... could not be written: ' + (err && err.message ? err.message : err));
                 skipped++;
                 writeFailures++;
@@ -598,19 +600,19 @@ class AttestationResponseMirror {
         // covered when rows of it are missing, and nothing re-publishes it afterwards.
         let publisher = this.hub && this.hub.attestationBatchPublisher;
         if(writeFailures > 0){
-            console.warn('AttestationResponseMirror: withholding the landed marker for window ' +
+            logger.warn('AttestationResponseMirror: withholding the landed marker for window ' +
                          windowStart + ': ' + writeFailures + ' row(s) of this batch could not be written');
         } else if(publisher && typeof publisher.recordLandedWindow === 'function'){
             try {
                 await publisher.recordLandedWindow(windowStart, windowEnd,
                     batchData.txid == null ? null : String(batchData.txid), batchData.rows.length);
             } catch(err){
-                console.warn('AttestationResponseMirror: could not record the landed batch window ' +
+                logger.warn('AttestationResponseMirror: could not record the landed batch window ' +
                              windowStart + ': ' + (err && err.message ? err.message : err));
             }
         }
 
-        console.log('AttestationResponseMirror: absorbed batch for window ' + windowStart + '-' + windowEnd +
+        logger.info('AttestationResponseMirror: absorbed batch for window ' + windowStart + '-' + windowEnd +
                     ' from ' + (sourceChain || 'unknown') + ' action ' + actionIndex + ' (' + stored +
                     ' new, ' + duplicates + ' held, ' + linked + ' linked, ' + skipped + ' unusable)');
         // 'db error' is the wording the sibling price-batch handler already answers the
@@ -650,7 +652,7 @@ class AttestationResponseMirror {
     // Returns { accepted, cleared, reason }.
     async retractBatchLink(sourceChain, retraction){
         let refuse = (reason) => {
-            console.warn('AttestationResponseMirror: refusing batch retraction from ' +
+            logger.warn('AttestationResponseMirror: refusing batch retraction from ' +
                          (sourceChain || 'unknown') + ': ' + reason);
             return { accepted: false, cleared: 0, reason: reason };
         };
@@ -706,7 +708,7 @@ class AttestationResponseMirror {
         // fresh insert, and these rows have been in the stream for hours.
         for(let row of linked) await this.rebroadcastRow(row);
 
-        console.log('AttestationResponseMirror: retracted the batch link for window ' +
+        logger.info('AttestationResponseMirror: retracted the batch link for window ' +
                     windowStart + '-' + windowEnd + ' from ' + (sourceChain || 'unknown') +
                     ' action ' + actionIndex + ' (' + linked.length + ' row(s) unlinked)');
         return { accepted: true, cleared: linked.length, reason: null };
@@ -821,7 +823,7 @@ class AttestationResponseMirror {
         switch(envelope.type){
             case ATTEST_RESULT:
                 this._handleResult(envelope).catch(e =>
-                    console.error('AttestationResponseMirror: ATTEST_RESULT error: ' +
+                    logger.error('AttestationResponseMirror: ATTEST_RESULT error: ' +
                                   (e && e.message ? e.message : e)));
                 break;
         }
@@ -952,7 +954,7 @@ class AttestationResponseMirror {
                 return false;
             }
             this.stats.dropped++;
-            console.warn('AttestationResponseMirror: dropping gossiped row ' + short +
+            logger.warn('AttestationResponseMirror: dropping gossiped row ' + short +
                          ' after one parked retry; this hub still holds no v0 request for it. ' +
                          'The periodic on-chain batch is the backstop.');
             return false;
@@ -967,7 +969,7 @@ class AttestationResponseMirror {
         // canonical its signatures do not cover.
         if(!this._isMirrorEra(declaredBlock)){
             this.stats.rejected++;
-            console.warn('AttestationResponseMirror: dropping gossiped row ' + short +
+            logger.warn('AttestationResponseMirror: dropping gossiped row ' + short +
                          '; its local request at block ' + declaredBlock + ' is legacy-era');
             return false;
         }
@@ -975,7 +977,7 @@ class AttestationResponseMirror {
         let verdict = await this.verifyGossipedRow(row, request, local.latestBlock);
         if(!verdict.ok){
             this.stats.rejected++;
-            console.warn('AttestationResponseMirror: dropping gossiped row ' + short +
+            logger.warn('AttestationResponseMirror: dropping gossiped row ' + short +
                          '; ' + verdict.error);
             return false;
         }
@@ -1044,7 +1046,7 @@ class AttestationResponseMirror {
                 params:  params
             }, { headers: hub.btcIndexerHeaders(), timeout: 5000 });
         } catch (e){
-            console.warn('AttestationResponseMirror: request lookup failed for ' +
+            logger.warn('AttestationResponseMirror: request lookup failed for ' +
                          row.request_id.substring(0, 16) + '...: ' + (e && e.message ? e.message : e));
             return null;
         }
@@ -1201,7 +1203,7 @@ class AttestationResponseMirror {
             let oldest = this._parked.keys().next().value;
             this._parked.delete(oldest);
             this.stats.dropped++;
-            console.warn('AttestationResponseMirror: park set full (' + PARK_MAX +
+            logger.warn('AttestationResponseMirror: park set full (' + PARK_MAX +
                          '); dropped the oldest entry to admit ' + row.request_id.substring(0, 16) + '...');
         }
         this._parked.set(key, { row: row, parkedAt: Date.now() });
@@ -1220,7 +1222,7 @@ class AttestationResponseMirror {
                 await this.ingestGossipRow(entry.row, false);
             } catch (e){
                 this.stats.errors++;
-                console.error('AttestationResponseMirror: parked retry failed for ' +
+                logger.error('AttestationResponseMirror: parked retry failed for ' +
                               entry.row.request_id.substring(0, 16) + '...: ' +
                               (e && e.message ? e.message : e));
             }

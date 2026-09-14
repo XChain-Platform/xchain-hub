@@ -111,6 +111,9 @@ const { allCanonicalInts } = require('../lib/canonical_int.js');
 const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
 // parseInt() off the v3/v4 wire. request_id / response_hash are hex, and
@@ -338,7 +341,7 @@ class AttestationRelay {
         });
         this.consensus.on('match:finalized', (ev) => {
             this.onRoundFinalized(ev).catch(err =>
-                console.error('AttestationRelay: finalize handler error: ' + (err && err.message)));
+                logger.error('AttestationRelay: finalize handler error: ' + (err && err.message)));
         });
         // An abandoned round must release its inflight slot or the request wedges:
         // the poll's inflight guard would skip it forever.
@@ -368,11 +371,11 @@ class AttestationRelay {
 
     async start(){
         if(!this.enabled){
-            console.log('AttestationRelay: disabled (set ATTEST_RELAY_ENABLED=1 to opt in); cross-chain relay inactive');
+            logger.info('AttestationRelay: disabled (set ATTEST_RELAY_ENABLED=1 to opt in); cross-chain relay inactive');
             return;
         }
         if(!this.peerManager){
-            console.log('AttestationRelay: no peer manager; skipping start');
+            logger.info('AttestationRelay: no peer manager; skipping start');
             return;
         }
 
@@ -387,7 +390,7 @@ class AttestationRelay {
         }
         for(const coin of Object.keys(this.indexers)){
             if(!this.indexers[coin].url)
-                console.warn('AttestationRelay: no indexer URL for ' + coin + ' (set ' + coin +
+                logger.warn('AttestationRelay: no indexer URL for ' + coin + ' (set ' + coin +
                     '_INDEXER_API_URL, or push it via xchain-node updateconfig); this chain is skipped every tick');
         }
 
@@ -403,18 +406,18 @@ class AttestationRelay {
         await this.consensus.start();
 
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => console.error('AttestationRelay: poll error: ' + (err && err.message)));
+            this._poll().catch(err => logger.error('AttestationRelay: poll error: ' + (err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
 
         for(let coin of ORIGIN_CHAINS){
             if(!this.getBroadcaster(coin))
-                console.warn('AttestationRelay: no ' + coin + ' broadcast rail (set ' + coin + '_ENCODER_URL + ' +
+                logger.warn('AttestationRelay: no ' + coin + ' broadcast rail (set ' + coin + '_ENCODER_URL + ' +
                     coin + '_ADDRESS, or wire setChainBroadcastHook); relay RESPONSES for ' + coin +
                     '-origin requests are held, never dropped');
         }
 
-        console.log('AttestationRelay: started (poll ' + this.pollMs + 'ms, origins ' +
+        logger.info('AttestationRelay: started (poll ' + this.pollMs + 'ms, origins ' +
                     ORIGIN_CHAINS.map(c => c + '=' + this.confirmations[c] + ' conf').join(' ') +
                     ', home ' + HOME_CHAIN + '=' + this.confirmations[HOME_CHAIN] + ' conf, ' +
                     this._published.size + ' request(s) and ' + this._publishedResponses.size +
@@ -467,11 +470,11 @@ class AttestationRelay {
             for(let coin of ORIGIN_CHAINS){
                 if(!this.indexers[coin] || !this.indexers[coin].url) continue;
                 try { await this.pollOriginRequests(coin); }
-                catch(e){ console.warn('AttestationRelay: ' + coin + ' poll failed: ' + (e && e.message)); }
+                catch(e){ logger.warn('AttestationRelay: ' + coin + ' poll failed: ' + (e && e.message)); }
             }
             if(home){
                 try { await this.relayHomeResponses(home); }
-                catch(e){ console.warn('AttestationRelay: response relay pass failed: ' + (e && e.message)); }
+                catch(e){ logger.warn('AttestationRelay: response relay pass failed: ' + (e && e.message)); }
             }
             await this.sweepFinalized();
             // Last, on the tips this tick just read: a leg is only evictable once its
@@ -541,7 +544,7 @@ class AttestationRelay {
         for(let req of res.rows){
             try { await this.maybeMaterialize(coin, latest, req); }
             catch(e){
-                console.warn('AttestationRelay: materialize attempt failed for ' +
+                logger.warn('AttestationRelay: materialize attempt failed for ' +
                     String(req && req.request_id).substring(0, 16) + '...: ' + (e && e.message));
             }
         }
@@ -587,7 +590,7 @@ class AttestationRelay {
         if(!rows.some(r => String(r && r.request_status) === REFUSED_REQUEST_STATUS)) return rows;
         if(!await this.rejectSlotArmed()) return rows;
         let kept = rows.filter(r => String(r && r.request_status) !== REFUSED_REQUEST_STATUS);
-        console.warn('AttestationRelay: ignoring ' + (rows.length - kept.length) +
+        logger.warn('AttestationRelay: ignoring ' + (rows.length - kept.length) +
                      ' REFUSED ' + HOME_CHAIN + ' relay row(s) in the materialized view ' +
                      '(ATTEST_RELAY_REJECT_SLOT armed on ' + this.network +
                      '); the requests they name are still owed a relay');
@@ -626,7 +629,7 @@ class AttestationRelay {
     logRejectSlotPlaneOnce(){
         if(this._rejectSlotPlaneLogged) return;
         this._rejectSlotPlaneLogged = true;
-        console.warn('AttestationRelay: no ' + HOME_CHAIN + ' tip time on ' + this.network +
+        logger.warn('AttestationRelay: no ' + HOME_CHAIN + ' tip time on ' + this.network +
                      ', so ATTEST_RELAY_REJECT_SLOT cannot be resolved; REFUSED relay rows still ' +
                      'count as materialized (wire an indexer tip push to lift this)');
     }
@@ -638,7 +641,7 @@ class AttestationRelay {
             if(row.response_action_index == null) continue;   // nothing fulfilled yet
             try { await this.maybeRelayResponse(latest, row); }
             catch(e){
-                console.warn('AttestationRelay: response relay attempt failed for ' +
+                logger.warn('AttestationRelay: response relay attempt failed for ' +
                     String(row && row.request_id).substring(0, 16) + '...: ' + (e && e.message));
             }
         }
@@ -699,7 +702,7 @@ class AttestationRelay {
         // provider from the origin), which is exactly why a disagreement is worth
         // saying out loud rather than proposing into a round that cannot finalize.
         if(originReq && String(originReq.provider_id || '') !== fields.providerId){
-            console.error('AttestationRelay: refusing to relay ' + rid.substring(0, 16) +
+            logger.error('AttestationRelay: refusing to relay ' + rid.substring(0, 16) +
                           '...: ' + coin + ' names provider "' + originReq.provider_id +
                           '" but ' + HOME_CHAIN + ' holds "' + fields.providerId + '"');
             return;
@@ -730,7 +733,7 @@ class AttestationRelay {
 
         let wireFault = this._wireFault(row, 1);
         if(wireFault){
-            console.error('AttestationRelay: cannot relay the response for ' + rid.substring(0, 16) + '... : ' + wireFault);
+            logger.error('AttestationRelay: cannot relay the response for ' + rid.substring(0, 16) + '... : ' + wireFault);
             return;
         }
 
@@ -771,7 +774,7 @@ class AttestationRelay {
 
         let stored = String(res.response_hash || '').toLowerCase();
         if(stored && stored !== responseHash){
-            console.error('AttestationRelay: refusing to relay ' + String(res.request_id).substring(0, 16) +
+            logger.error('AttestationRelay: refusing to relay ' + String(res.request_id).substring(0, 16) +
                           '...: the stored response body does not re-encode to its own hash ' +
                           '(a non-UTF-8 attested body cannot cross chains)');
             return null;
@@ -842,7 +845,7 @@ class AttestationRelay {
         // signed fields, so an oversized or unsplittable payload dooms the round.
         let wireFault = this._wireFault(row, 1);
         if(wireFault){
-            console.error('AttestationRelay: cannot materialize ' + rid.substring(0, 16) + '... : ' + wireFault);
+            logger.error('AttestationRelay: cannot materialize ' + rid.substring(0, 16) + '... : ' + wireFault);
             return;
         }
 
@@ -1101,7 +1104,7 @@ class AttestationRelay {
         // otherwise inherit the fifth unguarded path into the shared capability_snapshots
         // mirror. Keep every writer's guard in lockstep.
         if(validators && validators.truncated === true){
-            console.warn('AttestationRelay: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('AttestationRelay: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return;
@@ -1182,13 +1185,13 @@ class AttestationRelay {
 
         let rid = String(row.request_id).toLowerCase();
         if(sigs.length === 0){
-            console.warn('AttestationRelay: finalized ' + rid.substring(0, 16) + '... with no signatures; nothing to broadcast');
+            logger.warn('AttestationRelay: finalized ' + rid.substring(0, 16) + '... with no signatures; nothing to broadcast');
             return;
         }
 
         let fault = this._wireFault(row, sigs.length);
         if(fault){
-            console.error('AttestationRelay: dropping finalized ' + rid.substring(0, 16) + '... : ' + fault);
+            logger.error('AttestationRelay: dropping finalized ' + rid.substring(0, 16) + '... : ' + fault);
             return;
         }
 
@@ -1202,7 +1205,7 @@ class AttestationRelay {
             rid: rid, wire: wire, coin: coin, phase: phase, finalizedAt: Date.now(), rank: rank
         });
 
-        console.log('AttestationRelay: finalized ' + phase + ' ' + rid.substring(0, 16) + '... ' +
+        logger.info('AttestationRelay: finalized ' + phase + ' ' + rid.substring(0, 16) + '... ' +
                     (response
                         ? HOME_CHAIN + ':' + row.home_response_action_index + ' -> ' + coin + ' (' + row.status + ')'
                         : row.origin_chain + ':' + row.origin_action_index + ' -> ' + HOME_CHAIN) +
@@ -1240,7 +1243,7 @@ class AttestationRelay {
                 if(entry.rank < 0) continue;
                 if(entry.rank === 0) continue;   // already attempted at finalization
                 if(Date.now() - entry.finalizedAt < entry.rank * this.failoverWindowMs) continue;
-                console.warn('AttestationRelay: leader silent for the ' + phase + ' leg of ' +
+                logger.warn('AttestationRelay: leader silent for the ' + phase + ' leg of ' +
                              rid.substring(0, 16) + '...; rank ' + entry.rank + ' stepping in');
                 await this.broadcast(phase, rid);
             }
@@ -1272,7 +1275,7 @@ class AttestationRelay {
 
         let broadcaster = this.getBroadcaster(entry.coin);
         if(!broadcaster){
-            console.warn('AttestationRelay: no ' + entry.coin + ' broadcast rail configured for the ' + phase +
+            logger.warn('AttestationRelay: no ' + entry.coin + ' broadcast rail configured for the ' + phase +
                          ' leg of ' + rid.substring(0, 16) + '...; retained for a later sweep');
             return;
         }
@@ -1287,7 +1290,7 @@ class AttestationRelay {
         // the recorded spend, so record() must never be called on this path.
         let spendToken = this.spendGuard.reserve();
         if(!spendToken){
-            console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0, 16) + '...); retained for a later window');
+            logger.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0, 16) + '...); retained for a later window');
             return;
         }
 
@@ -1297,7 +1300,7 @@ class AttestationRelay {
             // Nothing goes on the wire without a durable record, so the leg stays
             // retryable and the reserved budget goes back.
             this.spendGuard.release(spendToken);
-            console.error('AttestationRelay: durable WAL write FAILED for ' + rid.substring(0, 16) +
+            logger.error('AttestationRelay: durable WAL write FAILED for ' + rid.substring(0, 16) +
                           '...; skipping broadcast (no on-chain spend without a durable record)');
             return;
         }
@@ -1310,7 +1313,7 @@ class AttestationRelay {
             state.published.mark(rid);
             state.wire.delete(rid);
             this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: (result && result.txid) || null });
-            console.log('AttestationRelay: broadcast ATTEST ' + version + ' on ' + entry.coin + ' for ' +
+            logger.info('AttestationRelay: broadcast ATTEST ' + version + ' on ' + entry.coin + ' for ' +
                         rid.substring(0, 16) + '... txid=' + ((result && result.txid) ? result.txid : '?'));
         } catch(e){
             this._broadcastFailed++;
@@ -1333,14 +1336,14 @@ class AttestationRelay {
                 this.spendGuard.commit(spendToken);
                 state.published.mark(rid);
                 this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: null, ambiguous: true });
-                console.error('AttestationRelay: AMBIGUOUS ' + version + ' broadcast failure for ' + rid.substring(0, 16) +
-                              '... (the tx may have reached the ' + entry.coin + ' node); not retrying: ', e);
+                logger.error(nodeUtil.format('AttestationRelay: AMBIGUOUS ' + version + ' broadcast failure for ' + rid.substring(0, 16) +
+                              '... (the tx may have reached the ' + entry.coin + ' node); not retrying: ', e));
             } else {
                 // A pre-send or clean failure left nothing on the wire and the leg stays
                 // retryable, so the reserved budget goes back.
                 this.spendGuard.release(spendToken);
                 this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'failed' });
-                console.error('AttestationRelay: ' + version + ' broadcast failed for ' + rid.substring(0, 16) + '...: ', e);
+                logger.error(nodeUtil.format('AttestationRelay: ' + version + ' broadcast failed for ' + rid.substring(0, 16) + '...: ', e));
             }
         }
     }
@@ -1468,7 +1471,7 @@ class AttestationRelay {
             return true;
         } catch(e){
             this._walFailures++;
-            console.error('AttestationRelay: failed to append the relay WAL at ' + this.walPath + ':', e);
+            logger.error(nodeUtil.format('AttestationRelay: failed to append the relay WAL at ' + this.walPath + ':', e));
             return false;
         }
     }
@@ -1555,7 +1558,7 @@ class AttestationRelay {
         let prior = this._deadlines.get(rid);
         if(prior && prior.coin === coin && prior.block === block) return true;
         if(!prior && this._deadlines.size >= MAX_TRACKED_DEADLINES){
-            console.warn('AttestationRelay: deadline index full at ' + MAX_TRACKED_DEADLINES +
+            logger.warn('AttestationRelay: deadline index full at ' + MAX_TRACKED_DEADLINES +
                          ' entries; ' + rid.substring(0, 16) + '... will be retained rather than evicted');
             return false;
         }
@@ -1604,7 +1607,7 @@ class AttestationRelay {
             }
             this._evicted++;
         }
-        console.log('AttestationRelay: evicted ' + expired.length + ' relay leg(s) whose origin deadline is ' +
+        logger.info('AttestationRelay: evicted ' + expired.length + ' relay leg(s) whose origin deadline is ' +
                     'buried past recall (' + this._published.size + ' request + ' + this._publishedResponses.size +
                     ' response record(s) retained)');
         // Only ever after the in-memory eviction: a compaction that failed leaves the
@@ -1681,14 +1684,14 @@ class AttestationRelay {
             // Atomic: a crash here leaves the OLD file, which is the conservative one.
             fs.renameSync(tmp, this.walPath);
             this._walCompactions++;
-            console.log('AttestationRelay: compacted the relay WAL (' + reason + '): ' +
+            logger.info('AttestationRelay: compacted the relay WAL (' + reason + '): ' +
                         lines + ' record(s) -> ' + out.length);
             return true;
         } catch(e){
             this._walFailures++;
             try { fs.unlinkSync(tmp); } catch(_){ /* best effort */ }
-            console.error('AttestationRelay: WAL compaction (' + reason + ') failed at ' + this.walPath +
-                          '; the uncompacted file stands:', e);
+            logger.error(nodeUtil.format('AttestationRelay: WAL compaction (' + reason + ') failed at ' + this.walPath +
+                          '; the uncompacted file stands:', e));
             return false;
         }
     }
@@ -1698,7 +1701,7 @@ class AttestationRelay {
     logGateOnce(snapshotBlock){
         if(this._gateLogged) return;
         this._gateLogged = true;
-        console.log('AttestationRelay: ATTEST_RELAY_ACTIVATION not reached on ' + this.network +
+        logger.info('AttestationRelay: ATTEST_RELAY_ACTIVATION not reached on ' + this.network +
                     ' (BTC ' + snapshotBlock + '); relay-eligible origin requests are held, nothing is broadcast');
     }
 

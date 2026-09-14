@@ -101,6 +101,9 @@ const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = requir
 // Canonical integer-spelling guard for the signed fields (see lib/canonical_int.js).
 const { allCanonicalInts } = require('../lib/canonical_int.js');
 const hubConfig = require('../config');
+const nodeUtil = require('node:util');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // The INT/BIGINT-backed fields each phase signs VERBATIM into _canonicalMatch and
 // every verifier re-derives from a normalized integer. Decimal, address, method,
@@ -207,7 +210,7 @@ class CrossChainCallEngine extends EventEmitter {
         });
         this.consensus.on('match:finalized', (ev) => {
             this.writeFinalizedRow(ev).catch(err =>
-                console.error('CrossChainCall: write finalized row error:', err && err.message));
+                logger.error(nodeUtil.format('CrossChainCall: write finalized row error:', err && err.message)));
         });
         // A round the consensus abandons (churned past its max lifetime under
         // sustained message loss) must release its inflight slot, or the next poll
@@ -245,14 +248,14 @@ class CrossChainCallEngine extends EventEmitter {
         }
         for(const coin of Object.keys(this.indexers || {})){
             if(!this.indexers[coin] || !this.indexers[coin].url)
-                console.warn('CrossChainCall: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
+                logger.warn('CrossChainCall: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
         }
         await this.consensus.start();
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => console.error('CrossChainCall: poll error:', err && err.message));
+            this._poll().catch(err => logger.error(nodeUtil.format('CrossChainCall: poll error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
-        console.log('CrossChainCall: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
+        logger.info('CrossChainCall: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
                     ALLOWED_CHAINS.map(c => c + '=' + this.confirmations[c]).join(' ') + ')');
     }
 
@@ -273,7 +276,7 @@ class CrossChainCallEngine extends EventEmitter {
             // dispatch whose only result row is 'retracted' is pending again.
             rows = await this.db.findCrossChainCallsByPhase();
         } catch(e){
-            console.warn('CrossChainCall: getStats query failed: ' + (e && e.message));
+            logger.warn('CrossChainCall: getStats query failed: ' + (e && e.message));
         }
         let pending_by_chain = {};
         for(let r of rows) pending_by_chain[r.target_chain] = Number(r.pending_relay_count);
@@ -336,7 +339,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         for(let call of res.calls){
             try { await this.maybeDispatch(coin, String(res.network), latest, call); }
-            catch(e){ console.warn('CrossChainCall: dispatch attempt failed for ' +
+            catch(e){ logger.warn('CrossChainCall: dispatch attempt failed for ' +
                                    String(call && call.call_id).substring(0, 16) + '...: ' + (e && e.message)); }
         }
     }
@@ -439,7 +442,7 @@ class CrossChainCallEngine extends EventEmitter {
             } catch(e){
                 this._resultAttemptFailures++;
                 this.parkResult(callId);
-                console.warn('CrossChainCall: result attempt failed for ' +
+                logger.warn('CrossChainCall: result attempt failed for ' +
                              callId.substring(0, 16) + '...: ' + (e && e.message));
             }
         }
@@ -544,7 +547,7 @@ class CrossChainCallEngine extends EventEmitter {
             map = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
                 ? await this.hub.resolveAdmitBlocks('cross_chain_calls', readSet) : null;
             if(!map){
-                console.error('CrossChainCall: refusing to open the ' + row.phase + ' round for call ' +
+                logger.error('CrossChainCall: refusing to open the ' + row.phase + ' round for call ' +
                     String(row.call_id).substring(0,16) + '... at snapshot_block ' + row.snapshot_block +
                     '; no fresh admission tip for ' + readSet.join(' / '));
                 return false;
@@ -584,7 +587,7 @@ class CrossChainCallEngine extends EventEmitter {
         let scope;
         try { scope = this.admissionScope(row); }
         catch (err) {
-            console.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
+            logger.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
                 '...; unusable admission read set: ' + err.message);
             return false;
         }
@@ -593,13 +596,13 @@ class CrossChainCallEngine extends EventEmitter {
         let map;
         try { map = ah.rowAdmitBlocks(row); }
         catch (err) {
-            console.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
+            logger.warn('CrossChainCall: refusing call ' + String(row.call_id).substring(0,16) +
                 '...; unusable admission map: ' + err.message);
             return false;
         }
         let v = await ah.checkAdmitBlocksAgainstHub(this.hub, scope.readSet, map);
         if(!v.ok){
-            console.warn('CrossChainCall: refusing to sign the ' + row.phase + ' round for call ' +
+            logger.warn('CrossChainCall: refusing to sign the ' + row.phase + ' round for call ' +
                 String(row.call_id).substring(0,16) + '... at snapshot_block ' + row.snapshot_block +
                 '; ' + v.reason);
             return false;
@@ -809,13 +812,13 @@ class CrossChainCallEngine extends EventEmitter {
         try {
             persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
-            console.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+            logger.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.deferFinalize(row);
             return;
         }
         if(!persistedRows){
-            console.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+            logger.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring ' +
                           row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round)');
             this.deferFinalize(row);
@@ -832,7 +835,7 @@ class CrossChainCallEngine extends EventEmitter {
         // no mirror, round released, so a later poll re-proposes only if the source chain
         // still carries the call.
         if(this.retractedSince(startSeq, row)){
-            console.warn('CrossChainCall: retraction landed while finalizing ' + row.phase + ' ' +
+            logger.warn('CrossChainCall: retraction landed while finalizing ' + row.phase + ' ' +
                          String(row.call_id).substring(0, 16) + '... (' + row.source_chain + ':' +
                          row.source_action_index + '); skipping the row write and the mirror');
             this.deferFinalize(row);
@@ -851,7 +854,7 @@ class CrossChainCallEngine extends EventEmitter {
         try {
             await this.db.setCrossChainCallFinalized(row, btcChainId);
         } catch(e){
-            console.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
+            logger.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
                           String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.deferFinalize(row);
             return;
@@ -860,7 +863,7 @@ class CrossChainCallEngine extends EventEmitter {
         // failure must not wedge the round. mirrorCallRow cannot throw.
         this._inflight.delete(row.round_id);
         await this.mirrorCallRow(row);
-        console.log('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
+        logger.info('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
                     row.source_chain + ':' + row.source_action_index + ' -> ' + row.target_chain + ':' + row.target_contract_index +
                     (row.phase === 'result' ? (' [' + row.result_status + ']') : '') +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
@@ -950,7 +953,7 @@ class CrossChainCallEngine extends EventEmitter {
         } catch(e){
             failure = (e && e.message) ? e.message : String(e);
         }
-        console.error('CrossChainCall: could not stream a committed cross_chain_calls row to mirror ' +
+        logger.error('CrossChainCall: could not stream a committed cross_chain_calls row to mirror ' +
                       'subscribers (' + failure + '); forcing subscriber resync');
         try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('cross_chain_calls mirror gap'); }
         catch(_e){ /* the repair itself must never fail a committed call row */ }
@@ -987,7 +990,7 @@ class CrossChainCallEngine extends EventEmitter {
         // under-counted stake denominator that this hub's own meetsStakeThreshold rejects.
         // Keep the three engines' guards in lockstep.
         if(validators && validators.truncated === true){
-            console.warn('CrossChainCall: refusing to persist a TRUNCATED ' + capability +
+            logger.warn('CrossChainCall: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
@@ -1097,11 +1100,11 @@ class CrossChainCallEngine extends EventEmitter {
             // broadcast otherwise. submitLocal always records the local intent so this
             // hub can co-sign peers' rounds for the same reorg.
             if(this.hub && this.hub.retractionConsensus)
-                this.hub.retractionConsensus.submitLocal(evt).catch(e => console.error('CrossChainCall: retraction submit error: ' + (e && e.message)));
+                this.hub.retractionConsensus.submitLocal(evt).catch(e => logger.error('CrossChainCall: retraction submit error: ' + (e && e.message)));
             else
                 this.broadcaster.broadcastDeletion(evt);
         }
-        console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
+        logger.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
                      ' reorg below action ' + from + (bounded ? ' (bounded <= ' + to + ')' : '') +
                      (fenced ? ' (gen <= ' + gen + ')' : '') + ' (should not happen past confirmation depth)');
     }

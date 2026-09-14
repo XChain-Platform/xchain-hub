@@ -79,6 +79,8 @@ const fs   = require('fs');
 const path = require('path');
 
 const SpendCeiling = require('./spend_ceiling.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // $2000 AML admission ceiling, in USD cents. The hard clamp on the per-window
 // spend budget: no operator config can raise the effective cap above this.
@@ -216,7 +218,7 @@ class SpendGuard {
         // (e.g. FullNodeChallengeRound calls check() with no balance argument).
         if (opts.balance === undefined && this.minBalance > 0 && !this._warnedFloorInert){
             this._warnedFloorInert = true;
-            console.warn(this.label + ': ' + this.prefix +
+            logger.warn(this.label + ': ' + this.prefix +
                 '_MIN_BALANCE=' + this.minBalance + ' is configured but check() is called with no balance; ' +
                 'the wallet floor is INERT for this effector (no balance source wired).');
         }
@@ -395,7 +397,7 @@ class SpendGuard {
         }
         this._spends.sort((a, b) => a.t - b.t);                 // prune() assumes ascending
         if (this._spends.length)
-            console.log(this.label + ': restored ' + this._spends.length + ' spend(s) totalling $' +
+            logger.info(this.label + ': restored ' + this._spends.length + ' spend(s) totalling $' +
                         (this.spentInWindow(now) / 100).toFixed(2) + ' from ' + this._statePath +
                         '; the per-window ceiling survives this restart');
     }
@@ -429,7 +431,7 @@ class SpendGuard {
         let now = Date.now();
         this._spends.push({ t: now, cost: this.maxSpendUsdCents });
         this.ceiling.seedConsumed(now);
-        console.warn(this.label + ': spend state at ' + this._statePath + ' is ' + why +
+        logger.warn(this.label + ': spend state at ' + this._statePath + ' is ' + why +
                      '; assuming the window is already spent (fail-closed) until it rolls over');
     }
 
@@ -455,7 +457,7 @@ class SpendGuard {
                 this._persistBroken    = false;
                 this._lastPersistError = null;
                 this._warnedWrite      = false;
-                console.log(this.label + ': spend state at ' + this._statePath +
+                logger.info(this.label + ': spend state at ' + this._statePath +
                             ' accepts writes again; spends resume');
             }
             return true;
@@ -464,7 +466,7 @@ class SpendGuard {
             this._lastPersistError = (e && e.message) ? e.message : String(e);
             if (!this._warnedWrite){
                 this._warnedWrite = true;
-                console.warn(this.label + ': could not persist spend state to ' + this._statePath +
+                logger.warn(this.label + ': could not persist spend state to ' + this._statePath +
                              ' (' + this._lastPersistError + '); REFUSING to authorise further spends ' +
                              'until the store accepts writes (fail-closed)');
             }

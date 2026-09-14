@@ -49,6 +49,8 @@ const swq               = require('../stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const ah                = require('../lib/admission_height.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
@@ -143,12 +145,12 @@ class CrossChainDexConsensus extends EventEmitter {
 
     async start(){
         if(!this.peerManager){
-            console.log('CrossChainDexConsensus: no peer manager; single-node finalize only');
+            logger.info('CrossChainDexConsensus: no peer manager; single-node finalize only');
             return;
         }
         this._messageHandler = (env) => this._handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
-        console.log('CrossChainDexConsensus: started');
+        logger.info('CrossChainDexConsensus: started');
     }
 
     async stop(){
@@ -260,7 +262,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // cross-hub deterministic there (CapabilitySnapshot.getQuorum), so quorum is
         // consistent fleet-wide and refusing would needlessly halt.
         if(weighted && validators && validators.truncated === true){
-            console.error('CrossChainDexConsensus: refusing round ' + rid.substring(0, 16) +
+            logger.error('CrossChainDexConsensus: refusing round ' + rid.substring(0, 16) +
                 '... over a TRUNCATED weighted cross_chain snapshot (snapshot_block=' + row.snapshot_block +
                 '): the cross_chain set overflowed VALIDATOR_QUERY_LIMIT so summed stake S is under-counted and ' +
                 'no quorum can safely finalize; raise VALIDATOR_QUERY_LIMIT (coordinated fleet upgrade). Will retry when the set fits.');
@@ -313,7 +315,7 @@ class CrossChainDexConsensus extends EventEmitter {
             let soleSelf = snapCount === 1 && String(validators[0].pubkey).toLowerCase() === myPubkey;
             if(!soleSelf){
                 this.pending.delete(rid);
-                console.warn('CrossChainDexConsensus: refusing to finalize match ' + rid +
+                logger.warn('CrossChainDexConsensus: refusing to finalize match ' + rid +
                     ' with quorum 0 over a ' + (snapCount === 0 ? 'EMPTY' : 'non-self single-validator') +
                     ' cross_chain snapshot (snapshot_block=' + row.snapshot_block +
                     '); will retry when the snapshot populates');
@@ -325,7 +327,7 @@ class CrossChainDexConsensus extends EventEmitter {
                 return;
             }
             try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
-            catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+            catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
             let sig = this.identity.sign(canonical);
             pending.signatures.set(myPubkey, sig);
             this.finalize(rid);
@@ -365,7 +367,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if((Date.now() - p.startedAt) > this.roundMaxLifetimeMs){
             if(p.timer) clearTimeout(p.timer);
             this.pending.delete(rid);
-            console.warn('CrossChainDexConsensus: abandoned stale round ' + rid.substring(0, 16) +
+            logger.warn('CrossChainDexConsensus: abandoned stale round ' + rid.substring(0, 16) +
                          '... after ' + Math.round((Date.now() - p.startedAt) / 1000) + 's unfinalized; engine will re-propose');
             this.emit('match:abandoned', { matchId: rid });
             return;
@@ -376,7 +378,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
     async broadcastPropose(pending){
         try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
-        catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+        catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
         let mySig = this.identity.sign(pending.canonical);
         pending.signatures.set(pending.myPubkey, mySig);
         pending.prepares.add(pending.myPubkey);
@@ -391,12 +393,12 @@ class CrossChainDexConsensus extends EventEmitter {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => console.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
+            case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => logger.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
             case this.types.PREPARE:     this._handlePrepare(envelope);    break;
             case this.types.COMMIT:      this._handleCommit(envelope);     break;
             case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
             case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
-            case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => console.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
+            case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => logger.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
         }
     }
 
@@ -413,7 +415,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let sameNetwork = String(row.network || '')  === String(pending.row.network || '');
         if(sameBlock && sameNetwork) return null;
         if(typeof this.engine._resolveCapabilityValidators !== 'function'){
-            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+            logger.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
                 ' because this engine cannot re-resolve the cross_chain set');
             return false;
         }
@@ -421,7 +423,7 @@ class CrossChainDexConsensus extends EventEmitter {
         try { raw = await this.engine._resolveCapabilityValidators('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ raw = null; }
         if(!Array.isArray(raw) || raw.length === 0){
-            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+            logger.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
                 ': the cross_chain set there resolved empty');
             return false;
         }
@@ -430,7 +432,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // under-counts S, so the strict two-thirds bar could pass a round the full set
         // rejects. The count path stays proceed-on-truncation there, and does here too.
         if(weighted && raw.truncated === true){
-            console.error('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+            logger.error('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
                 ' over a TRUNCATED weighted cross_chain snapshot; raise VALIDATOR_QUERY_LIMIT');
             return false;
         }
@@ -444,7 +446,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // a snapshot this hub read for itself. Mid-round it would mean adopting a
         // stranger's row and then ratifying it alone, so it is refused here.
         if(quorum === 0){
-            console.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
+            logger.warn('CrossChainDexConsensus: refusing a row at snapshot_block=' + row.snapshot_block +
                 ': the declared snapshot collapses to a single-validator quorum mid-round');
             return false;
         }
@@ -465,7 +467,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let scope;
         try { scope = this.engine.admissionScope(row); }
         catch(e){
-            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+            logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
                 '... has no usable admission scope (' + (e && e.message) + '); not signing');
             return false;
         }
@@ -474,7 +476,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let map;
         try { map = ah.rowAdmitBlocks(row); }
         catch(e){
-            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+            logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
                 '... carries an unusable admission map (' + (e && e.message) + '); not signing');
             return false;
         }
@@ -482,7 +484,7 @@ class CrossChainDexConsensus extends EventEmitter {
         try { v = await ah.checkAdmitBlocksAgainstHub(this.hub, scope.readSet, map); }
         catch(e){ v = { ok: false, chain: null, reason: 'admission bound check threw: ' + (e && e.message) }; }
         if(!v.ok){
-            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
+            logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) +
                 '... failed the ' + String(scope.table) + ' admission bound; not signing: ' + v.reason);
             return false;
         }
@@ -519,7 +521,7 @@ class CrossChainDexConsensus extends EventEmitter {
         try { ok = await this.engine.validateProposedMatch(row); }
         catch(e){ ok = false; }
         if(!ok){
-            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
+            logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
             return;
         }
 
@@ -586,7 +588,7 @@ class CrossChainDexConsensus extends EventEmitter {
             pending.commits.clear();
             pending._commitSent = false;
             adopted = true;
-            console.log('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
+            logger.info('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
         }
 
         if(view > pending.view) pending.view = view;
@@ -684,7 +686,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // only tally the commit with a verifying commit_sig.
         pending.signatures.set(senderPubkey, String(d.sig));
         if(!d.commit_sig || !ValidatorIdentity.verify(this.commitPayload(pending.canonical), String(d.commit_sig), senderPubkey)){
-            console.warn('CrossChainDexConsensus: COMMIT without verifying phase-bound commit_sig from ' +
+            logger.warn('CrossChainDexConsensus: COMMIT without verifying phase-bound commit_sig from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (vote not counted; a peer running older code, or a replayed PREPARE)');
             return;
         }
@@ -710,7 +712,7 @@ class CrossChainDexConsensus extends EventEmitter {
         this.markFinalized(rid, pending.row, sigs, pending.view);
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
 
-        console.log('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
+        logger.info('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' + sigs.length + ' sigs)');
         // `view` = the PBFT view this round finalized at (incremented per view-change).
         // Persisted as finalizing_view so the indexer rebuilds the exact EQUIV canonical
@@ -836,7 +838,7 @@ class CrossChainDexConsensus extends EventEmitter {
             if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
                 matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.nv, rid, view)
             });
-            this.broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
+            this.broadcastPropose(pending).catch(e => logger.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
         }
     }
 
@@ -913,7 +915,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // _handleNewView both short-circuit on a finalized round, so the monotonic-view
         // guard is never consulted for this round again. Taking the higher view is the bug.
         pending.view       = syncView;
-        console.log('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
+        logger.info('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
         this.finalize(rid);
     }
 
@@ -931,7 +933,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // guard: a Byzantine node can only announce views in which it is the leader).
         let expected = this._leaderFor(rid, pending.validators, view);
         if(!expected || announcer !== expected) {
-            console.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
+            logger.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
             return;
         }
         if(!this.verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
@@ -948,7 +950,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // is preserved and bounded.
         let votes = pending.viewChanges.get(view);
         if(!votes || !this.meetsQuorum(pending, votes)){
-            console.warn('CrossChainDexConsensus: deferring NEW_VIEW for view ' + view + ' (no local view-change quorum yet)');
+            logger.warn('CrossChainDexConsensus: deferring NEW_VIEW for view ' + view + ' (no local view-change quorum yet)');
             return;
         }
         pending.view = view;
