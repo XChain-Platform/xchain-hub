@@ -166,3 +166,40 @@ describe('OracleConsensus: a federated round needs a deterministic capability sn
         expect(oc.hasDeterministicSnapshot({ validators: [{ pubkey: 'aa' }] })).to.equal(true);
     });
 });
+
+// The quorum a federated follower locks is resolved in one step of the PROPOSE handler and
+// consumed by a later one. A step that drops or shadows that value either throws (the
+// handler rejects) or opens the round sized from the live set, so pin both: the handler
+// settles, and the pending round carries the SNAPSHOT's quorum, which the stub makes
+// distinct from anything the live set could yield.
+describe('OracleConsensus: a federated follower locks the snapshot quorum from PROPOSE', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    it('carries the snapshot quorum into the pending round', async function () {
+        let hub = createMockHub();
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
+        hub._peerManager.validatorPubkeys = new Set();
+        let oracleRound = { getSubmissions: sinon.stub().returns(
+            buildSubmissions(VALIDATORS_3.map(v => ({ sender: v.addr, prices: PRICES })))) };
+        let oc = new OracleConsensus(hub, oracleRound);
+        oc.minSubmissions = 1;
+        sinon.stub(swq, 'isStakeWeightedQuorumActive').returns(false);
+        let snapQuorum = sinon.stub().returns(7);
+        hub.capabilitySnapshot = Object.assign(makeCapabilitySnapshotStub(VALIDATORS_3), { getQuorum: snapQuorum });
+        oc.setValidatorSet(VALIDATORS_3);
+        expect(oc.getQuorum()).to.be.above(0).and.not.equal(7);
+        hub._peerManager.validatorAddr = VALIDATORS_3[1].addr;
+        let leader = VALIDATORS_3[0];
+
+        await oc._handlePropose({ type: 'ORACLE_PROPOSE', sender: leader.addr, sig_pubkey: leader.pubkey,
+            data: { round: 0, prices: PRICES, digest: oc._digest(0, PRICES), btcBlockHeight: HEIGHT } });
+
+        let pending = oc.pendingRounds.get(0);
+        if (pending && pending.timer) clearTimeout(pending.timer);
+        expect(snapQuorum.called).to.equal(true);
+        expect(snapQuorum.firstCall.args[0].validators).to.have.length(3);
+        expect(pending, 'the PROPOSE must open a pending round').to.not.equal(undefined);
+        expect(pending.quorum).to.equal(7);
+    });
+});
