@@ -235,17 +235,17 @@ describe('llm provider, anthropic sampling-parameter gate (#4464)', function () 
         const llm = _reloadProvider();
         for (const id of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
                           'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5'])
-            expect(llm._anthropicRejectsSampling(id), id).to.equal(true);
-        expect(llm._anthropicRejectsSampling('claude-opus-4-7-20260101')).to.equal(true);
+            expect(llm.anthropicRejectsSampling(id), id).to.equal(true);
+        expect(llm.anthropicRejectsSampling('claude-opus-4-7-20260101')).to.equal(true);
     });
 
     it('leaves every other Anthropic id on the explicit-temperature path', function () {
         const llm = _reloadProvider();
         for (const id of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5',
                           'claude-future-not-yet-listed', '', undefined])
-            expect(llm._anthropicRejectsSampling(id), String(id)).to.equal(false);
+            expect(llm.anthropicRejectsSampling(id), String(id)).to.equal(false);
         // Prefix-only ids must not match by substring: 4-6 is not 4-7's family.
-        expect(llm._anthropicRejectsSampling('claude-opus-4-70')).to.equal(false);
+        expect(llm.anthropicRejectsSampling('claude-opus-4-70')).to.equal(false);
     });
 
     it('omits temperature for the default claude-opus-4-7 fallback', async function () {
@@ -1058,17 +1058,17 @@ describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
         delete process.env.LLM_MAX_BUDGET_USD;
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
-        expect(llm._resolveMaxBudgetUsd()).to.equal(1.25);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(1.25);
         // clearing the governance value no longer means "no ceiling".
         llm._setConfig({ additional_config: { max_budget_usd: 0 } });
-        expect(llm._resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
     });
 
     it('LLM_MAX_BUDGET_USD env overrides the governance budget', function () {
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
         process.env.LLM_MAX_BUDGET_USD = '0.10';
-        expect(llm._resolveMaxBudgetUsd()).to.equal(0.10);
+        expect(llm.resolveMaxBudgetUsd()).to.equal(0.10);
     });
 });
 

@@ -120,7 +120,7 @@ function appendLine(file, line) {
     } finally { fs.closeSync(fd); }
 }
 
-function _appendSpendRecord(record) {
+function appendSpendRecord(record) {
     let line = JSON.stringify(record) + '\n';
     try {
         appendLine(_spendLogPath(), line);
@@ -156,7 +156,7 @@ function _appendSpendRecord(record) {
 // ties the settle to it), or null when the call cannot reach a vendor at all
 // (no credentials / unmapped model): those never bill, so they never enter the
 // reconciliation list.
-function _recordSpendIntent({ model, maxTokens, pinnedVendors }) {
+function recordSpendIntent({ model, maxTokens, pinnedVendors }) {
     let vendor, auth;
     try {
         vendor = vendorOfModel(model, pinnedVendors);
@@ -172,15 +172,15 @@ function _recordSpendIntent({ model, maxTokens, pinnedVendors }) {
         model:     String(model || ''),
         maxTokens: Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null
     };
-    _appendSpendRecord(rec);
+    appendSpendRecord(rec);
     return rec;
 }
 
 // Close an intent out. `usage` is the per-call collector the transport branch
 // filled (token counts, and the CLI's own total_cost_usd).
-function _recordSpendSettle(intent, status, usage, err) {
+function recordSpendSettle(intent, status, usage, err) {
     if (!intent) return;
-    _appendSpendRecord({
+    appendSpendRecord({
         id:        intent.id,
         ts:        new Date().toISOString(),
         phase:     'settle',
@@ -215,7 +215,7 @@ const LLM_DEFAULT_EST_USD_CENTS    = 5;     // $0.05: one bounded max_tokens tur
 
 let _guardCfg = {};
 let _guard    = null;
-function _spendGuard(){
+function spendGuard(){
     if (_guard) return _guard;
     // These are DEFAULTS, not overrides. SpendGuard reads env first, then cfg, so an
     // operator's LLM_MAX_SPEND_USD_CENTS_PER_WINDOW still wins, and a hub that sets
@@ -242,13 +242,13 @@ function _spendGuard(){
 exports.armSpendGuard = (cfg, persist) => {
     _guardCfg = cfg || {};
     _guard    = null;                       // rebuild against the hub's config
-    let g = _spendGuard();
+    let g = spendGuard();
     return persist ? g.persistTo() : g;
 };
 // Operator/health surface: the live window without reaching into the registry.
 // `audit` rides along so a degraded spend-audit sink is a standing, pollable
 // state rather than a console.warn that scrolls away.
-exports.spendStats = (now) => Object.assign(_spendGuard().stats(now),
+exports.spendStats = (now) => Object.assign(spendGuard().stats(now),
                                             { audit: Object.assign({}, _auditFaults) });
 exports._resetSpendGuardForTest = () => {
     _guard = null; _guardCfg = {}; SpendGuard.unregister('llm');
@@ -259,7 +259,7 @@ exports._resetSpendGuardForTest = () => {
 // A refusal to spend, not a vendor failure. Marked distinctly (and NOT as `paused`,
 // which means the operator/governance kill switch) so health and callers can tell a
 // budget stop from an outage: the fix for this one is time or a raised ceiling.
-function _budgetExhaustedError(reason){
+function budgetExhaustedError(reason){
     let err = new Error('llm: ' + (reason || 'per-window spend budget reached') + '; no paid API call issued');
     err.budgetExhausted = true;
     // Typed like the other non-transport outcomes (kind) but deliberately NOT
@@ -272,7 +272,7 @@ function _budgetExhaustedError(reason){
 // The CLI transport reports real money (total_cost_usd); the HTTP transports report
 // tokens, which would need a per-model price table to become money, so those keep the
 // reserved estimate. Round UP: a partial cent was spent, not free.
-function _actualCostUsdCents(usage){
+function actualCostUsdCents(usage){
     let c = Number(usage && usage.costUsd);
     if (!Number.isFinite(c) || c <= 0) return null;
     return Math.ceil(c * 100);
@@ -352,11 +352,11 @@ const ANTHROPIC_NO_SAMPLING_MODELS = [
     'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
     'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5', 'claude-mythos-preview'
 ];
-function _anthropicRejectsSampling(model) {
+function anthropicRejectsSampling(model) {
     let m = String(model || '');
     return ANTHROPIC_NO_SAMPLING_MODELS.some(id => m === id || m.startsWith(id + '-'));
 }
-exports._anthropicRejectsSampling = _anthropicRejectsSampling;
+exports.anthropicRejectsSampling = anthropicRejectsSampling;
 
 // Operator kill switch for this paid provider. The only pre-existing
 // lever was failing healthCheck (which the hub penalizes: the validator is still
@@ -369,25 +369,25 @@ exports._anthropicRejectsSampling = _anthropicRejectsSampling;
 //   - additional_config.enabled=false : governance-driven, federation-wide pause.
 // Default (both unset): enabled, so behavior is unchanged.
 let LLM_ENABLED_CONFIG = true;   // governance additional_config.enabled (default on)
-function _llmEnabled() {
+function llmEnabled() {
     if (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false') return false;
     return LLM_ENABLED_CONFIG !== false;
 }
-function _pausedError() {
+function pausedError() {
     let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
         ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
     let err = new Error('llm: provider paused (' + src + '); no paid API call issued');
     err.paused = true;   // distinct, non-transient marker so callers/health can tell
     return err;          // a deliberate pause from a real vendor/transport failure
 }
-exports._llmEnabled = _llmEnabled;
+exports.llmEnabled = llmEnabled;
 // Test seam for the canonicalizable-meta gate. The corroboration half only runs on the
 // judge-winner return, which needs a live judge transport to reach, so the suite
 // exercises the same function directly rather than mocking a vendor.
 // `pinnedApprovedModels` is the round's block-anchored allowlist;
 // omit it to exercise the live-module-global fallback the seam has always used.
 exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) =>
-    _canonicalMeta(proposals, idx, {
+    canonicalMeta(proposals, idx, {
         outcome: outcome || {},
         pinnedApprovedModels: pinnedApprovedModels || null
     });
@@ -411,7 +411,7 @@ exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) 
 // likewise default-ON rather than default-disabled).
 const DEFAULT_MAX_BUDGET_USD = 5;
 let MAX_BUDGET_USD_CONFIG = null;   // governance additional_config.max_budget_usd
-function _resolveMaxBudgetUsd() {
+function resolveMaxBudgetUsd() {
     let envVal = parseFloat(process.env.LLM_MAX_BUDGET_USD);
     if (Number.isFinite(envVal) && envVal > 0) return envVal;
     if (Number.isFinite(MAX_BUDGET_USD_CONFIG) && MAX_BUDGET_USD_CONFIG > 0) return MAX_BUDGET_USD_CONFIG;
@@ -422,7 +422,7 @@ function _resolveMaxBudgetUsd() {
     return DEFAULT_MAX_BUDGET_USD;
 }
 exports._DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
-exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
+exports.resolveMaxBudgetUsd = resolveMaxBudgetUsd;
 
 // Map a model id to its vendor. A BLOCK-ANCHORED per-call map is EXCLUSIVE where
 // one is supplied: resolution reads that map and then id-prefix inference, never
@@ -538,7 +538,7 @@ exports._setConfig = (def) => {
     // hotReload with no signal that no runtime read it. Log-only and never throwing,
     // so one unrecognised key cannot abort the rest of the install: a hub deliberately
     // running older code against newer governance keys must still apply what it knows.
-    _warnUnconsumedKeys(ac);
+    warnUnconsumedKeys(ac);
 };
 
 // Keys _setConfig above actually reads. Kept adjacent to it so a new key added there
@@ -554,7 +554,7 @@ const CONSUMED_CONFIG_KEYS = new Set([
 // hub. Keyed on the unknown-key set itself, not on a boolean, so a config that later
 // adds a second unknown key still reports it.
 let LAST_UNCONSUMED_WARNED = null;
-function _warnUnconsumedKeys(ac) {
+function warnUnconsumedKeys(ac) {
     let unknown = Object.keys(ac).filter(k => !CONSUMED_CONFIG_KEYS.has(k)).sort();
     let signature = unknown.join(',');
     if (signature === LAST_UNCONSUMED_WARNED) return;
@@ -578,7 +578,7 @@ exports._resetUnconsumedWarnState = () => { LAST_UNCONSUMED_WARNED = null; };
 exports.fetch = async (payload, options) => {
     options = options || {};
     // Kill switch: refuse to dial any billed vendor while paused.
-    if (!_llmEnabled()) throw _pausedError();
+    if (!llmEnabled()) throw pausedError();
     let envelope;
     try { envelope = JSON.parse(payload); }
     catch (_) { throw new Error('llm: payload must be a JSON envelope'); }
@@ -661,7 +661,7 @@ exports.fetch = async (payload, options) => {
     if (format !== 'text' && format !== 'json_object')
         throw new Error('llm: envelope.format must be "text" or "json_object"');
 
-    const text = await _runLlm({
+    const text = await runLlm({
         prompt:      envelope.prompt,
         system:      envelope.system,
         model,
@@ -712,12 +712,12 @@ exports.fetch = async (payload, options) => {
 // falls back to concatenating it into the user turn, collapsing the
 // instruction-hierarchy boundary _buildJudgePrompt relies on. Mirrors the
 // isEarlyOSeries test in _runLlm; keep the two in lockstep.
-function _modelCarriesSystemRole(model){
+function modelCarriesSystemRole(model){
     return !/^o1-(mini|preview)/.test(String(model));
 }
-exports._modelCarriesSystemRole = _modelCarriesSystemRole;
+exports.modelCarriesSystemRole = modelCarriesSystemRole;
 
-function _markInconclusive(options, reason){
+function markInconclusive(options, reason){
     if (options && options.outcome && typeof options.outcome === 'object') {
         options.outcome.inconclusive = true;
         options.outcome.reason = reason;
@@ -768,7 +768,7 @@ const META_MIN_CORROBORATION = 2;
 // Same anchoring rationale as pinnedModel/pinnedJudgeModel/pinnedVendors; the
 // live set remains the fallback for callers that pin nothing (the test seam and
 // any non-round caller).
-function _approvedMetaSet(options){
+function approvedMetaSet(options){
     const pinned = options && options.pinnedApprovedModels;
     const source = (Array.isArray(pinned) && pinned.length > 0) ? pinned : APPROVED_MODELS;
     return new Set(source.filter(m => typeof m === 'string' && m));
@@ -776,19 +776,19 @@ function _approvedMetaSet(options){
 
 // Validate the winning proposal's meta. Returns the value to canonicalize, or
 // null with `options.outcome` marked inconclusive.
-function _canonicalMeta(proposals, idx, options){
+function canonicalMeta(proposals, idx, options){
     const raw = proposals[idx] ? proposals[idx].meta : undefined;
     // Deliberately strict about type: a non-string meta (object, Buffer, number)
     // is not something this allowlist can reason about, so it is unrecognized.
     if (typeof raw !== 'string' || raw === ''){
         console.warn('llm: winning proposal carries a non-string/empty meta; failing closed');
-        _markInconclusive(options, 'meta_unrecognized');
+        markInconclusive(options, 'meta_unrecognized');
         return null;
     }
-    if (!_approvedMetaSet(options).has(raw)){
+    if (!approvedMetaSet(options).has(raw)){
         console.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
             'failing closed rather than canonicalizing an unvouched value on-chain');
-        _markInconclusive(options, 'meta_unrecognized');
+        markInconclusive(options, 'meta_unrecognized');
         return null;
     }
     if (proposals.length > 1){
@@ -796,7 +796,7 @@ function _canonicalMeta(proposals, idx, options){
         if (agreeing < META_MIN_CORROBORATION){
             console.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
                 ' of ' + proposals.length + ' proposals; failing closed');
-            _markInconclusive(options, 'meta_uncorroborated');
+            markInconclusive(options, 'meta_uncorroborated');
             return null;
         }
     }
@@ -813,8 +813,8 @@ function _canonicalMeta(proposals, idx, options){
 // SIGTERM kill, so a suite that mocks https or child_process only ever reproduces
 // the bound that already worked. Injecting the judge call is the only way to build
 // the failure the wall is for.
-let _judgeCall = _runLlm;
-exports._setJudgeCallForTest = (fn) => { _judgeCall = (typeof fn === 'function') ? fn : _runLlm; };
+let _judgeCall = runLlm;
+exports._setJudgeCallForTest = (fn) => { _judgeCall = (typeof fn === 'function') ? fn : runLlm; };
 
 // Sentinel resolved by the outer wall-clock race in exports.agree. A private
 // Symbol so it can never collide with a verdict (agree() resolves an object or
@@ -825,20 +825,20 @@ const _AGREE_BUDGET_SPENT = Symbol('agree budget spent');
 // options.timeoutMs. See exports.agree below for why the inner ladder deadline
 // is not enough on its own; `judgeInfo` is the telemetry channel that lets the
 // wrapper name the model that actually answered.
-async function _agreeJudged(proposals, options, judgeInfo) {
+async function agreeJudged(proposals, options, judgeInfo) {
     // Kill switch: a single proposal is returned without any billed
     // judge call, so only gate the paths that would actually dial a vendor (the
     // multi-proposal judge fan-out below). Guarded again just before _runLlm.
-    let paused = !_llmEnabled();
+    let paused = !llmEnabled();
     if (!Array.isArray(proposals) || proposals.length === 0) {
-        _markInconclusive(options, 'no_proposals');
+        markInconclusive(options, 'no_proposals');
         return null;
     }
     if (proposals.length === 1) {
         // Allowlist still applies with a single proposal. There is nothing to
         // corroborate against, but an unapproved identifier is unrecognized either way
         // and must not reach the canonical signature.
-        let solo = _canonicalMeta(proposals, 0, options);
+        let solo = canonicalMeta(proposals, 0, options);
         if (solo === null) return null;
         return { body: proposals[0].body, meta: solo };
     }
@@ -847,7 +847,7 @@ async function _agreeJudged(proposals, options, judgeInfo) {
     // provider is paused, do not dial: mark the round inconclusive (could-not-judge)
     // and return null, the same contract a judge-transport outage already produces.
     if (paused) {
-        _markInconclusive(options, 'provider_paused');
+        markInconclusive(options, 'provider_paused');
         return null;
     }
     // Same shape for a spent budget. The guard is hub-global (one SpendGuard for
@@ -857,8 +857,8 @@ async function _agreeJudged(proposals, options, judgeInfo) {
     // round as 'unreachable', the vendor-outage shape. allow() is a pure predicate
     // (no budget consumed); the in-loop budgetExhausted check below covers the
     // concurrent-round race between this allow() and the chain's reserve().
-    if (!_spendGuard().allow(null)) {
-        _markInconclusive(options, 'budget_exhausted');
+    if (!spendGuard().allow(null)) {
+        markInconclusive(options, 'budget_exhausted');
         return null;
     }
 
@@ -870,7 +870,7 @@ async function _agreeJudged(proposals, options, judgeInfo) {
     let judgeModel = options.pinnedJudgeModel || JUDGE_MODEL;
 
     let candidates = proposals.map(p => Buffer.isBuffer(p.body) ? p.body.toString('utf8') : String(p.body || ''));
-    let { system: judgeSystem, prompt: judgePrompt, truncated } = _buildJudgePrompt(candidates);
+    let { system: judgeSystem, prompt: judgePrompt, truncated } = buildJudgePrompt(candidates);
 
     // Judge fallback chain: pinned judge first, then the configured
     // alternates (deduped). Only TRANSPORT failures (vendor down, no creds,
@@ -886,7 +886,7 @@ async function _agreeJudged(proposals, options, judgeInfo) {
     // the existing !reached -> no_quorum path below still applies.
     let judgeChain = [judgeModel, ...JUDGE_FALLBACK_MODELS.filter(m => m && m !== judgeModel)]
         .filter(m => {
-            if (_modelCarriesSystemRole(m)) return true;
+            if (modelCarriesSystemRole(m)) return true;
             console.warn('llm: judge model ' + m + ' cannot carry a system/developer role; skipping from judge chain');
             return false;
         });
@@ -956,7 +956,7 @@ async function _agreeJudged(proposals, options, judgeInfo) {
             // model in the chain is refused too. Stop here (see the pre-loop gate).
             if (e && e.budgetExhausted) {
                 console.warn('llm: judge ' + jm + ' refused by the spend budget; stopping fallback chain');
-                _markInconclusive(options, 'budget_exhausted');
+                markInconclusive(options, 'budget_exhausted');
                 return null;
             }
             if (e && (e.kind === 'refusal' || e.transient === false)) {
@@ -972,7 +972,7 @@ async function _agreeJudged(proposals, options, judgeInfo) {
                 let reason = 'judge_hard_error';
                 if (e.kind === 'truncation')   reason = 'judge_truncation';
                 else if (e.kind === 'refusal') reason = 'judge_refusal';
-                _markInconclusive(options, reason);
+                markInconclusive(options, reason);
                 return null;
             }
             console.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
@@ -981,12 +981,12 @@ async function _agreeJudged(proposals, options, judgeInfo) {
     if (!reached) {
         // Whole judge chain unreachable: defer to no_quorum. Validators will
         // retry on the next round. (Spec §6.4 ack residual risk.)
-        _markInconclusive(options, 'unreachable');
+        markInconclusive(options, 'unreachable');
         return null;
     }
 
     if (!judgeText) {
-        _markInconclusive(options, 'empty_verdict');
+        markInconclusive(options, 'empty_verdict');
         return null;
     }
 
@@ -1007,11 +1007,11 @@ async function _agreeJudged(proposals, options, judgeInfo) {
         }
         judgement = JSON.parse(cleaned);
         if (!judgement || typeof judgement !== 'object' || Array.isArray(judgement)) {
-            _markInconclusive(options, 'unparseable');
+            markInconclusive(options, 'unparseable');
             return null;
         }
     } catch (_) {
-        _markInconclusive(options, 'unparseable');
+        markInconclusive(options, 'unparseable');
         return null;
     }
 
@@ -1027,12 +1027,12 @@ async function _agreeJudged(proposals, options, judgeInfo) {
             if (truncated[idx]) {
                 console.warn('llm: judge selected a truncated candidate (index ' + (idx + 1) +
                     '); failing to no_quorum to avoid finalizing bytes the judge never evaluated');
-                _markInconclusive(options, 'truncated_pick');
+                markInconclusive(options, 'truncated_pick');
                 return null;
             }
             // The judge vouched for the BODY it selected, never for that
             // proposal's meta. Gate the meta separately before it is canonicalized.
-            let meta = _canonicalMeta(proposals, idx, options);
+            let meta = canonicalMeta(proposals, idx, options);
             if (meta === null) return null;
             return { body: proposals[idx].body, meta: meta };
         }
@@ -1083,7 +1083,7 @@ exports.agree = async (proposals, options) => {
     let timer  = null;
     let verdict;
     try {
-        let inner = _agreeJudged(proposals, options, judgeInfo);
+        let inner = agreeJudged(proposals, options, judgeInfo);
         if (budgetMs > 0) {
             inner.catch(() => {});
             let spent = new Promise(resolve => {
@@ -1101,7 +1101,7 @@ exports.agree = async (proposals, options) => {
     if (verdict === _AGREE_BUDGET_SPENT) {
         console.warn('llm: agree() budget of ' + budgetMs + 'ms spent before a verdict' +
             (judgeInfo.model ? ' (last judge dialled ' + judgeInfo.model + ')' : '') + '; inconclusive');
-        _markInconclusive(options, 'judge_timeout');
+        markInconclusive(options, 'judge_timeout');
         verdict = null;
     }
 
@@ -1132,7 +1132,7 @@ exports.healthCheck = async (ctx) => {
     // distinct from a credential/transport failure, so operators can tell a kill
     // switch from a real outage in the logs. Carries paused:true for callers that
     // want to treat a pause differently from an ordinary ok:false.
-    if (!_llmEnabled()) {
+    if (!llmEnabled()) {
         let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
             ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
         return { ok: false, paused: true, error: 'llm: provider paused (' + src + ')' };
@@ -1181,8 +1181,8 @@ exports.healthCheck = async (ctx) => {
 // inside it: one intent record before ANY of the three billed transports is
 // dialed, one settle record on every exit, including the throwing ones (a
 // refusal or a truncation is a REACHED vendor, so it was still billed).
-async function _runLlm(opts) {
-    const intent = _recordSpendIntent(opts || {});
+async function runLlm(opts) {
+    const intent = recordSpendIntent(opts || {});
     // Per-call collector; a module-level one would cross-talk between the
     // concurrent rounds AttestationRound can have in flight at once.
     const usage  = {};
@@ -1192,20 +1192,20 @@ async function _runLlm(opts) {
     // must not consume budget. reserve() consumes in the same synchronous turn, which
     // is what stops concurrent rounds from all clearing one pre-send check and all
     // spending past the ceiling.
-    const token = intent ? _spendGuard().reserve(null) : null;
+    const token = intent ? spendGuard().reserve(null) : null;
     if (intent && !token) {
-        const err = _budgetExhaustedError(_spendGuard().noteBlocked());
+        const err = budgetExhaustedError(spendGuard().noteBlocked());
         // Close the intent out. An intent with no settle is the operator's post-crash
         // reconciliation list, and a refusal is not a call in flight.
-        _recordSpendSettle(intent, 'blocked', usage, err);
+        recordSpendSettle(intent, 'blocked', usage, err);
         throw err;
     }
 
     try {
-        const text = await _runLlmDispatch({ ...opts, _usage: usage });
+        const text = await runLlmDispatch({ ...opts, _usage: usage });
         // Re-price the reservation at the invoice when the transport reports one.
-        _spendGuard().commit(token, _actualCostUsdCents(usage));
-        _recordSpendSettle(intent, 'ok', usage, null);
+        spendGuard().commit(token, actualCostUsdCents(usage));
+        recordSpendSettle(intent, 'ok', usage, null);
         return text;
     } catch (e) {
         // Everything that throws from here reached a vendor - resolution and
@@ -1213,8 +1213,8 @@ async function _runLlm(opts) {
         // bills, so the reservation STAYS spent. Over-counting fails closed and ages
         // out within one window; handing budget back to a call that may have billed
         // does not.
-        _spendGuard().commit(token, _actualCostUsdCents(usage));
-        _recordSpendSettle(intent, 'error', usage, e);
+        spendGuard().commit(token, actualCostUsdCents(usage));
+        recordSpendSettle(intent, 'error', usage, e);
         throw e;
     }
 }
@@ -1224,7 +1224,7 @@ async function _runLlm(opts) {
 // model that nothing outside the system message is an instruction). It is deliberately
 // NOT set for a requester-supplied envelope.system: replacing the CLI's baseline there
 // would hand a request author the entire system role on the validator box.
-async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model, maxTokens, temperature, format, timeoutMs, pinnedVendors, _usage }) {
+async function runLlmDispatch({ prompt, system, systemIsSoleInstruction, model, maxTokens, temperature, format, timeoutMs, pinnedVendors, _usage }) {
     const vendor = vendorOfModel(model, pinnedVendors);
     const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
@@ -1249,7 +1249,7 @@ async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model,
         // Early o-series ids (o1-mini/o1-preview) reject a system-role message
         // outright (400). Other o-series models accept the instruction only via
         // the 'developer' role alias. gpt-* (incl. gpt-5) keeps plain 'system'.
-        const isEarlyOSeries = !_modelCarriesSystemRole(model);
+        const isEarlyOSeries = !modelCarriesSystemRole(model);
         // Early o-series models also reject the response_format parameter (400),
         // the same restricted request shape that bans the system role. Omit it
         // for them; the appended JSON system instruction (folded into the user
@@ -1275,7 +1275,7 @@ async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model,
         // (gpt-*, including the non-reasoning gpt-5-chat*) that honor it.
         const isReasoningModel = _isReasoningModel(model);
         if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
-        const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
+        const result = await callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
         // The vendor is billed from here on, whichever branch below
         // throws, so the settle record carries this call's real usage.
         if (_usage && result && result.usage) _usage.tokens = result.usage;
@@ -1328,7 +1328,7 @@ async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model,
         // actually emitted (claude-spawn.js only appends the flag for a positive
         // number); the resolver now always yields one, so this
         // transport is capped unless env/governance widens it.
-        const budget = _resolveMaxBudgetUsd();
+        const budget = resolveMaxBudgetUsd();
         const spawnOpts = {
             prompt,
             model,
@@ -1384,9 +1384,9 @@ async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model,
         // (400, not accepted-and-ignored). Mirrors the OpenAI branch's reasoning-model
         // gate above; every other Anthropic model keeps the clamped explicit value, so
         // the temperature-0 contract is unchanged wherever it is actually reachable.
-        if (!_anthropicRejectsSampling(model)) reqBody.temperature = anthropicTemperature;
+        if (!anthropicRejectsSampling(model)) reqBody.temperature = anthropicTemperature;
         if (sys) reqBody.system = sys;
-        const result = await _callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
+        const result = await callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
         // Billed from here on, whichever branch below throws.
         if (_usage && result && result.usage) _usage.tokens = result.usage;
         // A Claude-family refusal stop (stop_reason: "refusal") is a MODEL-level
@@ -1431,7 +1431,7 @@ async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model,
     throw new Error('llm: unsupported transport ' + auth.transport);
 }
 
-function _buildJudgePrompt(candidates) {
+function buildJudgePrompt(candidates) {
     // Candidate bodies are untrusted, attacker-chosen bytes. Concatenating them
     // raw lets a Byzantine responsible validator (or a candidate that merely
     // contains evaluator-shaped prose) steer the judge into declaring
@@ -1553,7 +1553,7 @@ function _httpStatusError(res, vendorLabel, json, str) {
 // intended budget. This arms a hard wall-clock deadline alongside it so
 // `timeoutMs` is honored as a TOTAL request budget on every transport,
 // mirroring the claude_spawn transport's kill-on-deadline behavior.
-function _armWallClockDeadline(req, timeoutMs, onDeadline) {
+function armWallClockDeadline(req, timeoutMs, onDeadline) {
     let timer = setTimeout(() => {
         req.destroy();
         onDeadline();
@@ -1563,7 +1563,7 @@ function _armWallClockDeadline(req, timeoutMs, onDeadline) {
     return timer;
 }
 
-async function _callAnthropic(apiPath, body, apiKey, options) {
+async function callAnthropic(apiPath, body, apiKey, options) {
     let timeoutMs = Number(options && options.timeoutMs) || 30000;
     let data = JSON.stringify(body);
 
@@ -1623,7 +1623,7 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
         });
         req.on('error',   (e) => { let err = new Error('llm: request error: ' + e.message); err.transient = true; safeReject(err); });
         req.on('timeout', ()  => { req.destroy(); let err = new Error('llm: timeout after ' + timeoutMs + 'ms'); err.transient = true; safeReject(err); });
-        _armWallClockDeadline(req, timeoutMs, () => {
+        armWallClockDeadline(req, timeoutMs, () => {
             let err = new Error('llm: timeout after ' + timeoutMs + 'ms (wall-clock deadline)');
             err.transient = true;
             safeReject(err);
@@ -1633,7 +1633,7 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
     });
 }
 
-async function _callOpenAi(apiPath, body, apiKey, options) {
+async function callOpenAi(apiPath, body, apiKey, options) {
     let timeoutMs = Number(options && options.timeoutMs) || 30000;
     let data = JSON.stringify(body);
 
@@ -1692,7 +1692,7 @@ async function _callOpenAi(apiPath, body, apiKey, options) {
         });
         req.on('error',   (e) => { let err = new Error('llm: request error: ' + e.message); err.transient = true; safeReject(err); });
         req.on('timeout', ()  => { req.destroy(); let err = new Error('llm: timeout after ' + timeoutMs + 'ms'); err.transient = true; safeReject(err); });
-        _armWallClockDeadline(req, timeoutMs, () => {
+        armWallClockDeadline(req, timeoutMs, () => {
             let err = new Error('llm: timeout after ' + timeoutMs + 'ms (wall-clock deadline)');
             err.transient = true;
             safeReject(err);
