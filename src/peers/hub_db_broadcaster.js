@@ -26,13 +26,13 @@
  ********************************************************************/
 
 const WebSocket = require('ws');
-const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('./lib/admission_height.js');
-const { admitMarginBlocks } = require('./mirror_admission_activation.js');
+const { HUB_SCHEMA_VERSION } = require('../hub-schema-version');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../lib/admission_height.js');
+const { admitMarginBlocks } = require('../mirror_admission_activation.js');
 
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
-const { bigIntReplacer } = require('./lib/bigint_replacer.js');
+const { bigIntReplacer } = require('../lib/bigint_replacer.js');
 
 // ---------------------------------------------------------------------------
 // The per-table per-chain admission height watermark

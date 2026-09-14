@@ -185,7 +185,7 @@ module.exports = {
     },
 
     // Reads one row from price_snapshots.
-    // Moved here from src/HubDbBroadcaster.js:632.
+    // Moved here from src/peers/hub_db_broadcaster.js:632.
     async getPriceSnapshotsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM price_snapshots');
     },

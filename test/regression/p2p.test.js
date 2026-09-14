@@ -13,7 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const ValidatorIdentity  = require('../../src/validators/identity');
-const PeerManager        = require('../../src/PeerManager');
+const PeerManager        = require('../../src/peers/manager');
 const { DB_METHODS }     = require('../helpers/mockHub');
 
 describe('Regression: P2P & ValidatorIdentity', function () {

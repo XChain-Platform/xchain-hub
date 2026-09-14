@@ -14,7 +14,7 @@ const sinon              = require('sinon');
 const { expect }         = require('chai');
 const EventEmitter       = require('events');
 const ValidatorIdentity  = require('../../src/validators/identity');
-const PeerManager        = require('../../src/PeerManager');
+const PeerManager        = require('../../src/peers/manager');
 const observability      = require('../../src/observability');
 const { waitUntil }      = require('../helpers/waitUntil');
 const { DB_METHODS }     = require('../helpers/mockHub');
@@ -1137,7 +1137,7 @@ describe('PeerManager', function () {
             const env = Object.assign({}, process.env);
             if (armingValue === null) delete env[rca.ROLLCALL_REGTEST_ENV];
             else env[rca.ROLLCALL_REGTEST_ENV] = armingValue;
-            const pmPath = require.resolve('../../src/PeerManager.js');
+            const pmPath = require.resolve('../../src/peers/manager.js');
             const out = spawnSync(process.execPath, ['-e',
                 'const PM = require(' + JSON.stringify(pmPath) + ');' +
                 'const r = PM.messageSubscribers({ HUB_NETWORK: "regtest" }, process.env);' +

@@ -91,7 +91,7 @@ const { parseCorsOrigin } = require('./lib/corsOrigin.js');
 // stack, so chain-only price recovery works at shipped defaults.
 const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');
 const roundPresence  = require('./lib/oracle_round_presence.js');   // oracle round presence/divergence
-const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
+const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -2520,7 +2520,7 @@ async function startApi(){
         res.type('application/json').send(openrpcSpec);
     });
 
-    // Bound JSON-RPC batch cardinality (src/rpcBatchGuard.js). The router below runs
+    // Bound JSON-RPC batch cardinality (src/peers/rpc_batch_guard.js). The router below runs
     // Promise.all over every element of a batch array while the per-IP rate limiter at
     // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
     // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in

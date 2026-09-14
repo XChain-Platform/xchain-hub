@@ -16,7 +16,7 @@ const { positiveIntConfig } = require('../../src/lib/config_int.js');
 const AttestationConsensus = require('../../src/attestation/consensus.js');
 const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus.js');
 const OracleConsensus = require('../../src/oracle/consensus.js');
-const PeerManager = require('../../src/PeerManager.js');
+const PeerManager = require('../../src/peers/manager.js');
 const { createMockHub } = require('../helpers/mockHub');
 
 // `parseInt(cfg) || DEFAULT` accepted a negative cap, and a negative

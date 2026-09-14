@@ -24,7 +24,7 @@
 
 const net               = require('net');
 const { expect }        = require('chai');
-const PeerManager       = require('../../src/PeerManager');
+const PeerManager       = require('../../src/peers/manager');
 const OracleBatchSigner = require('../../src/oracle/batch_signer');
 const OracleConsensus   = require('../../src/oracle/consensus');
 const ValidatorIdentity = require('../../src/validators/identity');

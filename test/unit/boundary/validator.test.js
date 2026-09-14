@@ -18,7 +18,7 @@ const { DB_METHODS } = require('../../helpers/mockHub');
 let mockDb;
 const XChainHub = proxyquire('../../../src/XChainHub', {
     './db':                 function () { return mockDb; },
-    './PeerManager.js':     function () { return null; },
+    './peers/manager.js':     function () { return null; },
     './consensus/pbft.js':       function () {},
     './validators/identity.js': function () {},
     './oracle/consensus.js': function () {},

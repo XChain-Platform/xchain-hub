@@ -19,7 +19,7 @@ const http               = require('http');
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const WebSocket          = require('ws');
-const PeerManager        = require('../../src/PeerManager');
+const PeerManager        = require('../../src/peers/manager');
 
 function get(port, path) {
     return new Promise((resolve, reject) => {

@@ -34,7 +34,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Signature enforcement', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('REQUIRE_SIGNATURES defaults to true when not specified', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
@@ -82,7 +82,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Sender<->key binding', function () {
-        const PeerManager       = require('../../src/PeerManager');
+        const PeerManager       = require('../../src/peers/manager');
         const ValidatorIdentity = require('../../src/validators/identity');
 
         const A = ValidatorIdentity.generate();
@@ -131,7 +131,7 @@ describe('Security Hardening', function () {
 
     describe('XChainHub: Fail-closed validator registry', function () {
         const XChainHub   = require('../../src/XChainHub');
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('startP2P throws and never opens the P2P listener when the registry load fails', async function () {
             // Regression: a DB failure in _loadValidatorPubkeys previously left
@@ -157,7 +157,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Dedup cache bounds', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('evicts oldest entry when dedup cache reaches max', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_DEDUP_CACHE_MAX: '5' }, null);
@@ -177,7 +177,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Peer address validation', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('rejects peer addresses without port', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
@@ -207,7 +207,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Per-peer rate limiting', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('allows messages within rate limit', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_MSG_RATE_LIMIT: '10' }, null);
@@ -239,7 +239,7 @@ describe('Security Hardening', function () {
     // =================================================================
 
     describe('PeerManager: Invalid JSON logging', function () {
-        const PeerManager = require('../../src/PeerManager');
+        const PeerManager = require('../../src/peers/manager');
 
         it('logs warning for invalid JSON instead of silent discard', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);

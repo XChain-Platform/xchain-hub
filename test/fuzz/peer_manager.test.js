@@ -18,7 +18,7 @@ const gen          = require('./helpers/generators');
 
 // PeerManager is constructed directly, so we need to mock its dependencies
 // but call _handleInbound, _buildEnvelope, _makeId directly.
-const PeerManager = require('../../src/PeerManager');
+const PeerManager = require('../../src/peers/manager');
 
 const SELF_ADDR = 'ws://self-validator:10001';
 

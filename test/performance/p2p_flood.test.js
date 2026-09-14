@@ -187,7 +187,7 @@ describe('Performance: P2P Message Flood', function () {
 
     describe('rate limiting', function () {
         it('messages exceeding rate limit are dropped', async function () {
-            let PeerManager = require('../../src/PeerManager');
+            let PeerManager = require('../../src/peers/manager');
 
             // Create a PeerManager with a very low rate limit for testing
             let pm = new PeerManager({
@@ -253,7 +253,7 @@ describe('Performance: P2P Message Flood', function () {
 
     describe('multi-peer connections', function () {
         it('handles messages from multiple concurrent peers', async function () {
-            let PeerManager = require('../../src/PeerManager');
+            let PeerManager = require('../../src/peers/manager');
 
             let pm = new PeerManager({
                 P2P_VALIDATOR_ADDR:          'ws://hub-multi:10001',

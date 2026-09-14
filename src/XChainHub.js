@@ -22,7 +22,7 @@
 const Database           = require('./db');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
 const coins              = require('./coins');
-const PeerManager        = require('./PeerManager.js');
+const PeerManager        = require('./peers/manager.js');
 const Consensus          = require('./consensus/pbft.js');
 const ValidatorIdentity  = require('./validators/identity.js');
 const OracleConsensus    = require('./oracle/consensus.js');
@@ -48,7 +48,7 @@ const fullnodeActivation = require('./lib/fullnode_activation.js');
 const admissionHeight    = require('./lib/admission_height.js');
 const { blockIntervalS } = require('./lib/relay_margin.js');
 const presence           = require('./lib/oracle_round_presence.js');
-const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
+const HubDbBroadcaster   = require('./peers/hub_db_broadcaster.js');
 const CapabilityRegistry = require('./validators/capability_registry.js');
 const CapabilitySnapshot = require('./validators/capability_snapshot.js');
 const StakeWeightFeed    = require('./validators/stake_weight_feed.js');

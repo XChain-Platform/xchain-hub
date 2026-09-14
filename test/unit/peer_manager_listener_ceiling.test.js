@@ -37,7 +37,7 @@ const os   = require('os');
 const path = require('path');
 const { expect } = require('chai');
 
-const PeerManager = require('../../src/PeerManager.js');
+const PeerManager = require('../../src/peers/manager.js');
 
 const SRC_DIR = path.join(__dirname, '..', '..', 'src');
 

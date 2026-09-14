@@ -84,7 +84,7 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
-const EncoderClient     = require('../EncoderClient.js');
+const EncoderClient     = require('../peers/encoder_client.js');
 const SpendGuard        = require('../lib/spend_guard.js');
 const ValidatorIdentity = require('../validators/identity.js');
 const swq               = require('../stake_weighted_quorum.js');

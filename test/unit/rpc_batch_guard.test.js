@@ -34,7 +34,7 @@ const path = require('path');
 const express = require('express');
 const jsonRouter = require('express-json-rpc-router');
 
-const { resolveMaxBatch, makeRpcBatchGuard } = require('../../src/rpcBatchGuard.js');
+const { resolveMaxBatch, makeRpcBatchGuard } = require('../../src/peers/rpc_batch_guard.js');
 
 const CAP = 20;
 

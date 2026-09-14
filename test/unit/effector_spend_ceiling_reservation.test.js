@@ -91,7 +91,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
         const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            '../EncoderClient': function () { return null; }
+            '../peers/encoder_client': function () { return null; }
         });
 
         // One broadcast per window: the ceiling is what the second pass must hit.
@@ -128,7 +128,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
         const OraclePublisher = proxyquire('../../src/oracle/publisher', {
             fs: fsMock,
-            '../EncoderClient': function () { return null; }
+            '../peers/encoder_client': function () { return null; }
         });
 
         const pub = new OraclePublisher(makeOracleHub({

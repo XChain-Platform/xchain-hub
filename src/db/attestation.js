@@ -159,7 +159,7 @@ module.exports = {
     },
 
     // Reads one row from attestation_responses.
-    // Moved here from src/HubDbBroadcaster.js:680.
+    // Moved here from src/peers/hub_db_broadcaster.js:680.
     async getAttestationResponsesMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM attestation_responses');
     },

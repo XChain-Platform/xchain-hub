@@ -103,7 +103,7 @@ const rejectSlot  = require('../attest_relay_reject_slot_activation.js');
 const snapWrite   = require('../lib/capability_snapshot_write.js');
 const coins       = require('../coins');
 
-const EncoderClient          = require('../EncoderClient.js');
+const EncoderClient          = require('../peers/encoder_client.js');
 const SpendGuard             = require('../lib/spend_guard.js');
 const CrossChainDexConsensus = require('../cross_chain/dex_consensus.js');
 const { AtMostOnce, isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');

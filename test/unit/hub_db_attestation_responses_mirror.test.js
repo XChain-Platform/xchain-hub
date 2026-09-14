@@ -289,7 +289,7 @@ describe('attestation_responses: the hub mirror registration surfaces', function
         let HubDbBroadcaster;
 
         before(function () {
-            HubDbBroadcaster = proxyquire('../../src/HubDbBroadcaster', { ws: { OPEN: 1 } });
+            HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster', { ws: { OPEN: 1 } });
         });
 
         function makeMockWs() {

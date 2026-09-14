@@ -24,14 +24,14 @@ const crypto            = require('crypto');
 const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
-const ValidatorIdentity = require('./validators/identity.js');
-const rulesDigest = require('./consensus_rules_digest.js');
-const coins            = require('./coins');
-const { positiveIntConfig } = require('./lib/config_int.js');
-const { notePeerReject, stampRemoteIp } = require('./consensus/diagnostics');
+const ValidatorIdentity = require('../validators/identity.js');
+const rulesDigest = require('../consensus_rules_digest.js');
+const coins            = require('../coins');
+const { positiveIntConfig } = require('../lib/config_int.js');
+const { notePeerReject, stampRemoteIp } = require('../consensus/diagnostics');
 // The roster below credits RollcallRound only where the engine would really start,
 // so it reads the engine's own activation source rather than a copy of it.
-const rollcallActivation = require('./rollcall_activation.js');
+const rollcallActivation = require('../rollcall_activation.js');
 
 // Bootstrap peers every new hub can reach. One hostname per validator; the
 // PORT selects the network, so a seed on the wrong port reaches the wrong
@@ -1095,7 +1095,7 @@ class PeerManager extends EventEmitter {
     _startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
         let version = '0.0.0';
-        try { version = require('../package.json').version; } catch(e) {}
+        try { version = require('../../package.json').version; } catch(e) {}
         this.heartbeatTimer = setInterval(() => {
             // `rules` rides INSIDE data, not beside it, because getSignablePayload's
             // preimage is a fixed field list (id/type/sender/timestamp/data/sig_pubkey)

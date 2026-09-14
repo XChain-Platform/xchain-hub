@@ -13,7 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const EventEmitter = require('events');
-const PeerManager  = require('../../../src/PeerManager');
+const PeerManager  = require('../../../src/peers/manager');
 const { createMockHub, DB_METHODS } = require('../../helpers/mockHub');
 
 describe('Boundary: P2P Layer', function () {

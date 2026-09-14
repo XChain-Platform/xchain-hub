@@ -26,7 +26,7 @@ let EncoderClient;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    EncoderClient = proxyquire('../../src/EncoderClient', { axios: axiosStub });
+    EncoderClient = proxyquire('../../src/peers/encoder_client', { axios: axiosStub });
 }
 
 function okResponse(result) {

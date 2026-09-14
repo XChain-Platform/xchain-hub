@@ -27,7 +27,7 @@
 module.exports = {
     // Inserts or updates a row in p2p_peers. validatorId is bound twice because the
     // ON DUPLICATE KEY UPDATE clause re-states it for the row that already exists.
-    // Moved here from src/PeerManager.js:1190.
+    // Moved here from src/peers/manager.js:1190.
     async setP2pPeer(addr, validatorId, isSeed) {
         return this.doQuery(`INSERT INTO p2p_peers (addr, validator_id, last_seen_at, is_seed)
                      VALUES (?, ?, NOW(), ?)

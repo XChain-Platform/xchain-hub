@@ -28,7 +28,7 @@ const path        = require('path');
 const proxyquire  = require('proxyquire');
 const { expect }  = require('chai');
 
-const PeerManager = require('../../src/PeerManager.js');
+const PeerManager = require('../../src/peers/manager.js');
 const { DB_METHODS } = require('../helpers/mockHub');
 
 describe('PeerManager: message listener ceiling, observed on a real hub boot', function () {

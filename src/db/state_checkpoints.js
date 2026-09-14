@@ -95,7 +95,7 @@ module.exports = {
     },
 
     // Reads one row from state_checkpoints.
-    // Moved here from src/HubDbBroadcaster.js:651.
+    // Moved here from src/peers/hub_db_broadcaster.js:651.
     async getStateCheckpointsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM state_checkpoints');
     },

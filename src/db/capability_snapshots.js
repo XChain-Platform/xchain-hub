@@ -56,7 +56,7 @@ module.exports = {
     },
 
     // Reads one row from capability_snapshots.
-    // Moved here from src/HubDbBroadcaster.js:647.
+    // Moved here from src/peers/hub_db_broadcaster.js:647.
     async getCapabilitySnapshotsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
     },

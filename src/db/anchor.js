@@ -68,7 +68,7 @@ module.exports = {
     },
 
     // Reads one row from anchor_reward_attestations.
-    // Moved here from src/HubDbBroadcaster.js:663.
+    // Moved here from src/peers/hub_db_broadcaster.js:663.
     async getAnchorRewardAttestationsMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM anchor_reward_attestations');
     },

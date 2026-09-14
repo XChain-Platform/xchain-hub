@@ -85,7 +85,7 @@ const path  = require('path');
 const axios = require('axios');
 
 const ValidatorIdentity          = require('../validators/identity.js');
-const EncoderClient              = require('../EncoderClient.js');
+const EncoderClient              = require('../peers/encoder_client.js');
 const SpendGuard                 = require('../lib/spend_guard.js');
 const StateAnchorPublisher       = require('../anchor/publisher.js');
 const { isAmbiguousSendError }   = require('../lib/idempotent_broadcast.js');

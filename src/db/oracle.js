@@ -56,7 +56,7 @@ module.exports = {
     },
 
     // Reads one row from oracle_prices.
-    // Moved here from src/HubDbBroadcaster.js:636.
+    // Moved here from src/peers/hub_db_broadcaster.js:636.
     async getOraclePricesMaxId() {
         return this.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
     },

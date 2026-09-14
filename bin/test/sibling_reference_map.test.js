@@ -40,10 +40,10 @@ describe('bin/sibling-reference-map.js', function () {
                 "const path = require('path');",
                 "const HUB = path.resolve(__dirname, '../../xchain-hub');",
                 "const engine = require(path.join(HUB, 'src', 'cross_chain', 'bridge_engine.js'));",
-                'const other = `${HUB}/src/PeerManager.js`;',
+                'const other = `${HUB}/src/peers/manager.js`;',
             ].join('\n');
             const hits = refs.scanIndirectIdioms(source, {}).found.map((h) => h.path).sort();
-            assert.deepStrictEqual(hits, ['src/PeerManager.js', 'src/cross_chain/bridge_engine.js'],
+            assert.deepStrictEqual(hits, ['src/cross_chain/bridge_engine.js', 'src/peers/manager.js'],
                 'neither site spells the repo name beside the file name, which is why a grep misses both');
         });
 
@@ -117,7 +117,7 @@ describe('bin/sibling-reference-map.js', function () {
             const sibling = path.join(root, 'xchain-decoder');
             fs.mkdirSync(path.join(sibling, 'src'), { recursive: true });
             fs.writeFileSync(path.join(sibling, 'src', 'own.js'),
-                "require('../../xchain-hub/src/PeerManager.js');\n");
+                "require('../../xchain-hub/src/peers/manager.js');\n");
 
             const nested = path.join(sibling, 'modules', 'xchain-indexer', 'src');
             fs.mkdirSync(nested, { recursive: true });
@@ -136,7 +136,7 @@ describe('bin/sibling-reference-map.js', function () {
         it('counts the sibling\'s own file and neither the nested checkout nor the tmp tree', () => {
             const map = refs.buildReferenceMap(root);
             const seen = Object.keys(map.paths).sort();
-            assert.deepStrictEqual(seen, ['src/PeerManager.js'],
+            assert.deepStrictEqual(seen, ['src/peers/manager.js'],
                 'a reference inside a scratch clone belongs to the cloned repo, and nobody repoints a clone');
             assert.strictEqual(map.referenceCount, 1);
         });

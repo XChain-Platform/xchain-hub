@@ -38,7 +38,7 @@ function loadModule() {
     };
     OraclePublisher = proxyquire('../../src/oracle/publisher', {
         fs: fsMock,
-        '../EncoderClient': function () { return null; }  // encoder=null by default
+        '../peers/encoder_client': function () { return null; }  // encoder=null by default
     });
 }
 

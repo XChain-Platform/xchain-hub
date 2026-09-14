@@ -23,7 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const HubDbBroadcaster = proxyquire('../../src/HubDbBroadcaster.js', { ws: { OPEN: 1 } });
+const HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
 const StateAnchorPublisher = require('../../src/anchor/publisher.js');
 const Database             = require('../../src/db');

@@ -137,7 +137,7 @@ module.exports = {
     },
 
     // Reads one row from cross_chain_calls.
-    // Moved here from src/HubDbBroadcaster.js:667.
+    // Moved here from src/peers/hub_db_broadcaster.js:667.
     async getCrossChainCallsMaxLiveId() {
         return this.doQuery(`SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'`);
     },
@@ -149,7 +149,7 @@ module.exports = {
     },
 
     // Reads one row from cross_chain_matches.
-    // Moved here from src/HubDbBroadcaster.js:643.
+    // Moved here from src/peers/hub_db_broadcaster.js:643.
     async getCrossChainMatchesMaxLiveId() {
         return this.doQuery(`SELECT MAX(id) AS max_id FROM cross_chain_matches WHERE status <> 'retracted'`);
     },
