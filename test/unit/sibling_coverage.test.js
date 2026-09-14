@@ -39,7 +39,7 @@
 // the full checkout proves it rather than asserting it. Default (unset) stays
 // permissive so a single-repo clone is green.
 //
-// Ported from xchain-sdk/test/unit/sibling-coverage.test.js.
+// Ported from xchain-sdk/test/unit/sibling_coverage.test.js.
 
 const assert = require('assert');
 const fs     = require('fs');

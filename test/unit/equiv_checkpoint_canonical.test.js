@@ -44,7 +44,7 @@ const GOLDEN = require('../fixtures/anchor_canonical_vectors.json');
 let sdkCheckpoint = null, sdkLight = null, Anchor = null, AnchorRecovery = null;
 let sdkErr = null, lightErr = null, anchorErr = null, recoveryErr = null;
 try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
-try { sdkLight = require('../../../xchain-sdk/src/light.js'); } catch (e) { lightErr = e; }
+try { sdkLight = require('../../../xchain-sdk/src/protocol/light_client.js'); } catch (e) { lightErr = e; }
 try { Anchor = require('../../../xchain-indexer/src/actions/anchor/index.js'); } catch (e) { anchorErr = e; }
 try { AnchorRecovery = require('../../../xchain-indexer/bin/recovery.js'); } catch (e) { recoveryErr = e; }
 const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
@@ -57,7 +57,7 @@ function requireSiblings() {
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
         const missing = [];
         if (!sdkCheckpoint)  missing.push('xchain-sdk/src/checkpoint.js (' + (sdkErr && sdkErr.message) + ')');
-        if (!sdkLight)       missing.push('xchain-sdk/src/light.js (' + (lightErr && lightErr.message) + ')');
+        if (!sdkLight)       missing.push('xchain-sdk/src/protocol/light_client.js (' + (lightErr && lightErr.message) + ')');
         if (!Anchor)         missing.push('xchain-indexer/src/actions/anchor/index.js (' + (anchorErr && anchorErr.message) + ')');
         if (!AnchorRecovery) missing.push('xchain-indexer/bin/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
         throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the XCHECKPOINT cross-service parity siblings are unloadable: '
