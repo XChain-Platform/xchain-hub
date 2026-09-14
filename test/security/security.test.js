@@ -13,7 +13,7 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
-const { createMockHub }    = require('../helpers/mockHub');
+const { createMockHub, DB_METHODS } = require('../helpers/mockHub');
 const { waitUntil }        = require('../helpers/waitUntil');
 const { PRICE_MAX }        = require('../../src/constants.js');
 const { VALIDATORS_3, VALIDATORS_4, makeValidator, SAMPLE_PRICES,
@@ -1247,7 +1247,7 @@ describe('Security Hardening', function () {
                 // assert the exact integer reaches the engine rather than a coerced one.
                 requestAttestation: sinon.stub().resolves({ status: 'attested' }),
                 reportReorg: sinon.stub().resolves(),
-                db: { setChainTip: sinon.stub().resolves(), doQuery: sinon.stub().resolves([]) }
+                db: { ...DB_METHODS, setChainTip: sinon.stub().resolves(), doQuery: sinon.stub().resolves([]) }
             };
 
             let capturedMethods;

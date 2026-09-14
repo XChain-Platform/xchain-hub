@@ -28,6 +28,7 @@
 const assert = require('assert');
 const SlashDetector = require('../../src/SlashDetector');
 const RewardTracker = require('../../src/RewardTracker');
+const { DB_METHODS } = require('../helpers/mockHub');
 
 const PK = (c) => c.repeat(64);   // 64-hex pubkey
 
@@ -141,7 +142,7 @@ describe('Regression: slashing safety + reward split', function () {
     describe('reward split', function () {
         function makeRewardTracker(perRound) {
             const writes = [];
-            const hub = { p2pConfig: { ORACLE_REWARD_PER_ROUND: perRound }, db: { doQuery: async (q, p) => { writes.push(p); } } };
+            const hub = { p2pConfig: { ORACLE_REWARD_PER_ROUND: perRound }, db: { ...DB_METHODS, doQuery: async (q, p) => { writes.push(p); } } };
             const rt = new RewardTracker(hub);
             return { rt, writes };
         }

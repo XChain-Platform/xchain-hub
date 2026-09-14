@@ -14,6 +14,7 @@ const sinon              = require('sinon');
 const { expect }         = require('chai');
 const ValidatorIdentity  = require('../../src/ValidatorIdentity');
 const PeerManager        = require('../../src/PeerManager');
+const { DB_METHODS }     = require('../helpers/mockHub');
 
 describe('Regression: P2P & ValidatorIdentity', function () {
 
@@ -157,7 +158,7 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 P2P_RECONNECT_BASE: 2000,
                 P2P_RECONNECT_MAX: 60000
             };
-            dbStub = { doQuery: sinon.stub().resolves([]) };
+            dbStub = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
             pm = new PeerManager(config, dbStub);
         });
 
