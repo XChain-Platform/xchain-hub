@@ -67,7 +67,7 @@ function resolveSecretEnv(legacyName, env = process.env) {
     const aliasName = SECRET_ENV_ALIASES[legacyName];
     if (!aliasName) {
         throw new Error('resolveSecretEnv: unknown secret env var ' + legacyName +
-            ' (add it to SECRET_ENV_ALIASES in src/secret-env.js)');
+            ' (add it to SECRET_ENV_ALIASES in src/secret_env.js)');
     }
 
     const aliasValue  = env[aliasName];

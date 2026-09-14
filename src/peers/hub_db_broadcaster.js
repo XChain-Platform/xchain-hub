@@ -26,7 +26,7 @@
  ********************************************************************/
 
 const WebSocket = require('ws');
-const { HUB_SCHEMA_VERSION } = require('../hub-schema-version');
+const { HUB_SCHEMA_VERSION } = require('../hub_schema_version');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../lib/admission_height.js');
 const { admitMarginBlocks } = require('../mirror_admission_activation.js');

@@ -33,7 +33,7 @@ patchConsole({ service: 'xchain-hub', version: require('../package.json').versio
 const { installCrashHandlers, noteShutdown } = require('./consensus/diagnostics');
 installCrashHandlers({ service: 'xchain-hub' });
 
-const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
+const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret_env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
 for(const key of REQUIRED_ENV){
@@ -45,7 +45,7 @@ for(const key of REQUIRED_ENV){
 
 // The DB password is checked apart from the list above because it accepts two
 // names: HUB_DB_SECRET (preferred) and the deprecated HUB_DB_PASS. See
-// src/secret-env.js for why the name matters.
+// src/secret_env.js for why the name matters.
 let HUB_DB_SECRET;
 try {
     HUB_DB_SECRET = resolveSecretEnv('HUB_DB_PASS');
@@ -78,7 +78,7 @@ const axios     = require('axios');   // hub-to-indexer RPC (attestation request
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const swq       = require('./stake_weighted_quorum.js');
 const wid       = require('./attest_responsible_widening_activation.js');
-const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
+const { HUB_SCHEMA_VERSION } = require('./hub_schema_version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 // The SAME replacer HubDbBroadcaster.js signs its WS frames with, imported rather than
 // copied: a bootstrap REST read and a streamed WS row must serialize a BIGINT column
 // identically, or a consumer that switches between the two feeds sees the same value
@@ -145,7 +145,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,

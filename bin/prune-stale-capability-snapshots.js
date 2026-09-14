@@ -35,7 +35,7 @@
 
 const Database = require('../src/db');
 const prune    = require('../src/lib/capability_snapshot_prune.js');
-const { resolveSecretEnv } = require('../src/secret-env.js');
+const { resolveSecretEnv } = require('../src/secret_env.js');
 
 function parseArgs(argv){
     let out = { dbs: [], apply: false, from: undefined, to: undefined, capability: undefined,

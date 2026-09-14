@@ -33,7 +33,7 @@ const path   = require('path');
 const identity = require('../consensus-identity.js');
 const digest   = require('../../src/consensus_rules_digest.js');
 const coins    = require('../../src/coins/index.js');
-const schema   = require('../../src/hub-schema-version.js');
+const schema   = require('../../src/hub_schema_version.js');
 
 describe('bin/consensus-identity.js', function () {
     this.timeout(60000);

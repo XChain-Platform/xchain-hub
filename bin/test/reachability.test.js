@@ -234,8 +234,8 @@ describe('bin/reachability.js', function () {
 
         it('resolves an extensionless relative require', () => {
             assert.strictEqual(
-                reach.resolveRequire('src/api.js', './hub-schema-version'),
-                'src/hub-schema-version.js',
+                reach.resolveRequire('src/api.js', './hub_schema_version'),
+                'src/hub_schema_version.js',
             );
             assert.strictEqual(reach.resolveRequire('src/api.js', 'crypto'), null,
                 'a bare package specifier is not a repo-local edge');
