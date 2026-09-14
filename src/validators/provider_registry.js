@@ -285,7 +285,7 @@ class ProviderRegistry {
     // Called from loadGovernanceHistory before layering governance changes. Preserves
     // any already-appended future activation entries (only the block-0 entry is reset),
     // so re-seeding does not wipe finalized history.
-    _seedProviderConfigGenesis(){
+    seedProviderConfigGenesis(){
         for (let [providerId, def] of Object.entries(DEFAULTS)){
             let ac = (def && def.additional_config) || {};
             let ms = normalizeMinStakeXchain(def && def.min_stake_xchain);
@@ -425,7 +425,7 @@ class ProviderRegistry {
     // activation_block. Idempotent. Best-effort: a hub without governance_proposals just gets
     // the genesis seed. Mirror of CapabilityRegistry.loadGovernanceHistory.
     async loadGovernanceHistory(){
-        this._seedProviderConfigGenesis();
+        this.seedProviderConfigGenesis();
         if (!this.db) return;
         let rows;
         try {

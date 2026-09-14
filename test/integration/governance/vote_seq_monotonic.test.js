@@ -83,42 +83,42 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
     it('THE ATTACK: replaying a captured earlier vote does NOT reinstate it', async function () {
         // The validator votes approve, then changes to reject. Both are genuine and
         // correctly signed at increasing seqs.
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 2000),  2000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 2000),  2000);
         expect(await storedVote()).to.deep.equal({ vote: 'reject', seq: 2000 });
 
         // An attacker re-broadcasts the captured approve. Its signature is perfectly
         // valid, which is precisely why the pre-fix sink accepted it.
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
 
         expect(await storedVote(), 'the superseded approve did not come back')
             .to.deep.equal({ vote: 'reject', seq: 2000 });
     });
 
     it('an equal seq does not overwrite (idempotent redelivery is not a vote change)', async function () {
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject', sig('reject', 2000), 2000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 2000), 2000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject', sig('reject', 2000), 2000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 2000), 2000);
         expect((await storedVote()).vote, 'same seq cannot flip the choice').to.equal('reject');
     });
 
     it('a strictly greater seq DOES overwrite, so a validator can still change their vote', async function () {
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 1001),  1001);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 1001),  1001);
         expect(await storedVote()).to.deep.equal({ vote: 'reject', seq: 1001 });
     });
 
     it('a late-arriving loser cannot lower the stored seq (GREATEST keeps the bar up)', async function () {
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject', sig('reject', 5000), 5000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 10), 10);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject', sig('reject', 5000), 5000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 10), 10);
         let after = await storedVote();
         expect(after.vote, 'choice unchanged').to.equal('reject');
         expect(after.seq, 'stored seq did not regress, so seq 11 cannot win next').to.equal(5000);
     });
 
     it('the stored signature always matches the stored vote after a refused replay', async function () {
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 2000),  2000);
-        await gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 2000),  2000);
+        await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000);
 
         let rows = await db.doQuery(
             "SELECT vote, signature, vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ?",
@@ -137,9 +137,9 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
         // await, so these interleave. Whatever order the DB serialises them in, every
         // hub must end up with the same row or the tally diverges.
         await Promise.all([
-            gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000),
-            gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 3000),  3000),
-            gov._upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 2000), 2000)
+            gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 1000), 1000),
+            gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 3000),  3000),
+            gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 2000), 2000)
         ]);
         expect(await storedVote(), 'highest seq wins regardless of interleaving')
             .to.deep.equal({ vote: 'reject', seq: 3000 });

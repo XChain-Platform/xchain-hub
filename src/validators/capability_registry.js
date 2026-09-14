@@ -68,7 +68,7 @@ class CapabilityRegistry {
         // applied the change), which is what makes CapabilitySnapshot's qualifying validator set
         // (and therefore the quorum N it locks) federation-deterministic.
         this.minStakeHistory = {};
-        this._seedGenesisHistory();
+        this.seedGenesisHistory();
         // Operator opt-out list (capabilities the operator does not want to serve even when qualified + self_test_ok)
         this.disabled   = new Set((hub.p2pConfig && hub.p2pConfig.DISABLED_CAPABILITIES) || []);
     }
@@ -77,7 +77,7 @@ class CapabilityRegistry {
     // capConfig. Called at construction and on hot-reload of the capability config. Preserves
     // any already-appended future activation entries (only the activation_block-0 entry is reset),
     // so a reload of operator config does not wipe finalized governance history.
-    _seedGenesisHistory() {
+    seedGenesisHistory() {
         for (let cap of KNOWN_CAPABILITIES) {
             let entry = this.capConfig[cap];
             // Preserve the pre-history getMinStake semantics: an entry present but without a
@@ -212,7 +212,7 @@ class CapabilityRegistry {
     // Back-compat shim (test-only / non-block-anchored callers): set the baseline (block-0)
     // MIN_STAKE for a capability. The real governance path is applyMinStakeActivation with a
     // proposer-declared activation_block, driven from XChainHub._applyCapabilityGovernanceChange.
-    _applyGovernanceChange(capability, parameterKey, newValue) {
+    applyGovernanceChange(capability, parameterKey, newValue) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
         if (parameterKey === 'MIN_STAKE') return this.applyMinStakeActivation(capability, 0, newValue);

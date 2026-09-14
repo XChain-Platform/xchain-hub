@@ -41,21 +41,21 @@ describe('Boundary: Governance', function () {
     describe('_validateChangeBounds - normal parameters', function () {
 
         it('exactly 50% increase (100→150) - should NOT throw', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
         });
 
         it('50.1% increase (100→150.1) - should throw', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150.1')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150.1')).to.throw(/exceeds maximum/);
         });
 
         it('exactly 33% decrease (100→67) - should NOT throw', function () {
             // changeRatio = (67-100)/100 = -0.33, equals -MAX_DECREASE so not strictly less
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
         });
 
         it('33.1% decrease (100→66.9) - should throw', function () {
             // changeRatio = (66.9-100)/100 = -0.331
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '66.9')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '66.9')).to.throw(/exceeds maximum/);
         });
     });
 
@@ -66,21 +66,21 @@ describe('Boundary: Governance', function () {
     describe('_validateChangeBounds - slashing parameters', function () {
 
         it('SLASH_DEVIATION_THRESHOLD: exactly 25% increase - should NOT throw', function () {
-            expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125')).to.not.throw();
         });
 
         it('SLASH_DEVIATION_THRESHOLD: 25.1% increase - should throw', function () {
-            expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125.1')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125.1')).to.throw(/exceeds maximum/);
         });
 
         it('SLASH_MISSED_ROUNDS_THRESHOLD: exactly 20% decrease - should NOT throw', function () {
             // changeRatio = (80-100)/100 = -0.20
-            expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '80')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '80')).to.not.throw();
         });
 
         it('SLASH_MISSED_ROUNDS_THRESHOLD: 20.1% decrease - should throw', function () {
             // changeRatio = (79.9-100)/100 = -0.201
-            expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '79.9')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '79.9')).to.throw(/exceeds maximum/);
         });
     });
 
@@ -92,22 +92,22 @@ describe('Boundary: Governance', function () {
 
         it('currentValue="0" - skips validation (no throw)', function () {
             // Division by zero guard: current === 0 → return early
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '0', '999')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '0', '999')).to.not.throw();
         });
 
         it('non-numeric values ("abc","def") - skips validation (no throw)', function () {
-            expect(() => gov._validateChangeBounds('SOME_PARAM', 'abc', 'def')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', 'abc', 'def')).to.not.throw();
         });
 
         it('negative current value - ratio inverts direction (increase from -100 to -50 is 50%)', function () {
             // changeRatio = (-50 - -100) / -100 = 50 / -100 = -0.50 → treated as decrease
             // -0.50 < -0.33 so this should throw for normal params
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '-100', '-50')).to.throw(/exceeds maximum/);
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '-100', '-50')).to.throw(/exceeds maximum/);
         });
 
         it('very small values: 0.001→0.0015 (50% increase) - boundary math with floats', function () {
             // changeRatio = (0.0015 - 0.001) / 0.001 = 0.5 exactly
-            expect(() => gov._validateChangeBounds('SOME_PARAM', '0.001', '0.0015')).to.not.throw();
+            expect(() => gov.validateChangeBounds('SOME_PARAM', '0.001', '0.0015')).to.not.throw();
         });
     });
 

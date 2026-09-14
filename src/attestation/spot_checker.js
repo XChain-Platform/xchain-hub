@@ -680,14 +680,14 @@ class AttestationSpotChecker {
         this._failures.set(pk, arr);
 
         if (arr.length >= this.failureThreshold && this.hub.slashDetector
-            && typeof this.hub.slashDetector._recordSlashProposal === 'function') {
+            && typeof this.hub.slashDetector.recordSlashProposal === 'function') {
             let evidence = JSON.stringify({
                 failures:   arr.length,
                 windowMs:   this.failureWindowMs,
                 lastRequestId: requestId
             });
             let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
-            this.hub.slashDetector._recordSlashProposal(pk, 'attestation_spot_check_failure', pseudoRound, evidence)
+            this.hub.slashDetector.recordSlashProposal(pk, 'attestation_spot_check_failure', pseudoRound, evidence)
                 .catch(e => console.warn('AttestationSpotChecker: slash record failed:', e));
         }
     }

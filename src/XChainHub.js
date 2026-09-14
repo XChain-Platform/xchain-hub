@@ -1257,7 +1257,7 @@ class XChainHub {
         if(this.capabilityRegistry){
             this.capabilityRegistry.capConfig = this.p2pConfig.CAPABILITIES || {};
             // Re-seed the block-0 genesis threshold; appended activations are preserved.
-            this.capabilityRegistry._seedGenesisHistory();
+            this.capabilityRegistry.seedGenesisHistory();
             this.capabilityRegistry.disabled  = new Set(this.p2pConfig.DISABLED_CAPABILITIES || []);
         }
         console.log('Loaded capability config from ' + configFilePath +
@@ -2034,7 +2034,7 @@ class XChainHub {
             }
             this.capabilityRegistry.applyMinStakeActivation(parsed.capability, Number(ev.activationBlock), String(ev.newValue));
         } else {
-            this.capabilityRegistry._applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
+            this.capabilityRegistry.applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
         }
         // Drop cached snapshots for this capability so the next consensus read re-queries
         // under the new threshold. The cache key already folds in min_stake, so this only

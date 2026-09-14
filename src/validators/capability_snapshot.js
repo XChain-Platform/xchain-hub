@@ -103,7 +103,7 @@ class CapabilitySnapshot {
         // value now refuses boot rather than forking silently (#4167, see
         // _resolveReorgBuffer). Default 6 = the BTC confirmation depth the
         // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
-        this.reorgBufferBlocks = this._resolveReorgBuffer();
+        this.reorgBufferBlocks = this.resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
         // Truncation is alarm-and-PROCEED (the snapshot is still usable and
         // cross-hub deterministic), so it is not a monitor failure and keeps
@@ -115,7 +115,7 @@ class CapabilitySnapshot {
         // visible instead of merely silent.
         this.monitor = new ConsensusInputMonitor({
             throttleMs:         this.cacheTtlMs,
-            alertAfterFailures: this._resolveAlertAfterFailures()
+            alertAfterFailures: this.resolveAlertAfterFailures()
         });
     }
 
@@ -127,7 +127,7 @@ class CapabilitySnapshot {
     // one CapabilitySnapshot instance straddle networks (multi-network reader, a
     // test harness swapping hub.network, reuse across two indexer targets) can no
     // longer serve a mainnet snapshot for a testnet (capability, blockIndex) query.
-    _netKey() {
+    netKey() {
         return (this.hub && this.hub.network) || '';
     }
 
@@ -138,7 +138,7 @@ class CapabilitySnapshot {
     // indistinguishable from a dead indexer or an empty validator set, so every
     // attestation round and config-change quorum collapses to a null snapshot
     // while nothing points the operator at auth. Surface it distinctly, throttled.
-    _onFetchError(method, err) {
+    onFetchError(method, err) {
         let reason = classifyFetchError(err);
         let detail;
         if (reason === REASONS.AUTH) {
@@ -151,14 +151,14 @@ class CapabilitySnapshot {
             detail = 'The BTC indexer did not respond (' + ((err && err.message) || 'unknown transport error') +
                 '); check that it is running and reachable at the configured URL.';
         }
-        return this._fail(method, reason, detail);
+        return this.fail(method, reason, detail);
     }
 
     // Record a consensus-input failure and return the null sentinel every fetch
     // path already uses. Single choke point so no future null-return can be
     // added without also raising the alarm (the exact regression the
     // consensus-input monitor closes).
-    _fail(method, reason, detail, throttleKey) {
+    fail(method, reason, detail, throttleKey) {
         this.monitor.recordFailure(method, reason, detail, throttleKey);
         return null;
     }
@@ -185,7 +185,7 @@ class CapabilitySnapshot {
     // hub, not at the predicate the laundering hides it from. Rejecting the whole
     // snapshot (rather than dropping the row) is deliberate: dropping a row shrinks
     // S exactly the same way. A legitimate '0' weight still passes.
-    _coerceValidators(result, opts) {
+    coerceValidators(result, opts) {
         if (!result || !Array.isArray(result.validators)) return null;
         if (opts && opts.requireWeight) {
             for (let v of result.validators) {
@@ -205,9 +205,9 @@ class CapabilitySnapshot {
     // sets for the same round. Reject on mismatch (throttled log follows the
     // auth idiom with its own field, so echo and auth alarms never mask each
     // other). Returns true when the echoed block matches the request.
-    _blockEchoOk(method, result, requested) {
+    blockEchoOk(method, result, requested) {
         if (Number(result.block_index) === Number(requested)) return true;
-        this._fail(method, REASONS.ECHO_MISMATCH,
+        this.fail(method, REASONS.ECHO_MISMATCH,
             'Returned block_index ' + result.block_index + ' for requested block ' + requested +
             '; rejecting the snapshot (freshness/echo mismatch, possible indexer bug or misconfiguration).');
         return false;
@@ -222,9 +222,9 @@ class CapabilitySnapshot {
     // indistinguishable here from a wrong one. Fail-closed costs this hub a vote;
     // fail-open casts a wrong one. Only the two capability-scoped fetchers call this;
     // the whole-federation ('*') fetchers send no capability and have nothing to echo.
-    _capabilityEchoOk(method, result, requested) {
+    capabilityEchoOk(method, result, requested) {
         if (String(result.capability) === String(requested)) return true;
-        this._fail(method, REASONS.ECHO_MISMATCH,
+        this.fail(method, REASONS.ECHO_MISMATCH,
             'Returned capability ' + result.capability + ' for requested capability ' + requested +
             '; rejecting the snapshot (echo mismatch, possible indexer bug or misconfiguration).');
         return false;
@@ -251,22 +251,22 @@ class CapabilitySnapshot {
         // the same (capability, blockIndex) MUST NOT share a cache entry. Without
         // this a governance MIN_STAKE change leaves a stale snapshot serving the
         // old validator set for up to the TTL, splitting quorum across hubs.
-        let minStake = this._resolveMinStake(capability, blockIndex);
+        let minStake = this.resolveMinStake(capability, blockIndex);
         // Fail closed (#S-F3): a null threshold from a LIVE registry means this
         // capability is unconfigured, and falling back to the indexer's local config
         // silently forks the qualifying set across independently-operated indexers.
         // Refuse the snapshot so the caller declines to vote / aborts the round.
-        if (minStake === null && this._registryReady()) {
-            this._warnMinStakeMissing(capability);
+        if (minStake === null && this.registryReady()) {
+            this.warnMinStakeMissing(capability);
             return null;
         }
-        let key = this._netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
+        let key = this.netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return this._fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+        if (!url) return this.fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         let params = { capability: capability, block_index: blockIndex };
         if (minStake !== null) params.min_stake = minStake;
@@ -279,11 +279,11 @@ class CapabilitySnapshot {
                 params:  params
             }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return this._fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result);
-            if (validators === null) return this._fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
-            if (!this._blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
-            if (!this._capabilityEchoOk('getcapabilityvalidators', result, capability)) return null;
+            if (!result || result.error) return this.fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
+            let validators = this.coerceValidators(result);
+            if (validators === null) return this.fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
+            if (!this.blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
+            if (!this.capabilityEchoOk('getcapabilityvalidators', result, capability)) return null;
             this.monitor.recordSuccess('getcapabilityvalidators');
             let snapshot = {
                 capability:  result.capability,
@@ -299,7 +299,7 @@ class CapabilitySnapshot {
         } catch (err) {
             // Indexer unreachable / down (or 401/403 auth mismatch): caller falls
             // back to local validator set; _onFetchError surfaces an auth misconfig.
-            return this._onFetchError('getcapabilityvalidators', err);
+            return this.onFetchError('getcapabilityvalidators', err);
         }
     }
 
@@ -314,20 +314,20 @@ class CapabilitySnapshot {
         // min_stake rides in the cache key for the same reason as getSnapshot:
         // it determines the qualifying set, so a governance threshold change must
         // force a fresh fetch rather than serve a snapshot keyed to the old one.
-        let minStake = this._resolveMinStake(capability, blockIndex);
+        let minStake = this.resolveMinStake(capability, blockIndex);
         // Fail closed (#S-F3): see getSnapshot. A live registry with no threshold for
         // this capability must not fall back to the indexer's local config (fork risk).
-        if (minStake === null && this._registryReady()) {
-            this._warnMinStakeMissing(capability);
+        if (minStake === null && this.registryReady()) {
+            this.warnMinStakeMissing(capability);
             return null;
         }
-        let key = 'w:' + this._netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
+        let key = 'w:' + this.netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return this._fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+        if (!url) return this.fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         let params = { capability: capability, block_index: blockIndex };
         if (minStake !== null) params.min_stake = minStake;
@@ -340,12 +340,12 @@ class CapabilitySnapshot {
                 params:  params
             }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return this._fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result, { requireWeight: true });
-            if (validators === null) return this._fail('getstakeweightsbycapability', REASONS.MALFORMED,
+            if (!result || result.error) return this.fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
+            let validators = this.coerceValidators(result, { requireWeight: true });
+            if (validators === null) return this.fail('getstakeweightsbycapability', REASONS.MALFORMED,
                 Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
-            if (!this._blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
-            if (!this._capabilityEchoOk('getstakeweightsbycapability', result, capability)) return null;
+            if (!this.blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
+            if (!this.capabilityEchoOk('getstakeweightsbycapability', result, capability)) return null;
             this.monitor.recordSuccess('getstakeweightsbycapability');
             let snapshot = {
                 capability:  result.capability,
@@ -360,7 +360,7 @@ class CapabilitySnapshot {
             this.prune(now);
             return snapshot;
         } catch (err) {
-            return this._onFetchError('getstakeweightsbycapability', err);
+            return this.onFetchError('getstakeweightsbycapability', err);
         }
     }
 
@@ -371,13 +371,13 @@ class CapabilitySnapshot {
     async getActiveValidatorSnapshot(blockIndex) {
         blockIndex = this._buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
-        let key = '*:' + this._netKey() + ':' + blockIndex;
+        let key = '*:' + this.netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return this._fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+        if (!url) return this.fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
             let res = await axios.post(url, {
@@ -387,10 +387,10 @@ class CapabilitySnapshot {
                 params:  { block_index: blockIndex }
             }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return this._fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result);
-            if (validators === null) return this._fail('getactivevalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
-            if (!this._blockEchoOk('getactivevalidators', result, blockIndex)) return null;
+            if (!result || result.error) return this.fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
+            let validators = this.coerceValidators(result);
+            if (validators === null) return this.fail('getactivevalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
+            if (!this.blockEchoOk('getactivevalidators', result, blockIndex)) return null;
             this.monitor.recordSuccess('getactivevalidators');
             let snapshot = {
                 capability:  '*',
@@ -404,7 +404,7 @@ class CapabilitySnapshot {
             this.prune(now);
             return snapshot;
         } catch (err) {
-            return this._onFetchError('getactivevalidators', err);
+            return this.onFetchError('getactivevalidators', err);
         }
     }
 
@@ -416,13 +416,13 @@ class CapabilitySnapshot {
     async getActiveWeightSnapshot(blockIndex) {
         blockIndex = this._buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
-        let key = 'wa:' + this._netKey() + ':' + blockIndex;
+        let key = 'wa:' + this.netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return this._fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+        if (!url) return this.fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
             let res = await axios.post(url, {
@@ -432,11 +432,11 @@ class CapabilitySnapshot {
                 params:  { block_index: blockIndex }
             }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return this._fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result, { requireWeight: true });
-            if (validators === null) return this._fail('getactivestakeweights', REASONS.MALFORMED,
+            if (!result || result.error) return this.fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
+            let validators = this.coerceValidators(result, { requireWeight: true });
+            if (validators === null) return this.fail('getactivestakeweights', REASONS.MALFORMED,
                 Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
-            if (!this._blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
+            if (!this.blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
             this.monitor.recordSuccess('getactivestakeweights');
             let snapshot = {
                 capability:  '*',
@@ -451,7 +451,7 @@ class CapabilitySnapshot {
             this.prune(now);
             return snapshot;
         } catch (err) {
-            return this._onFetchError('getactivestakeweights', err);
+            return this.onFetchError('getactivestakeweights', err);
         }
     }
 
@@ -520,12 +520,12 @@ class CapabilitySnapshot {
     // resolves the same threshold for the same block from block-anchored governance
     // history, so they fold the identical min_stake into the cache key and request
     // the identical qualifying set (#3703).
-    _resolveMinStake(capability, blockIndex) {
+    resolveMinStake(capability, blockIndex) {
         let reg = this.hub.capabilityRegistry;
         if (!reg || typeof reg.getMinStake !== 'function') return null;
         let v = reg.getMinStake(capability, blockIndex);
         if (v !== null && v !== undefined) return String(v);
-        return this._feedMinStake(capability);
+        return this.feedMinStake(capability);
     }
 
     // Second and last place a threshold can come from: the hub's stake-weight feed.
@@ -540,21 +540,21 @@ class CapabilitySnapshot {
     //
     // A configured threshold always wins (this is only reached once the registry
     // answered null), and a hub with no feed keeps the refusal byte for byte.
-    _feedMinStake(capability) {
+    feedMinStake(capability) {
         let feed = this.hub && this.hub.stakeWeightFeed;
         if (!feed || typeof feed.minStake !== 'function') return null;
         let v;
         try { v = feed.minStake(capability); }
         catch (e) { return null; }
         if (v === null || v === undefined) return null;
-        this._noteFeedFloor(capability, v);
+        this.noteFeedFloor(capability, v);
         return String(v);
     }
 
     // Say once per capability that this hub is reading the federation's floor
     // rather than its own, so the operator can tell a deliberate config-free hub
     // from one whose capability file failed to load.
-    _noteFeedFloor(capability, value) {
+    noteFeedFloor(capability, value) {
         if (!this._feedFloorNoted) this._feedFloorNoted = new Set();
         if (this._feedFloorNoted.has(capability)) return;
         this._feedFloorNoted.add(capability);
@@ -570,7 +570,7 @@ class CapabilitySnapshot {
     // the capability was never put in HUB_CAPABILITY_CONFIG, not that we are mid-
     // startup. Before the registry exists, min_stake is legitimately omitted (no
     // consensus rounds run pre-startCapabilities); this distinguishes the two.
-    _registryReady() {
+    registryReady() {
         let reg = this.hub && this.hub.capabilityRegistry;
         return !!(reg && typeof reg.getMinStake === 'function');
     }
@@ -579,8 +579,8 @@ class CapabilitySnapshot {
     // Routed through the monitor like every other fail-closed path, sub-keyed by
     // capability so a second missing threshold is not swallowed by the first
     // one's throttle window.
-    _warnMinStakeMissing(capability) {
-        this._fail('getsnapshot', REASONS.MIN_STAKE,
+    warnMinStakeMissing(capability) {
+        this.fail('getsnapshot', REASONS.MIN_STAKE,
             'Capability "' + capability + '" has NO configured MIN_STAKE threshold (missing from ' +
             'HUB_CAPABILITY_CONFIG) while the registry is live. Refusing to build a snapshot for it: omitting ' +
             'min_stake would let each indexer apply its OWN local threshold, so two hubs could qualify different ' +
@@ -594,7 +594,7 @@ class CapabilitySnapshot {
     // link; a non-positive or non-integer value falls back to the default rather
     // than disabling the alarm (a typo must not silently restore the old
     // silent-fail-closed behaviour).
-    _resolveAlertAfterFailures() {
+    resolveAlertAfterFailures() {
         let raw = process.env.HUB_CONSENSUS_INPUT_ALERT_AFTER;
         if (raw === undefined || raw === '') return undefined;
         let n = Number(raw);
@@ -617,7 +617,7 @@ class CapabilitySnapshot {
     // snapshots carry no capability filter and are intentionally left untouched.
     flushCapability(capability) {
         if (!capability) return 0;
-        let net = this._netKey();
+        let net = this.netKey();
         let prefixes = [net + ':' + capability + ':', 'w:' + net + ':' + capability + ':'];
         let removed = 0;
         for (let k of this.cache.keys()) {
@@ -644,7 +644,7 @@ class CapabilitySnapshot {
     // for a coordinated fleet-wide change. Same shape and same reasoning as
     // XChainHub._assertCanonicalMinStakes, which guards the identical fork
     // class for MIN_STAKE.
-    _resolveReorgBuffer() {
+    resolveReorgBuffer() {
         let raw = process.env.HUB_SNAPSHOT_REORG_BUFFER;
         if (raw === undefined || raw === '') return CANONICAL_REORG_BUFFER;
         let n = Number(raw);

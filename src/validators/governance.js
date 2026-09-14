@@ -105,7 +105,7 @@ function normalizeVoteSeq(seq) {
 // `latestBlock` is this hub's best observed BTC height at receive time.
 // `votingPeriodMs` is this hub's local governance.votingPeriod.
 // Returns the minimum valid activation_block.
-function _minActivationBlock(latestBlock, votingPeriodMs) {
+function minActivationBlock(latestBlock, votingPeriodMs) {
     let votingBlocks = Math.ceil(votingPeriodMs / BTC_BLOCK_MS);
     return latestBlock + votingBlocks + ACTIVATION_SAFETY_BUFFER_BLOCKS;
 }
@@ -162,7 +162,7 @@ class Governance extends EventEmitter {
     // observed BTC block has reached it. Unset height (mainnet pre-arm) or no
     // observed tip => OFF (safe: attach-but-legacy-tally). BTC-anchored so the
     // hub and every peer flip together, exactly like STAKE_WEIGHTED_QUORUM.
-    _isSnapshotLockActive() {
+    isSnapshotLockActive() {
         let net       = this.hub && this.hub.network;
         let threshold = GOV_SNAPSHOT_ACTIVATION[net];
         if (threshold === null || threshold === undefined) return false;
@@ -176,7 +176,7 @@ class Governance extends EventEmitter {
     // Phase 1 is count-based over the locked set (stake-weighting deferred: the
     // validators registry has no stake column and governance has no natural
     // capability scope; see the R2-M2 design doc).
-    _buildValidatorSnapshot() {
+    buildValidatorSnapshot() {
         return this.validatorSet
             .map(v => ({ pubkey: String(v.pubkey).toLowerCase(), addr: v.addr }))
             .sort((a, b) => (a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : 0));
@@ -185,7 +185,7 @@ class Governance extends EventEmitter {
     // Parse + shape-validate a wire/persisted snapshot. Returns a pubkey-sorted
     // array on success, or null if absent/malformed/oversized/duplicated. A JSON
     // string (DB column, wire field) and an already-parsed array are both accepted.
-    _parseSnapshot(raw) {
+    parseSnapshot(raw) {
         if (raw === null || raw === undefined) return null;
         let arr;
         if (typeof raw === 'string') {
@@ -213,7 +213,7 @@ class Governance extends EventEmitter {
     // rejected. Honest proposals pass because every hub is fed the same
     // `validators` table; a transient registration race just drops the proposal
     // (warn log) and the proposer re-proposes. See the R2-M2 design doc.
-    _snapshotMatchesLocalSet(snap) {
+    snapshotMatchesLocalSet(snap) {
         let local = new Set(this.validatorSet.map(v => String(v.pubkey).toLowerCase()));
         if (local.size !== snap.length) return false;
         for (let e of snap) if (!local.has(e.pubkey)) return false;
@@ -224,7 +224,7 @@ class Governance extends EventEmitter {
     // (pubkey array) for a snapshot-locked proposal, or null for a legacy row
     // (tallied against the live validator set, historical behaviour). Only votes
     // from electorate members count when locked. Returns the full breakdown.
-    _computeTally(votes, electorate) {
+    computeTally(votes, electorate) {
         // Resolve the electorate membership used to filter the numerator:
         //  - a snapshot-locked proposal: the locked snapshot;
         //  - a legacy row with a non-empty current set: this hub's CURRENT set
@@ -296,7 +296,7 @@ class Governance extends EventEmitter {
         let latest = Number(raw);
         if (!Number.isInteger(latest))
             throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
-        let minActivation = _minActivationBlock(latest, this.votingPeriod);
+        let minActivation = minActivationBlock(latest, this.votingPeriod);
         if (explicit === undefined || explicit === null) return minActivation;
         let ab = Number(explicit);
         if (!Number.isInteger(ab) || ab < 0)
@@ -335,7 +335,7 @@ class Governance extends EventEmitter {
             }
         }
 
-        this._validateChangeBounds(parameter, currentValue, proposedValue);
+        this.validateChangeBounds(parameter, currentValue, proposedValue);
 
         // Pre-launch pin (#4352): refuse to create a CAPABILITY_*_MIN_STAKE proposal. The
         // indexer's on-chain acceptance re-derives quorum from a frozen configs/<COIN>.js
@@ -360,7 +360,7 @@ class Governance extends EventEmitter {
 
         // R2-M2: snapshot-lock the electorate at creation so the tally denominator
         // (and vote-membership) cannot drift with a later setValidatorSet churn.
-        let snapshot     = this._buildValidatorSnapshot();
+        let snapshot     = this.buildValidatorSnapshot();
         let snapshotJson = JSON.stringify(snapshot);
 
         await this.db.createGovernanceProposalByProposalId(proposalId, proposerPubkey, parameter, currentValue, proposedValue, rationale || '', now, votingEnd, activation, snapshotJson);
@@ -398,7 +398,7 @@ class Governance extends EventEmitter {
         // not whoever is a validator right now, so a validator registered AFTER
         // the proposal was created cannot vote on it (and thus cannot dilute the
         // fixed denominator). Legacy (NULL-snapshot) rows keep the live-set rule.
-        let electorate = this._parseSnapshot(proposal.validator_snapshot);
+        let electorate = this.parseSnapshot(proposal.validator_snapshot);
         if (electorate && !electorate.some(e => e.pubkey === String(voterPubkey).toLowerCase()))
             throw new Error('Voter is not in this proposal\'s locked validator set');
 
@@ -417,7 +417,7 @@ class Governance extends EventEmitter {
 
         // Record the vote (upsert -- allows changing vote during voting period,
         // but only ever forward: _upsertVote refuses a non-increasing seq)
-        await this._upsertVote(proposalId, voterPubkey, voteChoice, signature, seq);
+        await this.upsertVote(proposalId, voterPubkey, voteChoice, signature, seq);
 
         this.peerManager.broadcast(GOV_VOTE, {
             proposalId, vote: voteChoice, voterPubkey, signature, seq
@@ -546,7 +546,7 @@ class Governance extends EventEmitter {
             }
             let ab = Number(activationBlock);
             if (latest !== null && Number.isInteger(latest)) {
-                let minAb = _minActivationBlock(latest, this.votingPeriod);
+                let minAb = minActivationBlock(latest, this.votingPeriod);
                 if (ab < minAb) {
                     console.warn('Governance: dropping inbound proposal ' + proposalId +
                         ' (' + parameter + '): activation_block ' + ab + ' is below follower min ' + minAb);
@@ -585,7 +585,7 @@ class Governance extends EventEmitter {
         // could reach different tally outcomes). Legitimate proposals always pass
         // bounds (propose() validated them), so honest traffic never diverges.
         try {
-            this._validateChangeBounds(parameter, currentValue, proposedValue);
+            this.validateChangeBounds(parameter, currentValue, proposedValue);
         } catch (e) {
             console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                 '): change exceeds allowed bounds: ' + e.message);
@@ -612,9 +612,9 @@ class Governance extends EventEmitter {
         // snapshot-lock is active a proposal that omits a valid snapshot is dropped
         // (never recorded), so no unlocked proposal enters the electorate; below
         // activation an invalid/absent snapshot persists as NULL (legacy tally).
-        let snap        = this._parseSnapshot(envelope.data.validatorSnapshot);
-        let snapValid   = !!snap && this._snapshotMatchesLocalSet(snap);
-        if (this._isSnapshotLockActive() && !snapValid) {
+        let snap        = this.parseSnapshot(envelope.data.validatorSnapshot);
+        let snapValid   = !!snap && this.snapshotMatchesLocalSet(snap);
+        if (this.isSnapshotLockActive() && !snapValid) {
             console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
                 '): snapshot-lock active but validator_snapshot is missing or does not match the local set');
             return;
@@ -671,7 +671,7 @@ class Governance extends EventEmitter {
     // TOCTOU window in which the loser lands last and wins. GREATEST keeps the
     // stored seq monotonic even when a superseded copy arrives late, so the
     // stale copy cannot lower the bar for the next replay.
-    async _upsertVote(proposalId, voterPubkey, vote, signature, seq) {
+    async upsertVote(proposalId, voterPubkey, vote, signature, seq) {
         return this.db.setGovernanceVote(proposalId, voterPubkey, vote, String(signature || ''), seq);
     }
 
@@ -731,10 +731,10 @@ class Governance extends EventEmitter {
         // R2-M2: on a snapshot-locked proposal, only a member of the LOCKED set
         // may be counted. The validatorSet gate above admits anyone registered
         // now; a validator added after the proposal opened must not vote on it.
-        let electorate = this._parseSnapshot(prows[0].validator_snapshot);
+        let electorate = this.parseSnapshot(prows[0].validator_snapshot);
         if (electorate && !electorate.some(e => e.pubkey === pk)) return;
 
-        this._upsertVote(proposalId, voterPubkey, vote, signature, voteSeq)
+        this.upsertVote(proposalId, voterPubkey, vote, signature, voteSeq)
             .catch(e => console.error('Governance: failed to persist inbound vote for proposal %s from %s:',
                 proposalId, voterPubkey, e));
         // A vote is consensus-tally-affecting state: a silently-dropped write here makes this
@@ -778,7 +778,7 @@ class Governance extends EventEmitter {
             noteDrop({ reason: 'unknown_sender', phase: 'gov_result', sender: envelope.sender, envelope });
             return;
         }
-        let leader = this._getProposalLeader(proposalId);
+        let leader = this.getProposalLeader(proposalId);
         if (!leader || leader.addr !== envelope.sender) return;
 
         // Reject a result that arrives before the voting window closes: the legitimate leader
@@ -803,15 +803,15 @@ class Governance extends EventEmitter {
         // rows keep the historical apply-wire-status behaviour (re-tallying them
         // against a per-hub-divergent live set would itself fork; this is why
         // R2-M2 gates R2-H2).
-        let electorate  = this._parseSnapshot(prows[0].validator_snapshot);
+        let electorate  = this.parseSnapshot(prows[0].validator_snapshot);
         let applyStatus = status;
         if (electorate) {
-            await this._ingestResultVotes(proposalId, envelope.data.votes, electorate);
+            await this.ingestResultVotes(proposalId, envelope.data.votes, electorate);
             let votes;
             try {
                 votes = await this.db.findGovernanceVotes(proposalId);
             } catch (e) { return; }
-            let localResult = this._computeTally(votes, electorate).approved ? 'passed' : 'failed';
+            let localResult = this.computeTally(votes, electorate).approved ? 'passed' : 'failed';
             if (localResult !== status) {
                 console.warn('Governance: GOV_RESULT status mismatch from leader ' + envelope.sender +
                     ' on ' + proposalId + ': wire=' + status + ' local=' + localResult +
@@ -857,7 +857,7 @@ class Governance extends EventEmitter {
     // vote()/_handleVote sign. Upsert is idempotent, so the leader's own loopback
     // and duplicate deliveries are harmless. A malformed/oversized `votes` array
     // is skipped (the local re-tally still runs on whatever votes we already hold).
-    async _ingestResultVotes(proposalId, wireVotes, electorate) {
+    async ingestResultVotes(proposalId, wireVotes, electorate) {
         if (!Array.isArray(wireVotes) || wireVotes.length > GOV_SNAPSHOT_MAX_VALIDATORS) return;
         let members = new Set(electorate.map(e => e.pubkey));
         for (let v of wireVotes) {
@@ -872,7 +872,7 @@ class Governance extends EventEmitter {
             let payload = voteSigningPayload(proposalId, v.vote, v.voterPubkey, seq);
             if (!ValidatorIdentity.verify(payload, String(v.signature || ''), v.voterPubkey)) continue;
             try {
-                await this._upsertVote(proposalId, v.voterPubkey, v.vote, v.signature, seq);
+                await this.upsertVote(proposalId, v.voterPubkey, v.vote, v.signature, seq);
             } catch (e) {
                 console.error('Governance: failed to ingest GOV_RESULT vote evidence for %s from %s:',
                     proposalId, v.voterPubkey, e && e.message ? e.message : e);
@@ -884,7 +884,7 @@ class Governance extends EventEmitter {
     // (modular index into the validator set) but, since governance has no
     // sequential round counter, derives the round from a hash of the immutable
     // proposal_id. Every hub computes the same leader for a given proposal.
-    _getProposalLeader(proposalId) {
+    getProposalLeader(proposalId) {
         if (this.validatorSet.length === 0) return null;
         let round = crypto.createHash('sha256').update(proposalId).digest().readUInt32BE(0);
         return this.validatorSet[round % this.validatorSet.length];
@@ -893,9 +893,9 @@ class Governance extends EventEmitter {
     // True if this hub is the deterministic leader responsible for tallying the
     // given proposal. A hub with no validator set (standalone / dev) falls back
     // to tallying locally so single-node operation is unaffected.
-    _isTallyLeader(proposalId) {
+    isTallyLeader(proposalId) {
         if (this.validatorSet.length === 0) return true;
-        let leader = this._getProposalLeader(proposalId);
+        let leader = this.getProposalLeader(proposalId);
         return !!leader && leader.addr === this.peerManager.validatorAddr;
     }
 
@@ -918,7 +918,7 @@ class Governance extends EventEmitter {
             // as authoritative. This prevents two hubs from independently
             // tallying with different gossip-delivered vote counts and reaching
             // contradictory passed/failed conclusions (split-brain).
-            if (!this._isTallyLeader(proposal.proposal_id)) continue;
+            if (!this.isTallyLeader(proposal.proposal_id)) continue;
             try {
                 await this._tallyProposal(proposal);
             } catch (e) {
@@ -937,8 +937,8 @@ class Governance extends EventEmitter {
         // R2-M2: tally against the proposal's LOCKED electorate (snapshot), not the
         // live mutable validatorSet, so a set churn mid-vote cannot move the
         // denominator. Legacy (NULL-snapshot) rows fall back to the live set.
-        let electorate = this._parseSnapshot(proposal.validator_snapshot);
-        let tally = this._computeTally(votes, electorate);
+        let electorate = this.parseSnapshot(proposal.validator_snapshot);
+        let tally = this.computeTally(votes, electorate);
         let { approvals, rejections, totalVotes, validatorCount, approved } = tally;
 
         let newStatus = approved ? 'passed' : 'failed';
@@ -981,11 +981,11 @@ class Governance extends EventEmitter {
         }
     }
 
-    _validateChangeBounds(parameter, currentValue, proposedValue) {
+    validateChangeBounds(parameter, currentValue, proposedValue) {
         // Ratio bound first, so a proposal that busts BOTH gates still reports the
         // size error; the floor below only decides values the ratio bound allows.
-        this._validateChangeRatio(parameter, currentValue, proposedValue);
-        this._validateSlashBandFloor(parameter, proposedValue);
+        this.validateChangeRatio(parameter, currentValue, proposedValue);
+        this.validateSlashBandFloor(parameter, proposedValue);
     }
 
     // Absolute floor under the slash band, mirroring the guard SlashDetector's
@@ -1002,7 +1002,7 @@ class Governance extends EventEmitter {
     // _handlePropose - fixed hubs drop a sub-floor Byzantine proposal that unfixed
     // hubs still record. Honest proposals always clear the floor, so honest traffic
     // never diverges.
-    _validateSlashBandFloor(parameter, proposedValue) {
+    validateSlashBandFloor(parameter, proposedValue) {
         if (parameter !== 'SLASH_DEVIATION_THRESHOLD') return;
         let band = parseFloat(proposedValue);
         if (!Number.isFinite(band) || band >= ORACLE_DEVIATION_THRESHOLD) return;
@@ -1011,7 +1011,7 @@ class Governance extends EventEmitter {
             'submissions inside the co-signed band, and SlashDetector refuses to construct on it.');
     }
 
-    _validateChangeRatio(parameter, currentValue, proposedValue) {
+    validateChangeRatio(parameter, currentValue, proposedValue) {
         // Only validate numeric parameters
         let cur  = parseDecimalParts(currentValue);
         let prop = parseDecimalParts(proposedValue);

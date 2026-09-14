@@ -90,7 +90,7 @@ class SlashGovernance {
     }
 
     // Pending evidence rows for one validator (oldest first, deterministic order).
-    async _pendingRows(validatorPubkey) {
+    async pendingRows(validatorPubkey) {
         return await this.db.findSlashProposals(validatorPubkey);
     }
 
@@ -108,7 +108,7 @@ class SlashGovernance {
         if (!PENALTY_ACTIONS.includes(penalty))
             throw new Error('penalty must be one of: ' + PENALTY_ACTIONS.join(', '));
 
-        let rows = await this._pendingRows(pk);
+        let rows = await this.pendingRows(pk);
         if (rows.length === 0)
             throw new Error('No pending slash_proposals evidence for validator ' + pk);
 
@@ -146,7 +146,7 @@ class SlashGovernance {
     // is exactly an id-ASC prefix of the current pending rows. Returns the
     // matching subset, or null when no prefix hashes to the voted hash
     // (genuine cross-hub evidence drift).
-    _matchVotedRows(rows, votedHash) {
+    matchVotedRows(rows, votedHash) {
         for (let k = rows.length; k >= 1; k--) {
             if (computeEvidenceHash(rows.slice(0, k)) === votedHash) return rows.slice(0, k);
         }
@@ -182,14 +182,14 @@ class SlashGovernance {
         // fail-closed: if it errors we execute nothing against evidence rows.
         let rows;
         try {
-            rows = await this._pendingRows(pk);
+            rows = await this.pendingRows(pk);
         } catch (e) {
             console.error('SlashGovernance: could not read pending evidence for validator ' +
                 pk.substring(0, 16) + '...; refusing to execute finalized ' + ev.proposalId +
                 ' against evidence rows (' + e.message + ')');
             return null;
         }
-        let voted = this._matchVotedRows(rows, parsed.evidenceHash);
+        let voted = this.matchVotedRows(rows, parsed.evidenceHash);
 
         let marked = 0;
         let newStatus = penalty === 'suspend' ? 'approved' : 'rejected';

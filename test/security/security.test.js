@@ -950,12 +950,12 @@ describe('Security Hardening', function () {
         });
 
         it('skips slash proposal for invalid pubkey format', async function () {
-            await sd._recordSlashProposal('invalid', 'price_deviation', 1, '{}');
+            await sd.recordSlashProposal('invalid', 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.callCount).to.equal(0);
         });
 
         it('records slash proposal for valid pubkey format', async function () {
-            await sd._recordSlashProposal('aa'.repeat(32), 'price_deviation', 1, '{}');
+            await sd.recordSlashProposal('aa'.repeat(32), 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.callCount).to.equal(1);
         });
 
@@ -967,7 +967,7 @@ describe('Security Hardening', function () {
                 deviations.push({ round: i, timestamp: Date.now() });
             }
             sd.recentDeviations.set(pubkey, deviations);
-            sd._trackDeviation(pubkey, 1002);
+            sd.trackDeviation(pubkey, 1002);
             expect(sd.recentDeviations.get(pubkey).length).to.be.at.most(1000);
         });
     });

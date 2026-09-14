@@ -71,7 +71,7 @@ class StakeWeightFeed {
     minStake(capability) {
         let key = String(capability);
         if (this._floors.has(key)) return this._floors.get(key);
-        let value = this._resolveFloor(key);
+        let value = this.resolveFloor(key);
         this._floors.set(key, value);
         return value;
     }
@@ -92,7 +92,7 @@ class StakeWeightFeed {
     // already caches the snapshot itself for a full PBFT round, and a second
     // cache would outlive a stake change the first one has let go.
     async qualifiedPubkeys(capability, blockIndex) {
-        let snapshot = await this._weightSnapshot(capability, blockIndex);
+        let snapshot = await this.weightSnapshot(capability, blockIndex);
         if (!snapshot || !Array.isArray(snapshot.validators)) {
             this.membershipUnresolved++;
             return null;
@@ -108,7 +108,7 @@ class StakeWeightFeed {
     // The weight snapshot, or null. Guarded because every caller here is on a
     // best-effort path beside a consensus decision that has already been made:
     // an indexer fault must cost an audit row, never the round.
-    async _weightSnapshot(capability, blockIndex) {
+    async weightSnapshot(capability, blockIndex) {
         let cs = this.hub && this.hub.capabilitySnapshot;
         if (!cs || typeof cs.getWeightSnapshot !== 'function') return null;
         try {
@@ -124,7 +124,7 @@ class StakeWeightFeed {
     // so BTC is the only bundle that carries thresholds, and the network follows
     // XChainHub._assertCanonicalMinStakes' own convention (a hub that declared
     // none is asserted against mainnet).
-    _resolveFloor(capability) {
+    resolveFloor(capability) {
         let network = (this.hub && this.hub.network) || 'mainnet';
         let entry;
         try {

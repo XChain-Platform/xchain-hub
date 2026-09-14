@@ -236,16 +236,16 @@ describe('Boundary: SlashDetector', function () {
 
         it('2 deviations in 24h → NO repeated_deviation', function () {
             let pubkey = VALIDATORS_3[0].pubkey;
-            sd._trackDeviation(pubkey, 1);
-            sd._trackDeviation(pubkey, 2);
+            sd.trackDeviation(pubkey, 1);
+            sd.trackDeviation(pubkey, 2);
             expect(repeatedCalls()).to.have.length(0);
         });
 
         it('2 deviations in 24h + 3rd arrives → YES repeated_deviation', function () {
             let pubkey = VALIDATORS_3[0].pubkey;
-            sd._trackDeviation(pubkey, 1);
-            sd._trackDeviation(pubkey, 2);
-            sd._trackDeviation(pubkey, 3);
+            sd.trackDeviation(pubkey, 1);
+            sd.trackDeviation(pubkey, 2);
+            sd.trackDeviation(pubkey, 3);
             expect(repeatedCalls()).to.have.length(1);
         });
 
@@ -261,7 +261,7 @@ describe('Boundary: SlashDetector', function () {
             ]);
 
             // 3rd deviation fires now; the two old entries are pruned, leaving only 1
-            sd._trackDeviation(pubkey, 3);
+            sd.trackDeviation(pubkey, 3);
 
             expect(repeatedCalls()).to.have.length(0);
             expect(sd.recentDeviations.get(pubkey)).to.have.length(1);
@@ -284,7 +284,7 @@ describe('Boundary: SlashDetector', function () {
             // Stub Date.now to return `now` so the cutoff calculation is stable
             sinon.stub(Date, 'now').returns(now);
 
-            sd._trackDeviation(pubkey, 3);
+            sd.trackDeviation(pubkey, 3);
 
             // 1st entry (timestamp === cutoff) is NOT > cutoff, so it is pruned
             // Remaining: entry 2 + entry 3 = 2 → no repeated_deviation

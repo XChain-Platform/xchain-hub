@@ -161,7 +161,7 @@ class StakeShareWatcher {
                 // rather than filling /health with `unconfigured` rows for chains
                 // that were never in scope.
                 if (sources.length === 0) continue;
-                await this._pollChain(chain, sources);
+                await this.pollChain(chain, sources);
             }
             this.passes++;
             this.lastPassAt = Date.now();
@@ -171,7 +171,7 @@ class StakeShareWatcher {
         }
     }
 
-    async _pollChain(chain, sources) {
+    async pollChain(chain, sources) {
         let url;
         try { url = await this.hub._resolveIndexerUrl(chain); }
         catch (err) { url = null; }
@@ -184,7 +184,7 @@ class StakeShareWatcher {
             return;
         }
 
-        let tip = await this._latestBlock(chain, url);
+        let tip = await this.latestBlock(chain, url);
         if (tip === null) {
             for (let cap of this.capabilities) {
                 this.monitor.recordUnavailable(chain, cap,
@@ -193,15 +193,15 @@ class StakeShareWatcher {
             }
             return;
         }
-        let block = Math.max(0, tip - this._reorgBuffer());
+        let block = Math.max(0, tip - this.reorgBuffer());
 
         for (let cap of this.capabilities) {
-            await this._pollCapability(chain, cap, url, block, sources);
+            await this.pollCapability(chain, cap, url, block, sources);
         }
     }
 
-    async _pollCapability(chain, capability, url, block, sources) {
-        let minStake = this._minStakeFor(capability, block);
+    async pollCapability(chain, capability, url, block, sources) {
+        let minStake = this.minStakeFor(capability, block);
         let params = { capability: capability, block_index: block };
         if (minStake !== null) params.min_stake = minStake;
 
@@ -209,7 +209,7 @@ class StakeShareWatcher {
         try {
             let res = await this._axios.post(url, {
                 jsonrpc: '2.0', id: Date.now(), method: 'getstakeweightsbycapability', params: params
-            }, { headers: this._headers(), timeout: 5000 });
+            }, { headers: this.headers(), timeout: 5000 });
             result = res && res.data && res.data.result;
         } catch (err) {
             let status = err && err.response && err.response.status;
@@ -251,18 +251,18 @@ class StakeShareWatcher {
     // One shared hub-to-indexer key covers every chain (_btcIndexerHeaders is the
     // hub's single header builder, despite the name). Tolerates a hub stub that
     // does not define it so a read never dies on a missing header.
-    _headers() {
+    headers() {
         if (this.hub && typeof this.hub.btcIndexerHeaders === 'function') return this.hub.btcIndexerHeaders();
         return { 'Content-Type': 'application/json' };
     }
 
     // Latest committed height on a chain's indexer. Null when unreadable; the
     // caller turns that into `unavailable` rather than guessing a height.
-    async _latestBlock(chain, url) {
+    async latestBlock(chain, url) {
         try {
             let res = await this._axios.post(url, {
                 jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {}
-            }, { headers: this._headers(), timeout: 5000 });
+            }, { headers: this.headers(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
             let blk = Number(result.block_index);
@@ -275,7 +275,7 @@ class StakeShareWatcher {
     // The same buried-height offset the consensus snapshot uses, read off the
     // live CapabilitySnapshot when there is one so an operator override cannot
     // put the monitor and the gate on different heights.
-    _reorgBuffer() {
+    reorgBuffer() {
         let snap = this.hub && this.hub.capabilitySnapshot;
         let buf = snap && Number(snap.reorgBufferBlocks);
         return Number.isInteger(buf) && buf >= 0 ? buf : DEFAULT_REORG_BUFFER;
@@ -285,7 +285,7 @@ class StakeShareWatcher {
     // consensus snapshot resolves it from. Null (omit the param) when no registry
     // is live, which lets the indexer apply its own local threshold; the
     // evaluator then sizes the margin off the smallest stake present instead.
-    _minStakeFor(capability, block) {
+    minStakeFor(capability, block) {
         let reg = this.hub && this.hub.capabilityRegistry;
         if (!reg || typeof reg.getMinStake !== 'function') return null;
         let v;

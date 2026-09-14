@@ -46,7 +46,7 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
     // re-arms on a falsy return so a failed write can be retried next round. A
     // stub returning undefined therefore impersonates a permanently failing DB
     // and re-fires the same offense every round.
-    sd._recordSlashProposal = async (pubkey, offenseType, round) => {
+    sd.recordSlashProposal = async (pubkey, offenseType, round) => {
         slashed.push({ pubkey, offenseType, round });
         return true;
     };

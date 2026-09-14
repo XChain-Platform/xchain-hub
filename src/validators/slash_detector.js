@@ -186,7 +186,7 @@ class SlashDetector {
         }
 
         // Pairs whose published price was CLAMPED this round get a wider band (item 5833).
-        let clampedPairs = this._clampLimitedPairs(round, finalizedMap);
+        let clampedPairs = this.clampLimitedPairs(round, finalizedMap);
 
         // Check each validator's submission against the finalized prices.
         // The unique offense signal is (validator, round): one proposal per
@@ -249,7 +249,7 @@ class SlashDetector {
             }
 
             if (deviatingPairs.length > 0) {
-                await this._recordSlashProposal(pubkey, 'price_deviation', round,
+                await this.recordSlashProposal(pubkey, 'price_deviation', round,
                     JSON.stringify({
                         pairCount: deviatingPairs.length,
                         pairs: deviatingPairs
@@ -257,7 +257,7 @@ class SlashDetector {
                 );
 
                 // Track once per (validator, round) for the repeated-deviation check
-                await this._trackDeviation(pubkey, round);
+                await this.trackDeviation(pubkey, round);
             }
         }
     }
@@ -276,7 +276,7 @@ class SlashDetector {
     // Fail-soft to TODAY's behaviour: no engine, or no reference for this round, yields
     // an empty set and the band stays at this.deviationThreshold. That never slashes
     // anyone the tight band would have spared, it only fails to widen.
-    _clampLimitedPairs(round, finalizedMap) {
+    clampLimitedPairs(round, finalizedMap) {
         let clamped = new Set();
         let engine  = this.hub && this.hub.oracleConsensus;
         let basis   = (engine && typeof engine.getClampReference === 'function')
@@ -309,7 +309,7 @@ class SlashDetector {
         // before recording this round (SLASH-MAP-NO-GC-1). Without this the four
         // per-validator maps kept one entry per pubkey ever seen, so a key
         // rotation leaked an entry forever over the process lifetime.
-        this._gcValidatorState(allValidators);
+        this.gcValidatorState(allValidators);
 
         let participantSet = new Set(participants);
 
@@ -356,7 +356,7 @@ class SlashDetector {
                 // duplicate proposal. Setting the latch first closes that TOCTOU
                 // window while a failed write still re-arms for a retry next round.
                 this.nonParticipationFired.set(v.pubkey, true);
-                let recorded = await this._recordSlashProposal(v.pubkey, 'non_participation', round,
+                let recorded = await this.recordSlashProposal(v.pubkey, 'non_participation', round,
                     JSON.stringify({
                         missedRounds: entry.missed,
                         windowRounds: entry.history.length,
@@ -377,7 +377,7 @@ class SlashDetector {
     // reconciling against the registry too never drops an active validator's
     // window. A dropped-then-returning validator simply restarts its window,
     // which only makes non-participation detection more lenient, never wrongful.
-    _gcValidatorState(allValidators) {
+    gcValidatorState(allValidators) {
         let live = new Set();
         for (let v of allValidators) if (v && v.pubkey) live.add(v.pubkey);
         let pm = this.hub.getPeerManager && this.hub.getPeerManager();
@@ -390,7 +390,7 @@ class SlashDetector {
         }
     }
 
-    async _trackDeviation(pubkey, round) {
+    async trackDeviation(pubkey, round) {
         if (!this.recentDeviations.has(pubkey)) {
             this.recentDeviations.set(pubkey, []);
         }
@@ -425,7 +425,7 @@ class SlashDetector {
                 // bug was a latch set before an un-awaited write that, on failure, was
                 // never retried because the saturated window never re-armed it.
                 this.repeatedDeviationFired.set(pubkey, true);
-                let recorded = await this._recordSlashProposal(pubkey, 'repeated_deviation', round,
+                let recorded = await this.recordSlashProposal(pubkey, 'repeated_deviation', round,
                     JSON.stringify({
                         deviationsIn24h: deviations.length,
                         rounds: deviations.slice(-50).map(d => d.round)
@@ -440,7 +440,7 @@ class SlashDetector {
 
     // Returns true only when the row persisted, so callers can latch a
     // once-per-crossing offense on success and safely retry on a failed write.
-    async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
+    async recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
         if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
             console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
             return false;
@@ -547,7 +547,7 @@ class SlashDetector {
         // populated with something monotonic-ish per offense (cosmetic: the
         // unique signal is validator_pubkey + offense_type + evidence).
         let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
-        await this._recordSlashProposal(pk, 'attestation_divergence', pseudoRound, evidence);
+        await this.recordSlashProposal(pk, 'attestation_divergence', pseudoRound, evidence);
     }
 }
 

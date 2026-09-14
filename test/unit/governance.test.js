@@ -44,46 +44,46 @@ describe('Governance', function () {
 
         describe('normal parameters', function () {
             it('allows 50% increase', function () {
-                expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
             });
 
             it('rejects 51% increase', function () {
-                expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '151')).to.throw(/exceeds maximum/);
+                expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '151')).to.throw(/exceeds maximum/);
             });
 
             it('allows 33% decrease', function () {
-                expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
             });
 
             it('rejects 34% decrease', function () {
-                expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '66')).to.throw(/exceeds maximum/);
+                expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '66')).to.throw(/exceeds maximum/);
             });
 
             it('allows exact boundary increase (50%)', function () {
-                expect(() => gov._validateChangeBounds('P', '200', '300')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '200', '300')).to.not.throw();
             });
 
             it('allows exact boundary decrease (33%)', function () {
                 // 100 → 67 is -33%. 100 * 0.33 = 33, so 67 is exactly -33%
-                expect(() => gov._validateChangeBounds('P', '100', '67')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '100', '67')).to.not.throw();
             });
         });
 
         describe('slashing parameters', function () {
             it('allows 25% increase for SLASH_DEVIATION_THRESHOLD', function () {
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
             });
 
             it('rejects 26% increase for SLASH_DEVIATION_THRESHOLD', function () {
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.063')).to.throw(/exceeds maximum/);
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.063')).to.throw(/exceeds maximum/);
             });
 
             it('allows 20% decrease for SLASH_MISSED_ROUNDS_THRESHOLD', function () {
-                expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '24')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '24')).to.not.throw();
             });
 
             it('rejects 21% decrease for SLASH_MISSED_ROUNDS_THRESHOLD', function () {
-                expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
+                expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
             });
 
             // The ratio bound caps only the SIZE of a change. The slash band also has an
@@ -92,54 +92,54 @@ describe('Governance', function () {
             // pass governance and then brick the hub on its next boot.
             it('rejects a SLASH_DEVIATION_THRESHOLD decrease below the oracle band floor', function () {
                 // 0.05 -> 0.04 is exactly -20%: inside the ratio bound, under the floor.
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.04'))
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.04'))
                     .to.throw(/below the federation-uniform/);
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.045'))
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.045'))
                     .to.throw(/below the federation-uniform/);
             });
 
             it('allows a SLASH_DEVIATION_THRESHOLD at or above the oracle band floor', function () {
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.05')).to.not.throw();
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.05')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
             });
 
             it('reports the ratio error when a decrease busts both the bound and the floor', function () {
-                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.03'))
+                expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.03'))
                     .to.throw(/exceeds maximum/);
             });
 
             it('applies no floor to SLASH_MISSED_ROUNDS_THRESHOLD (it carries no cross-constant band)', function () {
-                expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '0.05', '0.04')).to.not.throw();
+                expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '0.05', '0.04')).to.not.throw();
             });
         });
 
         describe('edge cases', function () {
             it('skips validation for non-numeric values', function () {
-                expect(() => gov._validateChangeBounds('P', 'abc', 'def')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', 'abc', 'def')).to.not.throw();
             });
 
             it('skips validation when current value is 0', function () {
-                expect(() => gov._validateChangeBounds('P', '0', '100')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '0', '100')).to.not.throw();
             });
 
             it('treats null / undefined values as non-numeric and skips', function () {
-                expect(() => gov._validateChangeBounds('P', null, '100')).to.not.throw();
-                expect(() => gov._validateChangeBounds('P', '100', undefined)).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', null, '100')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '100', undefined)).to.not.throw();
             });
 
             it('parses an explicit + sign', function () {
-                expect(() => gov._validateChangeBounds('P', '+100', '+120')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '+100', '+120')).to.not.throw();
             });
 
             it('parses a leading-dot fraction (empty integer part)', function () {
-                expect(() => gov._validateChangeBounds('P', '.5', '.6')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '.5', '.6')).to.not.throw();
             });
 
             it('enforces bounds when the current value is negative', function () {
                 // C=-100: a move to -160 is a 60% magnitude increase → exceeds.
-                expect(() => gov._validateChangeBounds('P', '-100', '-160')).to.throw(/exceeds maximum/);
+                expect(() => gov.validateChangeBounds('P', '-100', '-160')).to.throw(/exceeds maximum/);
                 // A small move stays within bounds.
-                expect(() => gov._validateChangeBounds('P', '-100', '-120')).to.not.throw();
+                expect(() => gov.validateChangeBounds('P', '-100', '-120')).to.not.throw();
             });
         });
     });
@@ -392,7 +392,7 @@ describe('Governance', function () {
         // Authenticated GOV_RESULT comes only from the proposal's deterministic tally
         // leader, after voting_end. Call order is now: SELECT voting_end → UPDATE → SELECT row.
         const PAST = '2020-01-01T00:00:00Z';                  // voting_end already elapsed
-        const leaderAddr = () => gov._getProposalLeader('gov:P:1').addr;
+        const leaderAddr = () => gov.getProposalLeader('gov:P:1').addr;
 
         it('emits proposal:finalized on a passed status transition (affectedRows > 0)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);    // SELECT voting_end
@@ -811,7 +811,7 @@ describe('Governance', function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: '2020-01-01T00:00:00Z' }]); // SELECT voting_end
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });                       // UPDATE
             await gov._handleResult({
-                sender: gov._getProposalLeader('gov:P:1').addr, type: 'GOV_RESULT',
+                sender: gov.getProposalLeader('gov:P:1').addr, type: 'GOV_RESULT',
                 data: { proposalId: 'gov:P:1', status: 'passed' }
             });
             expect(hub.db.doQuery.called).to.be.true;
@@ -890,34 +890,34 @@ describe('Governance', function () {
     describe('tally leadership', function () {
         it('_getProposalLeader returns null for an empty validator set', function () {
             gov.setValidatorSet([]);
-            expect(gov._getProposalLeader('gov:P:1')).to.be.null;
+            expect(gov.getProposalLeader('gov:P:1')).to.be.null;
         });
 
         it('_getProposalLeader is deterministic and drawn from the validator set', function () {
             gov.setValidatorSet(VALIDATORS_3);
-            let l1 = gov._getProposalLeader('gov:P:1');
-            let l2 = gov._getProposalLeader('gov:P:1');
+            let l1 = gov.getProposalLeader('gov:P:1');
+            let l2 = gov.getProposalLeader('gov:P:1');
             expect(l1).to.equal(l2);
             expect(VALIDATORS_3).to.include(l1);
         });
 
         it('_isTallyLeader is true in standalone mode (no validator set)', function () {
             gov.setValidatorSet([]);
-            expect(gov._isTallyLeader('gov:P:1')).to.be.true;
+            expect(gov.isTallyLeader('gov:P:1')).to.be.true;
         });
 
         it('_isTallyLeader is true when this node is the designated leader', function () {
             gov.setValidatorSet(VALIDATORS_3);
-            pm.validatorAddr = gov._getProposalLeader('gov:P:1').addr;
-            expect(gov._isTallyLeader('gov:P:1')).to.be.true;
+            pm.validatorAddr = gov.getProposalLeader('gov:P:1').addr;
+            expect(gov.isTallyLeader('gov:P:1')).to.be.true;
         });
 
         it('_isTallyLeader is false when another node is the leader', function () {
             gov.setValidatorSet(VALIDATORS_3);
-            let leader = gov._getProposalLeader('gov:P:1');
+            let leader = gov.getProposalLeader('gov:P:1');
             let other = VALIDATORS_3.find(v => v.addr !== leader.addr);
             pm.validatorAddr = other.addr;
-            expect(gov._isTallyLeader('gov:P:1')).to.be.false;
+            expect(gov.isTallyLeader('gov:P:1')).to.be.false;
         });
     });
 
@@ -939,7 +939,7 @@ describe('Governance', function () {
 
         it('skips proposals led by another node', async function () {
             gov.setValidatorSet(VALIDATORS_3);
-            let leader = gov._getProposalLeader('gov:P:1');
+            let leader = gov.getProposalLeader('gov:P:1');
             pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
             hub.db.doQuery.onFirstCall().resolves([{ proposal_id: 'gov:P:1' }]);
             let tally = sinon.stub(gov, '_tallyProposal').resolves();
@@ -1008,26 +1008,26 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     // ---- R2-M2 snapshot build/validate helpers ----
 
     it('_buildValidatorSnapshot returns a pubkey-sorted {pubkey,addr} array', function () {
-        let snap = gov._buildValidatorSnapshot();
+        let snap = gov.buildValidatorSnapshot();
         expect(snap).to.have.length(3);
         expect(snap.map(e => e.pubkey)).to.deep.equal(valset.map(v => v.pubkey).sort());
     });
 
     it('_parseSnapshot rejects malformed / oversized / duplicate-pubkey snapshots', function () {
-        expect(gov._parseSnapshot(null)).to.equal(null);
-        expect(gov._parseSnapshot('not json')).to.equal(null);
-        expect(gov._parseSnapshot('[]')).to.equal(null);
-        expect(gov._parseSnapshot(JSON.stringify([{ pubkey: 'aa' }, { pubkey: 'aa' }]))).to.equal(null);
-        expect(gov._parseSnapshot(JSON.stringify([{ addr: 'x' }]))).to.equal(null); // no pubkey
+        expect(gov.parseSnapshot(null)).to.equal(null);
+        expect(gov.parseSnapshot('not json')).to.equal(null);
+        expect(gov.parseSnapshot('[]')).to.equal(null);
+        expect(gov.parseSnapshot(JSON.stringify([{ pubkey: 'aa' }, { pubkey: 'aa' }]))).to.equal(null);
+        expect(gov.parseSnapshot(JSON.stringify([{ addr: 'x' }]))).to.equal(null); // no pubkey
     });
 
     it('_snapshotMatchesLocalSet is exact-set: rejects a self-only shrink and a superset', function () {
-        let full = gov._parseSnapshot(snapshotJson);
-        expect(gov._snapshotMatchesLocalSet(full)).to.equal(true);
+        let full = gov.parseSnapshot(snapshotJson);
+        expect(gov.snapshotMatchesLocalSet(full)).to.equal(true);
         let selfOnly = [{ pubkey: kps[0].pubkey, addr: 'x' }];
-        expect(gov._snapshotMatchesLocalSet(selfOnly)).to.equal(false);
+        expect(gov.snapshotMatchesLocalSet(selfOnly)).to.equal(false);
         let superset = full.concat([{ pubkey: 'ff'.repeat(32), addr: 'y' }]);
-        expect(gov._snapshotMatchesLocalSet(superset)).to.equal(false);
+        expect(gov.snapshotMatchesLocalSet(superset)).to.equal(false);
     });
 
     // ---- GOV-TALLY-DENOM-1: legacy tally re-filters the numerator by membership ----
@@ -1043,7 +1043,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
             { voter_pubkey: kps[0].pubkey, vote: 'approve' },
             { voter_pubkey: departed,      vote: 'approve' }
         ];
-        let tally = gov._computeTally(votes, null);
+        let tally = gov.computeTally(votes, null);
         expect(tally.approvals).to.equal(1);
         expect(tally.totalVotes).to.equal(1);
         expect(tally.validatorCount).to.equal(3);
@@ -1112,7 +1112,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     // ---- R2-H2: follower re-tallies, never trusts the wire status ----
 
     it('_handleResult APPLIES local FAILED over a leader forged "passed" with zero approvals', async function () {
-        let leader = gov._getProposalLeader('gov:P:1');
+        let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: snapshotJson }]);
         // No stored votes locally, and the forged result carries none.
@@ -1128,7 +1128,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     });
 
     it('_handleResult recovers a follower that missed GOV_VOTE gossip via signed evidence', async function () {
-        let leader = gov._getProposalLeader('gov:P:1');
+        let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: snapshotJson }]);
         // Local store is EMPTY until the evidence is ingested; after ingest the
@@ -1154,18 +1154,18 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT INTO governance_votes/)).resolves();
         let outsider = ValidatorIdentity.generate();
         let outsiderPriv = new ValidatorIdentity(outsider.privkeyHex);
-        let electorate = gov._parseSnapshot(snapshotJson);
+        let electorate = gov.parseSnapshot(snapshotJson);
         let bad = signedVote(kps[0], 'gov:P:1', 'approve'); bad.signature = 'ee'.repeat(64); // tampered
         let nonMember = { voterPubkey: outsider.pubkeyHex.toLowerCase(), vote: 'approve',
             signature: outsiderPriv.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: outsider.pubkeyHex.toLowerCase() })) };
         let good = signedVote(kps[1], 'gov:P:1', 'approve');
 
-        await gov._ingestResultVotes('gov:P:1', [bad, nonMember, good], electorate);
+        await gov.ingestResultVotes('gov:P:1', [bad, nonMember, good], electorate);
         expect(insert.callCount, 'only the one valid member vote is ingested').to.equal(1);
     });
 
     it('_handleResult keeps wire-status behaviour for a legacy NULL-snapshot proposal', async function () {
-        let leader = gov._getProposalLeader('gov:P:1');
+        let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: null }]);
         let update = hub.db.doQuery.withArgs(sinon.match(/UPDATE governance_proposals/)).resolves({ affectedRows: 1 });
@@ -1205,16 +1205,16 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     });
 
     it('_isSnapshotLockActive gates on network + observed BTC height', function () {
-        expect(gov._isSnapshotLockActive(), 'no network -> off').to.equal(false);
+        expect(gov.isSnapshotLockActive(), 'no network -> off').to.equal(false);
         hub.network = 'regtest';
         hub._latestBlockIndex = 5;
-        expect(gov._isSnapshotLockActive(), 'regtest activates at 0').to.equal(true);
+        expect(gov.isSnapshotLockActive(), 'regtest activates at 0').to.equal(true);
         hub.network = 'mainnet';
         hub._latestBlockIndex = 962999;
-        expect(gov._isSnapshotLockActive(), 'mainnet below 963000 -> off').to.equal(false);
+        expect(gov.isSnapshotLockActive(), 'mainnet below 963000 -> off').to.equal(false);
         hub._latestBlockIndex = 963000;
-        expect(gov._isSnapshotLockActive(), 'mainnet at 963000 -> on').to.equal(true);
+        expect(gov.isSnapshotLockActive(), 'mainnet at 963000 -> on').to.equal(true);
         hub._latestBlockIndex = null;
-        expect(gov._isSnapshotLockActive(), 'mainnet no observed tip -> off').to.equal(false);
+        expect(gov.isSnapshotLockActive(), 'mainnet no observed tip -> off').to.equal(false);
     });
 });

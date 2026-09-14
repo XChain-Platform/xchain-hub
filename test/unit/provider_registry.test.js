@@ -426,7 +426,7 @@ describe('ProviderRegistry', function () {
     describe('getAdditionalConfig (block-anchored)', function () {
         it('returns the genesis config before any activation', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             let ac = reg.getAdditionalConfig('llm', 500);
             expect(ac.approved_models[0]).to.equal('claude-sonnet-4-6');
             expect(ac.judge_model).to.equal('claude-haiku-4-5');
@@ -434,7 +434,7 @@ describe('ProviderRegistry', function () {
 
         it('resolves the activation-N config at block N and later, genesis before', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' });
             expect(reg.getAdditionalConfig('llm', 999).approved_models[0]).to.equal('claude-sonnet-4-6');
             expect(reg.getAdditionalConfig('llm', 1000).approved_models[0]).to.equal('claude-opus-4-8');
@@ -452,7 +452,7 @@ describe('ProviderRegistry', function () {
     describe('applyProviderConfigActivation', function () {
         it('is idempotent by activation_block (overwrites, no duplicate entry)', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['a'] });
             reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['b'] });
             let hist = reg.providerConfigHistory.get('llm');
@@ -491,14 +491,14 @@ describe('ProviderRegistry', function () {
     describe('getMinStake (block-anchored provider floor)', function () {
         it('resolves the spec floors from the genesis seed', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             expect(reg.getMinStake('http_get', 500)).to.equal('10000');
             expect(reg.getMinStake('llm', 500)).to.equal('25000');
         });
 
         it('resolves the activation floor at its block and later, genesis before', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, '40000');
             expect(reg.getMinStake('llm', 999)).to.equal('25000');
             expect(reg.getMinStake('llm', 1000)).to.equal('40000');
@@ -507,7 +507,7 @@ describe('ProviderRegistry', function () {
 
         it('keeps the previous floor across an activation that only moves additional_config', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, '40000');
             reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['y'] });   // no floor change
             expect(reg.getMinStake('llm', 2000)).to.equal('40000');
@@ -516,7 +516,7 @@ describe('ProviderRegistry', function () {
 
         it('is order-independent: a later-appended earlier activation still resolves correctly', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 3000, {}, '60000');
             reg.applyProviderConfigActivation('llm', 2000, {}, '40000');   // appended out of order
             expect(reg.getMinStake('llm', 1999)).to.equal('25000');
@@ -526,7 +526,7 @@ describe('ProviderRegistry', function () {
 
         it('returns the latest configured floor when no block is given', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 5000, {}, '90000');
             expect(reg.getMinStake('llm')).to.equal('90000');
         });
@@ -546,16 +546,16 @@ describe('ProviderRegistry', function () {
 
         it('ignores an unparseable governance floor rather than zeroing the bar', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, {}, 'not-a-number');
             expect(reg.getMinStake('llm', 1000)).to.equal('25000');
         });
 
         it('re-seeding genesis does not wipe a later activation floor', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, {}, '40000');
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             expect(reg.getMinStake('llm', 999)).to.equal('25000');
             expect(reg.getMinStake('llm', 1000)).to.equal('40000');
         });
@@ -588,14 +588,14 @@ describe('ProviderRegistry', function () {
     describe('getConsensusStrategy (block-anchored PBFT strategy)', function () {
         it('resolves the DEFAULTS strategies from the genesis seed', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             expect(reg.getConsensusStrategy('http_get', 500)).to.equal('byte_equality');
             expect(reg.getConsensusStrategy('llm', 500)).to.equal('judge_model');
         });
 
         it('resolves the activation strategy at its block and later, genesis before', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, null, 'byte_equality');
             expect(reg.getConsensusStrategy('llm', 999)).to.equal('judge_model');
             expect(reg.getConsensusStrategy('llm', 1000)).to.equal('byte_equality');
@@ -604,7 +604,7 @@ describe('ProviderRegistry', function () {
 
         it('keeps the previous strategy across an activation that only moves additional_config', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, null, 'byte_equality');
             reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['y'] });   // no strategy change
             expect(reg.getConsensusStrategy('llm', 2000)).to.equal('byte_equality');
@@ -615,7 +615,7 @@ describe('ProviderRegistry', function () {
             // decline the round, not silently run the previous state machine while the
             // rest of the federation runs the new one.
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, {}, null, 'threshold_vote');
             expect(reg.getConsensusStrategy('llm', 1000)).to.equal('threshold_vote');
         });
@@ -668,9 +668,9 @@ describe('ProviderRegistry', function () {
 
         it('re-seeding genesis does not wipe a later activation strategy', function () {
             let reg = new ProviderRegistry(makeHub());
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             reg.applyProviderConfigActivation('llm', 1000, {}, null, 'byte_equality');
-            reg._seedProviderConfigGenesis();
+            reg.seedProviderConfigGenesis();
             expect(reg.getConsensusStrategy('llm', 999)).to.equal('judge_model');
             expect(reg.getConsensusStrategy('llm', 1000)).to.equal('byte_equality');
         });
@@ -702,7 +702,7 @@ describe('ProviderRegistry', function () {
                              additional_config: { approved_models: ['z'] } };
 
             let liveReg = new ProviderRegistry(makeHub());
-            liveReg._seedProviderConfigGenesis();
+            liveReg.seedProviderConfigGenesis();
             await XChainHub.prototype.applyProviderGovernanceChange.call(
                 { providerRegistry: liveReg },
                 { parameter: 'ATTESTATION_PROVIDER:llm', activationBlock: 7000,

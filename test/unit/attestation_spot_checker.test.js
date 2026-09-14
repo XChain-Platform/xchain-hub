@@ -276,7 +276,7 @@ describe('AttestationSpotChecker', function () {
         it('calls slashDetector when failure count reaches threshold', async function () {
             let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '3' } });
             let slashStub = sinon.stub().resolves();
-            hub.slashDetector = { _recordSlashProposal: slashStub };
+            hub.slashDetector = { recordSlashProposal: slashStub };
             let sc = new AttestationSpotChecker(hub, makeProviderRegistry(false));
 
             // Fire 3 failures for pubkey1
@@ -296,7 +296,7 @@ describe('AttestationSpotChecker', function () {
         it('does NOT call slashDetector when failures are below threshold', async function () {
             let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '5' } });
             let slashStub = sinon.stub().resolves();
-            hub.slashDetector = { _recordSlashProposal: slashStub };
+            hub.slashDetector = { recordSlashProposal: slashStub };
             let sc = new AttestationSpotChecker(hub, makeProviderRegistry(false));
 
             for (let i = 1; i <= 2; i++) {
