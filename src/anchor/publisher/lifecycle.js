@@ -85,15 +85,11 @@ module.exports = {
         };
     },
 
-    async start(){
-        if(!this.enabled){ logger.info('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
-        // The per-window spend ceilings were memory-only, so every restart
-        // restored a full allowance. Reload the saved window before anything anchors.
-        this.spendGuard.persistTo();
-        // Fill any indexer URL left empty at construction (configs-table-
-        // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
-        // configs-aware resolver, so anchor on-chain verification reaches the
-        // indexer instead of returning 'no-indexer' on a standard hub.
+    // Fill any indexer URL left empty at construction (configs-table-
+    // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
+    // configs-aware resolver, so anchor on-chain verification reaches the
+    // indexer instead of returning 'no-indexer' on a standard hub.
+    async resolveMissingIndexerUrls(){
         if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
             for(const coin of Object.keys(this.indexers || {})){
                 if(this.indexers[coin] && this.indexers[coin].url) continue;
@@ -103,6 +99,11 @@ module.exports = {
                 } catch(_){}
             }
         }
+    },
+
+    // Listen to the peer wire and to the two engines whose finalized rows fill an
+    // archive, so a full batch flushes on size rather than waiting out the interval.
+    subscribeToAnchorSources(){
         this.listenToPeers();
         if(this.hub.crossChainDex){
             this._matchHandler = () => {
@@ -122,6 +123,12 @@ module.exports = {
             this.hub.crossChainCalls.on('call:dispatch', this._callHandler);
             this.hub.crossChainCalls.on('call:result',   this._callHandler);
         }
+    },
+
+    // The four cadences a running publisher keeps: the publishing interval, the much
+    // shorter deferred-announcement drain, the failover wake and the one-shot startup
+    // catch-up. Every handle is unref'd, so none of them holds the process open.
+    startFlushTimers(){
         this._timer = setInterval(() => {
             this.flush().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: interval flush error:', err && err.message)));
         }, this.intervalMs);
@@ -154,6 +161,16 @@ module.exports = {
             }, this.startupFlushMs);
             if(this._startupTimer.unref) this._startupTimer.unref();
         }
+    },
+
+    async start(){
+        if(!this.enabled){ logger.info('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
+        // The per-window spend ceilings were memory-only, so every restart
+        // restored a full allowance. Reload the saved window before anything anchors.
+        this.spendGuard.persistTo();
+        await this.resolveMissingIndexerUrls();
+        this.subscribeToAnchorSources();
+        this.startFlushTimers();
         logger.info('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
                     (this.startupFlushMs > 0 ? 'in ' + this.startupFlushMs + 'ms' : 'off') +
                     ', batch ' + this.batchSize + ', address ' + (this.dogeAddress || '<unset>') + ')');
@@ -256,6 +273,80 @@ module.exports = {
         return summary.confirmed > 0;
     },
 
+    // Drain queued peer announcements, the first thing a flush does, so a checkpoint
+    // another hub already anchored is stamped before this flush's failover-rank check
+    // would re-anchor it (the whole point of the suppression signal). Never let a drain
+    // error abort the flush: the queue is bookkeeping, publishing is the job.
+    async drainDeferredAnnouncements(){
+        await this.drainDeferredBundleDone()
+            .catch(err => logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
+        await this.drainDeferredFinalized()
+            .catch(err => logger.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
+        await this._drainDeferredRewardAttest()
+            .catch(err => logger.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
+    },
+
+    // The reason this flush must not publish, as the summary flush returns, or null
+    // when it may. Every gate here is fail-closed and leaves the rows pending.
+    async flushRefusal(signer){
+        if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
+            if(!this._loggedNoPipeline){
+                logger.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
+                this._loggedNoPipeline = true;
+            }
+            return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
+        }
+        // Hard pre-send balance gate. The balance is enforced, not just logged: a low
+        // balance that only WARNed would let a fee-estimation bug or a stuck-tx retry
+        // loop drain the wallet with nothing but a log line. A balance below the floor,
+        // or an unreadable balance (null; fail-closed), skips this flush's publishing.
+        // The scheduler keeps running and retries on the next flush once the wallet
+        // is topped up / the balance source recovers.
+        let balance = await this.checkBalance(signer);
+        // The gate is only meaningful when a balance source is actually wired
+        // (a getBalanceFn hook, or an encoder + address to sum UTXOs). With no
+        // source, balance is always null and there is nothing to enforce, so we
+        // preserve prior behavior rather than disable publishing outright.
+        let hasBalanceSource = !!(signer.getBalanceFn || (signer.encoder && this.dogeAddress));
+        if(hasBalanceSource){
+            if(balance === null){
+                logger.warn('StateAnchorPublisher: DOGE balance unreadable; skipping this flush (fail-closed)');
+                return { anchored: [], archive: 'none', skipped: 'balance_unreadable' };
+            }
+            if(balance < this.lowBalanceThreshold){
+                logger.warn('StateAnchorPublisher: DOGE balance ' + Number(balance).toFixed(4) + ' below floor ' +
+                             this.lowBalanceThreshold + '; skipping publish this flush (fail-closed)');
+                return { anchored: [], archive: 'none', skipped: 'below_balance_floor' };
+            }
+        }
+        // Confirmed-UTXO reserve. A balance above the floor says nothing about
+        // whether it can be SPENT INTO A MINEABLE WIRE: after an anchor that never
+        // confirms, the whole balance is change sitting unconfirmed behind it.
+        // Defer the flush instead of building on it; rows stay pending, no marker
+        // is armed, no intent is recorded, and the next wake retries as a normal
+        // flush. Fail soft, see confirmedUtxoAvailable.
+        if(!(await this.confirmedUtxoAvailable(signer))){
+            this.noteNoConfirmedUtxo('this flush');
+            return { anchored: [], archive: 'none', skipped: 'no_confirmed_utxo' };
+        }
+
+        // Shared SpendGuard gate on the PRIMARY anchor path. A runtime
+        // pause (per-capability) or an exhausted per-window spend ceiling skips
+        // this flush's on-chain publishing entirely; the scheduler retries next
+        // flush. Placed after the balance gate so a paused publisher never spends
+        // on the leader path (the fe3aedbf kill-switch was inert on the primary
+        // path; this closes it).
+        if(this.spendGuard.isPaused()){
+            logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+            return { anchored: [], archive: 'none', skipped: 'paused' };
+        }
+        if(!this.spendGuard.allow()){
+            logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+            return { anchored: [], archive: 'none', skipped: 'spend_ceiling' };
+        }
+        return null;
+    },
+
     async flush(opts){
         let failoverOnly = !!(opts && opts.failoverOnly);
         if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
@@ -264,74 +355,11 @@ module.exports = {
         // only if it defers again.
         if(!failoverOnly) this._leaderRetryDue = false;
         try {
-            // Drain queued peer announcements FIRST, so a checkpoint another hub already
-            // anchored is stamped before this flush's failover-rank check would re-anchor
-            // it (the whole point of the suppression signal). Never let a drain error
-            // abort the flush: the queue is bookkeeping, publishing is the job.
-            await this.drainDeferredBundleDone()
-                .catch(err => logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
-            await this.drainDeferredFinalized()
-                .catch(err => logger.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
-            await this._drainDeferredRewardAttest()
-                .catch(err => logger.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
+            await this.drainDeferredAnnouncements();
             let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
-
-            let signer = this.resolveSigner();
-            if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
-                if(!this._loggedNoPipeline){
-                    logger.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
-                    this._loggedNoPipeline = true;
-                }
-                return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
-            }
-            // Hard pre-send balance gate. The balance is enforced, not just logged: a low
-            // balance that only WARNed would let a fee-estimation bug or a stuck-tx retry
-            // loop drain the wallet with nothing but a log line. A balance below the floor,
-            // or an unreadable balance (null; fail-closed), skips this flush's publishing.
-            // The scheduler keeps running and retries on the next flush once the wallet
-            // is topped up / the balance source recovers.
-            let balance = await this.checkBalance(signer);
-            // The gate is only meaningful when a balance source is actually wired
-            // (a getBalanceFn hook, or an encoder + address to sum UTXOs). With no
-            // source, balance is always null and there is nothing to enforce, so we
-            // preserve prior behavior rather than disable publishing outright.
-            let hasBalanceSource = !!(signer.getBalanceFn || (signer.encoder && this.dogeAddress));
-            if(hasBalanceSource){
-                if(balance === null){
-                    logger.warn('StateAnchorPublisher: DOGE balance unreadable; skipping this flush (fail-closed)');
-                    return { anchored: [], archive: 'none', skipped: 'balance_unreadable' };
-                }
-                if(balance < this.lowBalanceThreshold){
-                    logger.warn('StateAnchorPublisher: DOGE balance ' + Number(balance).toFixed(4) + ' below floor ' +
-                                 this.lowBalanceThreshold + '; skipping publish this flush (fail-closed)');
-                    return { anchored: [], archive: 'none', skipped: 'below_balance_floor' };
-                }
-            }
-            // Confirmed-UTXO reserve. A balance above the floor says nothing about
-            // whether it can be SPENT INTO A MINEABLE WIRE: after an anchor that never
-            // confirms, the whole balance is change sitting unconfirmed behind it.
-            // Defer the flush instead of building on it; rows stay pending, no marker
-            // is armed, no intent is recorded, and the next wake retries as a normal
-            // flush. Fail soft, see confirmedUtxoAvailable.
-            if(!(await this.confirmedUtxoAvailable(signer))){
-                this.noteNoConfirmedUtxo('this flush');
-                return { anchored: [], archive: 'none', skipped: 'no_confirmed_utxo' };
-            }
-
-            // Shared SpendGuard gate on the PRIMARY anchor path. A runtime
-            // pause (per-capability) or an exhausted per-window spend ceiling skips
-            // this flush's on-chain publishing entirely; the scheduler retries next
-            // flush. Placed after the balance gate so a paused publisher never spends
-            // on the leader path (the fe3aedbf kill-switch was inert on the primary
-            // path; this closes it).
-            if(this.spendGuard.isPaused()){
-                logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
-                return { anchored: [], archive: 'none', skipped: 'paused' };
-            }
-            if(!this.spendGuard.allow()){
-                logger.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
-                return { anchored: [], archive: 'none', skipped: 'spend_ceiling' };
-            }
+            let signer   = this.resolveSigner();
+            let refused  = await this.flushRefusal(signer);
+            if(refused) return refused;
 
             let anchored = await this._publishPendingCheckpoints(signer, btcBlock, failoverOnly);
             let archive  = await this._startArchiveRound(signer, btcBlock, failoverOnly);
