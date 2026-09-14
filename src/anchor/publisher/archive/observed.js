@@ -21,7 +21,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../../publisher.js');
+const canonicalForms = require('../canonical_forms.js');
 
 module.exports = {
 
@@ -80,7 +80,7 @@ module.exports = {
         for(let c of (archive.calls || []))
             if(c && c.call_id != null) entry.calls.add(String(c.call_id) + '|' + String(c.phase));
         for(let r of (archive.rewards || []))
-            if(r && r.reward_type != null) entry.rewards.add(StateAnchorPublisher.archiveRewardKey(r));
+            if(r && r.reward_type != null) entry.rewards.add(canonicalForms.archiveRewardKey(r));
         // Bounded on its own terms as well as through the leader map's lockstep evict,
         // so a body recorded for a seq whose leader entry is already gone cannot pin
         // memory.
@@ -109,7 +109,7 @@ module.exports = {
             if(c && c.call_id != null && !entry.calls.has(String(c.call_id) + '|' + String(c.phase)))
                 return 'call ' + String(c.call_id).substring(0, 16) + '... (' + c.phase + ')';
         for(let r of (rewards || []))
-            if(r && r.reward_type != null && !entry.rewards.has(StateAnchorPublisher.archiveRewardKey(r)))
+            if(r && r.reward_type != null && !entry.rewards.has(canonicalForms.archiveRewardKey(r)))
                 return 'reward ' + String(r.reward_type) + '/#' + String(r.round_number);
         return null;
     },

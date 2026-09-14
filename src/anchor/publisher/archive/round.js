@@ -21,7 +21,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../../publisher.js');
+const canonicalForms = require('../canonical_forms.js');
 const zlib = require('zlib');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
@@ -195,7 +195,7 @@ module.exports = {
             // Unconditional (all set sizes): the membership check above already
             // pins the size-1 identity, and a single-member ladder resolves to
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
-            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
+            let order = canonicalForms.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
             // Same backup-only rule as the v0 path. A leader driving its
             // own batch on the wake cadence would archive whatever few rows are

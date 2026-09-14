@@ -78,7 +78,6 @@
  ********************************************************************/
 
 const zlib              = require('zlib');
-const crypto            = require('crypto');
 const axios             = require('axios');
 const coins             = require('../coins');
 const EncoderClient     = require('../peers/encoder_client.js');
@@ -103,9 +102,37 @@ const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { installParts } = require('./install_parts.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, DEFAULT_ANCHOR_MARKER_RETENTION_MS,
-        MATCH_KEYS, CALL_KEYS, XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE,
+        MATCH_KEYS, XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE,
         XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN,
         XANCREWARD } = require('./publisher/constants.js');
+const canonicalForms = require('./publisher/canonical_forms.js');
+// One method group per behaviour, installed on the prototype below in the order the
+// PART_METHODS list spells out. Every part is required here at the top: none requires
+// this file back (the statics they call live in canonical_forms.js), so each loads
+// completely before the class exists.
+const stateMethods                 = require('./publisher/state.js');
+const lifecycleMethods             = require('./publisher/lifecycle.js');
+const bundleMethods                = require('./publisher/bundle.js');
+const publishBundleMethods         = require('./publisher/publish_bundle.js');
+const rewardMethods                = require('./publisher/reward.js');
+const rewardDeferMethods           = require('./publisher/reward_defer.js');
+const attestRoundMethods           = require('./publisher/attest_round.js');
+const archiveAttestMethods         = require('./publisher/archive/attest.js');
+const archiveRoundMethods          = require('./publisher/archive/round.js');
+const archiveBuildMethods          = require('./publisher/archive/build.js');
+const bundleDoneMethods            = require('./publisher/bundle_done.js');
+const lookupMethods                = require('./publisher/lookups.js');
+const archiveSignMethods           = require('./publisher/archive/sign.js');
+const archiveVerifyMethods         = require('./publisher/archive/verify.js');
+const archivePublishMethods        = require('./publisher/archive/publish.js');
+const archiveFinalizedMethods      = require('./publisher/archive/finalized.js');
+const archiveFinalizedApplyMethods = require('./publisher/archive/finalized_apply.js');
+const archiveObservedMethods       = require('./publisher/archive/observed.js');
+const archiveRowMethods            = require('./publisher/archive/rows.js');
+const signerMethods                = require('./publisher/signers.js');
+const broadcastMethods             = require('./publisher/broadcast.js');
+const intentMethods                = require('./publisher/intents.js');
+const optionMethods                = require('./publisher/options.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
@@ -158,84 +185,6 @@ class StateAnchorPublisher {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
         }
-    }
-
-    // Deterministic publisher ordering (AttestationRound's responsible-set
-    // idiom): sort the eligible set by SHA256(key ‖ pubkey) ascending. Every
-    // hub computes the identical order from the block-boundary snapshot.
-    static hashOrder(key, pubkeys){
-        return (pubkeys || []).map(pk => {
-            let p = String(pk).toLowerCase();
-            return { pubkey: p, hash: crypto.createHash('sha256').update(key, 'utf8').update(p, 'utf8').digest('hex') };
-        }).sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0)).map(e => e.pubkey);
-    }
-
-    // Fixed-key-order match record (shared with the follower verifier + recovery).
-    static serializeMatch(m){
-        let out = {};
-        for(let k of MATCH_KEYS){
-            let v = m[k];
-            if(k === 'id' || k === 'a_action_index' || k === 'b_action_index' || k === 'snapshot_block' || k === 'effective_time')
-                out[k] = Number(v);
-            else if(k === 'finalizing_view')
-                out[k] = Number(v) || 0;   // EQUIV VIEW; archived so recovery rebuilds the exact signed bytes
-            else if(k === 'a_ownership' || k === 'b_ownership')
-                out[k] = Number(v) ? 1 : 0;
-            else if(k === 'a_tick' || k === 'b_tick')
-                out[k] = (v == null) ? null : String(v);
-            else if(k === 'a_payout_legs' || k === 'b_payout_legs'){
-                // Omit-when-null: legs only exist at/above the CROSS_CHAIN_ROYALTY flag-day
-                // (create-side deny below it), so legs-less archives stay byte-identical to
-                // those built by pre-royalty hubs and recovery tolerates both shapes.
-                if(v != null) out[k] = String(v);
-            }
-            else
-                out[k] = String(v == null ? '' : v);
-        }
-        return out;
-    }
-
-    // Fixed-key-order XCALL relay record (shared with the follower verifier +
-    // recovery). result_status / return_payload_b64 are null on dispatch rows.
-    static serializeCall(c){
-        let out = {};
-        for(let k of CALL_KEYS){
-            let v = c[k];
-            if(k === 'id' || k === 'snapshot_block' || k === 'source_action_index' || k === 'source_contract_index' ||
-               k === 'target_contract_index' || k === 'gas_limit' || k === 'cross_hops' || k === 'effective_time')
-                out[k] = Number(v);
-            else if(k === 'finalizing_view')
-                out[k] = Number(v) || 0;   // EQUIV VIEW; archived so recovery rebuilds the exact signed bytes
-            else if(k === 'result_status' || k === 'return_payload_b64')
-                out[k] = (v == null) ? null : String(v);
-            else
-                out[k] = String(v == null ? '' : v);
-        }
-        return out;
-    }
-
-    // Fixed-key-order anchor-publish reward record (shared with the follower
-    // verifier + recovery). `source` is the earn-time staking address pinned by
-    // the archive builder. Recovery restores rewards into the BTC indexer DB
-    // BEFORE the reindex, so it cannot resolve sources itself, and a later
-    // re-stake of the pubkey from a different address must not move the credit.
-    static serializeReward(r, source){
-        return {
-            validator_pubkey: String(r.validator_pubkey).toLowerCase(),
-            source:           String(source),
-            round_number:     Number(r.round_number),
-            reward_type:      String(r.reward_type),
-            amount:           String(r.amount),
-            block_index:      Number(r.block_index)
-        };
-    }
-
-    // Reward identity shared by the archive body and the FINALIZED reward list. The
-    // archived record carries no round_qualifier, so the key stops at the three fields
-    // both shapes hold.
-    static archiveRewardKey(r){
-        return String(r.reward_type) + '|' + String(Number(r.round_number)) + '|' +
-               String(r.validator_pubkey).toLowerCase();
     }
 
     // Per-broadcast confirmed-input check, BEFORE anything is built or signed, and
@@ -307,6 +256,37 @@ class StateAnchorPublisher {
     }
 }
 
+// The statics keep the descriptors `static` would give them (installParts: non-enumerable,
+// writable, configurable), and the method groups go onto the prototype in list order.
+installParts(StateAnchorPublisher, [canonicalForms]);
+
+const PART_METHODS = [
+    stateMethods,
+    lifecycleMethods,
+    bundleMethods,
+    publishBundleMethods,
+    rewardMethods,
+    rewardDeferMethods,
+    attestRoundMethods,
+    archiveAttestMethods,
+    archiveRoundMethods,
+    archiveBuildMethods,
+    bundleDoneMethods,
+    lookupMethods,
+    archiveSignMethods,
+    archiveVerifyMethods,
+    archivePublishMethods,
+    archiveFinalizedMethods,
+    archiveFinalizedApplyMethods,
+    archiveObservedMethods,
+    archiveRowMethods,
+    signerMethods,
+    broadcastMethods,
+    intentMethods,
+    optionMethods
+];
+installParts(StateAnchorPublisher.prototype, PART_METHODS);
+
 module.exports = Object.assign(StateAnchorPublisher, {
     XANC_SIGN_REQ,
     XANC_SIGN,
@@ -319,33 +299,3 @@ module.exports = Object.assign(StateAnchorPublisher, {
     XANCREWARD,
     MATCH_KEYS
 });
-
-// The method groups live in publisher/ by behaviour, and this installs them on the
-// prototype. It runs AFTER module.exports is assigned because a part that calls one of
-// the statics above requires this file back, and a circular require sees only what
-// module.exports already holds.
-installParts(StateAnchorPublisher.prototype, [
-    require('./publisher/state.js'),
-    require('./publisher/lifecycle.js'),
-    require('./publisher/bundle.js'),
-    require('./publisher/publish_bundle.js'),
-    require('./publisher/reward.js'),
-    require('./publisher/reward_defer.js'),
-    require('./publisher/attest_round.js'),
-    require('./publisher/archive/attest.js'),
-    require('./publisher/archive/round.js'),
-    require('./publisher/archive/build.js'),
-    require('./publisher/bundle_done.js'),
-    require('./publisher/lookups.js'),
-    require('./publisher/archive/sign.js'),
-    require('./publisher/archive/verify.js'),
-    require('./publisher/archive/publish.js'),
-    require('./publisher/archive/finalized.js'),
-    require('./publisher/archive/finalized_apply.js'),
-    require('./publisher/archive/observed.js'),
-    require('./publisher/archive/rows.js'),
-    require('./publisher/signers.js'),
-    require('./publisher/broadcast.js'),
-    require('./publisher/intents.js'),
-    require('./publisher/options.js'),
-]);

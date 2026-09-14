@@ -21,7 +21,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../../publisher.js');
+const canonicalForms = require('../canonical_forms.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../stake_weighted_quorum.js');
 const eq = require('../../../equivocation_header.js');
@@ -201,9 +201,9 @@ module.exports = {
             v: 1,
             network: network,
             batch_seq: batchSeq,
-            matches: matches.map(m => StateAnchorPublisher.serializeMatch(m)),
-            calls: calls.map(c => StateAnchorPublisher.serializeCall(c)),
-            rewards: rewards.map(({row, source}) => StateAnchorPublisher.serializeReward(row, source)),
+            matches: matches.map(m => canonicalForms.serializeMatch(m)),
+            calls: calls.map(c => canonicalForms.serializeCall(c)),
+            rewards: rewards.map(({row, source}) => canonicalForms.serializeReward(row, source)),
             capability_snapshots: snaps
         };
         return { json: JSON.stringify(obj), count: matches.length };

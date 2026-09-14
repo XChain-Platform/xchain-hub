@@ -22,7 +22,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../../publisher.js');
+const canonicalForms = require('../canonical_forms.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../stake_weighted_quorum.js');
 const ar = require('../../../anchor_reward_activation.js');
@@ -50,7 +50,7 @@ module.exports = {
         for(let am of archive.matches){
             let rows = await this.db.getCrossChainMatchByMatchId(am.match_id);
             if(rows && rows.length > 0){
-                let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
+                let localTerms    = canonicalForms.serializeMatch(rows[0]);
                 let archivedTerms = Object.assign({}, am);
                 // id is per-hub bookkeeping (each hub assigns its own AUTO_INCREMENT
                 // cursor); the leader archives ITS id as provenance only (ordering
@@ -88,7 +88,7 @@ module.exports = {
         for(let ac of (archive.calls || [])){
             let rows = await this.db.getCrossChainCallByCallIdAndPhase(ac.call_id, ac.phase);
             if(rows && rows.length > 0){
-                let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
+                let localTerms    = canonicalForms.serializeCall(rows[0]);
                 let archivedTerms = Object.assign({}, ac);
                 delete localTerms.id;                       // per-hub cursor; see the match loop
                 delete archivedTerms.id;

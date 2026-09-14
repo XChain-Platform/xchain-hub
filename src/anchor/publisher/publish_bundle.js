@@ -22,7 +22,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../publisher.js');
+const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../anchor_reward_activation.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
 const { getLogger } = require('../../observability');
@@ -54,7 +54,7 @@ module.exports = {
                          ' deferred: empty oracle_publish set at the bundle\'s own snapshot block (fail closed)');
             return null;
         }
-        let order = StateAnchorPublisher.hashOrder(
+        let order = canonicalForms.hashOrder(
             this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
         return order;
     },

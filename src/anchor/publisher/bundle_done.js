@@ -22,7 +22,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../publisher.js');
+const canonicalForms = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const ar = require('../../anchor_reward_activation.js');
 const { XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE, XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN, XANCREWARD } = require('./constants.js');
@@ -91,7 +91,7 @@ module.exports = {
         let electionSet = await this._getActiveOraclePublishPubkeys(snapshotBlock);
         if(electionSet.length === 0) return;             // fail closed: unresolved election set
         {
-            let order = StateAnchorPublisher.hashOrder(
+            let order = canonicalForms.hashOrder(
                 this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;

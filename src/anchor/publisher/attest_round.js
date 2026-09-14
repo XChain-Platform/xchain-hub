@@ -21,7 +21,7 @@
 
 'use strict';
 
-const StateAnchorPublisher = require('../publisher.js');
+const canonicalForms = require('./canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
@@ -230,7 +230,7 @@ module.exports = {
             // Run the ladder check for EVERY set size: a single-member set must
             // still bind sender === eligible[0] (rank 0), or any current member
             // could impersonate the sole elected publisher.
-            let order = StateAnchorPublisher.hashOrder(
+            let order = canonicalForms.hashOrder(
                 this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
