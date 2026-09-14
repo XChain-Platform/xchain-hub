@@ -304,7 +304,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[0]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 0, 'a restart must re-emit, not re-sign');
             const reEmitted = second.hub._pm.broadcast.getCalls()
@@ -322,7 +322,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[0]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
@@ -341,7 +341,7 @@ describe('RollcallRound', function () {
             const id2 = new ValidatorIdentity(SEEDS[1]);
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
-            second._loadSignLog();
+            second.loadSignLog();
             await second._tick();
             assert.strictEqual(signSpy.callCount, 1, 'a foreign line must not stand in for this hub\'s own signature');
             const own = second.hub._pm.broadcast.getCalls()
@@ -355,7 +355,7 @@ describe('RollcallRound', function () {
 
         it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
             const eng   = makeEngine({});
-            const mine  = eng._ownPubkey();
+            const mine  = eng.ownPubkey();
             const other = new ValidatorIdentity(SEEDS[1]).getPubkeyHex().toLowerCase();
             assert.ok(mine && mine !== other);
             fs.writeFileSync(process.env.ROLLCALL_SPEND_LOG_PATH,
@@ -1324,7 +1324,7 @@ describe('RollcallRound', function () {
             wireRpc({ tip: 42 });
             const eng2 = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                     { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            eng2._gatesFor = () => 'a.B,'.repeat(3000);
+            eng2.gatesFor = () => 'a.B,'.repeat(3000);
             await eng2._tick();
             assert.strictEqual(eng2.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'an oversize GATES list must stop the publish, not ride out un-decodable');

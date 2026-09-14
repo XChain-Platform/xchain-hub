@@ -170,9 +170,9 @@ class RollcallRound {
         this.enabled = String(process.env.ROLLCALL_ENABLED || cfg.ROLLCALL_ENABLED || 'true') !== 'false';
         this.pollMs  = parseInt(process.env.ROLLCALL_POLL_MS || cfg.ROLLCALL_POLL_MS || '30000');
 
-        this.publishDelayBlocks      = this._resolveTunable('ROLLCALL_PUBLISH_DELAY_BLOCKS',      PUBLISH_DELAY_DEFAULTS);
-        this.electionToleranceBlocks = this._resolveTunable('ROLLCALL_ELECTION_TOLERANCE_BLOCKS', ELECTION_TOLERANCE_DEFAULTS);
-        this.selfPublishBlocks       = this._resolveTunable('ROLLCALL_SELF_PUBLISH_BLOCKS',       SELF_PUBLISH_DEFAULTS);
+        this.publishDelayBlocks      = this.resolveTunable('ROLLCALL_PUBLISH_DELAY_BLOCKS',      PUBLISH_DELAY_DEFAULTS);
+        this.electionToleranceBlocks = this.resolveTunable('ROLLCALL_ELECTION_TOLERANCE_BLOCKS', ELECTION_TOLERANCE_DEFAULTS);
+        this.selfPublishBlocks       = this.resolveTunable('ROLLCALL_SELF_PUBLISH_BLOCKS',       SELF_PUBLISH_DEFAULTS);
 
         // BTC indexer (ledger_hash + tip) and DOGE indexer (what is already on
         // chain for the epoch). Same env surface the rest of the hub uses.
@@ -232,7 +232,7 @@ class RollcallRound {
     // value falls back to the default rather than disabling the gate it feeds:
     // a NaN publish delay would compare false forever and publish nothing, which
     // is exactly the silent inertness this engine must not have.
-    _resolveTunable(name, defaults){
+    resolveTunable(name, defaults){
         let fallback = defaults[this.network];
         if(!Number.isFinite(fallback)) fallback = defaults.mainnet;
         let raw = process.env[name] !== undefined ? process.env[name] : this.cfg[name];
@@ -279,7 +279,7 @@ class RollcallRound {
         if(this.peerManager) this.peerManager.on('message', this._handler);
         // Both logs must be consumed BEFORE the first tick: the recovered epochs
         // gate the very round that tick reconstructs.
-        this._loadSignLog();
+        this.loadSignLog();
         this._loadSpendLog();
         this.spendGuard.persistTo();
         let tick = async () => {
@@ -308,7 +308,7 @@ class RollcallRound {
     // active or not, so a signer's list stays a true superset comparand at any
     // later request block; the sorted comma-joined form is the wire field and the
     // canonical hashes it.
-    _gatesFor(epochHeight){
+    gatesFor(epochHeight){
         if(!rga.isRollcallGatesActive(epochHeight, this.network)) return null;
         return knownGateKeys().join(',');
     }
@@ -336,7 +336,7 @@ class RollcallRound {
     // PUBLISHER carries no signature of its own; it is the key the publish reward
     // attaches to, and the chain pays only the ELECTED leader, so naming a key
     // here is a claim the close checks rather than a race anyone can win.
-    _buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
+    buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
         let v1    = (gates !== undefined && gates !== null);
         let parts = ['ROLLCALL', v1 ? '1' : '0', String(Number(epochHeight)),
                      String(ledgerHash).toLowerCase(), String(publisher).toLowerCase()];
@@ -409,7 +409,7 @@ class RollcallRound {
         return result;
     }
 
-    async _dogeIndexerCall(method, params){
+    async dogeIndexerCall(method, params){
         if(!this.dogeIndexerUrl) throw new Error('no DOGE indexer URL (set DOGE_INDEXER_API_URL / DOGE_INDEXER_URL)');
         let headers = { 'Content-Type': 'application/json' };
         if(this.dogeIndexerKey) headers['x-api-key'] = this.dogeIndexerKey;
@@ -445,7 +445,7 @@ class RollcallRound {
             // tip moving away from an epoch that was created blocks ago.
             for(let [e, state] of this.rounds){
                 if(tipBlock - e > this.acceptWindow + ROUND_RETENTION_BLOCKS){ this.rounds.delete(e); continue; }
-                try { await this._advance(state, tipBlock); }
+                try { await this.advance(state, tipBlock); }
                 catch(err){ console.warn('RollcallRound: epoch ' + e + ' advance failed:', err && err.message ? err.message : err); }
             }
         } finally {
@@ -511,7 +511,7 @@ class RollcallRound {
         // (_onSign reads state.canonical) and the wire it publishes must all be the
         // same form, and re-deriving the form at each of those sites is how they
         // would come to disagree mid-epoch.
-        let gates     = this._gatesFor(epoch);
+        let gates     = this.gatesFor(epoch);
         let canonical = this._canonical(epoch, ledgerHash, gates);
         let myPubkey  = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
 
@@ -547,7 +547,7 @@ class RollcallRound {
                 sig = stored.sig;
             } else {
                 sig = this.identity.sign(canonical);
-                this._recordSignature({ epoch, pubkey: myPubkey, ledger_hash: ledgerHash, sig });
+                this.recordSignature({ epoch, pubkey: myPubkey, ledger_hash: ledgerHash, sig });
                 this._signatures.set(epoch, { ledgerHash, sig });
             }
             state.signed = true;
@@ -681,7 +681,7 @@ class RollcallRound {
 
     // ── publish ──────────────────────────────────────────────────────────────
 
-    async _advance(state, tipBlock){
+    async advance(state, tipBlock){
         let since = tipBlock - state.epoch;
         if(since > this.acceptWindow) return;       // nothing can land any more
         let myPubkey = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
@@ -695,18 +695,18 @@ class RollcallRound {
             state.myRank = order.indexOf(myPubkey);
         }
 
-        await this._maybePublish(state, myPubkey, since);
-        await this._maybeSelfPublish(state, myPubkey, since);
+        await this.maybePublish(state, myPubkey, since);
+        await this.maybeSelfPublish(state, myPubkey, since);
     }
 
-    async _maybePublish(state, myPubkey, since){
+    async maybePublish(state, myPubkey, since){
         if(state.published) return;
         if(since < this.publishDelayBlocks) return;
         if(!this._rankUnlocked(state.order, myPubkey, since)) return;
         if(state.sigs.size === 0) return;
-        if(!this._requireBroadcast()) return;
+        if(!this.requireBroadcast()) return;
 
-        let onChain = await this._onChainSigners(state);
+        let onChain = await this.onChainSigners(state);
         // Both branches below also exclude state.sent. Already on the wire from this
         // hub's own earlier chunks is the same answer as already on chain: the DOGE
         // read lags indexing by longer than a tick, so without it the retry after a
@@ -728,7 +728,7 @@ class RollcallRound {
         if(pairs.length === 0) return;
 
         state.published = true;   // one sweep publish per epoch per hub; see below
-        let ok = await this._publishPairs(state, myPubkey, pairs, 'sweep');
+        let ok = await this.publishPairs(state, myPubkey, pairs, 'sweep');
         // A definitive failure releases the slot so a later tick can retry inside
         // the window, and the retry now rebuilds only the pairs that were never
         // broadcast. An ambiguous send does NOT release: the DOGE node may have
@@ -737,22 +737,22 @@ class RollcallRound {
         if(ok === 'retry') state.published = false;
     }
 
-    async _maybeSelfPublish(state, myPubkey, since){
+    async maybeSelfPublish(state, myPubkey, since){
         if(state.selfPublished) return;
         if(since < this.selfPublishBlocks) return;
         let mySig = state.sigs.get(myPubkey);
         if(!mySig) return;                       // nothing of ours to rescue
         if(state.ownSigOnWire) return;           // our own publish already carried it
-        if(!this._requireBroadcast()) return;
+        if(!this.requireBroadcast()) return;
 
-        let onChain = await this._onChainSigners(state);
+        let onChain = await this.onChainSigners(state);
         // Unresolved read: publish. This is the censorship escape hatch, and the
         // thing it escapes is precisely a federation whose answers cannot be
         // trusted; one extra transaction is cheaper than an eviction.
         if(onChain && onChain.has(myPubkey)) return;
 
         state.selfPublished = true;
-        let ok = await this._publishPairs(state, myPubkey, [{ pubkey: myPubkey, sig: mySig }], 'self');
+        let ok = await this.publishPairs(state, myPubkey, [{ pubkey: myPubkey, sig: mySig }], 'self');
         if(ok === 'retry') state.selfPublished = false;
         if(ok === 'sent') state.ownSigOnWire = true;
     }
@@ -761,7 +761,7 @@ class RollcallRound {
     // 'retry' (a definitive failure; the caller may release its slot, and every
     // chunk that DID go out is recorded in state.sent so the retry rebuilds only
     // the undelivered tail) or 'held' (ambiguous; the slot stays claimed).
-    async _publishPairs(state, myPubkey, pairs, kind){
+    async publishPairs(state, myPubkey, pairs, kind){
         let key = kind === 'self' ? (state.epoch + ':self') : String(state.epoch);
         if(this._committed.has(key)){
             console.warn('RollcallRound: epoch ' + state.epoch + ' (' + kind + ') already carries a committed ' +
@@ -867,7 +867,7 @@ class RollcallRound {
                 return 'retry';
             }
             let chunk = chunks[i];
-            let wire = this._buildWire(state.epoch, state.ledgerHash, myPubkey, chunk, state.gates);
+            let wire = this.buildWire(state.epoch, state.ledgerHash, myPubkey, chunk, state.gates);
             try {
                 let res = await this._broadcast(wire);
                 // The reservation IS the spend; record() here would count it twice.
@@ -925,12 +925,12 @@ class RollcallRound {
     // the real cut, because we only publish while the tip is inside the window.
     // The answer is therefore a subset of what will count, never a superset, so it
     // can cost a duplicate fee and can never cost a missing signature.
-    async _onChainSigners(state){
+    async onChainSigners(state){
         let keys = Array.from(state.sigs.keys());
         if(keys.length === 0) return new Set();
         let res;
         try {
-            res = await this._dogeIndexerCall('getrollcallsigners', {
+            res = await this.dogeIndexerCall('getrollcallsigners', {
                 network:        this.network,
                 epoch_height:   state.epoch,
                 // Two hours of slack over wall clock: a DOGE miner may stamp a
@@ -987,7 +987,7 @@ class RollcallRound {
 
     // Gate every publish path on it, and say so exactly once: this is a standing
     // deployment condition, not an event, and it is re-evaluated every tick.
-    _requireBroadcast(){
+    requireBroadcast(){
         if(this.broadcastCapable()) return true;
         if(!this._loggedNoBroadcast){
             this._loggedNoBroadcast = true;
@@ -1044,18 +1044,18 @@ class RollcallRound {
     // Every durable record names the identity that wrote it, so a log that
     // holds another hub's lines (a copied config dir, a shared audit path) can
     // be told apart from this hub's own on the next boot.
-    _ownPubkey(){
+    ownPubkey(){
         return this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
     }
 
     _recordSpend(entry){
         return this._appendLine(this.spendLogPath,
-            Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this._ownPubkey() || undefined }, entry));
+            Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this.ownPubkey() || undefined }, entry));
     }
 
     // A signature costs nothing on chain, so an unwritable path must not stop the
     // hub answering an epoch; it only costs the restart re-emit.
-    _recordSignature(entry){
+    recordSignature(entry){
         return this._appendLine(this.signLogPath, Object.assign({ ts: Date.now() }, entry));
     }
 
@@ -1072,7 +1072,7 @@ class RollcallRound {
         let text;
         try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
         catch(e){ return; }
-        let mine = this._ownPubkey();
+        let mine = this.ownPubkey();
         let outcome = new Map();
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
@@ -1103,11 +1103,11 @@ class RollcallRound {
     // it signed. Measured on the regtest acceptance venue on 2026-09-04, where
     // three in-process hubs shared one log and the restarted hub carried a
     // peer's signature on its own self-publish.
-    _loadSignLog(){
+    loadSignLog(){
         let text;
         try { text = fs.readFileSync(this.signLogPath, 'utf8'); }
         catch(e){ return; }
-        let mine = this._ownPubkey();
+        let mine = this.ownPubkey();
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
             let rec;

@@ -150,11 +150,11 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
         const src  = fs.readFileSync(path.join(__dirname, '../../src/rollcall/round.js'), 'utf8');
         const used = new Set();
         // Two read forms: the literal process.env.NAME, and the three publish
-        // tunables, which go through _resolveTunable('NAME', ...) and are therefore
+        // tunables, which go through resolveTunable('NAME', ...) and are therefore
         // invisible to a literal scan. Missing the second form is exactly how an
         // undocumented knob would ship.
         for (const re of [/process\.env\.(ROLLCALL_[A-Z_0-9]+)/g,
-                          /_resolveTunable\(\s*'(ROLLCALL_[A-Z_0-9]+)'/g]) {
+                          /resolveTunable\(\s*'(ROLLCALL_[A-Z_0-9]+)'/g]) {
             let m;
             while ((m = re.exec(src)) !== null) used.add(m[1]);
         }
@@ -186,7 +186,7 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         eng.pollMs = 30000;
         eng.peerManager = null;
         eng._started = false;
-        eng._loadSignLog = () => { eng._started = true; };
+        eng.loadSignLog = () => { eng._started = true; };
         eng._loadSpendLog = () => { eng._started = true; };
         eng.spendGuard = { persistTo: () => { eng._started = true; } };
         eng._tick = async () => { eng._started = true; };
