@@ -47,6 +47,9 @@
 
 const config = {
     // codemod:env-entries
+    get DB_ACQUIRE_TIMEOUT() { return process.env.DB_ACQUIRE_TIMEOUT; },
+    get DB_CONNECT_TIMEOUT() { return process.env.DB_CONNECT_TIMEOUT; },
+    get DB_QUERY_TIMEOUT() { return process.env.DB_QUERY_TIMEOUT; },
     get ADMISSION_ORACLE_INGEST_WINDOW_MS() { return process.env.ADMISSION_ORACLE_INGEST_WINDOW_MS; },
     get ADMISSION_TIP_MAX_AGE_S() { return process.env.ADMISSION_TIP_MAX_AGE_S; },
     get ADMISSION_WATERMARK_SAMPLE_MS() { return process.env.ADMISSION_WATERMARK_SAMPLE_MS; },

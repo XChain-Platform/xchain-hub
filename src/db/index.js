@@ -76,6 +76,7 @@ const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
+const hubConfig = require('../config');
 const logger = getLogger();
 
 const MIXINS = [
@@ -161,8 +162,8 @@ class Database {
             database:           this.dbName,
             port:               this.port,
             connectionLimit:    10,
-            connectTimeout:     parseInt(process.env.DB_CONNECT_TIMEOUT) || 10000,
-            acquireTimeout:     parseInt(process.env.DB_ACQUIRE_TIMEOUT) || 10000,
+            connectTimeout:     parseInt(hubConfig.DB_CONNECT_TIMEOUT) || 10000,
+            acquireTimeout:     parseInt(hubConfig.DB_ACQUIRE_TIMEOUT) || 10000,
             idleTimeout:        60000,
             insertIdAsNumber:   true,
             bigIntAsNumber:     true,
@@ -182,7 +183,7 @@ class Database {
             // which MariaDB already stores as UTC internally.
             timezone:           'Z',
             minDelayValidation: 3000,
-            queryTimeout:       parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
+            queryTimeout:       parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000
         };
 
         this.pool = mariadb.createPool(this.connectionPoolParams);
