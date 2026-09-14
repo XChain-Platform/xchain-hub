@@ -158,8 +158,8 @@ describe('oracle round-interval shared constants (#2653)', () => {
     });
 
     it('no consumer re-declares the interval/window defaults as bare fallback literals', () => {
-        for (const file of ['api.js', 'OracleRound.js', 'XChainHub.js']) {
-            const src = fs.readFileSync(path.join(__dirname, '../../src', file), 'utf8');
+        for (const file of ['../../src/api.js', '../../src/OracleRound.js', '../../src/XChainHub.js']) {
+            const src = fs.readFileSync(path.join(__dirname, file), 'utf8');
             // The drift vector is a fallback expression like
             // `ORACLE_ROUND_INTERVAL || 600000` on an oracle-cadence line; the
             // constant name is the only allowed way to spell the default. Scoped
