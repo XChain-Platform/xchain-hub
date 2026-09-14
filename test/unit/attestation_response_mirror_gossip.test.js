@@ -576,7 +576,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
 
             // The indexer catches up between cycles.
             post.resolves({ data: { result: { latest_block_index: LATEST_BLOCK, count: 1, requests: [localRequest()] } } });
-            await mirror._drainParked();
+            await mirror.drainParked();
 
             expect(hub.db.table).to.have.length(1);
             expect(mirror._parked.size).to.equal(0);
@@ -589,14 +589,14 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
             await mirror.start();
 
             await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
-            await mirror._drainParked();
+            await mirror.drainParked();
 
             expect(hub.db.table).to.have.length(0);
             expect(mirror._parked.size).to.equal(0);
             expect(mirror.stats.dropped).to.equal(1);
 
             // A second cycle has nothing left to do: the row is gone, not re-parked.
-            await mirror._drainParked();
+            await mirror.drainParked();
             expect(mirror.stats.dropped).to.equal(1);
         });
 

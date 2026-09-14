@@ -279,7 +279,7 @@ describe('AttestationRelay', function () {
                         for (const meta of ['', '200', 'model=ünï', null]) {
                             for (const status of ['ok', 'expired']) {
                                 for (const originChain of ['LTC', 'DOGE']) {
-                                    const fields = relay._responseFieldsFromHome(homeRelayedRow({
+                                    const fields = relay.responseFieldsFromHome(homeRelayedRow({
                                         response_payload: payload,
                                         response_hash:    crypto.createHash('sha256').update(Buffer.from(payload, 'utf8')).digest('hex'),
                                         response_status:  status,
@@ -1041,7 +1041,7 @@ describe('AttestationRelay', function () {
             if (lines) fs.writeFileSync(wal, lines.map(JSON.stringify).join('\n') + '\n');
             process.env.ATTEST_RELAY_QUEUE_PATH = wal;
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             return relay;
         }
 
@@ -1072,14 +1072,14 @@ describe('AttestationRelay', function () {
             fs.writeFileSync(wal, '{"rid":"' + REQ_ID + '","phase":"sent"}\n{not json\n');
             process.env.ATTEST_RELAY_QUEUE_PATH = wal;
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             expect(relay._published.has(REQ_ID)).to.equal(true);
         });
 
         it('starts clean when no WAL exists yet', function () {
             process.env.ATTEST_RELAY_QUEUE_PATH = path.join(dir, 'absent.jsonl');
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             expect(relay._published.size).to.equal(0);
         });
 
@@ -1143,7 +1143,7 @@ describe('AttestationRelay', function () {
             const sent = [];
             relay.setBroadcastHook(async (payload) => { sent.push(payload); return { txid: 'deadbeef' }; });
             // Sole signer, so this node is unambiguously rank 0.
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(sent).to.have.length(1);
             expect(sent[0].split('|')[1]).to.equal('3');
             expect(relay._published.has(REQ_ID)).to.equal(true);
@@ -1154,8 +1154,8 @@ describe('AttestationRelay', function () {
             const relay = new AttestationRelay(makeHub());
             const sent = [];
             relay.setBroadcastHook(async (payload) => { sent.push(payload); return { txid: 'deadbeef' }; });
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(sent).to.have.length(1);
         });
 
@@ -1172,17 +1172,17 @@ describe('AttestationRelay', function () {
             const sent = [];
             relay.setBroadcastHook(async (payload) => { sent.push(payload); return { txid: 'x' }; });
 
-            await relay._onRoundFinalized(finalizedEvent([
+            await relay.onRoundFinalized(finalizedEvent([
                 { pubkey: PUBKEY_A, sig: SIG_A }, { pubkey: PUBKEY_B, sig: SIG_A },
             ]));
             expect(sent).to.have.length(0);
             expect(relay._finalizedWire.get(REQ_ID).rank).to.equal(1);
 
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(sent).to.have.length(0);   // window has not elapsed
 
             relay._finalizedWire.get(REQ_ID).finalizedAt = Date.now() - (relay.failoverWindowMs + 1000);
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(sent).to.have.length(1);
         });
 
@@ -1191,11 +1191,11 @@ describe('AttestationRelay', function () {
                 getIdentity: () => ({ getPubkeyHex: () => PUBKEY_B, sign: () => SIG_A }),
             }));
             relay.setBroadcastHook(async () => ({ txid: 'x' }));
-            await relay._onRoundFinalized(finalizedEvent([
+            await relay.onRoundFinalized(finalizedEvent([
                 { pubkey: PUBKEY_A, sig: SIG_A }, { pubkey: PUBKEY_B, sig: SIG_A },
             ]));
             relay._homePending = new Set([REQ_ID]);
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(relay._finalizedWire.has(REQ_ID)).to.equal(false);
         });
 
@@ -1203,13 +1203,13 @@ describe('AttestationRelay', function () {
             const relay = new AttestationRelay(makeHub());
             const sent = [];
             relay.setBroadcastHook(async (p) => { sent.push(p); return { txid: 'x' }; });
-            await relay._onRoundFinalized(finalizedEvent([]));
+            await relay.onRoundFinalized(finalizedEvent([]));
             expect(sent).to.have.length(0);
         });
 
         it('retains the round when no broadcast rail is configured', async function () {
             const relay = new AttestationRelay(makeHub());
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._finalizedWire.has(REQ_ID)).to.equal(true);
             expect(relay._published.has(REQ_ID)).to.equal(false);
         });
@@ -1221,7 +1221,7 @@ describe('AttestationRelay', function () {
                 e.code = 'ECONNRESET';
                 throw e;
             });
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._published.has(REQ_ID)).to.equal(true);
             expect(relay._broadcastFailed).to.equal(1);
         });
@@ -1233,7 +1233,7 @@ describe('AttestationRelay', function () {
                 e.code = 'ECONNREFUSED';
                 throw e;
             });
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._published.has(REQ_ID)).to.equal(false);
             expect(relay._finalizedWire.has(REQ_ID)).to.equal(true);
         });
@@ -1249,7 +1249,7 @@ describe('AttestationRelay', function () {
             relay.btcAddress   = 'mtest';
             relay.btcPubkeyHex = 'ab'.repeat(33);
 
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._published.has(REQ_ID)).to.equal(false);
             expect(relay._finalizedWire.has(REQ_ID)).to.equal(true);
             expect(relay._broadcastFailed).to.equal(1);
@@ -1278,7 +1278,7 @@ describe('AttestationRelay', function () {
             relay.setBroadcastHook(async (p) => { home.push(p); return { txid: 'btc' }; });
             relay.setChainBroadcastHook('LTC', async (p) => { origin.push(p); return { txid: 'ltc' }; });
 
-            await relay._onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(origin).to.have.length(1);
             expect(origin[0].split('|')[1]).to.equal('4');
             // Handing a v4 to the home hook would put it on BTC, where it is rejected
@@ -1297,7 +1297,7 @@ describe('AttestationRelay', function () {
             relay.btcAddress   = 'mtest';
             relay.btcPubkeyHex = 'ab'.repeat(33);
 
-            await relay._onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(home).to.have.length(0);
             expect(relay._finalizedResponse.has(REQ_ID)).to.equal(true);   // retained, not dropped
             expect(relay._publishedResponses.has(REQ_ID)).to.equal(false);
@@ -1316,7 +1316,7 @@ describe('AttestationRelay', function () {
             // chain it is signing for so a multi-key module can pick the right one.
             relay.setWalletSignHook(async (psbt, coin) => { seen.coin = coin; return 'deadbeef'; });
 
-            await relay._onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedResponseEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(seen.address).to.equal('ltc1qtest');
             expect(seen.coin).to.equal('LTC');
             expect(seen.data.split('|')[1]).to.equal('4');
@@ -1328,18 +1328,18 @@ describe('AttestationRelay', function () {
                 getIdentity: () => ({ getPubkeyHex: () => PUBKEY_B, sign: () => SIG_A }),
             }));
             relay.setChainBroadcastHook('LTC', async () => ({ txid: 'ltc' }));
-            await relay._onRoundFinalized(finalizedResponseEvent([
+            await relay.onRoundFinalized(finalizedResponseEvent([
                 { pubkey: PUBKEY_A, sig: SIG_A }, { pubkey: PUBKEY_B, sig: SIG_A },
             ]));
             expect(relay._finalizedResponse.has(REQ_ID)).to.equal(true);
 
             // A null view is "unknown" and must NOT retire the round.
             relay._originPending.LTC = null;
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(relay._finalizedResponse.has(REQ_ID)).to.equal(true);
 
             relay._originPending.LTC = new Set();   // the origin closed it: a v4 landed
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(relay._finalizedResponse.has(REQ_ID)).to.equal(false);
         });
 
@@ -1355,15 +1355,15 @@ describe('AttestationRelay', function () {
             relay.setChainBroadcastHook('LTC', async (p) => { sent.push(p); return { txid: 'ltc' }; });
             relay._originPending.LTC = new Set([REQ_ID]);   // still owed
 
-            await relay._onRoundFinalized(finalizedResponseEvent([
+            await relay.onRoundFinalized(finalizedResponseEvent([
                 { pubkey: PUBKEY_A, sig: SIG_A }, { pubkey: PUBKEY_B, sig: SIG_A },
             ]));
             expect(sent).to.have.length(0);
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(sent).to.have.length(0);
 
             relay._finalizedResponse.get(REQ_ID).finalizedAt = Date.now() - (relay.failoverWindowMs + 1000);
-            await relay._sweepFinalized();
+            await relay.sweepFinalized();
             expect(sent).to.have.length(1);
         });
 
@@ -1371,9 +1371,9 @@ describe('AttestationRelay', function () {
             // a record with no deadline is one no later process can ever retire,
             // so the stamp is applied centrally in _appendWal rather than per call site.
             const relay = new AttestationRelay(makeHub());
-            relay._noteDeadline('LTC', REQ_ID, 3160010);
+            relay.noteDeadline('LTC', REQ_ID, 3160010);
             relay.setBroadcastHook(async () => ({ txid: 'deadbeef' }));
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
 
             const recs = fs.readFileSync(process.env.ATTEST_RELAY_QUEUE_PATH, 'utf8')
                 .split('\n').filter(Boolean).map(JSON.parse);
@@ -1395,7 +1395,7 @@ describe('AttestationRelay', function () {
             relay.btcAddress   = 'mtest';
             relay.btcPubkeyHex = 'ab'.repeat(33);
 
-            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            await relay.onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._published.has(REQ_ID)).to.equal(true);
         });
     });
@@ -1516,12 +1516,12 @@ describe('AttestationRelay', function () {
 
         it('refuses a deadline it cannot use, rather than indexing a guess', function () {
             const relay = new AttestationRelay(makeHub());
-            expect(relay._noteDeadline('LTC', REQ_ID, 0)).to.equal(false);
-            expect(relay._noteDeadline('LTC', REQ_ID, 'later')).to.equal(false);
-            expect(relay._noteDeadline('BTC', REQ_ID, 100)).to.equal(false);   // home chain issues none
-            expect(relay._noteDeadline('LTC', 'not-a-request-id', 100)).to.equal(false);
+            expect(relay.noteDeadline('LTC', REQ_ID, 0)).to.equal(false);
+            expect(relay.noteDeadline('LTC', REQ_ID, 'later')).to.equal(false);
+            expect(relay.noteDeadline('BTC', REQ_ID, 100)).to.equal(false);   // home chain issues none
+            expect(relay.noteDeadline('LTC', 'not-a-request-id', 100)).to.equal(false);
             expect(relay._deadlines.size).to.equal(0);
-            expect(relay._noteDeadline('LTC', REQ_ID, DEADLINE)).to.equal(true);
+            expect(relay.noteDeadline('LTC', REQ_ID, DEADLINE)).to.equal(true);
         });
 
         // ── the eviction itself ──────────────────────────────────────────────
@@ -1548,22 +1548,22 @@ describe('AttestationRelay', function () {
         it('holds the record until the grace window past the deadline has also elapsed', async function () {
             const relay = relayAtTip(DEADLINE + 5000);
             relay._published.mark(REQ_ID);
-            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
+            relay.noteDeadline('LTC', REQ_ID, DEADLINE);
 
             relay._originLatest.LTC = horizon(relay);        // exactly at it, not past it
-            expect(relay._evictExpired()).to.equal(0);
+            expect(relay.evictExpired()).to.equal(0);
             expect(relay._published.has(REQ_ID)).to.equal(true);
 
             relay._originLatest.LTC = horizon(relay) + 1;
-            expect(relay._evictExpired()).to.equal(1);
+            expect(relay.evictExpired()).to.equal(1);
             expect(relay._published.has(REQ_ID)).to.equal(false);
         });
 
         it('evicts nothing on a chain whose tip it has not read', function () {
             const relay = new AttestationRelay(makeHub());
             relay._published.mark(REQ_ID);
-            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
-            expect(relay._evictExpired()).to.equal(0);
+            relay.noteDeadline('LTC', REQ_ID, DEADLINE);
+            expect(relay.evictExpired()).to.equal(0);
             expect(relay._published.has(REQ_ID)).to.equal(true);
         });
 
@@ -1571,9 +1571,9 @@ describe('AttestationRelay', function () {
             const relay = new AttestationRelay(makeHub());
             relay._finalizedResponse.set(REQ_ID, { rid: REQ_ID, wire: 'x', coin: 'LTC', phase: 'response',
                                                    finalizedAt: Date.now(), rank: 1 });
-            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
+            relay.noteDeadline('LTC', REQ_ID, DEADLINE);
             relay._originLatest.LTC = DEADLINE + 5000;
-            relay._evictExpired();
+            relay.evictExpired();
             expect(relay._finalizedResponse.has(REQ_ID)).to.equal(false);
         });
 
@@ -1600,7 +1600,7 @@ describe('AttestationRelay', function () {
                 { rid: OTHER_ID, leg: 'request', phase: 'failed' },
             ]);
             const relay = new AttestationRelay(makeHub());
-            expect(relay._loadWal()).to.deep.equal({ records: 6, keys: 2 });
+            expect(relay.loadWal()).to.deep.equal({ records: 6, keys: 2 });
         });
 
         it('rewrites the WAL to one record per surviving key, keeping the txid', function () {
@@ -1613,11 +1613,11 @@ describe('AttestationRelay', function () {
                 { rid: OTHER_ID, leg: 'request',  phase: 'failed' },
             ]);
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             expect(relay._published.size).to.equal(2);
 
             relay._originLatest.LTC = DEADLINE + 5000;   // buries REQ_ID, not OTHER_ID
-            expect(relay._evictExpired()).to.equal(1);
+            expect(relay.evictExpired()).to.equal(1);
 
             const lines = walLines();
             expect(lines).to.have.length(1);
@@ -1626,7 +1626,7 @@ describe('AttestationRelay', function () {
 
             // The restart must agree: one leg still suppressed, the evicted one gone.
             const restarted = new AttestationRelay(makeHub());
-            restarted._loadWal();
+            restarted.loadWal();
             expect(restarted._published.has(OTHER_ID)).to.equal(true);
             expect(restarted._published.has(REQ_ID)).to.equal(false);
             expect(restarted._publishedResponses.has(REQ_ID)).to.equal(false);
@@ -1642,19 +1642,19 @@ describe('AttestationRelay', function () {
                   deadline_chain: 'LTC', deadline_block: DEADLINE },
             ]);
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             relay._publishedResponses.mark(OTHER_ID);              // held in memory, no line on disk
-            relay._noteDeadline('LTC', OTHER_ID, DEADLINE + 100000);
+            relay.noteDeadline('LTC', OTHER_ID, DEADLINE + 100000);
 
             relay._originLatest.LTC = DEADLINE + 5000;
-            expect(relay._evictExpired()).to.equal(1);
+            expect(relay.evictExpired()).to.equal(1);
 
             const lines = walLines();
             expect(lines).to.have.length(1);
             expect(lines[0]).to.include({ rid: OTHER_ID, leg: 'response', phase: 'sent', synthesized: true });
 
             const restarted = new AttestationRelay(makeHub());
-            restarted._loadWal();
+            restarted.loadWal();
             expect(restarted._publishedResponses.has(OTHER_ID)).to.equal(true);
         });
 
@@ -1667,11 +1667,11 @@ describe('AttestationRelay', function () {
                 { rid: OTHER_ID, leg: 'request', phase: 'sent', txid: 'cc', deadline_chain: 'LTC', deadline_block: DEADLINE + 100000 },
             ]);
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             sinon.stub(fs, 'renameSync').throws(Object.assign(new Error('EIO'), { code: 'EIO' }));
 
             relay._originLatest.LTC = DEADLINE + 5000;
-            expect(relay._evictExpired()).to.equal(1);
+            expect(relay.evictExpired()).to.equal(1);
             expect(relay._walFailures).to.equal(1);
             expect(relay.getStats().wal_compactions).to.equal(0);
 
@@ -1680,13 +1680,13 @@ describe('AttestationRelay', function () {
             expect(fs.existsSync(process.env.ATTEST_RELAY_QUEUE_PATH + '.compact')).to.equal(false);
 
             const restarted = new AttestationRelay(makeHub());
-            restarted._loadWal();
+            restarted.loadWal();
             expect(restarted._published.has(REQ_ID)).to.equal(true);    // suppression survives
         });
 
         it('compacts nothing when there is no WAL on disk yet', function () {
             const relay = new AttestationRelay(makeHub());
-            expect(relay._compactWal('startup')).to.equal(false);
+            expect(relay.compactWal('startup')).to.equal(false);
             expect(fs.existsSync(process.env.ATTEST_RELAY_QUEUE_PATH)).to.equal(false);
         });
 
@@ -1696,11 +1696,11 @@ describe('AttestationRelay', function () {
                 { rid: REQ_ID, leg: 'response', phase: 'sent', txid: 'bb', deadline_chain: 'LTC', deadline_block: DEADLINE },
             ]);
             const relay = new AttestationRelay(makeHub());
-            relay._loadWal();
+            relay.loadWal();
             relay._originLatest.LTC = DEADLINE + 5000;
-            relay._evictExpired();
+            relay.evictExpired();
             expect(walLines()).to.have.length(0);
-            expect(relay._loadWal()).to.deep.equal({ records: 0, keys: 0 });
+            expect(relay.loadWal()).to.deep.equal({ records: 0, keys: 0 });
         });
     });
 });

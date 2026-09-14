@@ -257,7 +257,7 @@ describe('AttestationRound', function () {
             let fresh = Date.now();
             ar.seen.set('rid1', old);
             ar.seen.set('rid2', fresh);
-            ar._evictStaleSeen();
+            ar.evictStaleSeen();
             expect(ar.seen.has('rid1')).to.be.false;
             expect(ar.seen.has('rid2')).to.be.true;
         });
@@ -266,7 +266,7 @@ describe('AttestationRound', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.seen.set('rid1', Date.now());
-            ar._evictStaleSeen();
+            ar.evictStaleSeen();
             expect(ar.seen.has('rid1')).to.be.true;
         });
     });
@@ -280,7 +280,7 @@ describe('AttestationRound', function () {
             let old  = Date.now() - ar.roundsTtlMs - 1;
             ar.rounds.set('rid1', { proposedAt: old });
             ar.rounds.set('rid2', { proposedAt: Date.now() });
-            ar._evictStaleRounds();
+            ar.evictStaleRounds();
             expect(ar.rounds.has('rid1')).to.be.false;
             expect(ar.rounds.has('rid2')).to.be.true;
         });
@@ -289,7 +289,7 @@ describe('AttestationRound', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.rounds.set('rid1', {}); // no proposedAt
-            ar._evictStaleRounds();
+            ar.evictStaleRounds();
             expect(ar.rounds.has('rid1')).to.be.true;
         });
     });
@@ -1534,7 +1534,7 @@ describe('AttestationRound', function () {
             let { ar } = setup();
             ar.leaderSilence.set('old', { silent: new Set(), updatedAt: Date.now() - ar.roundsTtlMs - 1 });
             ar.leaderSilence.set('new', { silent: new Set(), updatedAt: Date.now() });
-            ar._evictStaleLeaderSilence();
+            ar.evictStaleLeaderSilence();
             expect(ar.leaderSilence.has('old')).to.be.false;
             expect(ar.leaderSilence.has('new')).to.be.true;
         });

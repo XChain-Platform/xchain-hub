@@ -104,10 +104,10 @@ class AttestationSpotChecker {
         this.failureThreshold = parseInt(cfg.SPOT_CHECK_FAILURE_THRESHOLD) || DEFAULT_FAILURE_THRESHOLD;
 
         // Scheduler config (see header). Off unless SPOT_CHECK_ENABLED is set.
-        this.schedulerEnabled = this._isTruthy(cfg.SPOT_CHECK_ENABLED);
+        this.schedulerEnabled = this.isTruthy(cfg.SPOT_CHECK_ENABLED);
         this.intervalMs       = parseInt(cfg.SPOT_CHECK_INTERVAL_MS) || DEFAULT_SCHEDULER_INTERVAL_MS;
         this.maxPerTick       = parseInt(cfg.SPOT_CHECK_MAX_PER_TICK) || DEFAULT_MAX_INJECTIONS_PER_TICK;
-        this.corpus           = this._parseCorpus(cfg.SPOT_CHECK_CORPUS);
+        this.corpus           = this.parseCorpus(cfg.SPOT_CHECK_CORPUS);
         this._corpusCursor    = 0;
         this._injectedCount   = 0;
 
@@ -150,7 +150,7 @@ class AttestationSpotChecker {
                                      // what makes it awaitable in tests
     }
 
-    _isTruthy(v){
+    isTruthy(v){
         if (v === true) return true;
         let s = String(v == null ? '' : v).trim().toLowerCase();
         return s === '1' || s === 'true' || s === 'yes' || s === 'on';
@@ -159,7 +159,7 @@ class AttestationSpotChecker {
     // Accepts a JSON string or an array of { providerId|provider_id, prompt,
     // expectedPattern|expected } entries. Silently drops malformed entries so a
     // bad governance config can never crash the scheduler.
-    _parseCorpus(raw){
+    parseCorpus(raw){
         let arr = raw;
         if (typeof raw === 'string') {
             try { arr = JSON.parse(raw); } catch (e) { arr = []; }
@@ -192,12 +192,12 @@ class AttestationSpotChecker {
             reorg.on('reorg:confirmed', this._reorgHandler);
         }
 
-        this._startReJudgeSweep();
+        this.startReJudgeSweep();
 
         let consensus = this.hub.attestationConsensus;
         if (!consensus) {
             console.log('AttestationSpotChecker: no AttestationConsensus, skipping consensus wiring');
-            this._startScheduler();
+            this.startScheduler();
             return;
         }
         this._messageHandler = (event) => {
@@ -206,12 +206,12 @@ class AttestationSpotChecker {
         };
         consensus.on('request:finalized', this._messageHandler);
         console.log('AttestationSpotChecker started (window=' + this.failureWindowMs + 'ms, threshold=' + this.failureThreshold + ')');
-        this._startScheduler();
+        this.startScheduler();
     }
 
     // Start the injection scheduler when opted in and fully wired. Silent no-op
     // otherwise (the module still judges externally-registered spot-checks).
-    _startScheduler(){
+    startScheduler(){
         if (this._scheduler) return;
         if (!this.schedulerEnabled) return;
         if (!this._injector) {
@@ -223,7 +223,7 @@ class AttestationSpotChecker {
             return;
         }
         this._scheduler = setInterval(() => {
-            this._schedulerTick().catch(err =>
+            this.schedulerTick().catch(err =>
                 console.warn('AttestationSpotChecker: scheduler tick error: ' + (err && err.message ? err.message : err)));
         }, this.intervalMs);
         if (this._scheduler.unref) this._scheduler.unref();  // never pin process liveness
@@ -234,7 +234,7 @@ class AttestationSpotChecker {
     // One scheduler pass: inject up to maxPerTick synthetic requests, round-
     // robin over the corpus. Each injection is independently guarded so a single
     // provider/encoder failure cannot abort the batch or throw out of the timer.
-    async _schedulerTick(){
+    async schedulerTick(){
         if (!this._injector || this.corpus.length === 0) return 0;
         // Scheduler self-overlap guard (house convention:
         // FullNodeChallengeRound._tick). The injector is an operator-supplied hook that
@@ -295,10 +295,10 @@ class AttestationSpotChecker {
     // state the module still judges externally-registered spot-checks (see header),
     // so a sweep hung off the scheduler would never run for the deployments that
     // most need it. Unref'd, and a no-op pass over an empty map when nothing is held.
-    _startReJudgeSweep(){
+    startReJudgeSweep(){
         if (this._sweeper) return;
         this._sweeper = setInterval(() => {
-            this._sweepReJudge().catch(err =>
+            this.sweepReJudge().catch(err =>
                 console.warn('AttestationSpotChecker: re-judge sweep error: ' + (err && err.message ? err.message : err)));
         }, this.rejudgeSweepMs);
         if (this._sweeper.unref) this._sweeper.unref();
@@ -308,7 +308,7 @@ class AttestationSpotChecker {
     // Bounded: at capacity the OLDEST held record is dropped, matching register()'s
     // eviction rule, because an unbounded map here would cache response bodies for
     // the process lifetime.
-    _deferReJudge(rid, record){
+    deferReJudge(rid, record){
         if (this._pendingReJudge.size >= MAX_PENDING_REJUDGE) {
             let firstKey = this._pendingReJudge.keys().next().value;
             if (firstKey) this._pendingReJudge.delete(firstKey);
@@ -324,7 +324,7 @@ class AttestationSpotChecker {
     // timer. Overlap-guarded for the same reason _schedulerTick is: nothing
     // bounds a judge round trip, so a hung provider would otherwise let passes
     // stack up and re-ask the same records concurrently.
-    async _sweepReJudge(){
+    async sweepReJudge(){
         if (this._pendingReJudge.size === 0) return 0;
         if (this._sweepInFlight) return 0;
         this._sweepInFlight = true;
@@ -365,7 +365,7 @@ class AttestationSpotChecker {
                     continue;
                 }
                 this._pendingReJudge.delete(rid);
-                await this._scoreVerdict(rec.providerId, rid, rec.signatures, rec.blockIndex, !!verdict);
+                await this.scoreVerdict(rec.providerId, rid, rec.signatures, rec.blockIndex, !!verdict);
                 scored++;
             }
             return scored;
@@ -378,15 +378,15 @@ class AttestationSpotChecker {
     // onRequestFinalized and the re-judge sweep so the two can never drift.
     // Persists one row per signer (reorg-safe, keyed by the request's creation
     // block) and accrues a failure against every signer on a judged-wrong round.
-    async _scoreVerdict(providerId, rid, signatures, blockIndex, passed){
+    async scoreVerdict(providerId, rid, signatures, blockIndex, passed){
         for (let s of (signatures || [])) {
-            await this._persistStats(s.pubkey, providerId, rid, blockIndex, passed);
+            await this.persistStats(s.pubkey, providerId, rid, blockIndex, passed);
         }
         if (passed) return;
         console.warn('AttestationSpotChecker: failed spot-check on ' + rid.substring(0, 16) +
                      '... (provider=' + providerId + ', signers=' + (signatures || []).length + ')');
         for (let s of (signatures || [])) {
-            this._recordFailure(s.pubkey, rid);
+            this.recordFailure(s.pubkey, rid);
         }
     }
 
@@ -512,7 +512,7 @@ class AttestationSpotChecker {
             // A throw is a judge TRANSPORT failure, not a verdict about the round,
             // so hold it for re-judging rather than dropping the spot-check.
             console.warn('AttestationSpotChecker: judge call threw for %s...; deferred for re-judge:', rid.substring(0, 16), e);
-            this._deferReJudge(rid, deferRecord);
+            this.deferReJudge(rid, deferRecord);
             return;
         }
 
@@ -524,7 +524,7 @@ class AttestationSpotChecker {
             // back. Still neutral in the meantime: no evidence is recorded either way.
             console.warn('AttestationSpotChecker: judge unavailable on ' + rid.substring(0, 16) +
                          '... (reason=' + outcome.reason + '); deferred for re-judge');
-            this._deferReJudge(rid, deferRecord);
+            this.deferReJudge(rid, deferRecord);
             return;
         }
 
@@ -547,13 +547,13 @@ class AttestationSpotChecker {
         // DB hiccup must not abort judging or throw out of the event handler.
         // A match clears nothing: failures accumulate over the window regardless
         // of intervening passes (per spec: 3 failures in 24h, not a streak).
-        await this._scoreVerdict(entry.providerId, rid, event.signatures, blockIndex, !!verdict);
+        await this.scoreVerdict(entry.providerId, rid, event.signatures, blockIndex, !!verdict);
     }
 
     // Persist one judged spot-check outcome to attestation_validator_stats.
     // Idempotent per (validator, request). No-op when the hub has no DB
     // (single-node / unit tests run purely on the in-memory window).
-    async _persistStats(pubkey, providerId, requestId, blockIndex, passed){
+    async persistStats(pubkey, providerId, requestId, blockIndex, passed){
         if (!pubkey) return;
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function') return;
@@ -563,7 +563,7 @@ class AttestationSpotChecker {
             // A row just landed, which is the only way this table ever grows, so this
             // is where the retention sweep belongs (same reasoning as the sibling
             // publishers' post-write sweeps). Throttled and fire-and-forget inside.
-            this._sweepStatsRetention();
+            this.sweepStatsRetention();
         } catch (e) {
             console.warn('AttestationSpotChecker: stats persist failed for ' +
                          String(pubkey).substring(0, 16) + '...: ' + (e && e.message ? e.message : e));
@@ -598,7 +598,7 @@ class AttestationSpotChecker {
     // nothing new to delete for hours after it runs and the judge path calls it on
     // every persisted outcome. Fire-and-forget with the rejection swallowed:
     // retention is housekeeping and must never fail or stall a judging pass.
-    _sweepStatsRetention(){
+    sweepStatsRetention(){
         if (!this.statsRetentionMs) return;
         let now = Date.now();
         if (now - this._statsSweptAt < STATS_SWEEP_MIN_INTERVAL_MS) return;
@@ -666,7 +666,7 @@ class AttestationSpotChecker {
 
     // Track a failure against a validator. If the count in the rolling
     // window crosses threshold, record a slash proposal via SlashDetector.
-    _recordFailure(pubkey, requestId){
+    recordFailure(pubkey, requestId){
         if (!pubkey) return;
         let pk = String(pubkey).toLowerCase();
         let now = Date.now();
@@ -693,11 +693,11 @@ class AttestationSpotChecker {
     }
 
     // For tests + introspection
-    _failuresFor(pubkey){
+    failuresFor(pubkey){
         return (this._failures.get(String(pubkey || '').toLowerCase()) || []).slice();
     }
-    _queueSize(){ return this._queue.size; }
-    _pendingReJudgeSize(){ return this._pendingReJudge.size; }
+    queueSize(){ return this._queue.size; }
+    pendingReJudgeSize(){ return this._pendingReJudge.size; }
 }
 
 module.exports = AttestationSpotChecker;

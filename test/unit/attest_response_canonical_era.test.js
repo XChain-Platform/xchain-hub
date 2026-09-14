@@ -235,8 +235,8 @@ describe('mirror-era ATTEST response canonical, driven through a round', functio
         let lines = src.split('\n');
         let sites = [];
         lines.forEach((line, i) => {
-            if (!/this\._(build|sign)Canonical\(/.test(line)) return;
-            // Skip the two forwarding calls inside _signCanonical itself, which are
+            if (!/this\.(_buildCanonical|signCanonical)\(/.test(line)) return;
+            // Skip the two forwarding calls inside signCanonical itself, which are
             // the arity fork rather than a round's call site.
             if (/\? this\._buildCanonical|: this\._buildCanonical\(requestId/.test(line)) return;
             sites.push({ line: i + 1, text: line.trim() });

@@ -336,7 +336,7 @@ class AttestationRelay {
             idField: 'round_id'
         });
         this.consensus.on('match:finalized', (ev) => {
-            this._onRoundFinalized(ev).catch(err =>
+            this.onRoundFinalized(ev).catch(err =>
                 console.error('AttestationRelay: finalize handler error: ' + (err && err.message)));
         });
         // An abandoned round must release its inflight slot or the request wedges:
@@ -390,12 +390,12 @@ class AttestationRelay {
                     '_INDEXER_API_URL, or push it via xchain-node updateconfig); this chain is skipped every tick');
         }
 
-        let wal = this._loadWal();
+        let wal = this.loadWal();
         // Fold the file down as soon as it carries more than one record per
         // surviving key. Without this a long-lived hub re-reads (whole-file, readFileSync)
         // an ever-growing history of intent/sent/failed pairs at every restart, even on a
         // fleet whose legs all evict cleanly.
-        if(wal.records > wal.keys) this._compactWal('startup');
+        if(wal.records > wal.keys) this.compactWal('startup');
         // The WAL kept at-most-once sends across a restart, but the spend
         // ceilings behind them did not; reload the saved window from the same idiom.
         this.spendGuard.persistTo();
@@ -407,7 +407,7 @@ class AttestationRelay {
         if(this._pollTimer.unref) this._pollTimer.unref();
 
         for(let coin of ORIGIN_CHAINS){
-            if(!this._getBroadcaster(coin))
+            if(!this.getBroadcaster(coin))
                 console.warn('AttestationRelay: no ' + coin + ' broadcast rail (set ' + coin + '_ENCODER_URL + ' +
                     coin + '_ADDRESS, or wire setChainBroadcastHook); relay RESPONSES for ' + coin +
                     '-origin requests are held, never dropped');
@@ -461,22 +461,22 @@ class AttestationRelay {
             // re-materializes a request BTC has already fulfilled, and the response leg
             // must see this tick's origin pending sets, since an origin request still
             // pending is precisely one still owed its v4.
-            await this._refreshHomePending();
-            let home = await this._refreshHomeRelayed();
+            await this.refreshHomePending();
+            let home = await this.refreshHomeRelayed();
             for(let coin of ORIGIN_CHAINS){
                 if(!this.indexers[coin] || !this.indexers[coin].url) continue;
-                try { await this._pollOriginRequests(coin); }
+                try { await this.pollOriginRequests(coin); }
                 catch(e){ console.warn('AttestationRelay: ' + coin + ' poll failed: ' + (e && e.message)); }
             }
             if(home){
-                try { await this._relayHomeResponses(home); }
+                try { await this.relayHomeResponses(home); }
                 catch(e){ console.warn('AttestationRelay: response relay pass failed: ' + (e && e.message)); }
             }
-            await this._sweepFinalized();
+            await this.sweepFinalized();
             // Last, on the tips this tick just read: a leg is only evictable once its
             // origin chain has buried the request's deadline, so eviction wants the
             // freshest view and must never run ahead of the legs it might retire.
-            this._evictExpired();
+            this.evictExpired();
         } finally {
             this._polling = false;
         }
@@ -486,7 +486,7 @@ class AttestationRelay {
     // reads expose. Returns ok:false when the indexer is unreachable, which every
     // caller treats as "keep the previous view" rather than "the set is empty":
     // acting on a blind view is what double-broadcasts a fee.
-    async _fetchAllPages(coin, method, listField){
+    async fetchAllPages(coin, method, listField){
         let rows   = [];
         let latest = null;
         let cursor = null;
@@ -515,15 +515,15 @@ class AttestationRelay {
     // kept alongside the wider _homeRelayed view: it answers "already materialized"
     // from a second, independently refreshed source, and from the chain itself rather
     // than from local bookkeeping, so it also covers a v3 broadcast by a PEER.
-    async _refreshHomePending(){
+    async refreshHomePending(){
         if(!this.indexers[HOME_CHAIN] || !this.indexers[HOME_CHAIN].url) return;
-        let res = await this._fetchAllPages(HOME_CHAIN, 'getpendingattestation_requests', 'requests');
+        let res = await this.fetchAllPages(HOME_CHAIN, 'getpendingattestation_requests', 'requests');
         if(!res.ok) return;   // home indexer unreachable: keep the previous view rather than relaying blind
         this._homePending = new Set(res.rows.map(r => String(r.request_id || '').toLowerCase()));
     }
 
-    async _pollOriginRequests(coin){
-        let res = await this._fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
+    async pollOriginRequests(coin){
+        let res = await this.fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
         if(!res.ok){
             // Same fail-closed stance as the home view, and it is what makes the
             // response leg safe: a stale-but-absent origin row would read as "the v4
@@ -538,7 +538,7 @@ class AttestationRelay {
         // The tip the eviction pass measures this chain's deadlines against.
         this._originLatest[coin] = latest;
         for(let req of res.rows){
-            try { await this._maybeMaterialize(coin, latest, req); }
+            try { await this.maybeMaterialize(coin, latest, req); }
             catch(e){
                 console.warn('AttestationRelay: materialize attempt failed for ' +
                     String(req && req.request_id).substring(0, 16) + '...: ' + (e && e.message));
@@ -552,11 +552,11 @@ class AttestationRelay {
     // exists; a row that carries one is work this driver owes back to an origin chain.
     // Returns the rows for the acting pass, or null when the read failed, which leaves
     // the previous view standing rather than relaying blind.
-    async _refreshHomeRelayed(){
+    async refreshHomeRelayed(){
         if(!this.indexers[HOME_CHAIN] || !this.indexers[HOME_CHAIN].url) return null;
-        let res = await this._fetchAllPages(HOME_CHAIN, 'getrelayedattestation_requests', 'requests');
+        let res = await this.fetchAllPages(HOME_CHAIN, 'getrelayedattestation_requests', 'requests');
         if(!res.ok) return null;
-        let rows = await this._withoutRefusedRows(res.rows);
+        let rows = await this.withoutRefusedRows(res.rows);
         this._homeRelayed = new Set(rows.map(r => String(r.request_id || '').toLowerCase()));
         return { ok: res.ok, rows: rows, latest: res.latest };
     }
@@ -579,12 +579,12 @@ class AttestationRelay {
     // (a refused request is not pending), and the per-id re-read a co-signer does
     // before a v4 demands a terminal response row, which a refused request cannot have
     // (a v1 is admitted only against a pending request).
-    async _withoutRefusedRows(rows){
+    async withoutRefusedRows(rows){
         if(!Array.isArray(rows) || rows.length === 0) return Array.isArray(rows) ? rows : [];
         // The gate read costs a config lookup, so it is only taken when there is
         // actually a refusal in the view. A healthy fleet has none and pays nothing.
         if(!rows.some(r => String(r && r.request_status) === REFUSED_REQUEST_STATUS)) return rows;
-        if(!await this._rejectSlotArmed()) return rows;
+        if(!await this.rejectSlotArmed()) return rows;
         let kept = rows.filter(r => String(r && r.request_status) !== REFUSED_REQUEST_STATUS);
         console.warn('AttestationRelay: ignoring ' + (rows.length - kept.length) +
                      ' REFUSED ' + HOME_CHAIN + ' relay row(s) in the materialized view ' +
@@ -601,7 +601,7 @@ class AttestationRelay {
     // or an unparseable/zero time answers NOT ARMED, which is the pre-arm behaviour
     // this method is a correction to: it costs a relay that waits, never a fee spent
     // on a v3 the fleet drops.
-    async _rejectSlotArmed(){
+    async rejectSlotArmed(){
         let blockTime = null;
         try {
             if(this.db && typeof this.db.getChainTip === 'function'){
@@ -616,13 +616,13 @@ class AttestationRelay {
             blockTime = null;
         }
         if(blockTime == null){
-            this._logRejectSlotPlaneOnce();
+            this.logRejectSlotPlaneOnce();
             return false;
         }
         return rejectSlot.isAttestRelayRejectSlotActive(blockTime, this.network);
     }
 
-    _logRejectSlotPlaneOnce(){
+    logRejectSlotPlaneOnce(){
         if(this._rejectSlotPlaneLogged) return;
         this._rejectSlotPlaneLogged = true;
         console.warn('AttestationRelay: no ' + HOME_CHAIN + ' tip time on ' + this.network +
@@ -630,12 +630,12 @@ class AttestationRelay {
                      'count as materialized (wire an indexer tip push to lift this)');
     }
 
-    async _relayHomeResponses(home){
+    async relayHomeResponses(home){
         let latest = Number(home.latest);
         if(!Number.isFinite(latest)) return;
         for(let row of home.rows){
             if(row.response_action_index == null) continue;   // nothing fulfilled yet
-            try { await this._maybeRelayResponse(latest, row); }
+            try { await this.maybeRelayResponse(latest, row); }
             catch(e){
                 console.warn('AttestationRelay: response relay attempt failed for ' +
                     String(row && row.request_id).substring(0, 16) + '...: ' + (e && e.message));
@@ -643,7 +643,7 @@ class AttestationRelay {
         }
     }
 
-    async _maybeRelayResponse(latestHomeBlock, res){
+    async maybeRelayResponse(latestHomeBlock, res){
         let rid = String(res.request_id || '').toLowerCase();
         if(!/^[0-9a-f]{64}$/.test(rid)) return;
 
@@ -662,12 +662,12 @@ class AttestationRelay {
         // Eviction can only forget a record it holds a deadline for, and the
         // record most in need of forgetting is precisely one already marked published:
         // indexing after those returns would leave every relayed leg pinned forever.
-        this._noteDeadline(coin, rid, originReq && originReq.deadline_block);
+        this.noteDeadline(coin, rid, originReq && originReq.deadline_block);
 
         // Same horizon, same reason as the request leg, and here it also saves a real
         // fee outright: the origin indexer rejects a v4 for a request past its own
         // deadline_block ('invalid: REQUEST expired'), so the broadcast could only burn.
-        if(this._pastEvictionHorizon(coin, originReq && originReq.deadline_block)) return;
+        if(this.pastEvictionHorizon(coin, originReq && originReq.deadline_block)) return;
 
         if(this._publishedResponses.has(rid)) return;
         if(this._finalizedResponse.has(rid)) return;
@@ -685,11 +685,11 @@ class AttestationRelay {
         let snapshotBlock = await this._resolveSnapshotBlock();
         if(snapshotBlock == null) return;
         if(!attestRelay.isAttestRelayActive(snapshotBlock, this.network)){
-            this._logGateOnce(snapshotBlock);
+            this.logGateOnce(snapshotBlock);
             return;
         }
 
-        let fields = this._responseFieldsFromHome(res);
+        let fields = this.responseFieldsFromHome(res);
         if(!fields) return;
 
         // The origin indexer builds its canonical from ITS OWN request row's
@@ -718,7 +718,7 @@ class AttestationRelay {
             // NOT CONSENSUS: it is deliberately absent from _relayResponseCanonical, which
             // must byte-match the indexer's, and every follower re-derives it from its own
             // origin indexer instead of trusting the leader's copy.
-            origin_deadline_block:      this._absoluteOriginDeadline(originReq),
+            origin_deadline_block:      this.absoluteOriginDeadline(originReq),
             home_response_action_index: fields.homeResponseActionIndex,
             provider_id:                fields.providerId,
             response_hash:              fields.responseHash,
@@ -753,7 +753,7 @@ class AttestationRelay {
     // quorum signature. The stored response_hash is what makes that detectable, and a
     // mismatch refuses the relay outright. Such a request expires on the origin's own
     // deadline, which is the honest outcome.
-    _responseFieldsFromHome(res){
+    responseFieldsFromHome(res){
         let homeResponseActionIndex = Number(res.response_action_index);
         let providerId              = String(res.provider_id || '');
         let status                  = String(res.response_status || '');
@@ -779,7 +779,7 @@ class AttestationRelay {
         return { homeResponseActionIndex, providerId, status, meta, payloadB64, responseHash };
     }
 
-    async _maybeMaterialize(coin, latestBlock, req){
+    async maybeMaterialize(coin, latestBlock, req){
         let rid = String(req.request_id || '').toLowerCase();
         if(!/^[0-9a-f]{64}$/.test(rid)) return;
 
@@ -791,16 +791,16 @@ class AttestationRelay {
         // Index the absolute deadline BEFORE the already-relayed guards, for the reason
         // spelled out in _maybeRelayResponse: the record that most needs evicting is one
         // this node has already published, and those returns are hit on every later tick.
-        this._noteDeadline(coin, rid, req.deadline_block);
+        this.noteDeadline(coin, rid, req.deadline_block);
 
         // Never materialize a request whose deadline the origin has already buried. This
         // is the same horizon eviction uses, and it is what makes eviction safe: a
         // forgotten key cannot come back through this path and spend a second fee. The
         // request is dead anyway (the origin's expiry sweep is simply behind).
-        if(this._pastEvictionHorizon(coin, req.deadline_block)) return;
+        if(this.pastEvictionHorizon(coin, req.deadline_block)) return;
 
         if(this._published.has(rid)) return;
-        if(this._homeHasRequest(rid)) return;
+        if(this.homeHasRequest(rid)) return;
         if(this._finalizedWire.has(rid)) return;
 
         let depth = latestBlock - Number(req.block_index) + 1;
@@ -816,11 +816,11 @@ class AttestationRelay {
         // pin. Below it the fleet's indexers reject a v3 outright, so proposing a
         // round would only burn a BTC fee on a guaranteed-invalid action.
         if(!attestRelay.isAttestRelayActive(snapshotBlock, this.network)){
-            this._logGateOnce(snapshotBlock);
+            this.logGateOnce(snapshotBlock);
             return;
         }
 
-        let fields = this._relayFieldsFromOrigin(coin, req);
+        let fields = this.relayFieldsFromOrigin(coin, req);
         if(!fields) return;
 
         let row = {
@@ -861,7 +861,7 @@ class AttestationRelay {
     // deadline_block is a height on a different chain. The count is NOT rescaled for
     // the chains' differing block intervals: the indexer's provider deadline window
     // is the authority on what BTC-side span is acceptable and rejects the rest.
-    _relayFieldsFromOrigin(coin, req){
+    relayFieldsFromOrigin(coin, req){
         let originActionIndex = Number(req.action_index);
         let redundancy        = Number(req.redundancy);
         let deadlineBlocks    = Number(req.deadline_block) - Number(req.block_index);
@@ -964,8 +964,8 @@ class AttestationRelay {
         // request sits until its deadline expires. Fail closed before either leg runs.
         if(!RELAY_CANONICAL_INT_FIELDS[row.phase]) return false;
         if(!allCanonicalInts(row, RELAY_CANONICAL_INT_FIELDS[row.phase])) return false;
-        if(row.phase === 'request')  return await this._validateRequestRow(row);
-        if(row.phase === 'response') return await this._validateResponseRow(row);
+        if(row.phase === 'request')  return await this.validateRequestRow(row);
+        if(row.phase === 'response') return await this.validateResponseRow(row);
         return false;
     }
 
@@ -973,7 +973,7 @@ class AttestationRelay {
     // id binds the leg it claims to be, and the leader's snapshot choice is close
     // enough to our own tip view. An ancient snapshot_block would let a Byzantine
     // leader select a stale cross_chain validator set for the indexer's check.
-    async _validateRowEnvelope(row, phase, rid){
+    async validateRowEnvelope(row, phase, rid){
         if(!/^[0-9a-f]{64}$/.test(rid)) return false;
         if(ORIGIN_CHAINS.indexOf(String(row.origin_chain)) === -1) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
@@ -984,16 +984,16 @@ class AttestationRelay {
         return true;
     }
 
-    async _validateRequestRow(row){
+    async validateRequestRow(row){
         let rid = String(row.request_id || '').toLowerCase();
-        if(!await this._validateRowEnvelope(row, 'request', rid)) return false;
+        if(!await this.validateRowEnvelope(row, 'request', rid)) return false;
 
         // A request already on the home chain must not be materialized twice; the
         // indexer would reject the duplicate, so co-signing it only wastes a fee.
-        if(this._homeHasRequest(rid)) return false;
+        if(this.homeHasRequest(rid)) return false;
 
         let coin = String(row.origin_chain);
-        let res  = await this._fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
+        let res  = await this.fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
         if(!res.ok) return false;
 
         let mine = res.rows.find(r => String(r.request_id || '').toLowerCase() === rid);
@@ -1004,14 +1004,14 @@ class AttestationRelay {
         // the origin row itself, which carries the absolute deadline. Index it here so a
         // node that only ever CO-SIGNS (and therefore never runs _maybeMaterialize for
         // this request) can still evict the record its own broadcast may create.
-        this._noteDeadline(coin, rid, mine.deadline_block);
+        this.noteDeadline(coin, rid, mine.deadline_block);
         if(Number.isFinite(Number(res.latest))) this._originLatest[coin] = Number(res.latest);
-        if(this._pastEvictionHorizon(coin, mine.deadline_block)) return false;
+        if(this.pastEvictionHorizon(coin, mine.deadline_block)) return false;
 
         let depth = Number(res.latest) - Number(mine.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return false;
 
-        let fields = this._relayFieldsFromOrigin(coin, mine);
+        let fields = this.relayFieldsFromOrigin(coin, mine);
         if(!fields) return false;
 
         return fields.originActionIndex === Number(row.origin_action_index) &&
@@ -1037,13 +1037,13 @@ class AttestationRelay {
     //   the body    re-derived here rather than trusted, so the payload, hash, status
     //               and meta a follower signs are its own reading of BTC and not the
     //               leader's claim about it.
-    async _validateResponseRow(row){
+    async validateResponseRow(row){
         let rid = String(row.request_id || '').toLowerCase();
-        if(!await this._validateRowEnvelope(row, 'response', rid)) return false;
+        if(!await this.validateRowEnvelope(row, 'response', rid)) return false;
 
         let coin = String(row.origin_chain);
 
-        let origin = await this._fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
+        let origin = await this.fetchAllPages(coin, 'getpendingattestation_requests', 'requests');
         if(!origin.ok) return false;
         let originReq = origin.rows.find(r => String(r.request_id || '').toLowerCase() === rid);
         if(!originReq) return false;
@@ -1058,11 +1058,11 @@ class AttestationRelay {
         // eviction clock can never be moved forward by a peer. An ABSENT field is tolerated
         // (a leader running code that predates this field): the value is bookkeeping,
         // and refusing over it would wedge a mixed-version fleet on the leg that settles.
-        if(!this._checkOriginDeadline(row, originReq)) return false;
+        if(!this.checkOriginDeadline(row, originReq)) return false;
         if(Number.isFinite(Number(origin.latest))) this._originLatest[coin] = Number(origin.latest);
         // The leg the leader proposed is past recall on this node's own view of the
         // origin: co-signing it would fund a v4 the origin rejects as expired.
-        if(this._pastEvictionHorizon(coin, originReq.deadline_block)) return false;
+        if(this.pastEvictionHorizon(coin, originReq.deadline_block)) return false;
 
         let res;
         try { res = await this._indexerCall(HOME_CHAIN, 'getrelayedattestation_requests', { request_id: rid, limit: 1 }); }
@@ -1078,7 +1078,7 @@ class AttestationRelay {
         let depth = Number(res.latest_block_index) - Number(home.response_block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[HOME_CHAIN]) return false;
 
-        let fields = this._responseFieldsFromHome(home);
+        let fields = this.responseFieldsFromHome(home);
         if(!fields) return false;
 
         return fields.providerId   === String(row.provider_id) &&
@@ -1166,13 +1166,13 @@ class AttestationRelay {
     // The two legs' local state, selected by phase. Everything downstream of a
     // finalized round (retention, failover, WAL, spend guard) is one implementation
     // parameterised on this, so the legs cannot drift apart in the money path.
-    _legState(phase){
+    legState(phase){
         return (phase === 'response')
             ? { wire: this._finalizedResponse, published: this._publishedResponses }
             : { wire: this._finalizedWire,     published: this._published };
     }
 
-    async _onRoundFinalized(ev){
+    async onRoundFinalized(ev){
         let row  = ev.row;
         let sigs = ev.signatures || [];
         this._inflight.delete(String(row.round_id));
@@ -1197,7 +1197,7 @@ class AttestationRelay {
         let coin = response ? String(row.origin_chain) : HOME_CHAIN;
         let wire = response ? this._buildResponseWire(row, sigs) : this._buildRequestWire(row, sigs);
         let rank = this._myRank(rid, ev);
-        this._legState(phase).wire.set(rid, {
+        this.legState(phase).wire.set(rid, {
             rid: rid, wire: wire, coin: coin, phase: phase, finalizedAt: Date.now(), rank: rank
         });
 
@@ -1228,11 +1228,11 @@ class AttestationRelay {
         return idx;   // -1 when we did not sign, which _sweepFinalized treats as never eligible
     }
 
-    async _sweepFinalized(){
+    async sweepFinalized(){
         for(let phase of ['request', 'response']){
-            let state = this._legState(phase);
+            let state = this.legState(phase);
             for(let [rid, entry] of state.wire){
-                if(state.published.has(rid) || this._legLanded(phase, rid, entry)){
+                if(state.published.has(rid) || this.legLanded(phase, rid, entry)){
                     state.wire.delete(rid);
                     continue;
                 }
@@ -1251,25 +1251,25 @@ class AttestationRelay {
     // pending queue; for the response leg the v4 flips the origin request OUT of the
     // origin's pending queue. A pending view we failed to refresh is null and answers
     // "unknown", which retains the round rather than retiring it.
-    _legLanded(phase, rid, entry){
-        if(phase === 'request') return this._homeHasRequest(rid);
+    legLanded(phase, rid, entry){
+        if(phase === 'request') return this.homeHasRequest(rid);
         let pending = this._originPending[String(entry && entry.coin)];
         return Boolean(pending) && !pending.has(rid);
     }
 
     // Does the home chain already hold this request, at ANY lifecycle status? See the
     // note on _homeRelayed for why the pending queue alone is not that answer.
-    _homeHasRequest(rid){
+    homeHasRequest(rid){
         return this._homePending.has(rid) || this._homeRelayed.has(rid);
     }
 
     async broadcast(phase, rid){
-        let state = this._legState(phase);
+        let state = this.legState(phase);
         let entry = state.wire.get(rid);
         if(!entry) return;
         if(state.published.has(rid)) return;
 
-        let broadcaster = this._getBroadcaster(entry.coin);
+        let broadcaster = this.getBroadcaster(entry.coin);
         if(!broadcaster){
             console.warn('AttestationRelay: no ' + entry.coin + ' broadcast rail configured for the ' + phase +
                          ' leg of ' + rid.substring(0, 16) + '...; retained for a later sweep');
@@ -1292,7 +1292,7 @@ class AttestationRelay {
 
         // The intent record goes down BEFORE the send so a crash mid-flight is
         // recoverable as ambiguous rather than invisible. See _loadWal.
-        if(!this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'intent' })){
+        if(!this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'intent' })){
             // Nothing goes on the wire without a durable record, so the leg stays
             // retryable and the reserved budget goes back.
             this.spendGuard.release(spendToken);
@@ -1308,7 +1308,7 @@ class AttestationRelay {
             this.spendGuard.commit(spendToken);   // the reservation IS the fee charged to the window
             state.published.mark(rid);
             state.wire.delete(rid);
-            this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: (result && result.txid) || null });
+            this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: (result && result.txid) || null });
             console.log('AttestationRelay: broadcast ATTEST ' + version + ' on ' + entry.coin + ' for ' +
                         rid.substring(0, 16) + '... txid=' + ((result && result.txid) ? result.txid : '?'));
         } catch(e){
@@ -1331,14 +1331,14 @@ class AttestationRelay {
                 // nothing will re-attempt.
                 this.spendGuard.commit(spendToken);
                 state.published.mark(rid);
-                this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: null, ambiguous: true });
+                this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: null, ambiguous: true });
                 console.error('AttestationRelay: AMBIGUOUS ' + version + ' broadcast failure for ' + rid.substring(0, 16) +
                               '... (the tx may have reached the ' + entry.coin + ' node); not retrying: ', e);
             } else {
                 // A pre-send or clean failure left nothing on the wire and the leg stays
                 // retryable, so the reserved budget goes back.
                 this.spendGuard.release(spendToken);
-                this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'failed' });
+                this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'failed' });
                 console.error('AttestationRelay: ' + version + ' broadcast failed for ' + rid.substring(0, 16) + '...: ', e);
             }
         }
@@ -1388,7 +1388,7 @@ class AttestationRelay {
     // operator's shared hooks; an origin rail is only ever the explicitly configured
     // one (see chainRails), so a v4 can never be handed to a hook that would put it
     // on BTC.
-    _getBroadcaster(coin){
+    getBroadcaster(coin){
         if(String(coin) === HOME_CHAIN || coin == null){
             if(this.broadcastFn) return (payload) => this.broadcastFn(payload);
             if(this.encoder && this.walletSignFn && this.btcAddress && this.btcPubkeyHex)
@@ -1452,7 +1452,7 @@ class AttestationRelay {
 
     // ----- durable at-most-once -----
 
-    _appendWal(entry){
+    appendWal(entry){
         // Stamp the eviction key from one place rather than at each call site,
         // so no record can be written that a later process cannot re-anchor: a record
         // without a deadline is one the eviction pass can never retire.
@@ -1490,7 +1490,7 @@ class AttestationRelay {
     //
     // Returns { records, keys } so start() can tell a file that is one record per live
     // key from a history that has earned a compaction.
-    _loadWal(){
+    loadWal(){
         let text;
         try { text = fs.readFileSync(this.walPath, 'utf8'); }
         catch(e){ return { records: 0, keys: 0 }; }   // absent on a first run
@@ -1503,7 +1503,7 @@ class AttestationRelay {
             let rid = String(rec.rid || '').toLowerCase();
             if(!rid) continue;
             records++;
-            this._noteDeadline(rec.deadline_chain, rid, rec.deadline_block);
+            this.noteDeadline(rec.deadline_chain, rid, rec.deadline_block);
             let leg = (String(rec.leg || '') === 'response') ? 'response' : 'request';
             let key = leg + '|' + rid;
             let prior = outcome.get(key);
@@ -1516,7 +1516,7 @@ class AttestationRelay {
         for(let [key, state] of outcome){
             if(state !== 'sent' && state !== 'intent') continue;
             let split = key.indexOf('|');
-            this._legState(key.substring(0, split)).published.mark(key.substring(split + 1));
+            this.legState(key.substring(0, split)).published.mark(key.substring(split + 1));
             keys++;
         }
         return { records: records, keys: keys };
@@ -1528,7 +1528,7 @@ class AttestationRelay {
     // supply a usable one. Null means "never evict this leg": retention is the safe
     // direction, since the only cost is memory and the cost of the other direction is a
     // duplicate broadcast that burns a real fee.
-    _absoluteOriginDeadline(originReq){
+    absoluteOriginDeadline(originReq){
         let block = Number(originReq && originReq.deadline_block);
         return (Number.isInteger(block) && block > 0) ? block : null;
     }
@@ -1536,15 +1536,15 @@ class AttestationRelay {
     // A follower's re-derivation of the threaded deadline. Indexes its OWN reading first,
     // then accepts the row only if the leader's copy agrees (or is absent, from a
     // leader running code that predates this field). Never adopts the leader's number.
-    _checkOriginDeadline(row, originReq){
+    checkOriginDeadline(row, originReq){
         let rid  = String(row.request_id || '').toLowerCase();
-        let mine = this._absoluteOriginDeadline(originReq);
-        this._noteDeadline(row.origin_chain, rid, mine);
+        let mine = this.absoluteOriginDeadline(originReq);
+        this.noteDeadline(row.origin_chain, rid, mine);
         if(row.origin_deadline_block == null) return true;
         return mine != null && Number(row.origin_deadline_block) === mine;
     }
 
-    _noteDeadline(coin, rid, deadlineBlock){
+    noteDeadline(coin, rid, deadlineBlock){
         coin  = String(coin || '');
         rid   = String(rid  || '').toLowerCase();
         let block = Number(deadlineBlock);
@@ -1567,7 +1567,7 @@ class AttestationRelay {
     // proposed after its records were forgotten, eviction would be exactly the
     // double-broadcast it is supposed to prevent. False whenever the chain's tip is
     // unknown, so an unread chain evicts nothing and blocks nothing.
-    _pastEvictionHorizon(coin, deadlineBlock){
+    pastEvictionHorizon(coin, deadlineBlock){
         let tip   = Number(this._originLatest[String(coin || '')]);
         let block = Number(deadlineBlock);
         if(!Number.isFinite(tip) || !Number.isInteger(block)) return false;
@@ -1586,10 +1586,10 @@ class AttestationRelay {
     //
     // A chain whose tip we have never read is skipped: eviction runs off observed
     // heights only, never off wall clock or off a chain we cannot see.
-    _evictExpired(){
+    evictExpired(){
         let expired = [];
         for(let [rid, d] of this._deadlines){
-            if(!this._pastEvictionHorizon(d.coin, d.block)) continue;
+            if(!this.pastEvictionHorizon(d.coin, d.block)) continue;
             expired.push(rid);
         }
         if(!expired.length) return 0;
@@ -1597,7 +1597,7 @@ class AttestationRelay {
         for(let rid of expired){
             this._deadlines.delete(rid);
             for(let phase of ['request', 'response']){
-                let state = this._legState(phase);
+                let state = this.legState(phase);
                 state.published.delete(rid);
                 state.wire.delete(rid);
             }
@@ -1609,7 +1609,7 @@ class AttestationRelay {
         // Only ever after the in-memory eviction: a compaction that failed leaves the
         // fuller file on disk, so a restart re-learns the keys and holds them another
         // window. The reverse order could drop a record that is still live.
-        this._compactWal('eviction');
+        this.compactWal('eviction');
         return expired.length;
     }
 
@@ -1618,7 +1618,7 @@ class AttestationRelay {
     // operator may need to trace is preserved rather than synthesized away; a key with
     // no line left (only possible if a record was lost) gets a synthetic 'sent' so
     // compaction can never be the thing that un-suppresses a broadcast.
-    _compactWal(reason){
+    compactWal(reason){
         let text;
         try { text = fs.readFileSync(this.walPath, 'utf8'); }
         catch(e){ return false; }   // nothing on disk yet: nothing to compact
@@ -1650,7 +1650,7 @@ class AttestationRelay {
             let rid   = key.substring(split + 1);
             // Dropped here: keys this pass just evicted, and keys whose last word was a
             // definitive 'failed' (absent and 'failed' mean the same thing on reload).
-            if(!this._legState(leg).published.has(rid)) continue;
+            if(!this.legState(leg).published.has(rid)) continue;
             let d = this._deadlines.get(rid);
             out.push(JSON.stringify(Object.assign({}, rec, {
                 leg: leg, compacted: true,
@@ -1660,7 +1660,7 @@ class AttestationRelay {
             seen.add(key);
         }
         for(let leg of ['request', 'response']){
-            for(let rid of this._legState(leg).published.keys()){
+            for(let rid of this.legState(leg).published.keys()){
                 if(seen.has(leg + '|' + rid)) continue;
                 let d = this._deadlines.get(rid);
                 out.push(JSON.stringify({
@@ -1694,7 +1694,7 @@ class AttestationRelay {
 
     // ----- helpers -----
 
-    _logGateOnce(snapshotBlock){
+    logGateOnce(snapshotBlock){
         if(this._gateLogged) return;
         this._gateLogged = true;
         console.log('AttestationRelay: ATTEST_RELAY_ACTIVATION not reached on ' + this.network +

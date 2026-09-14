@@ -104,7 +104,7 @@ describe('AttestationConsensus: cross-round proposer record (P60)', function () 
         // What the round-timeout handler does to a stalled round.
         consensus.pending.delete(RID);
         consensus.earlyMessages.delete(RID);
-        consensus._markTornDown(RID);
+        consensus.markTornDown(RID);
 
         expect(consensus.pending.has(RID)).to.be.false;
         expect(consensus.hasProposedFor(RID, pub(live)), 'the retry round lost the evidence').to.be.true;
@@ -131,9 +131,9 @@ describe('AttestationConsensus: cross-round proposer record (P60)', function () 
     it('is ring-bounded FIFO so requestId flooding cannot grow it', function () {
         let c = new AttestationConsensus(
             createMockHub({ p2pConfig: { ATTESTATION_PROPOSER_SEEN_MAX: '2' } }), makeProviderRegistry());
-        c._recordProposer('r1', pub(live));
-        c._recordProposer('r2', pub(live));
-        c._recordProposer('r3', pub(live));
+        c.recordProposer('r1', pub(live));
+        c.recordProposer('r2', pub(live));
+        c.recordProposer('r3', pub(live));
         expect(c.proposerSeen.size).to.equal(2);
         expect(c.hasProposedFor('r1', pub(live))).to.be.false;
         expect(c.hasProposedFor('r3', pub(live))).to.be.true;

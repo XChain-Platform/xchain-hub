@@ -172,7 +172,7 @@ class AttestationResponseMirror {
     // after hub.start() has built both, but a hub that reconnects its DB or wires a
     // broadcaster later must not leave this engine holding a dead handle.
     _db(){ return this.hub && this.hub.db; }
-    _broadcaster(){ return this.hub && this.hub.hubDbBroadcaster; }
+    broadcaster(){ return this.hub && this.hub.hubDbBroadcaster; }
     _peerManager(){ return this.hub && this.hub.peerManager; }
 
     // Seam for tests; every wall-clock read on this path goes through it.
@@ -208,7 +208,7 @@ class AttestationResponseMirror {
             } catch (err) {
                 this.stats.errors++;
                 console.error('AttestationResponseMirror: row build failed for ' +
-                              this._shortRid(event) + ': ' + (err && err.message ? err.message : err));
+                              this.shortRid(event) + ': ' + (err && err.message ? err.message : err));
                 return;
             }
             if(!row) return;
@@ -222,7 +222,7 @@ class AttestationResponseMirror {
                 // full coverage of the federation, while forwarding on receipt
                 // would multiply one artifact by the peer count on every hop and
                 // let a Byzantine peer amplify at no cost.
-                if(inserted) this._gossipRow(row);
+                if(inserted) this.gossipRow(row);
             }).catch(err => {
                 this.stats.errors++;
                 console.error('AttestationResponseMirror: mirror write failed for ' +
@@ -244,7 +244,7 @@ class AttestationResponseMirror {
             this._peerHandler = (envelope) => this._handleMessage(envelope);
             pm.on('message', this._peerHandler);
             this._retryTimer = setInterval(() => {
-                this._drainParked().catch(e =>
+                this.drainParked().catch(e =>
                     console.error('AttestationResponseMirror: park drain error: ' + (e && e.message ? e.message : e)));
             }, PARK_RETRY_MS);
             // Never hold the process (or a test runner) open for a cache of rows
@@ -358,8 +358,8 @@ class AttestationResponseMirror {
             request_id:           rid,
             // Ordering aid only, and informational at that: the applier re-derives
             // both from its own local v0 request row rather than trusting the wire.
-            request_action_index: this._intOrNull(event.request && event.request.action_index),
-            request_block_index:  this._intOrNull(requestBlock),
+            request_action_index: this.intOrNull(event.request && event.request.action_index),
+            request_block_index:  this.intOrNull(requestBlock),
             provider_id:          String(event.providerId == null ? '' : event.providerId),
             status:               status,
             // Stored decoded as UTF-8, exactly as attests.response_payload is on the
@@ -389,7 +389,7 @@ class AttestationResponseMirror {
                                   }))),
             // Informational: the verifier recomputes the widening step itself from
             // the request's own block, so a lying `widen` changes nothing on chain.
-            widen:                Math.max(0, this._intOrNull(event.widen) || 0),
+            widen:                Math.max(0, this.intOrNull(event.widen) || 0),
             // Hub wall clock at quorum. AUDIT ONLY: never a consensus input, never
             // compared across hubs, and deliberately the one column two hubs' copies
             // of the same logical row are allowed to disagree on (alongside `id`).
@@ -457,7 +457,7 @@ class AttestationResponseMirror {
         // the row a subscriber missed is recovered by the bootstrap over `since_id`,
         // not by a re-emit it may equally have missed.
         if(inserted){
-            let b = this._broadcaster();
+            let b = this.broadcaster();
             if(b && typeof b.broadcastRow === 'function')
                 b.broadcastRow({ table: 'attestation_responses', row: stored });
         }
@@ -553,7 +553,7 @@ class AttestationResponseMirror {
             // The batch's row fields ARE the gossip payload's fields, so the structural
             // parse is shared rather than written twice: a row the gossip path would not
             // store is not a row the chain path may store either.
-            let row = this._parseGossipRow(raw);
+            let row = this.parseGossipRow(raw);
             if(!row){ skipped++; continue; }
 
             let inserted = false;
@@ -578,14 +578,14 @@ class AttestationResponseMirror {
             // replay, a re-landed batch and a second batch carrying the same row all
             // no-ops: the first batch to carry a response owns its link, and a later one
             // cannot re-point it at itself.
-            let didLink = await this._linkBatchAction(row, actionIndex);
+            let didLink = await this.linkBatchAction(row, actionIndex);
             if(didLink){
                 linked++;
                 // Re-broadcast so the mirror consumer upserts the ONE column on the
                 // natural key. insertAndBroadcast streams a row only on a fresh insert,
                 // and the row this link lands on has usually been in the stream for
                 // hours, so without this the link would reach no indexer.
-                await this._rebroadcastRow(row);
+                await this.rebroadcastRow(row);
             }
         }
 
@@ -704,7 +704,7 @@ class AttestationResponseMirror {
         // The cleared link has to travel the road the set link travelled, for the reason
         // the link's own re-broadcast states: insertAndBroadcast streams a row only on a
         // fresh insert, and these rows have been in the stream for hours.
-        for(let row of linked) await this._rebroadcastRow(row);
+        for(let row of linked) await this.rebroadcastRow(row);
 
         console.log('AttestationResponseMirror: retracted the batch link for window ' +
                     windowStart + '-' + windowEnd + ' from ' + (sourceChain || 'unknown') +
@@ -771,7 +771,7 @@ class AttestationResponseMirror {
     }
 
     // Set the batch link on one row, once. Returns true iff this call set it.
-    async _linkBatchAction(row, actionIndex){
+    async linkBatchAction(row, actionIndex){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return false;
         let res = await db.updateAttestationResponseByNetworkAndRequestId(actionIndex, row.network, row.request_id, row.effective_time);
@@ -781,13 +781,13 @@ class AttestationResponseMirror {
     // Stream a row that already existed. Selected back rather than broadcast from the
     // object in hand for the reason insertAndBroadcast records: the consumer's cursor is
     // the AUTO_INCREMENT id, and only the table carries it.
-    async _rebroadcastRow(row){
+    async rebroadcastRow(row){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored) return;
-        let b = this._broadcaster();
+        let b = this.broadcaster();
         if(b && typeof b.broadcastRow === 'function')
             b.broadcastRow({ table: 'attestation_responses', row: stored });
     }
@@ -806,7 +806,7 @@ class AttestationResponseMirror {
     // a round-trip through parse-and-stringify would be a chance for key order or
     // number spelling to drift between two hubs' copies of one logical row, and the
     // on-chain batch (§6.1) puts those columns on chain verbatim.
-    _gossipRow(row){
+    gossipRow(row){
         let pm = this._peerManager();
         if(!pm || typeof pm.broadcast !== 'function') return;
         let data = {};
@@ -829,12 +829,12 @@ class AttestationResponseMirror {
 
     async _handleResult(envelope){
         this.stats.received++;
-        let row = this._parseGossipRow(envelope.data);
+        let row = this.parseGossipRow(envelope.data);
         if(!row){
             this.stats.rejected++;
             return;
         }
-        await this._ingestGossipRow(row, true);
+        await this.ingestGossipRow(row, true);
     }
 
     // Shape the wire payload into a row this hub could store, or null. Structural
@@ -842,7 +842,7 @@ class AttestationResponseMirror {
     // a status the table does not carry) so the expensive checks downstream are
     // never reached by junk. It establishes NOTHING about truth; that is the
     // verifier's job.
-    _parseGossipRow(d){
+    parseGossipRow(d){
         if(!d || typeof d !== 'object') return null;
 
         // A hub writes rows for ITS OWN network only. The mirror's whole scoping
@@ -870,7 +870,7 @@ class AttestationResponseMirror {
 
         // The two JSON columns must at least PARSE as the shapes the applier and the
         // batch expect, or the row is unusable everywhere downstream.
-        if(this._parseSigList(d.signatures) === null) return null;
+        if(this.parseSigList(d.signatures) === null) return null;
         let signerPubkeys = String(d.signer_pubkeys == null ? '' : d.signer_pubkeys);
         try {
             if(!Array.isArray(JSON.parse(signerPubkeys))) return null;
@@ -891,8 +891,8 @@ class AttestationResponseMirror {
             // Informational, and overwritten from this hub's own request row once it
             // resolves (see _ingestGossipRow). Accepted here only as the cursor hint
             // _resolveLocalRequest uses.
-            request_action_index: this._intOrNull(d.request_action_index),
-            request_block_index:  this._intOrNull(d.request_block_index),
+            request_action_index: this.intOrNull(d.request_action_index),
+            request_block_index:  this.intOrNull(d.request_block_index),
             provider_id:          providerId,
             status:               status,
             response_payload:     payload,
@@ -905,13 +905,13 @@ class AttestationResponseMirror {
             // stored as null, which is the legacy row and binds by effective_time. The
             // verifier re-checks it as part of the canonical, so a lying sender only
             // produces a row whose signatures do not verify.
-            admit_block_btc:      this._heightOrNull(d.admit_block_btc),
+            admit_block_btc:      this.heightOrNull(d.admit_block_btc),
             signer_pubkeys:       signerPubkeys,
             signatures:           String(d.signatures == null ? '' : d.signatures),
             // TINYINT UNSIGNED, and purely informational: the verifier recomputes the
             // widening step from the request's own block, so this is clamped rather
             // than checked.
-            widen:                Math.max(0, Math.min(255, this._intOrNull(d.widen) || 0)),
+            widen:                Math.max(0, Math.min(255, this.intOrNull(d.widen) || 0)),
             // OUR clock, not the sender's. This column means "when this hub came to
             // hold the row", it is never a consensus input, and the two hubs are
             // explicitly allowed to disagree on it.
@@ -924,7 +924,7 @@ class AttestationResponseMirror {
     //
     // `allowPark` is false on the retry pass, which is what makes the retry happen
     // exactly ONCE: an entry drained from the park set can no longer re-park itself.
-    async _ingestGossipRow(row, allowPark){
+    async ingestGossipRow(row, allowPark){
         let short = row.request_id.substring(0, 16) + '...';
 
         // Cheapest gate first, and it is the one that carries the storm. Five hubs
@@ -936,7 +936,7 @@ class AttestationResponseMirror {
         // math. A second variant of a request this hub holds (a different signed stamp,
         // from a round that finalized under another leader slot) is NOT held, and takes
         // the full verification below like any first delivery.
-        if(await this._alreadyHeld(row)){
+        if(await this.alreadyHeld(row)){
             this.stats.duplicates++;
             return false;
         }
@@ -945,10 +945,10 @@ class AttestationResponseMirror {
         // turns on comes from this row, never from the wire: an untrusted hub that
         // could name the block its signatures are checked at could name a block at
         // which it controlled the responsible set.
-        let local = await this._resolveLocalRequest(row);
+        let local = await this.resolveLocalRequest(row);
         if(!local){
             if(allowPark){
-                this._park(row);
+                this.park(row);
                 return false;
             }
             this.stats.dropped++;
@@ -972,7 +972,7 @@ class AttestationResponseMirror {
             return false;
         }
 
-        let verdict = await this._verifyGossipedRow(row, request, local.latestBlock);
+        let verdict = await this.verifyGossipedRow(row, request, local.latestBlock);
         if(!verdict.ok){
             this.stats.rejected++;
             console.warn('AttestationResponseMirror: dropping gossiped row ' + short +
@@ -986,8 +986,8 @@ class AttestationResponseMirror {
         // values are the same on every honest node, so taking them makes two hubs'
         // copies of one logical row converge instead of diverge, which is what the
         // on-chain batch body (§6.1) puts on chain.
-        row.request_block_index  = this._intOrNull(request.block_index);
-        row.request_action_index = this._intOrNull(request.action_index);
+        row.request_block_index  = this.intOrNull(request.block_index);
+        row.request_action_index = this.intOrNull(request.action_index);
 
         // insertAndBroadcast streams the row to THIS hub's WS subscribers on a fresh
         // insert, which is the whole point: an indexer following a hub outside the
@@ -999,7 +999,7 @@ class AttestationResponseMirror {
     }
 
     // Does this hub already hold the row? One keyed read on the UNIQUE index.
-    async _alreadyHeld(row){
+    async alreadyHeld(row){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return false;
         let rows = await db.getAttestationResponse(row.network, row.request_id, row.effective_time);
@@ -1019,7 +1019,7 @@ class AttestationResponseMirror {
     // verification consumes is taken from that returned row. A lie therefore costs
     // the liar its own delivery (we look in the wrong page, find nothing, park and
     // drop) and cannot make us verify against a set of its choosing.
-    async _resolveLocalRequest(row){
+    async resolveLocalRequest(row){
         let hub = this.hub;
         if(!hub || typeof hub._resolveBtcIndexerUrl !== 'function') return null;
         let url = await hub._resolveBtcIndexerUrl();
@@ -1065,13 +1065,13 @@ class AttestationResponseMirror {
     // AttestationRound, and _buildCanonical is the byte string they sign. A second
     // spelling of either would be a fork surface that no suite compares, which is why
     // this reaches for two "private" methods instead of copying twenty lines.
-    async _verifyGossipedRow(row, request, latestBlock){
+    async verifyGossipedRow(row, request, latestBlock){
         let rid = row.request_id;
         let declaredBlock = Number(request.block_index);
         if(!Number.isFinite(declaredBlock)) return { ok: false, error: 'local request carries no block_index' };
         let redundancy = Math.max(1, Number(request.redundancy) || 1);
 
-        let sigs = this._parseSigList(row.signatures);
+        let sigs = this.parseSigList(row.signatures);
         if(sigs === null || sigs.length === 0) return { ok: false, error: 'signature list is not a non-empty JSON array of {pubkey,sig}' };
 
         // The body as bytes. The column stores the UTF-8 DECODE of what was signed, so
@@ -1176,7 +1176,7 @@ class AttestationResponseMirror {
     // Parse the `signatures` column into format-checked, lower-cased entries, or null
     // when it is not the shape every consumer requires. Shared by the structural gate
     // and the verifier so the two can never disagree about what a signature list is.
-    _parseSigList(raw){
+    parseSigList(raw){
         let declared;
         try { declared = JSON.parse(String(raw == null ? '' : raw)); }
         catch(_){ return null; }
@@ -1192,7 +1192,7 @@ class AttestationResponseMirror {
     }
 
     // Hold a row whose request this hub cannot resolve yet, for exactly one retry.
-    _park(row){
+    park(row){
         let key = row.network + '|' + row.request_id;
         // One entry per logical row: several peers gossiping the same unknown request
         // must buy it one retry, not one retry each.
@@ -1211,13 +1211,13 @@ class AttestationResponseMirror {
     // One park cycle. Every entry is removed from the set BEFORE its retry runs, so a
     // row gets exactly one second chance whatever the retry does and the set cannot
     // accumulate across cycles.
-    async _drainParked(){
+    async drainParked(){
         if(this._parked.size === 0) return;
         let entries = Array.from(this._parked.values());
         this._parked.clear();
         for(let entry of entries){
             try {
-                await this._ingestGossipRow(entry.row, false);
+                await this.ingestGossipRow(entry.row, false);
             } catch (e){
                 this.stats.errors++;
                 console.error('AttestationResponseMirror: parked retry failed for ' +
@@ -1231,7 +1231,7 @@ class AttestationResponseMirror {
     // NaN on anything unparseable, because both columns are nullable and
     // informational: a null there degrades an ordering aid, while a NaN is a SQL error
     // that would lose the whole row.
-    _intOrNull(v){
+    intOrNull(v){
         if(v == null) return null;
         let n = Number(v);
         return Number.isFinite(n) ? Math.trunc(n) : null;
@@ -1241,13 +1241,13 @@ class AttestationResponseMirror {
     // reads '' as 0 (Number('') is 0) and would turn a missing height into "admissible at
     // block 0", which is the row binding at the first block every indexer already has.
     // Null here means the legacy row, which binds by effective_time at every height.
-    _heightOrNull(v){
+    heightOrNull(v){
         if(v === null || v === undefined || v === '') return null;
         let n = Number(v);
         return (Number.isSafeInteger(n) && n >= 0) ? n : null;
     }
 
-    _shortRid(event){
+    shortRid(event){
         let rid = event && event.requestId;
         return rid ? String(rid).substring(0, 16) + '...' : '(no request id)';
     }

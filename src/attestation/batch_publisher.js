@@ -267,7 +267,7 @@ class AttestationBatchPublisher {
         // window whose on-chain state a crash left unknown. The floor comes from the same
         // read, because both answers are about what this hub has already resolved.
         try {
-            await this._hydrateMarkers();
+            await this.hydrateMarkers();
             this._floorWindow = await this._resolveFloorWindow();
         } catch(e){
             console.error('AttestationBatchPublisher: could not hydrate durable batch markers ' +
@@ -367,10 +367,10 @@ class AttestationBatchPublisher {
         let attempted = 0, published = 0;
         try {
             let now     = Number.isFinite(nowSec) ? Number(nowSec) : this._nowSeconds();
-            let pending = await this._pendingWindows(now);
+            let pending = await this.pendingWindows(now);
             for(let w of pending){
                 attempted++;
-                let done = await this._publishWindow(w.windowStart, w.age);
+                let done = await this.publishWindow(w.windowStart, w.age);
                 if(done) published++;
             }
         } finally {
@@ -412,14 +412,14 @@ class AttestationBatchPublisher {
     // The closed windows with no durable marker, oldest first, bounded. `age` is how
     // many windows have closed since: it is the rank a hub must be at or below to
     // publish, which is what staggers the fallback when the elected leader is dark.
-    async _pendingWindows(nowSec){
+    async pendingWindows(nowSec){
         let current = this.windowStartFor(nowSec);
         let out = [];
         for(let i = MAX_CATCHUP_WINDOWS; i >= 1; i--){
             let start = current - i * this.windowS;
             if(start < 0) continue;
             if(this._floorWindow !== null && start < this._floorWindow) continue;
-            let marker = await this._getMarker(start);
+            let marker = await this.getMarker(start);
             if(marker && String(marker.status) !== 'intent') continue;   // sent, landed or dead-lettered
             if(marker){
                 // Intent with no outcome: a crash between the send and the sent marker.
@@ -454,7 +454,7 @@ class AttestationBatchPublisher {
 
     // Publish one window, or leave it for a later attempt. Returns true only when a
     // batch for this window actually went out.
-    async _publishWindow(windowStart, age){
+    async publishWindow(windowStart, age){
         let windowEnd = this.windowEndFor(windowStart);
 
         let rows;
@@ -478,13 +478,13 @@ class AttestationBatchPublisher {
                 ' holds ' + rows.length + ' terminal responses, over the ' + abw.ATTEST_BATCH_MAX_ROWS +
                 '-row consensus cap; the window is dead-lettered to ' + this.deadLetterPath +
                 ' and NOT published. Chain coverage for this window is missing until an operator splits it.');
-            await this._recordDeadLetter(windowStart, windowEnd, rows.length);
+            await this.recordDeadLetter(windowStart, windowEnd, rows.length);
             return false;
         }
 
         let anchor = await this._resolveAnchor();
         if(anchor === null){
-            this._warnNoAnchor(windowStart);
+            this.warnNoAnchor(windowStart);
             this.stats.windowsDeferred++;
             return false;
         }
@@ -503,7 +503,7 @@ class AttestationBatchPublisher {
         // would otherwise pay five fees for five identical batches. Rank is hash order
         // over the same capability set the batch is judged against, keyed on the batch
         // key so the election is per window rather than per hub.
-        let election = await this._electionRank(anchor, batchKey);
+        let election = await this.electionRank(anchor, batchKey);
         if(election === null){
             console.warn('AttestationBatchPublisher: cannot resolve the attestation set at anchor ' + anchor +
                          '; deferring window ' + windowStart);
@@ -513,7 +513,7 @@ class AttestationBatchPublisher {
         // The set this batch is judged against goes into the mirror NOW, before any
         // rank decision: a follower that never becomes leader still mirrors it, and an
         // off-BTC verifier reads whichever hub it follows.
-        await this._persistAttestationSnapshot(anchor);
+        await this.persistAttestationSnapshot(anchor);
         if(election.rank > age){
             // Not this hub's turn yet. A window nobody lands is picked up by the next
             // rank one window later, so a dark leader costs a window's coverage a delay
@@ -521,7 +521,7 @@ class AttestationBatchPublisher {
             return false;
         }
 
-        let signed = await this._collectBatchSignatures(window, batchKey);
+        let signed = await this.collectBatchSignatures(window, batchKey);
         if(!signed.met){
             // NOTHING IS PUBLISHED WITHOUT A QUORUM, and the window is deliberately left
             // with no marker: the rows are unchanged in the table, so a later attempt
@@ -541,11 +541,11 @@ class AttestationBatchPublisher {
             console.error('AttestationBatchPublisher: CRITICAL - window ' + windowStart + '-' + windowEnd +
                 ' cannot be encoded (' + encoded.status + '); dead-lettered to ' + this.deadLetterPath +
                 ' and NOT published. Chain coverage for this window is missing.');
-            await this._recordDeadLetter(windowStart, windowEnd, rows.length);
+            await this.recordDeadLetter(windowStart, windowEnd, rows.length);
             return false;
         }
 
-        return await this._broadcastWindow(window, batchKey, encoded);
+        return await this.broadcastWindow(window, batchKey, encoded);
     }
 
     // ------------------------------------------------------------ the mirror read
@@ -568,10 +568,10 @@ class AttestationBatchPublisher {
         if(!db || typeof db.doQuery !== 'function') throw new Error('no hub DB');
         let rows = await db.findAttestationResponsesInBatchWindow(
             this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1);
-        return (rows || []).map(r => this._normalizeRow(r));
+        return (rows || []).map(r => this.normalizeRow(r));
     }
 
-    _normalizeRow(r){
+    normalizeRow(r){
         let intOrNull = (v) => {
             if(v === null || v === undefined) return null;
             let n = Number(v);
@@ -597,7 +597,7 @@ class AttestationBatchPublisher {
     // Project onto the codec's field list, in the codec's order. Called on the way into
     // every canonical so the publisher and the verifier serialize the same object even
     // if a read ever hands back a column the wire does not carry.
-    _wireRows(rows){
+    wireRows(rows){
         return rows.map(r => {
             let out = {};
             for(let f of abw.ATTEST_BATCH_ROW_FIELDS) out[f] = r[f];
@@ -643,15 +643,15 @@ class AttestationBatchPublisher {
             return null;
         }
         let n = Number(tip && tip.blockHeight);
-        if(Number.isFinite(n) && n > 0) return this._anchorResolved(Math.trunc(n), 'pushed');
+        if(Number.isFinite(n) && n > 0) return this.anchorResolved(Math.trunc(n), 'pushed');
         pushedFailure = tip
             ? 'the BTC chain_tips row holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
             : 'no BTC chain_tips row exists for network ' + (this.network || '<unset>') +
               '; the Bitcoin indexer has not called pushchaintip on this hub';
 
-        let observed = this._observedBtcTip();
+        let observed = this.observedBtcTip();
         let o = Number(observed && observed.blockHeight);
-        if(Number.isFinite(o) && o > 0) return this._anchorResolved(Math.trunc(o), 'observed');
+        if(Number.isFinite(o) && o > 0) return this.anchorResolved(Math.trunc(o), 'observed');
 
         this._anchorFailure = pushedFailure +
             ', and the attestation poll has not observed a BTC tip either';
@@ -660,14 +660,14 @@ class AttestationBatchPublisher {
 
     // The tip the attestation round's request poll last reported, or null on a hub
     // that runs no round (observer-only, or the round not yet started).
-    _observedBtcTip(){
+    observedBtcTip(){
         let round = this.hub && typeof this.hub.getAttestationRound === 'function'
             ? this.hub.getAttestationRound() : null;
         if(!round || typeof round.getObservedBtcTip !== 'function') return null;
         return round.getObservedBtcTip();
     }
 
-    _anchorResolved(height, source){
+    anchorResolved(height, source){
         // Both latches clear together: an outage that returns after the tip came back is
         // a NEW episode and has to say so, even when its cause reads the same.
         this._anchorFailure = null;
@@ -688,7 +688,7 @@ class AttestationBatchPublisher {
     // condition that cannot change without an operator; latching keeps the reason
     // visible without burying the log, and clearing it on a new cause lets a changed
     // failure speak.
-    _warnNoAnchor(windowStart){
+    warnNoAnchor(windowStart){
         let why = this._anchorFailure || 'the BTC chain tip is unavailable';
         if(this._anchorWarned === why) return;
         this._anchorWarned = why;
@@ -706,7 +706,7 @@ class AttestationBatchPublisher {
     // count-keyed below, so leader, follower and the DOGE indexer size one quorum from
     // one source. Returns null when the snapshot cannot be resolved at all, which every
     // caller treats as "defer", never as "nobody is eligible".
-    async _resolveAttestationSet(anchor){
+    async resolveAttestationSet(anchor){
         let cs = this.hub && this.hub.capabilitySnapshot;
         if(!cs) return null;
         let weighted = swq.isStakeWeightedQuorumActive(anchor, this.network);
@@ -743,12 +743,12 @@ class AttestationBatchPublisher {
     // the leader; the natural-key INSERT IGNORE makes the rows identical and a re-write
     // free; a TRUNCATED set is never mirrored (SWQ-TRUNC-MIRROR). Once per anchor per
     // process, because the same anchor recurs every window while the tip sits still.
-    async _persistAttestationSnapshot(anchor, set){
+    async persistAttestationSnapshot(anchor, set){
         let a = Number(anchor);
         if(!Number.isInteger(a) || a <= 0) return 0;
         if(!this._persistedAnchors) this._persistedAnchors = new Set();
         if(this._persistedAnchors.has(a)) return 0;
-        if(!set) set = await this._resolveAttestationSet(a);
+        if(!set) set = await this.resolveAttestationSet(a);
         if(!set || set.length === 0) return 0;          // unresolved / truncated: nothing to mirror
         let db = this._db();
         if(!db) return 0;
@@ -778,8 +778,8 @@ class AttestationBatchPublisher {
     // cannot be resolved. Hash order over sha256(batchKey || pubkey), the ANCHOR
     // publisher election's rule: deterministic, unpredictable per window, and it needs
     // no coordination at all.
-    async _electionRank(anchor, batchKey){
-        let set = await this._resolveAttestationSet(anchor);
+    async electionRank(anchor, batchKey){
+        let set = await this.resolveAttestationSet(anchor);
         if(!set) return null;
         let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if(!me) return null;
@@ -800,7 +800,7 @@ class AttestationBatchPublisher {
     // Leader half. Resolves { met, sigs } once a quorum of the attestation set at the
     // anchor has co-signed the batch canonical, or { met:false } on timeout or a short
     // quorum. On met:false NOTHING is published for the window.
-    async _collectBatchSignatures(window, batchKey){
+    async collectBatchSignatures(window, batchKey){
         let empty = { met: false, sigs: [] };
         if(!this.identity) return empty;
 
@@ -810,10 +810,10 @@ class AttestationBatchPublisher {
             window_end:       window.window_end,
             row_count:        window.row_count,
             btc_block_height: window.btc_block_height,
-            rows:             this._wireRows(window.rows)
+            rows:             this.wireRows(window.rows)
         });
 
-        let set = await this._resolveAttestationSet(window.btc_block_height);
+        let set = await this.resolveAttestationSet(window.btc_block_height);
         if(!set) return empty;
         let me = this.identity.getPubkeyHex().toLowerCase();
         // This hub must hold `attestation` at the anchor, or its own signature is not
@@ -863,7 +863,7 @@ class AttestationBatchPublisher {
                 window_end:       window.window_end,
                 row_count:        window.row_count,
                 btc_block_height: window.btc_block_height,
-                rows:             this._wireRows(window.rows)
+                rows:             this.wireRows(window.rows)
             });
             this.checkSignQuorum();
         });
@@ -945,7 +945,7 @@ class AttestationBatchPublisher {
 
         // This hub must hold `attestation` at the anchor, or its signature is dead
         // weight on the wire and the leader counts a quorum the chain will not.
-        let set = await this._resolveAttestationSet(anchor);
+        let set = await this.resolveAttestationSet(anchor);
         let me  = this.identity.getPubkeyHex().toLowerCase();
         if(!set || !set.some(v => v.pubkey === me)){
             this.refuse(windowStart, 'this hub holds no attestation capability at anchor ' + anchor);
@@ -953,7 +953,7 @@ class AttestationBatchPublisher {
         }
         // Same rows the leader wrote, from this hub's own resolution (deterministic,
         // INSERT IGNORE), so an indexer following THIS hub verifies the batch too.
-        await this._persistAttestationSnapshot(anchor, set);
+        await this.persistAttestationSnapshot(anchor, set);
 
         let mine;
         try {
@@ -1065,7 +1065,7 @@ class AttestationBatchPublisher {
     // because a continuation without its head is unattributable; a node that sees the
     // head before the chunks holds a structurally sound action that has delivered
     // nothing, which is the ANCHOR archive head's behaviour and is recoverable.
-    async _broadcastWindow(window, batchKey, encoded){
+    async broadcastWindow(window, batchKey, encoded){
         let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
         if(!canBroadcast){
             console.warn('AttestationBatchPublisher: no broadcast pipeline configured ' +
@@ -1074,7 +1074,7 @@ class AttestationBatchPublisher {
             this.stats.windowsDeferred++;
             return false;
         }
-        if(!(await this._balanceAllows())){
+        if(!(await this.balanceAllows())){
             this.stats.windowsDeferred++;
             return false;
         }
@@ -1099,7 +1099,7 @@ class AttestationBatchPublisher {
         // Durable intent BEFORE the first send and AFTER the reservation, so a window the
         // ceiling declined leaves no crash marker behind and a crash mid-send leaves one.
         try {
-            await this._recordIntent(window, batchKey);
+            await this.recordIntent(window, batchKey);
         } catch(e){
             for(let t of tokens) this.spendGuard.release(t);
             console.error('AttestationBatchPublisher: cannot record publish intent for window ' +
@@ -1108,7 +1108,7 @@ class AttestationBatchPublisher {
             return false;
         }
 
-        this._bufferWindow(window, batchKey, encoded);
+        this.bufferWindow(window, batchKey, encoded);
 
         let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
         let headTxid = null;
@@ -1126,7 +1126,7 @@ class AttestationBatchPublisher {
                 // testnet window dropped by one transient encoder refusal). A failure on a LATER wire leaves the head on chain and is
                 // handled by the latch below unchanged, as is every ambiguous failure.
                 if(i === 0 && !ambiguous && isNeverSentError(e) &&
-                   await this._retryRefusedHead(window, e, tokens)) return false;
+                   await this.retryRefusedHead(window, e, tokens)) return false;
                 this.spendGuard.commit(tokens[i]);   // a send that may have left the process is a spend
                 for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
                 console.error('AttestationBatchPublisher: CRITICAL - wire ' + (i + 1) + '/' +
@@ -1141,7 +1141,7 @@ class AttestationBatchPublisher {
             if(i === 0) headTxid = (result && result.txid) ? String(result.txid) : null;
         }
 
-        await this._markSent(window.window_start, headTxid, window.row_count);
+        await this.markSent(window.window_start, headTxid, window.row_count);
         this._refusalAttempts.delete(window.window_start);   // the window is paid for; its attempt history is spent
         this.stats.windowsPublished++;
         this.stats.rowsPublished += window.row_count;
@@ -1167,7 +1167,7 @@ class AttestationBatchPublisher {
     // line is never touched, and a delete that removes no row leaves the window exactly
     // as the latch below expects it. Rebuilt content is byte-identical (the rows are
     // unchanged in the mirror), which is the same property the no-quorum retry relies on.
-    async _retryRefusedHead(window, e, tokens){
+    async retryRefusedHead(window, e, tokens){
         let attempt = (this._refusalAttempts.get(window.window_start) || 0) + 1;
         this._refusalAttempts.set(window.window_start, attempt);
         // At the bound the window latches like any other failure, exactly once: the
@@ -1176,7 +1176,7 @@ class AttestationBatchPublisher {
         if(attempt >= this.maxRefusalAttempts) return false;
 
         try {
-            await this._clearIntent(window.window_start);
+            await this.clearIntent(window.window_start);
         } catch(err){
             // The marker survives, so the window quarantines on the next sweep. Latching
             // now is the honest outcome, and the caller's CRITICAL line is the one an
@@ -1202,7 +1202,7 @@ class AttestationBatchPublisher {
 
     // Balance gates, fail-closed in the same order OraclePublisher applies them: an
     // unreadable balance is not a licence to spend.
-    async _balanceAllows(){
+    async balanceAllows(){
         let hasSource = !!(this.getBalanceFn || (this.encoder && this.dogeAddress));
         if(!hasSource) return true;
         let balance = null;
@@ -1261,7 +1261,7 @@ class AttestationBatchPublisher {
 
     // ------------------------------------------------------------ durable markers
 
-    async _getMarker(windowStart){
+    async getMarker(windowStart){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return null;
         let rows = await db.findAttestPublishedBatchesByNetwork(this.network, windowStart);
@@ -1271,7 +1271,7 @@ class AttestationBatchPublisher {
     // Load every window this hub has already resolved. Only the intent-only rows need
     // remembering in memory: they are the ones the sweep must refuse, once each rather
     // than once per pass.
-    async _hydrateMarkers(){
+    async hydrateMarkers(){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
@@ -1284,7 +1284,7 @@ class AttestationBatchPublisher {
 
     // Idempotent: an existing row for the window is left exactly as it is, so a replay
     // can never downgrade a `sent` or `landed` marker back to an intent.
-    async _recordIntent(window, batchKey){
+    async recordIntent(window, batchKey){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         await db.setAttestPublishedBatchByNetwork(this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent');
@@ -1293,7 +1293,7 @@ class AttestationBatchPublisher {
     // Withdraw an intent-only marker. The status guard is the whole safety of the
     // statement: it can only ever remove a row that says "no outcome recorded", so it
     // cannot erase evidence of a window this hub or the federation has paid for.
-    async _clearIntent(windowStart){
+    async clearIntent(windowStart){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         await db.deleteAttestPublishedBatch(this.network, windowStart, 'intent');
@@ -1302,7 +1302,7 @@ class AttestationBatchPublisher {
     // The DOGE is already spent by the time this runs, so a failure here is logged
     // rather than thrown: the intent row means a restart quarantines the window instead
     // of paying for it twice.
-    async _markSent(windowStart, txid, rowCount){
+    async markSent(windowStart, txid, rowCount){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         try {
@@ -1314,7 +1314,7 @@ class AttestationBatchPublisher {
         }
     }
 
-    async _recordDeadLetter(windowStart, windowEnd, rowCount){
+    async recordDeadLetter(windowStart, windowEnd, rowCount){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return;
         this.stats.windowsDeadLettered++;
@@ -1342,8 +1342,8 @@ class AttestationBatchPublisher {
     // What a window was built from, appended when it publishes. Not a queue: the
     // durable marker is the at-most-once guard, and this is the operator's copy of the
     // content, which the mirror table would otherwise have to be re-derived from.
-    _bufferWindow(window, batchKey, encoded){
-        this._append(this.bufferPath, {
+    bufferWindow(window, batchKey, encoded){
+        this.append(this.bufferPath, {
             window_start: window.window_start, window_end: window.window_end,
             batch_key: batchKey, row_count: window.row_count,
             btc_block_height: window.btc_block_height,
@@ -1355,11 +1355,11 @@ class AttestationBatchPublisher {
     // Append-only give-up sink, never truncated. Best-effort: a write failure here must
     // not stop the CRITICAL log or the durable marker that keeps the window from looping.
     _deadLetter(record, reason){
-        this._append(this.deadLetterPath, Object.assign({}, record,
+        this.append(this.deadLetterPath, Object.assign({}, record,
             { deadLetteredAt: Date.now(), reason: reason }));
     }
 
-    _append(file, record){
+    append(file, record){
         try {
             let fd = fs.openSync(file, 'a');
             fs.writeSync(fd, JSON.stringify(record) + '\n');

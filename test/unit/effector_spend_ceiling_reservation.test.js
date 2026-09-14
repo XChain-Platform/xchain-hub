@@ -174,7 +174,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         const gate = deferred();
         const broadcastStub = sinon.stub().returns(gate.promise);
         relay.broadcastFn = broadcastStub;
-        relay._legState('request').wire.set(rid, { coin: null, wire: 'ATTEST|3|' + rid });
+        relay.legState('request').wire.set(rid, { coin: null, wire: 'ATTEST|3|' + rid });
 
         const sendA = relay.broadcast('request', rid);
         const sendB = relay.broadcast('request', rid);

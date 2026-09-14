@@ -164,9 +164,9 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
             return { requestId: 'aa'.repeat(31) + String(calls).padStart(2, '0') };
         });
 
-        const a = checker._schedulerTick();
+        const a = checker.schedulerTick();
         await flush();
-        const b = await checker._schedulerTick();   // fires while a is parked on the gate
+        const b = await checker.schedulerTick();   // fires while a is parked on the gate
         expect(b, 'the guarded tick injected nothing').to.equal(0);
         expect(calls, 'the injector was not called a second time').to.equal(1);
 
@@ -184,9 +184,9 @@ describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
             return { requestId: 'bb'.repeat(32) };
         });
 
-        expect(await checker._schedulerTick(), 'failed injection counts nothing').to.equal(0);
+        expect(await checker.schedulerTick(), 'failed injection counts nothing').to.equal(0);
         expect(checker._tickInFlight, 'flag released after a failed injection').to.equal(false);
-        expect(await checker._schedulerTick(), 'the next tick still injects').to.equal(1);
+        expect(await checker.schedulerTick(), 'the next tick still injects').to.equal(1);
     });
 });
 

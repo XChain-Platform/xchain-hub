@@ -88,7 +88,7 @@ describe('ring caps reject a negative operator value', function () {
 
         // A negative cap evicted the rid just marked, so _bufferEarlyMessage
         // parked the prior-attempt envelopes the mark exists to drop.
-        ac._markTornDown('rid-1');
+        ac.markTornDown('rid-1');
         expect(ac.tornDown.has('rid-1')).to.be.true;
     });
 

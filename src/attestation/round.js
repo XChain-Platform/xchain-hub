@@ -284,18 +284,18 @@ class AttestationRound {
 
         // Drop `seen` entries older than the retry window so transiently-skipped
         // requests can be re-evaluated once their blocking condition clears.
-        this._evictStaleSeen();
+        this.evictStaleSeen();
 
         // Same window, durable half: drop recorded fetches whose
         // retry window has lapsed so the table cannot grow with request volume.
-        await this._evictStaleFetchCache();
+        await this.evictStaleFetchCache();
 
         // Drop `rounds` entries older than the round TTL so completed/abandoned
         // round state doesn't accumulate for the process lifetime.
-        this._evictStaleRounds();
+        this.evictStaleRounds();
 
         // Same TTL, same reason, for the per-request leader-silence observation.
-        this._evictStaleLeaderSilence();
+        this.evictStaleLeaderSilence();
 
         // Page forward from where the last poll left off. When the cursor is
         // null this requests the oldest page; otherwise it asks the indexer for
@@ -391,7 +391,7 @@ class AttestationRound {
         }
     }
 
-    _evictStaleSeen(){
+    evictStaleSeen(){
         let cutoff = Date.now() - this.retryAfterMs;
         for(let [rid, ts] of this.seen){
             if(ts < cutoff) this.seen.delete(rid);
@@ -405,16 +405,16 @@ class AttestationRound {
     // must degrade to today's behavior (fetch again) rather than drop a round.
     // Every method below therefore swallows its error and returns the
     // no-cache answer.
-    _cacheCutoffEpochSec(){
+    cacheCutoffEpochSec(){
         return Math.floor((Date.now() - this.retryAfterMs) / 1000);
     }
 
     // The recorded outcome for a request, or null when there is none, it has
     // aged past the retry window, or the DB is unreachable.
-    async _readFetchCache(rid){
+    async readFetchCache(rid){
         if(!this.db || typeof this.db.doQuery !== 'function') return null;
         try {
-            let rows = await this.db.findAttestationFetchCache(rid, this._cacheCutoffEpochSec());
+            let rows = await this.db.findAttestationFetchCache(rid, this.cacheCutoffEpochSec());
             let row = (rows && rows.length) ? rows[0] : null;
             if(!row) return null;
             // Providers return { body: Buffer, meta: string } and agree() drops a
@@ -434,7 +434,7 @@ class AttestationRound {
     // Upsert the completed outcome, success and provider_error alike: a durable
     // error is what keeps a restart from re-proposing a different answer for a
     // round that already carries this hub's signed non-ok proposal.
-    async _writeFetchCache(rid, providerId, status, fetched, model){
+    async writeFetchCache(rid, providerId, status, fetched, model){
         if(!this.db || typeof this.db.doQuery !== 'function') return;
         try {
             let body = (fetched && fetched.body !== null && fetched.body !== undefined)
@@ -451,16 +451,16 @@ class AttestationRound {
 
     // Bound growth on the same window `seen` uses; a finalized or expired round
     // has no further use for its recorded fetch.
-    async _evictStaleFetchCache(){
+    async evictStaleFetchCache(){
         if(!this.db || typeof this.db.doQuery !== 'function') return;
         try {
-            await this.db.deleteAttestationFetchCache(this._cacheCutoffEpochSec());
+            await this.db.deleteAttestationFetchCache(this.cacheCutoffEpochSec());
         } catch (e) {
             console.warn('AttestationRound: fetch-cache eviction failed:', e && e.message ? e.message : e);
         }
     }
 
-    _evictStaleRounds(){
+    evictStaleRounds(){
         let cutoff = Date.now() - this.roundsTtlMs;
         for(let [rid, st] of this.rounds){
             if(st && typeof st.proposedAt === 'number' && st.proposedAt < cutoff){
@@ -469,7 +469,7 @@ class AttestationRound {
         }
     }
 
-    _evictStaleLeaderSilence(){
+    evictStaleLeaderSilence(){
         let cutoff = Date.now() - this.roundsTtlMs;
         for(let [rid, rec] of this.leaderSilence){
             if(rec && typeof rec.updatedAt === 'number' && rec.updatedAt < cutoff){
@@ -510,7 +510,7 @@ class AttestationRound {
     //
     // `latestBlock` is the poll's indexer tip and `step` the ladder step already
     // derived from it. Returns { index, pubkey } for the slot the round should run.
-    _resolveLeader(rid, responsible, step, latestBlock, requestBlock){
+    resolveLeader(rid, responsible, step, latestBlock, requestBlock){
         let pubkeyOf = (i) => (responsible[i] ? responsible[i].pubkey : (responsible[0] ? responsible[0].pubkey : null));
 
         if(!lss.isLeaderSilenceSkipActive(requestBlock, this.hub ? this.hub.network : undefined)){
@@ -692,7 +692,7 @@ class AttestationRound {
         let step = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
             ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmationsFor(snapshotBlk), this.leaderRotationBlocks)
             : 0;
-        let leader       = this._resolveLeader(rid, responsible, step, latestBlock, snapshotBlk);
+        let leader       = this.resolveLeader(rid, responsible, step, latestBlock, snapshotBlk);
         let leaderIdx    = leader.index;
         let leaderPubkey = leader.pubkey;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
@@ -831,7 +831,7 @@ class AttestationRound {
         // restart behave exactly like no restart. Cache rows age out on the same
         // retryAfterMs window as `seen`, so a genuinely timed-out round still
         // re-fetches rather than replaying a stale answer forever.
-        let cached    = await this._readFetchCache(rid);
+        let cached    = await this.readFetchCache(rid);
         let fetched   = null;
         let myStatus  = 'ok';
         if(cached){
@@ -868,7 +868,7 @@ class AttestationRound {
             // Record the COMPLETED outcome only. A claim written before the call
             // would let a crash mid-fetch skip a round this hub never finished,
             // trading bounded duplicate spend for a liveness hole.
-            await this._writeFetchCache(rid, providerId, myStatus, fetched, pinnedFetchModel);
+            await this.writeFetchCache(rid, providerId, myStatus, fetched, pinnedFetchModel);
         }
 
         let roundState = {

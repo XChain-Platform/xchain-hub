@@ -166,7 +166,7 @@ describe('AttestationConsensus', function () {
             // Winner gets established (provider.agree() resolved); drain replays
             // the buffered COMMIT so the peer's vote now counts toward quorum.
             pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus._drainEarlyCommits(RID);
+            consensus.drainEarlyCommits(RID);
 
             expect(pending.commits.has(PEER)).to.equal(true);
             expect(consensus.earlyCommits.has(RID)).to.equal(false);
@@ -306,13 +306,13 @@ describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
     it('_signCanonical returns null when there is no identity', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = null;
-        expect(c._signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
+        expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     });
 
     it('_signCanonical returns null (not throw) when identity.sign throws', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = { sign: () => { throw new Error('hsm offline'); } };
-        expect(c._signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
+        expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     });
 
     it('_signCanonical produces a verifiable signature with a real identity', function () {
@@ -320,7 +320,7 @@ describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
         let hub = createMockHub({ identity: id });
         let c = new AttestationConsensus(hub, makeProviderRegistry());
         let body = Buffer.from('b');
-        let sig = c._signCanonical('rid', 'p', body, 'ok', 'm');
+        let sig = c.signCanonical('rid', 'p', body, 'ok', 'm');
         let canonical = buildCanonical('rid', 'p', body, 'ok', 'm').toString('utf8');
         expect(ValidatorIdentity.verify(canonical, sig, pub(id))).to.equal(true);
     });
@@ -393,11 +393,11 @@ describe('AttestationConsensus: nonOkPublished ring buffer', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.finalizedMax      = 1;   // would evict immediately under the old sizing
         c.nonOkPublishedMax = 3;
-        c._recordNonOkPublished('a', 'provider_error');
-        c._recordNonOkPublished('b', 'no_quorum');
-        c._recordNonOkPublished('c', 'provider_error');
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('b', 'no_quorum');
+        c.recordNonOkPublished('c', 'provider_error');
         expect(c.nonOkPublished.size).to.equal(3);   // finalizedMax=1 no longer evicts
-        c._recordNonOkPublished('d', 'provider_error');
+        c.recordNonOkPublished('d', 'provider_error');
         expect(c.nonOkPublished.has('a')).to.equal(false);
         expect(c.nonOkPublished.has('d')).to.equal(true);
         expect(c._nonOkPublishedOrder).to.deep.equal(['b', 'c', 'd']);
@@ -405,8 +405,8 @@ describe('AttestationConsensus: nonOkPublished ring buffer', function () {
 
     it('accumulates statuses per rid without growing the ring', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
-        c._recordNonOkPublished('a', 'provider_error');
-        c._recordNonOkPublished('a', 'no_quorum');
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('a', 'no_quorum');
         expect(c._nonOkPublishedOrder).to.deep.equal(['a']);
         expect(c.nonOkPublished.get('a').has('provider_error')).to.equal(true);
         expect(c.nonOkPublished.get('a').has('no_quorum')).to.equal(true);
@@ -416,8 +416,8 @@ describe('AttestationConsensus: nonOkPublished ring buffer', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         let warn = sinon.stub(console, 'warn');
         c.nonOkPublishedMax = 1;
-        c._recordNonOkPublished('a', 'provider_error');
-        c._recordNonOkPublished('b', 'provider_error');   // evicts 'a', still pending
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('b', 'provider_error');   // evicts 'a', still pending
         expect(c.nonOkEvictedWhilePendingCount).to.equal(1);
         expect(warn.getCalls().some(call => /still-pending request a/.test(call.args[0]))).to.equal(true);
         expect(warn.getCalls().some(call => /ATTESTATION_NONOK_PUBLISHED_MAX/.test(call.args[0]))).to.equal(true);
@@ -427,9 +427,9 @@ describe('AttestationConsensus: nonOkPublished ring buffer', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         sinon.stub(console, 'warn');
         c.nonOkPublishedMax = 1;
-        c._recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('a', 'provider_error');
         c.markFinalized('a');                            // retry round later succeeded
-        c._recordNonOkPublished('b', 'provider_error');   // evicts 'a', now terminal
+        c.recordNonOkPublished('b', 'provider_error');   // evicts 'a', now terminal
         expect(c.nonOkEvictedWhilePendingCount).to.equal(0);
     });
 });
@@ -1567,12 +1567,12 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
     });
 
     it('_maybeAdvanceFromProposals returns for an unknown request', async function () {
-        await c._maybeAdvanceFromProposals('does-not-exist'); // !pending guard
+        await c.maybeAdvanceFromProposals('does-not-exist'); // !pending guard
     });
 
     it('_maybeAdvanceFromProposals returns when a winner already exists', async function () {
         c.pending.set('z', { finalized: false, winner: { body: Buffer.from('x'), meta: '' } });
-        await c._maybeAdvanceFromProposals('z'); // winner guard
+        await c.maybeAdvanceFromProposals('z'); // winner guard
     });
 
     it('_checkPrepareQuorum returns early when no winner is set', function () {
@@ -1598,7 +1598,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
 
     it('_maybeAdvanceFromProposals returns when an agree() is already in flight', async function () {
         c.pending.set('z', { finalized: false, winner: null, _agreeing: true });
-        await c._maybeAdvanceFromProposals('z'); // _agreeing guard
+        await c.maybeAdvanceFromProposals('z'); // _agreeing guard
     });
 
     it('abandons the round if it is pruned while agree() is awaiting', async function () {
@@ -2319,7 +2319,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         // Governance lowers the cap mid-round; the registry now reports 4 bytes.
         reg.getDef.returns({ max_response_bytes: 4, consensus_strategy: 'byte_equality' });
         // Control: a live read would now reject this body outright.
-        expect(c._maxBodyB64Length('http_get')).to.be.below(BODY.toString('base64').length);
+        expect(c.maxBodyB64Length('http_get')).to.be.below(BODY.toString('base64').length);
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
         // Accepted under the pinned cap: the live read would have rejected a body
@@ -2330,7 +2330,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
     // item 2640: a torn-down rid drops (not parks) late envelopes, and a fresh
     // round reopening clears the mark so its own early messages buffer again.
     it('suppresses buffering for a torn-down rid until a fresh round reopens (2640)', async function () {
-        c._markTornDown(RID);
+        c.markTornDown(RID);
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         expect(c.earlyMessages.has(RID)).to.equal(false);  // dropped, not parked
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
@@ -2355,8 +2355,8 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
     // `envelope` this method never takes, so a second teardown for one rid threw
     // ReferenceError out of the bare round-timeout timer (an uncaught hub fault).
     it('_markTornDown is idempotent and does not throw when the rid is already marked (6489)', function () {
-        c._markTornDown(RID);
-        expect(() => c._markTornDown(RID)).to.not.throw();
+        c.markTornDown(RID);
+        expect(() => c.markTornDown(RID)).to.not.throw();
         expect(c.tornDown.has(RID)).to.equal(true);
         expect(c._tornDownOrder.filter(r => r === RID).length).to.equal(1);
     });

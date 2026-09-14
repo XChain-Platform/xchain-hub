@@ -192,7 +192,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(true);
             const pub = Object.assign(Object.create(AttestationBatchPublisher.prototype),
                 { hub: { capabilitySnapshot: cap }, network: NETWORK });
-            const out = await pub._resolveAttestationSet(BLOCK);
+            const out = await pub.resolveAttestationSet(BLOCK);
 
             expect(out).to.equal(null);            // null is this rail's fail-closed value
         });
@@ -201,7 +201,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(false);
             const pub = Object.assign(Object.create(AttestationBatchPublisher.prototype),
                 { hub: { capabilitySnapshot: cap }, network: NETWORK });
-            const out = await pub._resolveAttestationSet(BLOCK);
+            const out = await pub.resolveAttestationSet(BLOCK);
 
             expect(out).to.have.lengthOf(2);
         });

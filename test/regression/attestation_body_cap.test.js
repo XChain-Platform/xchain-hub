@@ -87,12 +87,12 @@ describe('Regression: Attestation body_b64 size cap', function () {
 
     describe('_maxBodyB64Length()', function () {
         it('derives the cap from max_response_bytes ×1.4 @regression-p1', function () {
-            expect(consensus._maxBodyB64Length(PROVIDER_ID)).to.equal(MAX_B64);
+            expect(consensus.maxBodyB64Length(PROVIDER_ID)).to.equal(MAX_B64);
         });
 
         it('falls back to a 64 KB cap when the provider def is missing @regression-p1', function () {
             consensus.providerRegistry.getDef.returns(null);
-            expect(consensus._maxBodyB64Length('unknown')).to.equal(Math.ceil(65536 * 1.4));
+            expect(consensus.maxBodyB64Length('unknown')).to.equal(Math.ceil(65536 * 1.4));
         });
     });
 

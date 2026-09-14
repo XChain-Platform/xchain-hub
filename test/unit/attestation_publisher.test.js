@@ -554,7 +554,7 @@ describe('AttestationPublisher: queue I/O', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
         pub._enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
-        pub._removeFromQueue(new Set(['aa'.repeat(32), 'bb'.repeat(32)]));  // lowercase drop set
+        pub.removeFromQueue(new Set(['aa'.repeat(32), 'bb'.repeat(32)]));  // lowercase drop set
         const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('cc'.repeat(32));
@@ -562,13 +562,13 @@ describe('AttestationPublisher: queue I/O', function () {
 
     it('_removeFromQueue is a no-op for empty drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._removeFromQueue(new Set());
+        pub.removeFromQueue(new Set());
         expect(pub.readQueue()).to.have.length(1);
     });
 
     it('_removeFromQueue is a no-op for null drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._removeFromQueue(null);
+        pub.removeFromQueue(null);
         expect(pub.readQueue()).to.have.length(1);
     });
 
@@ -603,13 +603,13 @@ describe('AttestationPublisher: _getBroadcaster', function () {
         const pub = makePublisher();
         const fn = sinon.stub().resolves({ txid: 'abc' });
         pub.setBroadcastHook(fn);
-        const broadcaster = pub._getBroadcaster();
+        const broadcaster = pub.getBroadcaster();
         expect(typeof broadcaster).to.equal('function');
     });
 
     it('returns null when no hooks and no encoder are configured', function () {
         const pub = makePublisher();
-        expect(pub._getBroadcaster()).to.be.null;
+        expect(pub.getBroadcaster()).to.be.null;
     });
 
     it('returns the _defaultBroadcast pipeline when encoder + walletSignFn + address + pubkey are all set', function () {
@@ -618,7 +618,7 @@ describe('AttestationPublisher: _getBroadcaster', function () {
         pub.setWalletSignHook(sinon.stub().resolves('txhex'));
         pub.btcAddress    = '1TestAddress';
         pub.btcPubkeyHex  = 'ab'.repeat(33);
-        const broadcaster = pub._getBroadcaster();
+        const broadcaster = pub.getBroadcaster();
         expect(typeof broadcaster).to.equal('function');
     });
 
@@ -626,14 +626,14 @@ describe('AttestationPublisher: _getBroadcaster', function () {
         const pub = makePublisher();
         pub.setEncoder({ getUtxos: sinon.stub() });
         // No walletSignFn, no address
-        expect(pub._getBroadcaster()).to.be.null;
+        expect(pub.getBroadcaster()).to.be.null;
     });
 
     it('broadcastFn path: broadcaster calls broadcastFn with payload and event', async function () {
         const pub = makePublisher();
         const fn = sinon.stub().resolves({ txid: 'xyz' });
         pub.setBroadcastHook(fn);
-        const broadcaster = pub._getBroadcaster();
+        const broadcaster = pub.getBroadcaster();
         const result = await broadcaster('wire-payload', { requestId: 'test' });
         expect(fn.calledWith('wire-payload', { requestId: 'test' })).to.equal(true);
         expect(result.txid).to.equal('xyz');
@@ -2186,7 +2186,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         const pub = makePublisher(MY_PUB, { db, p2pConfig: { [ENV_KEY]: '600000' } });
         fs.writeFileSync(pub.queuePath, '');
 
-        expect(await pub._prunePublishedRequests()).to.equal(2);
+        expect(await pub.prunePublishedRequests()).to.equal(2);
 
         const del = deletes(db);
         expect(del.length, 'no DELETE was issued').to.equal(1);
@@ -2207,7 +2207,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         const pub = makePublisher(MY_PUB, { db, p2pConfig: { [ENV_KEY]: '600000' } });
         writeQueue(pub.queuePath, [{ ts: Date.now(), requestId: RID_B.toUpperCase(), wire: 'ATTEST|1|x' }]);
 
-        await pub._prunePublishedRequests();
+        await pub.prunePublishedRequests();
 
         const del = deletes(db)[0];
         expect(del.sql).to.match(/request_id\s+NOT\s+IN\s*\(\?\)/i);
@@ -2224,7 +2224,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         for (let i = 0; i < 5001; i++) many.push({ ts: Date.now(), requestId: 'ff'.repeat(31) + (i % 100).toString(16).padStart(2, '0'), wire: 'w' });
         writeQueue(pub.queuePath, many);
 
-        expect(await pub._prunePublishedRequests()).to.equal(0);
+        expect(await pub.prunePublishedRequests()).to.equal(0);
         expect(deletes(db).length, 'a queue that deep is a drain failure, not a retention problem').to.equal(0);
     });
 
@@ -2240,7 +2240,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         });
         fs.writeFileSync(pub.queuePath, '');
 
-        await pub._prunePublishedRequests();
+        await pub.prunePublishedRequests();
         expect(deletes(db)[0].params[0]).to.equal(240000);
 
         // Governance widening the window widens the floor with it.
@@ -2251,7 +2251,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
             providerRegistry: { maxDeadlineWindowBlocks: () => ({ blocks: 1000, providerId: 'slow_provider' }) }
         });
         fs.writeFileSync(pub2.queuePath, '');
-        await pub2._prunePublishedRequests();
+        await pub2.prunePublishedRequests();
         expect(deletes(db2)[0].params[0]).to.equal(2400000);
     });
 
@@ -2263,7 +2263,7 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
             providerRegistry: { maxDeadlineWindowBlocks: () => ({ blocks: 100, providerId: 'http_get' }) }
         });
         fs.writeFileSync(pub.queuePath, '');
-        await pub._prunePublishedRequests();
+        await pub.prunePublishedRequests();
         expect(deletes(db)[0].params[0]).to.equal(7776000);
     });
 
@@ -2271,19 +2271,19 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         const dbOff = mkDb(1);
         const off   = makePublisher(MY_PUB, { db: dbOff, p2pConfig: { [ENV_KEY]: '0' } });
         fs.writeFileSync(off.queuePath, '');
-        expect(await off._prunePublishedRequests()).to.equal(0);
+        expect(await off.prunePublishedRequests()).to.equal(0);
         expect(deletes(dbOff).length).to.equal(0);
 
         const noDb = makePublisher(MY_PUB, { p2pConfig: { [ENV_KEY]: '600000' } });
         fs.writeFileSync(noDb.queuePath, '');
-        expect(await noDb._prunePublishedRequests()).to.equal(0);
+        expect(await noDb.prunePublishedRequests()).to.equal(0);
 
         // No registry: the floor contributes nothing and the configured window stands.
         const dbNoReg = mkDb(0);
         const noReg   = makePublisher(MY_PUB, { db: dbNoReg, p2pConfig: { [ENV_KEY]: '600000' } });
         fs.writeFileSync(noReg.queuePath, '');
-        expect(noReg._publishedRetentionFloorMs()).to.equal(0);
-        await noReg._prunePublishedRequests();
+        expect(noReg.publishedRetentionFloorMs()).to.equal(0);
+        await noReg.prunePublishedRequests();
         expect(deletes(dbNoReg)[0].params[0]).to.equal(600);
     });
 

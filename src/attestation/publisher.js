@@ -447,7 +447,7 @@ class AttestationPublisher {
             return;
         }
 
-        let broadcaster = this._getBroadcaster();
+        let broadcaster = this.getBroadcaster();
         if (!broadcaster){
             console.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '...; entry queued for later replay');
             return;
@@ -456,7 +456,7 @@ class AttestationPublisher {
         // this process lifetime (whose prior dequeue rewrite failed, leaving it on the
         // durable queue) must not spend a second BTC fee. The stale queue entry is
         // dropped by the sweep's matching guard.
-        if (this._isPublishedInProcess(rid, responseStatus)){
+        if (this.isPublishedInProcess(rid, responseStatus)){
             console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + responseStatus + ') already broadcast this ' +
                          'process lifetime; skipping duplicate live broadcast');
             return;
@@ -466,7 +466,7 @@ class AttestationPublisher {
         // after the spend reservation below. Either non-send answer leaves the entry on
         // the WAL for the sweep, whose matching gate drops it: the same disposition the
         // in-process check above already gives a duplicate.
-        if (await this._durableSendGate(rid, responseStatus) !== 'send') return;
+        if (await this.durableSendGate(rid, responseStatus) !== 'send') return;
         // Per-window BTC spend ceiling. A tripped ceiling is not a
         // failure: leave the entry on the WAL so the sweep publishes it in a later
         // window; do not spend now.
@@ -484,7 +484,7 @@ class AttestationPublisher {
         // The send is now committed to, so the intent is durable from here
         // and not one line earlier: everything above this point can still decline to
         // send, and an intent row for a never-sent request reads as a crash-mid-send.
-        if (!await this._armPublishIntent(rid, responseStatus)){
+        if (!await this.armPublishIntent(rid, responseStatus)){
             this.spendGuard.release(spendToken);
             return;
         }
@@ -497,7 +497,7 @@ class AttestationPublisher {
             this._recordSpend(rid, result && result.txid, 'live');   // durable spend audit
             this._publishedRequests.mark(this._publicationKey(rid, responseStatus));
             await this.markPublished(rid, result && result.txid, responseStatus);   // restart-surviving marker
-            this._removeFromQueue(new Set([rid]));
+            this.removeFromQueue(new Set([rid]));
         } catch (e) {
             this._broadcastFailed++;
             // Classify BEFORE settling the reservation: "the send failed" and "the send
@@ -520,7 +520,7 @@ class AttestationPublisher {
                 // withdrawn: leaving it would quarantine an ordinary RPC rejection at
                 // the next restart.
                 this.spendGuard.release(spendToken);
-                await this._clearPublishIntent(rid, responseStatus);
+                await this.clearPublishIntent(rid, responseStatus);
                 console.error('AttestationPublisher: broadcast failed for %s... (will retry via sweep):', rid.substring(0,16), e);
             }
         }
@@ -589,7 +589,7 @@ class AttestationPublisher {
     // Null is NOT "nothing published": it is a row written before `sent_statuses`
     // existed, whose outcome is unrecorded, and every caller reads it as the whole
     // request being spoken for. That keeps an upgraded hub exactly as closed as it was.
-    _parseSentStatuses(value){
+    parseSentStatuses(value){
         if (value === null || value === undefined) return null;
         let list = String(value).split(',').map(s => s.trim()).filter(s => s.length > 0);
         return list.length > 0 ? new Set(list) : null;
@@ -597,7 +597,7 @@ class AttestationPublisher {
 
     // In-process half of the guard, over both key shapes: this publication, or a whole
     // request held by a pre-upgrade marker row.
-    _isPublishedInProcess(rid, status){
+    isPublishedInProcess(rid, status){
         return this._publishedRequests.has(rid)
             || this._publishedRequests.has(this._publicationKey(rid, status));
     }
@@ -669,7 +669,7 @@ class AttestationPublisher {
             let rid   = String(r.request_id).toLowerCase();
             let armed = (r.intent_status === null || r.intent_status === undefined) ? null : String(r.intent_status);
             if (r.sent_at !== null && r.sent_at !== undefined){
-                let sent = this._parseSentStatuses(r.sent_statuses);
+                let sent = this.parseSentStatuses(r.sent_statuses);
                 if (sent === null){
                     this._publishedRequests.mark(rid);
                 } else {
@@ -701,7 +701,7 @@ class AttestationPublisher {
     // completed publication is never removed by a late or misordered call. Logged,
     // never thrown: leaving the intent is the fail-closed direction, so a failure here
     // only costs an operator replay.
-    async _clearPublishIntent(rid, status){
+    async clearPublishIntent(rid, status){
         let db = this._db();
         if (!db) return;
         try {
@@ -735,7 +735,7 @@ class AttestationPublisher {
     //
     // Returns 0 when no registry or no usable window is available, in which case the
     // caller falls back to the queue exclusion plus the configured window alone.
-    _publishedRetentionFloorMs(){
+    publishedRetentionFloorMs(){
         let registry = (this.hub && this.hub.providerRegistry) ? this.hub.providerRegistry : null;
         if (!registry || typeof registry.maxDeadlineWindowBlocks !== 'function') return 0;
         let max = registry.maxDeadlineWindowBlocks();
@@ -768,12 +768,12 @@ class AttestationPublisher {
     //
     // Returns the number of rows deleted. Throws on a DB error; the caller decides
     // (the sweep path treats a retention failure as non-fatal).
-    async _prunePublishedRequests(){
+    async prunePublishedRequests(){
         let db = this._db();
         if (!db) return 0;
         if (!this.publishedRequestsRetentionMs || this.publishedRequestsRetentionMs <= 0) return 0;
 
-        let windowMs = Math.max(this.publishedRequestsRetentionMs, this._publishedRetentionFloorMs());
+        let windowMs = Math.max(this.publishedRequestsRetentionMs, this.publishedRetentionFloorMs());
 
         // Invariant 2. Best-effort read; an unreadable queue returns [] and the window
         // applies on its own (an unreadable queue file is already loud elsewhere).
@@ -812,11 +812,11 @@ class AttestationPublisher {
     // pass that has already spent BTC. Skipped when the publisher is disabled (a paused
     // publisher touches nothing) and when nothing has been published since the last
     // sweep, since the table only grows when this hub spends.
-    _sweepPublishedRequestRetention(){
+    sweepPublishedRequestRetention(){
         if (!this.enabled || !this._markersAddedSinceSweep) return;
         if (!this._db() || !this.publishedRequestsRetentionMs) return;
         this._markersAddedSinceSweep = false;
-        this._retentionSweep = this._prunePublishedRequests()
+        this._retentionSweep = this.prunePublishedRequests()
             .catch((e) => {
                 console.warn('AttestationPublisher: published-requests retention sweep failed ' +
                     '(the marker table keeps growing until it succeeds): ', e);
@@ -841,7 +841,7 @@ class AttestationPublisher {
     //             retry on a later sweep
     // Marking the in-process guard on a 'sent' answer keeps the rest of the pass
     // consistent with a same-process duplicate.
-    async _durableSendGate(rid, status){
+    async durableSendGate(rid, status){
         let st = String(status || 'ok');
         if (this._quarantinedRequests.has(rid) || this._quarantinedRequests.has(this._publicationKey(rid, st))){
             console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') is quarantined (publish intent ' +
@@ -862,7 +862,7 @@ class AttestationPublisher {
             // published is unknown and it holds every status. An 'ok' entry is terminal
             // for every status too: the request is answered, and anything further is a
             // second paid response to a question already settled.
-            let sent = this._parseSentStatuses(marker.sent_statuses);
+            let sent = this.parseSentStatuses(marker.sent_statuses);
             if (sent === null || sent.has(st) || sent.has('ok')){
                 console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') has a durable sent marker (txid ' +
                     (marker.txid || '<none>') + ', published ' + (sent === null ? '<unrecorded>' : Array.from(sent).join(',')) +
@@ -881,7 +881,7 @@ class AttestationPublisher {
     // the intent cannot be persisted, which is a fail-closed defer: the caller hands the
     // reservation back and leaves the entry queued rather than spending a fee it could
     // not record.
-    async _armPublishIntent(rid, status){
+    async armPublishIntent(rid, status){
         try {
             await this.recordPublishIntent(rid, status);
             return true;
@@ -931,7 +931,7 @@ class AttestationPublisher {
     // mid-sweep) is never clobbered. Returns the rewrite outcome so the at-most-once
     // guard is only reset when the durable queue is proven to no longer hold any
     // published entry.
-    _removeFromQueue(dropSet){
+    removeFromQueue(dropSet){
         if (!dropSet || dropSet.size === 0) return true;
         let remaining = this.readQueue().filter(e => !dropSet.has(String(e.requestId).toLowerCase()));
         let rewritten = this.rewriteQueue(remaining);
@@ -951,7 +951,7 @@ class AttestationPublisher {
     }
 
     // Choose the active broadcaster, or null when none is configured.
-    _getBroadcaster(){
+    getBroadcaster(){
         if (this.broadcastFn) return (payload, ev) => this.broadcastFn(payload, ev);
         if (this.encoder && this.walletSignFn && this.btcAddress && this.btcPubkeyHex){
             return (payload) => this._defaultBroadcast(payload);
@@ -1104,7 +1104,7 @@ class AttestationPublisher {
             // leaves an EMPTY queue, and the inner pass returns before its body on an
             // empty queue), and after the overlap guard releases so a slow DELETE can
             // never make the next tick think a sweep is still in flight.
-            this._sweepPublishedRequestRetention();
+            this.sweepPublishedRequestRetention();
         }
     }
 
@@ -1131,7 +1131,7 @@ class AttestationPublisher {
             return;
         }
 
-        let broadcaster = this._getBroadcaster();
+        let broadcaster = this.getBroadcaster();
         let now  = Date.now();
         let drop = new Set();     // request IDs to remove (landed/expired or re-broadcast)
         let replayed = 0;
@@ -1146,7 +1146,7 @@ class AttestationPublisher {
             // lifetime, it is only still on the queue because a prior tick's rewrite
             // failed to truncate it. Re-broadcasting would spend a BTC fee twice, so
             // drop the stale entry without re-sending (mirrors OraclePublisher).
-            if (this._isPublishedInProcess(rid, entryStatus)){
+            if (this.isPublishedInProcess(rid, entryStatus)){
                 console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + entryStatus + ') already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
                 drop.add(rid);
                 continue;
@@ -1210,7 +1210,7 @@ class AttestationPublisher {
             // response the PREVIOUS process broadcast is still pending here (accepted
             // but unmined), and both in-process guards died with that process, so
             // without a durable marker this sweep pays a second BTC fee for it.
-            let gate = await this._durableSendGate(rid, entryStatus);
+            let gate = await this.durableSendGate(rid, entryStatus);
             if (gate === 'sent'){ drop.add(rid); continue; }
             if (gate === 'defer') continue;   // retained, retried on a later sweep
 
@@ -1228,7 +1228,7 @@ class AttestationPublisher {
             // Intent goes durable only here, past every no-send exit above
             // (the ceiling trip especially: it retains the entry for a later window, and
             // an intent row would make that later window quarantine it instead).
-            if (!await this._armPublishIntent(rid, entryStatus)){
+            if (!await this.armPublishIntent(rid, entryStatus)){
                 this.spendGuard.release(spendToken);
                 continue;   // retained, retried on a later sweep
             }
@@ -1263,14 +1263,14 @@ class AttestationPublisher {
                     // so the retry this line promises is not cancelled by a quarantine
                     // after a restart.
                     this.spendGuard.release(spendToken);
-                    await this._clearPublishIntent(rid, entryStatus);
+                    await this.clearPublishIntent(rid, entryStatus);
                     console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
                 }
                 // keep; not added to drop
             }
         }
 
-        if (drop.size > 0) this._removeFromQueue(drop);
+        if (drop.size > 0) this.removeFromQueue(drop);
         if (replayed > 0) console.log('AttestationPublisher: replay/failover re-broadcast ' + replayed + ' finalized response(s)');
     }
 
