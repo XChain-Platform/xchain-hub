@@ -84,6 +84,55 @@ function computeEvidenceHash(rows) {
     return crypto.createHash('sha256').update(keys.join('\n')).digest('hex');
 }
 
+// Mark the voted members of the pending evidence set with the penalty's status. Returns the
+// number of rows marked, or null for a 'dismiss' whose voted set this hub does not hold
+// (nothing executes then).
+async function sweepVotedEvidence(governance, ev, parsed, penalty, rows) {
+    let pk = parsed.validatorPubkey;
+    let voted = governance.matchVotedRows(rows, parsed.evidenceHash);
+
+    let marked = 0;
+    let newStatus = penalty === 'suspend' ? 'approved' : 'rejected';
+    if (voted) {
+        if (voted.length < rows.length) {
+            logger.warn('SlashGovernance: ' + (rows.length - voted.length) + ' pending row(s) for validator ' +
+                pk.substring(0, 16) + '... were detected after proposal ' + ev.proposalId +
+                ' was created; leaving them pending (not covered by the voted evidence set)');
+        }
+        let res = await governance.db.updateSlashProposalsStatusByIds(newStatus, pk, voted.map(r => r.id));
+        marked = (res && res.affectedRows != null) ? res.affectedRows : 0;
+    } else {
+        // No local subset hashes to the voted evidence set: this hub's
+        // evidence drifted from what the electorate audited. Fail closed
+        // on the evidence rows - they stay 'pending' for operator
+        // reconciliation / a fresh proposal - instead of blessing an
+        // unaudited sweep. For 'dismiss' that means nothing executes.
+        logger.warn('SlashGovernance: no local pending-evidence subset matches voted hash ' +
+            parsed.evidenceHash + ' for validator ' + pk.substring(0, 16) +
+            '... (proposal ' + ev.proposalId + '); leaving all ' + rows.length +
+            ' pending row(s) untouched' +
+            (penalty === 'suspend' ? ' (validator suspension still executes on electorate authority)' : ''));
+        if (penalty === 'dismiss') {
+            return null;
+        }
+    }
+    return marked;
+}
+
+// Suspend the validator and push the shrunken active set out. Returns whether a row changed.
+async function suspendValidator(governance, pk) {
+    let vres = await governance.db.updateValidatorBySigningPubkey(pk);
+    let suspended = !!(vres && vres.affectedRows > 0);
+
+    // Push the shrunken active set into the transport registry and every
+    // running PBFT engine, mirroring deregisterValidator. Without this
+    // the suspended validator stays in every in-memory validatorSet
+    // until restart and the penalty is a DB row, not an exclusion.
+    if (typeof governance.hub.loadValidatorPubkeys === 'function') await governance.hub.loadValidatorPubkeys();
+    if (typeof governance.hub.propagateValidatorSet === 'function') await governance.hub.propagateValidatorSet();
+    return suspended;
+}
+
 class SlashGovernance {
 
     constructor(hub) {
@@ -191,46 +240,12 @@ class SlashGovernance {
                 ' against evidence rows (' + e.message + ')');
             return null;
         }
-        let voted = this.matchVotedRows(rows, parsed.evidenceHash);
-
-        let marked = 0;
+        let marked = await sweepVotedEvidence(this, ev, parsed, penalty, rows);
+        if (marked === null) return { validatorPubkey: pk, penalty, evidenceRowsUpdated: 0, suspended: false };
         let newStatus = penalty === 'suspend' ? 'approved' : 'rejected';
-        if (voted) {
-            if (voted.length < rows.length) {
-                logger.warn('SlashGovernance: ' + (rows.length - voted.length) + ' pending row(s) for validator ' +
-                    pk.substring(0, 16) + '... were detected after proposal ' + ev.proposalId +
-                    ' was created; leaving them pending (not covered by the voted evidence set)');
-            }
-            let res = await this.db.updateSlashProposalsStatusByIds(newStatus, pk, voted.map(r => r.id));
-            marked = (res && res.affectedRows != null) ? res.affectedRows : 0;
-        } else {
-            // No local subset hashes to the voted evidence set: this hub's
-            // evidence drifted from what the electorate audited. Fail closed
-            // on the evidence rows - they stay 'pending' for operator
-            // reconciliation / a fresh proposal - instead of blessing an
-            // unaudited sweep. For 'dismiss' that means nothing executes.
-            logger.warn('SlashGovernance: no local pending-evidence subset matches voted hash ' +
-                parsed.evidenceHash + ' for validator ' + pk.substring(0, 16) +
-                '... (proposal ' + ev.proposalId + '); leaving all ' + rows.length +
-                ' pending row(s) untouched' +
-                (penalty === 'suspend' ? ' (validator suspension still executes on electorate authority)' : ''));
-            if (penalty === 'dismiss') {
-                return { validatorPubkey: pk, penalty, evidenceRowsUpdated: 0, suspended: false };
-            }
-        }
 
         let suspended = false;
-        if (penalty === 'suspend') {
-            let vres = await this.db.updateValidatorBySigningPubkey(pk);
-            suspended = !!(vres && vres.affectedRows > 0);
-
-            // Push the shrunken active set into the transport registry and every
-            // running PBFT engine, mirroring deregisterValidator. Without this
-            // the suspended validator stays in every in-memory validatorSet
-            // until restart and the penalty is a DB row, not an exclusion.
-            if (typeof this.hub.loadValidatorPubkeys === 'function') await this.hub.loadValidatorPubkeys();
-            if (typeof this.hub.propagateValidatorSet === 'function') await this.hub.propagateValidatorSet();
-        }
+        if (penalty === 'suspend') suspended = await suspendValidator(this, pk);
 
         logger.info('SlashGovernance: executed penalty "' + penalty + '" on validator ' +
             pk.substring(0, 16) + '...: ' + marked + ' evidence row(s) -> ' + newStatus +
