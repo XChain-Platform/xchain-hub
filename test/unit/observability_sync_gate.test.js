@@ -213,8 +213,12 @@ describe('observability shim: the vendored-copy parity gate', function () {
     describe('the ported suite headers describe the mechanism that exists', function () {
 
         // Skips per consumer when the sibling is absent, the same way every other
-        // cross-repo guard here does; test/unit/sibling-coverage.test.js is what
+        // cross-repo guard here does; test/unit/sibling_coverage.test.js is what
         // reports which of them could not run.
+        //
+        // It reports an absent CHECKOUT, not an absent SUITE, so a consumer that
+        // vendors the code and never ported the suite skips here and is reported
+        // nowhere. Read a green run as "every ported suite named the gate".
         for (const consumer of CONSUMERS) {
             it(`${consumer}: its ported observability suite names the real gate`, function () {
                 const suite = path.join(SIBLING_ROOT, consumer, 'test', 'unit', 'observability.test.js');

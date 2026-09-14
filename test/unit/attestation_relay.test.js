@@ -53,7 +53,7 @@ const SIG_A     = '1'.repeat(128);
 const sha256    = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
 // The origin indexer's getpendingattestation_requests row shape, matching the
-// column list xchain-indexer/src/db.js::getPendingAttestationRequests selects.
+// column list xchain-indexer/src/db/index.js::getPendingAttestationRequests selects.
 function originRow(overrides = {}) {
     return {
         action_index:         4242,
@@ -93,7 +93,7 @@ function makeHub(overrides = {}) {
 
 // The home indexer's getrelayedattestation_requests row shape: a BTC request row
 // materialized from an LTC origin, with its terminal response attached. Column names
-// match xchain-indexer/src/db.js::getRelayedAttestationRequests.
+// match xchain-indexer/src/db/index.js::getRelayedAttestationRequests.
 const RESPONSE_BODY = '{"score":42}';
 function homeRelayedRow(overrides = {}) {
     return {

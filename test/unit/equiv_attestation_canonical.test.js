@@ -12,7 +12,7 @@
 // CONSENSUS-CRITICAL: the attestation canonical is a UTF-8 Buffer
 // (request_id || provider_id || sha256(body) || status || meta). The hub
 // (AttestationConsensus._buildCanonical) and the on-chain verifier
-// (indexer actions/attest.js) MUST produce byte-identical bytes. XATTEST has
+// (indexer actions/attest/index.js) MUST produce byte-identical bytes. XATTEST has
 // no view change (VIEW=0); the gate keys on the REQUEST's block (deterministic
 // from request_id, NOT in the content) + network, so both sides flip identically.
 const { expect } = require('chai');

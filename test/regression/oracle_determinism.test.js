@@ -28,6 +28,10 @@
  *      because pairs are sorted before serialization.
  *
  * Pure (no DB / no network) so it runs in CI on every change.
+ *
+ * Determinism here is a consensus property, not a tidiness one: two hubs that
+ * saw the same prices in a different order must sign the same bytes, so any
+ * change that makes aggregation order-dependent is a fork and not a bug.
  */
 
 const assert = require('assert');
@@ -100,7 +104,9 @@ describe('Regression: Oracle determinism', function () {
 
     // The aggregate ARRAY itself is canonical, not just the payload built from
     // it. It is what PROPOSE propagates and what price_snapshots stores, so two
-    // hubs with identical prices produce identical bytes. Consensus-breaking.
+    // hubs with identical prices produce identical bytes. Consensus-breaking,
+    // and it shipped ungated with the pre-launch batch rather than behind an
+    // activation, so there is no height at which the old order is still valid.
     it('aggregate array order is canonical, not arrival-dependent @regression-p0', function () {
         const a = oc._aggregateAll(submissions(ENTRIES, FWD));
         const b = oc._aggregateAll(submissions(ENTRIES, REV));

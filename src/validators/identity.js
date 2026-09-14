@@ -42,10 +42,14 @@ class ValidatorIdentity {
         this.privateKey = crypto.createPrivateKey({ key: pkcs8Der, format: 'der', type: 'pkcs8' });
         this.publicKey  = crypto.createPublicKey(this.privateKey);
 
+        // Extract the raw 32-byte pubkey for its hex representation: strip the
+        // SPKI header, because the DER export is not the form that goes on the wire.
         let spkiDer = this.publicKey.export({ format: 'der', type: 'spki' });
         this.pubkeyHex = spkiDer.subarray(SPKI_ED25519_PREFIX.length).toString('hex');
     }
 
+    // Get the public key as 64 hex chars, the raw form every envelope carries
+    // rather than the DER export it was derived from.
     getPubkeyHex() {
         return this.pubkeyHex;
     }
@@ -73,11 +77,15 @@ class ValidatorIdentity {
         });
     }
 
+    // Sign an envelope, returning the signature hex over the canonical payload
+    // built above, never over the envelope object's own key order.
     signEnvelope(envelope) {
         let payload = ValidatorIdentity.getSignablePayload(envelope);
         return this.sign(payload);
     }
 
+    // Verify a signature against a raw 64-hex-char pubkey. Malformed input is
+    // false rather than a throw, so a peer cannot crash a verifier with junk.
     static verify(payload, sigHex, pubkeyHex) {
         if (!sigHex || !pubkeyHex) return false;
         try {
@@ -89,6 +97,8 @@ class ValidatorIdentity {
         }
     }
 
+    // Verify an envelope's signature against a pubkey hex, rebuilding the
+    // canonical payload first so a reordered envelope cannot verify.
     static verifyEnvelope(envelope, pubkeyHex) {
         let payload = ValidatorIdentity.getSignablePayload(envelope);
         return ValidatorIdentity.verify(payload, envelope.sig, pubkeyHex);
@@ -102,6 +112,8 @@ class ValidatorIdentity {
         return crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
     }
 
+    // Generate a new Ed25519 keypair (utility for key generation), handing back
+    // both halves as raw hex with their DER headers stripped.
     static generate() {
         let { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
         let spkiDer  = publicKey.export({ format: 'der', type: 'spki' });

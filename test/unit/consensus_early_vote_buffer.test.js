@@ -23,6 +23,13 @@
 // to back, and a follower that loses that race never applies the config the
 // federation just finalized. Nothing retries: the leader has already resolved,
 // and the remaining small COMMITs cannot carry the threshold between them.
+//
+// The race is load-dependent, and that is the trap this suite exists to close.
+// On a loaded four-hub weighted federation the round applied on the leader and
+// on none of its followers, each of which saw the leader's COMMIT arrive before
+// its own proposal existed. It does not reproduce on an idle host at all, so
+// for a fortnight it read as gate flakiness rather than as a consensus defect.
+// Anything here that starts failing intermittently is that race, not flake.
 
 const sinon      = require('sinon');
 const { expect } = require('chai');

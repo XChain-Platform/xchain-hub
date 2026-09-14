@@ -23,6 +23,11 @@
  *     - omit a key to enable the provider (the common case)
  *     - set a key to `false` to opt out of a provider on this hub
  *
+ * The verdict is ANY, not ALL: one healthy provider makes the capability
+ * ready, and the unhealthy ones are reported alongside it rather than failing
+ * the hub. A probe that throws is recorded as that provider's failure, so one
+ * broken module cannot take the whole self-test down with it.
+ *
  ********************************************************************/
 
 // Providers this self-test knows how to probe. Each module must export

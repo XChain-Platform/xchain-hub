@@ -16,8 +16,8 @@
  *
  * CONSENSUS-CRITICAL. Three sites rebuild these bytes from carried fields and
  * must agree to the byte: the publishing hub (RollcallRound), the DOGE indexer's
- * parser (actions/rollcall.js) and the BTC indexer's epoch close
- * (rollcall_close.js). Before v1 each site spelled the concatenation inline;
+ * parser (actions/rollcall/index.js) and the BTC indexer's epoch close
+ * (consensus/rollcall_close.js). Before v1 each site spelled the concatenation inline;
  * with a second form that is three places to drift, so the spelling lives here
  * and the sites call it. Frozen by
  * xchain-documentation/protocol/test-vectors/rollcall_canonical.json.

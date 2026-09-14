@@ -81,12 +81,14 @@ const {
  * only the pair's own chains would leave the row unadmitted everywhere else.
  *
  * Per mirrored table: the row fields naming its readers, or EVERY_CHAIN, or a
- * fixed chain list. Sourced from the consuming query in each case:
+ * fixed chain list. Sourced from the consuming query in each case, at the
+ * indexer-relative path shown (no line numbers where the file has since moved,
+ * because a number into a relocated file is worse than no number at all):
  *
- *   cross_chain_matches      indexer db.js:9764, hub_db_sync.js:4196   a_chain OR b_chain
- *   cross_chain_calls        indexer db.js:10254, :10305, :4208        target_chain OR source_chain
- *   bridge_transfers         bridge_settle.js:1021                     dest_chain
- *   policy_snapshots         bridge_settle.js:1045-1050                no chain clause at all
+ *   cross_chain_matches      db/index.js, hub/hub_db_sync.js           a_chain OR b_chain
+ *   cross_chain_calls        db/index.js                               target_chain OR source_chain
+ *   bridge_transfers         consensus/bridge_settle.js                dest_chain
+ *   policy_snapshots         consensus/bridge_settle.js                no chain clause at all
  *   attestation_responses    XChainIndexer.js:1517 call-site guard     BTC only
  *   anchor_reward_attestations  XChainIndexer.js:1495 same guard       BTC only
  *   oracle_prices            XChainIndexer.js:1336                     every chain

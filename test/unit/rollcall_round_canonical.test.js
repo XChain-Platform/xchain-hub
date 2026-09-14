@@ -14,7 +14,7 @@
 // (xchain-documentation/protocol/test-vectors/rollcall_canonical.json).
 //
 // Three independent implementations must agree on these bytes: this hub PRODUCES
-// them, the DOGE indexer's actions/rollcall.js rebuilds the canonical from the
+// them, the DOGE indexer's actions/rollcall/index.js rebuilds the canonical from the
 // carried fields to verify each signature, and the BTC close rebuilds it AGAIN
 // from its own ledger_hash. A drift between any two silently drops real presence
 // proofs and evicts live validators, with no build or test failure anywhere
