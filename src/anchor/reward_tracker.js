@@ -148,40 +148,8 @@ class RewardTracker {
     async recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         let lcPubkey = pubkey.toLowerCase();
 
-        // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
-        // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
-        // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
-        // therefore archive) that SAME frozen amount, or a recovered node (which restores the
-        // archived amount) would diverge from a live node (which derives the frozen amount) when
-        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. The same rule extends to
-        // `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
-        // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
-        // flag-day the legacy operator-tunable amount stands.
-        // Gate on the REWARD's network (the checkpoint row's, threaded from the
-        // publisher), falling back to the hub's own network only for callers that
-        // do not pass one. The build half (StateAnchorPublisher's v4/v5 payload
-        // gate) keys on row.network; re-deriving from this.hub.network here
-        // diverged on a legacy-unscoped hub (network===''): a post-flag-day
-        // mainnet checkpoint was built derivable (indexer credits the frozen
-        // amount on-chain) while this half saw ''->inactive and ALSO credited +
-        // pushed the legacy amount - a double-credit on the COLLECT-spendable
-        // rail.
-        let network   = (rewardNetwork !== undefined && rewardNetwork !== null)
-                      ? String(rewardNetwork)
-                      : ((this.hub && this.hub.network) ? this.hub.network : '');
-        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
-                               ar.isAnchorRewardActive(Number(blockIndex), network);
-        // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
-        // from the ANCHOR v7 publisher attestation. Same frozen ANCHOR_REWARD_AMOUNT and
-        // the same flag-day as the per-chain form it replaces, so a hub that records it
-        // and an indexer that derives it agree on the amount whatever
-        // ANCHOR_REWARD_PER_PUBLISH is set to locally.
-        let isDerivedBundle  = String(rewardType) === 'anchor_bundle' &&
-                               ar.isAnchorRewardActive(Number(blockIndex), network);
-        let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
-                               ar.isArchiveRewardActive(Number(blockIndex), network);
-        let amount = parseFloat((isDerivedChain || isDerivedBundle) ? ar.ANCHOR_REWARD_AMOUNT
-                              : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
+        // The frozen consensus amount at/above its flag-day, else the operator-tunable one.
+        let amount = this.resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
 
@@ -223,6 +191,46 @@ class RewardTracker {
         // indexer itself (per-chain from the ANCHOR v4/v5 publisher attestation, archive
         // from v6), so a hub-side write would be a second, weaker source for a row the
         // chain already determines.
+    }
+
+    // The anchor reward amount to record, as a parsed float (NaN when the configured
+    // legacy amount does not parse). Pure: no DB access, so the locked body keeps its
+    // statement order.
+    resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork) {
+        // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
+        // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
+        // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
+        // therefore archive) that SAME frozen amount, or a recovered node (which restores the
+        // archived amount) would diverge from a live node (which derives the frozen amount) when
+        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. The same rule extends to
+        // `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
+        // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
+        // flag-day the legacy operator-tunable amount stands.
+        // Gate on the REWARD's network (the checkpoint row's, threaded from the
+        // publisher), falling back to the hub's own network only for callers that
+        // do not pass one. The build half (StateAnchorPublisher's v4/v5 payload
+        // gate) keys on row.network; re-deriving from this.hub.network here
+        // diverged on a legacy-unscoped hub (network===''): a post-flag-day
+        // mainnet checkpoint was built derivable (indexer credits the frozen
+        // amount on-chain) while this half saw ''->inactive and ALSO credited +
+        // pushed the legacy amount - a double-credit on the COLLECT-spendable
+        // rail.
+        let network   = (rewardNetwork !== undefined && rewardNetwork !== null)
+                      ? String(rewardNetwork)
+                      : ((this.hub && this.hub.network) ? this.hub.network : '');
+        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
+                               ar.isAnchorRewardActive(Number(blockIndex), network);
+        // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
+        // from the ANCHOR v7 publisher attestation. Same frozen ANCHOR_REWARD_AMOUNT and
+        // the same flag-day as the per-chain form it replaces, so a hub that records it
+        // and an indexer that derives it agree on the amount whatever
+        // ANCHOR_REWARD_PER_PUBLISH is set to locally.
+        let isDerivedBundle  = String(rewardType) === 'anchor_bundle' &&
+                               ar.isAnchorRewardActive(Number(blockIndex), network);
+        let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
+                               ar.isArchiveRewardActive(Number(blockIndex), network);
+        return parseFloat((isDerivedChain || isDerivedBundle) ? ar.ANCHOR_REWARD_AMOUNT
+                         : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,
