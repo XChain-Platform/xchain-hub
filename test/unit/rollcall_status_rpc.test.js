@@ -166,7 +166,7 @@ describe('capabilities/oracle_publish broadcast presence check', function () {
 
     function load(loadSignerHooks) {
         return proxyquire('../../src/capabilities/oracle_publish', {
-            '../lib/signer-loader.js': { loadSignerHooks }
+            '../lib/signer_loader.js': { loadSignerHooks }
         });
     }
 

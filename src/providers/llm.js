@@ -58,8 +58,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { resolveLlmVendorAuth } = require('../lib/hub-credentials');
-const { runClaudePrint } = require('../lib/claude-spawn');
+const { resolveLlmVendorAuth } = require('../lib/hub_credentials');
+const { runClaudePrint } = require('../lib/claude_spawn');
 const SpendGuard = require('../lib/spend_guard.js');
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are

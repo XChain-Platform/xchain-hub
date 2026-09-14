@@ -7,7 +7,7 @@
  *
  **********************************************************************
  *
- * Unit tests: src/lib/signer-loader.js
+ * Unit tests: src/lib/signer_loader.js
  *
  * The loader is the production boot path that wires an operator-supplied
  * signer module (HUB_SIGNER_MODULE) into the DOGE publishers. Policy under
@@ -21,7 +21,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const { loadSignerHooks, applySignerHooks, buildSignerHooks } = require('../../src/lib/signer-loader.js');
+const { loadSignerHooks, applySignerHooks, buildSignerHooks } = require('../../src/lib/signer_loader.js');
 
 // Capture console.warn for the chain-refusal assertions: the warn line IS the
 // contract (an operator's only signal that a publisher is deliberately idle), so

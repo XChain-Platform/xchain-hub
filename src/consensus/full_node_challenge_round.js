@@ -200,7 +200,7 @@ class FullNodeChallengeRound {
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
         // The rail a verdict settles on: built, funded and broadcast on BTC through the
-        // encoder and address above. src/lib/signer-loader.js reads this to decide
+        // encoder and address above. src/lib/signer_loader.js reads this to decide
         // whether the operator's one HUB_SIGNER_MODULE may be wired here; the historical
         // module signs with the DOGE key, and wiring it here spent DOGE fees on payloads
         // BTC then read as an invalid REQUEST_ID.

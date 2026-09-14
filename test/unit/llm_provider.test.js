@@ -83,8 +83,8 @@ function _withEnv(extra, fn){
 // state is fresh. cache-bust the dependency chain too.
 function _reloadProvider(){
     delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
-    delete require.cache[require.resolve('../../src/lib/claude-spawn.js')];
+    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
+    delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
     return require('../../src/providers/llm.js');
 }
 
@@ -630,7 +630,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     afterEach(function () {
         sinon.restore();
         // Restore any patched cache entry
-        const spawnKey = require.resolve('../../src/lib/claude-spawn.js');
+        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
         if (savedCacheEntry !== undefined) {
             require.cache[spawnKey] = savedCacheEntry;
             savedCacheEntry = undefined;
@@ -642,7 +642,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     // Inject a fake claude-spawn module into the cache, reload llm.js so its
     // destructured binding picks up our stub, then restore after the test.
     function reloadWithSpawnStub(spawnResolveValue) {
-        const spawnKey = require.resolve('../../src/lib/claude-spawn.js');
+        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
         savedCacheEntry = require.cache[spawnKey];
 
         const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
@@ -654,7 +654,7 @@ describe('llm provider, fetch via claude_spawn', function () {
 
         // Now reload llm.js; its `const { runClaudePrint }` will pick up our stub
         delete require.cache[require.resolve('../../src/providers/llm.js')];
-        delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
+        delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
         const llm = require('../../src/providers/llm.js');
         return { llm, stub: fakeRunClaudePrint };
     }
@@ -1741,7 +1741,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
     afterEach(function () {
         sinon.restore();
-        const credsKey = require.resolve('../../src/lib/hub-credentials.js');
+        const credsKey = require.resolve('../../src/lib/hub_credentials.js');
         if (savedCredsCacheEntry !== undefined) {
             require.cache[credsKey] = savedCredsCacheEntry;
             savedCredsCacheEntry = undefined;
@@ -1751,7 +1751,7 @@ describe('llm provider, auth credential fallback chain', function () {
     });
 
     function reloadWithAuthStub(authResult) {
-        const credsKey = require.resolve('../../src/lib/hub-credentials.js');
+        const credsKey = require.resolve('../../src/lib/hub_credentials.js');
         savedCredsCacheEntry = require.cache[credsKey];
 
         const fakeResolve = sinon.stub().returns(authResult);
@@ -1771,7 +1771,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
         // Reload llm.js so it picks up our fake hub-credentials
         delete require.cache[require.resolve('../../src/providers/llm.js')];
-        delete require.cache[require.resolve('../../src/lib/claude-spawn.js')];
+        delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
         const llm = require('../../src/providers/llm.js');
         return { llm, stub: fakeResolve };
     }
@@ -2631,8 +2631,8 @@ describe('llm provider, multi-vendor healthCheck', function () {
 describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () {
 
     function freshCreds() {
-        delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
-        return require('../../src/lib/hub-credentials.js');
+        delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
+        return require('../../src/lib/hub_credentials.js');
     }
 
     it('resolves HUB_OPENAI_API_KEY ahead of OPENAI_API_KEY', function () {

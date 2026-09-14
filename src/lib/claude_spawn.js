@@ -44,7 +44,7 @@
 
 const { spawn } = require('child_process');
 const os = require('os');
-const { resolveHubLlmAuth } = require('./hub-credentials');
+const { resolveHubLlmAuth } = require('./hub_credentials');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 

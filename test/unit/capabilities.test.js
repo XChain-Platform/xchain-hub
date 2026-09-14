@@ -235,7 +235,7 @@ describe('capabilities/attestation selfTest()', function () {
         // hub-credentials returns ok=false so llm probe is skipped unless explicitly enabled
         return proxyquire('../../src/capabilities/attestation', {
             '../providers/http_get.js': httpGetStub,
-            '../lib/hub-credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
+            '../lib/hub_credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
         });
     }
 
@@ -268,7 +268,7 @@ describe('capabilities/attestation selfTest()', function () {
         let throwStub = { healthCheck: sinon.stub().rejects(new Error('probe died')) };
         let attestation = proxyquire('../../src/capabilities/attestation', {
             '../providers/http_get.js': throwStub,
-            '../lib/hub-credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
+            '../lib/hub_credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
         });
         let r = await attestation.selfTest({});
         expect(r.ok).to.be.false;

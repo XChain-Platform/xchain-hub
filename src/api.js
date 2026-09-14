@@ -86,7 +86,7 @@ const { HUB_SCHEMA_VERSION } = require('./hub_schema_version');   // stamped on 
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
 const { buildOraclePricesSnapshotQuery } = require('./oracle/prices_snapshot_query');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
-const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+const { parseCorsOrigin } = require('./lib/cors_origin.js');
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults.
 const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');

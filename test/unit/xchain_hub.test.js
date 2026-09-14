@@ -1109,7 +1109,7 @@ describe('XChainHub', function () {
                     // would call.
                     './oracle/batch_signer.js': function () { return { start: sinon.stub().resolves(), stop: sinon.stub().resolves(), getStats: sinon.stub().returns({}) }; },
                     './oracle/publisher.js':  function () { return { start: sinon.stub().resolves() }; },
-                    './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
+                    './lib/signer_loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
                 }
             };
         }
@@ -1181,7 +1181,7 @@ describe('XChainHub', function () {
                 './anchor/reward_tracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
                 './validators/slash_detector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
                 './oracle/publisher.js': function () { return { start: sinon.stub().resolves() }; },
-                './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
+                './lib/signer_loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
             };
         }
 
@@ -1254,7 +1254,7 @@ describe('XChainHub', function () {
 
         it('applies HUB_SIGNER_MODULE hooks to the attestation publisher', async function () {
             this.timeout(30000);
-            const realLoader = require('../../src/lib/signer-loader.js');
+            const realLoader = require('../../src/lib/signer_loader.js');
             const fakeHooks = {
                 source:       'fake-signer',
                 walletSignFn: sinon.stub(),
@@ -1264,7 +1264,7 @@ describe('XChainHub', function () {
             const stubs = makeAttestationStubs();
             const HubWithSigner = proxyquire('../../src/XChainHub', Object.assign({
                 './db': function () { return mockDb; },
-                './lib/signer-loader.js': {
+                './lib/signer_loader.js': {
                     loadSignerHooks:  () => fakeHooks,
                     applySignerHooks: realLoader.applySignerHooks
                 }
@@ -1284,7 +1284,7 @@ describe('XChainHub', function () {
             const stubs = makeAttestationStubs();
             const HubNoSigner = proxyquire('../../src/XChainHub', Object.assign({
                 './db': function () { return mockDb; },
-                './lib/signer-loader.js': {
+                './lib/signer_loader.js': {
                     loadSignerHooks:  () => null,
                     applySignerHooks: () => { throw new Error('must not be called'); }
                 }
