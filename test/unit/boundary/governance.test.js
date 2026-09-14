@@ -112,7 +112,7 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _tallyProposal - quorum and approval boundary cases
+    // tallyProposal - quorum and approval boundary cases
     //
     // Formula: quorum = totalVotes >= ceil(validatorCount / 2)
     //          passed = quorumMet && approvals >= ceil(validatorCount * 2 / 3)
@@ -124,7 +124,7 @@ describe('Boundary: Governance', function () {
     //   We inspect the first argument of the UPDATE call to check status.
     // -----------------------------------------------------------------
 
-    describe('_tallyProposal - quorum and approval boundary cases', function () {
+    describe('tallyProposal - quorum and approval boundary cases', function () {
 
         function makeProposal(id) {
             return { proposal_id: id, parameter: 'SOME_PARAM', current_value: '100', proposed_value: '120' };
@@ -149,7 +149,7 @@ describe('Boundary: Governance', function () {
                 .onFirstCall().resolves(votes)   // SELECT votes
                 .onSecondCall().resolves([]);      // UPDATE proposal
             let proposal = makeProposal('prop-test');
-            await gov._tallyProposal(proposal);
+            await gov.tallyProposal(proposal);
             // Second call is the UPDATE - first arg of args array is the SQL args array
             let updateArgs = hub.db.doQuery.secondCall.args[1];
             return updateArgs[0]; // newStatus is first bind param

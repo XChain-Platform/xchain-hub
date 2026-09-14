@@ -43,7 +43,7 @@
  *
  * Execution runs on EVERY hub via the same 'proposal:finalized' event
  * the capability/provider governance appliers use: the leader emits it
- * from _tallyProposal and followers emit it from their own local
+ * from tallyProposal and followers emit it from their own local
  * re-tally of the GOV_RESULT evidence (R2-H2), so the penalty applies
  * federation-wide without any new message type.
  *

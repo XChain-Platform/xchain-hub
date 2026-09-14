@@ -87,7 +87,7 @@ class SlashDetector {
         // publish gate (_aggregate) enforce, so by default we never slash a
         // submission the federation just co-signed. This is the band's FLOOR, not
         // the band in force every round: in a round where the aggregation clamp
-        // moved a pair's published price, _checkDeviations widens that pair by
+        // moved a pair's published price, checkDeviations widens that pair by
         // maxChangeForPair, because the clamp is licensed to publish that far from
         // the median every submitter stood behind (item 5833).
         // A SLASH_DEVIATION_THRESHOLD override (env / governance) is still
@@ -103,7 +103,7 @@ class SlashDetector {
         // is falsy, so it silently became the default and neither the throw nor the warn
         // ever fired. Dropping the `||` makes the finiteness check load-bearing rather
         // than cosmetic: a typo'd value now parses to NaN, which passes both guards below
-        // (`NaN < x` is false, `NaN !== x` is true) and would reach _checkDeviations.
+        // (`NaN < x` is false, `NaN !== x` is true) and would reach checkDeviations.
         // The band is not compared with a JS `>` there but handed to
         // deviation_band.exceedsBand, and that was executed rather than reasoned about:
         // with a NaN band it returns TRUE for any deviation at all (0.1% off the
@@ -176,11 +176,11 @@ class SlashDetector {
     // participants: array of validator pubkeys that submitted
     // allValidators: array of { pubkey, addr } (full validator set)
     async checkRound(round, submissions, finalizedPrices, participants, allValidators) {
-        await this._checkDeviations(round, submissions, finalizedPrices);
-        await this._checkParticipation(round, participants, allValidators);
+        await this.checkDeviations(round, submissions, finalizedPrices);
+        await this.checkParticipation(round, participants, allValidators);
     }
 
-    async _checkDeviations(round, submissions, finalizedPrices) {
+    async checkDeviations(round, submissions, finalizedPrices) {
         if (!submissions || !finalizedPrices) return;
 
         let finalizedMap = {};
@@ -199,7 +199,7 @@ class SlashDetector {
         for (let [sender, sub] of submissions) {
             if (!sub.prices || !Array.isArray(sub.prices)) continue;
 
-            let pubkey = this._resolveValidatorPubkey(sender);
+            let pubkey = this.resolveValidatorPubkey(sender);
             if (!pubkey) continue;
 
             let deviatingPairs = [];
@@ -305,7 +305,7 @@ class SlashDetector {
         return clamped;
     }
 
-    async _checkParticipation(round, participants, allValidators) {
+    async checkParticipation(round, participants, allValidators) {
         if (!allValidators || allValidators.length === 0) return;
 
         // Drop tracking state for pubkeys no longer in the known validator set
@@ -375,7 +375,7 @@ class SlashDetector {
     // so a signing-key rotation does not leak a map entry per retired pubkey for
     // the process lifetime (SLASH-MAP-NO-GC-1). A pubkey is kept if it is in this
     // round's validator set OR still in the live peer registry: a deviating
-    // validator is recorded via _resolveValidatorPubkey off the registry and may
+    // validator is recorded via resolveValidatorPubkey off the registry and may
     // be known there before/without appearing in the round's `allValidators`, so
     // reconciling against the registry too never drops an active validator's
     // window. A dropped-then-returning validator simply restarts its window,
@@ -457,7 +457,7 @@ class SlashDetector {
         }
     }
 
-    _resolveValidatorPubkey(addr) {
+    resolveValidatorPubkey(addr) {
         let pm = this.hub.getPeerManager();
         if (!pm || !pm.validatorPubkeys) return null;
         return pm.validatorPubkeys.get(addr) || null;

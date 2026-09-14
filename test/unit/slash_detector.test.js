@@ -28,7 +28,7 @@ describe('SlashDetector', function () {
             }
         });
         pm = hub._peerManager;
-        // Map addrs → pubkeys so _resolveValidatorPubkey works
+        // Map addrs → pubkeys so resolveValidatorPubkey works
         pm.validatorPubkeys = new Map([
             [VALIDATORS_3[0].addr, VALIDATORS_3[0].pubkey],
             [VALIDATORS_3[1].addr, VALIDATORS_3[1].pubkey],
@@ -93,7 +93,7 @@ describe('SlashDetector', function () {
                 .to.throw(/below the federation-uniform ORACLE_DEVIATION_THRESHOLD/);
         });
 
-        // A non-numeric override must not survive as NaN. _checkDeviations does not
+        // A non-numeric override must not survive as NaN. checkDeviations does not
         // compare the band with a JS `>`; it hands it to deviation_band.exceedsBand,
         // which returns TRUE against a NaN band for any deviation at all. So a NaN band
         // does not disable slashing, it slashes every honest submitter, breaching the
@@ -131,7 +131,7 @@ describe('SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '104000' }] // 4% deviation
             }]);
 
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -142,7 +142,7 @@ describe('SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '106000' }] // 6% deviation
             }]);
 
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[0]).to.include('slash_proposals');
@@ -156,7 +156,7 @@ describe('SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '105000' }] // exactly 5%
             }]);
 
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -167,7 +167,7 @@ describe('SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '93000' }] // -7% deviation
             }]);
 
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.true;
         });
 
@@ -179,13 +179,13 @@ describe('SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '200000' }]
             }]);
 
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('handles null/empty submissions gracefully', async function () {
-            await sd._checkDeviations(1, null, [{ coinPair: 'BTC/USD', price: '100000' }]);
-            await sd._checkDeviations(1, new Map(), null);
+            await sd.checkDeviations(1, null, [{ coinPair: 'BTC/USD', price: '100000' }]);
+            await sd.checkDeviations(1, new Map(), null);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -196,7 +196,7 @@ describe('SlashDetector', function () {
                 [VALIDATORS_3[1].addr, { prices: [{ coinPair: 'ETH/USD', price: '5000' }] }], // coin pair not finalized
                 [VALIDATORS_3[2].addr, { prices: [{ coinPair: 'BTC/USD', price: 'abc' }] }]   // non-numeric price
             ]);
-            await sd._checkDeviations(1, subs, finalizedPrices);
+            await sd.checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -215,7 +215,7 @@ describe('SlashDetector', function () {
                 ]
             }]);
 
-            await sd._checkDeviations(7, subs, finalizedPrices);
+            await sd.checkDeviations(7, subs, finalizedPrices);
 
             // Exactly one slash_proposals INSERT for the round
             expect(hub.db.doQuery.callCount).to.equal(1);
@@ -240,7 +240,7 @@ describe('SlashDetector', function () {
                 ]
             }]);
 
-            await sd._checkDeviations(7, subs, finalizedPrices);
+            await sd.checkDeviations(7, subs, finalizedPrices);
             expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1);
         });
     });
@@ -335,7 +335,7 @@ describe('SlashDetector', function () {
     describe('non-participation (windowed rate)', function () {
 
         // Seed a validator's sliding window with `misses` missed rounds
-        // (newest last), as if _checkParticipation had run that many times.
+        // (newest last), as if checkParticipation had run that many times.
         function seedMisses(pubkey, misses) {
             sd.participation.set(pubkey, {
                 history: new Array(misses).fill(true),
@@ -343,10 +343,10 @@ describe('SlashDetector', function () {
             });
         }
 
-        // Drive `n` rounds through _checkParticipation with the given participants.
+        // Drive `n` rounds through checkParticipation with the given participants.
         async function runRounds(n, participants, startRound) {
             for (let i = 0; i < n; i++) {
-                await sd._checkParticipation((startRound || 1) + i, participants, VALIDATORS_3);
+                await sd.checkParticipation((startRound || 1) + i, participants, VALIDATORS_3);
             }
         }
 
@@ -368,7 +368,7 @@ describe('SlashDetector', function () {
         it('29 misses in the window does NOT trigger slash', async function () {
             seedMisses(VALIDATORS_3[0].pubkey, 28);
 
-            await sd._checkParticipation(29, [], VALIDATORS_3);
+            await sd.checkParticipation(29, [], VALIDATORS_3);
             expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(29);
             expect(hub.db.doQuery.called).to.be.false;
         });
@@ -376,7 +376,7 @@ describe('SlashDetector', function () {
         it('30 misses in the window triggers non_participation slash and latches', async function () {
             seedMisses(VALIDATORS_3[0].pubkey, 29);
 
-            await sd._checkParticipation(30, [], VALIDATORS_3);
+            await sd.checkParticipation(30, [], VALIDATORS_3);
             expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(30);
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
@@ -393,11 +393,11 @@ describe('SlashDetector', function () {
             // 29 misses, one participation, then more misses. The old consecutive
             // counter reset to 0 on the participation and never fired.
             seedMisses(VALIDATORS_3[0].pubkey, 29);
-            await sd._checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            await sd.checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
             expect(hub.db.doQuery.called).to.be.false;
 
             // One more miss: 30 misses in the last 31 rounds → fires.
-            await sd._checkParticipation(31, [], VALIDATORS_3);
+            await sd.checkParticipation(31, [], VALIDATORS_3);
             expect(hub.db.doQuery.called).to.be.true;
             let evidence = JSON.parse(hub.db.doQuery.getCall(0).args[1][3]);
             expect(evidence.missedRounds).to.equal(30);
@@ -408,9 +408,9 @@ describe('SlashDetector', function () {
             // 29 misses + 1 participation, repeated: fires by round 31.
             for (let cycle = 0; cycle < 2; cycle++) {
                 for (let r = 0; r < 29; r++) {
-                    await sd._checkParticipation(cycle * 30 + r + 1, [], VALIDATORS_3);
+                    await sd.checkParticipation(cycle * 30 + r + 1, [], VALIDATORS_3);
                 }
-                await sd._checkParticipation(cycle * 30 + 30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+                await sd.checkParticipation(cycle * 30 + 30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
             }
             expect(hub.db.doQuery.called).to.be.true;
             expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
@@ -433,14 +433,14 @@ describe('SlashDetector', function () {
 
         it('re-arms the latch only when the windowed miss count recovers below the threshold', async function () {
             seedMisses(VALIDATORS_3[0].pubkey, 29);
-            await sd._checkParticipation(30, [], VALIDATORS_3); // fires + latches
+            await sd.checkParticipation(30, [], VALIDATORS_3); // fires + latches
             expect(hub.db.doQuery.callCount).to.equal(1);
             hub.db.doQuery.resetHistory();
 
             // One participation while the window stays saturated: still latched.
-            await sd._checkParticipation(31, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            await sd.checkParticipation(31, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
-            await sd._checkParticipation(32, [], VALIDATORS_3);
+            await sd.checkParticipation(32, [], VALIDATORS_3);
             expect(hub.db.doQuery.called).to.be.false;
 
             // Sustained participation until misses drop below the threshold:
@@ -455,10 +455,10 @@ describe('SlashDetector', function () {
 
         it('does not re-fire while latched and the window stays saturated', async function () {
             seedMisses(VALIDATORS_3[0].pubkey, 29);
-            await sd._checkParticipation(30, [], VALIDATORS_3);
+            await sd.checkParticipation(30, [], VALIDATORS_3);
             hub.db.doQuery.resetHistory();
 
-            await sd._checkParticipation(31, [], VALIDATORS_3);
+            await sd.checkParticipation(31, [], VALIDATORS_3);
             expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(31);
             // Latch is set, so no second proposal for the same offense.
             expect(hub.db.doQuery.called).to.be.false;
@@ -472,7 +472,7 @@ describe('SlashDetector', function () {
             sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, false);
             hub.db.doQuery.resetHistory();
 
-            await sd._checkParticipation(31, [], VALIDATORS_3);
+            await sd.checkParticipation(31, [], VALIDATORS_3);
             expect(hub.db.doQuery.called).to.be.true;
             expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
@@ -482,14 +482,14 @@ describe('SlashDetector', function () {
             seedMisses(VALIDATORS_3[0].pubkey, 29);
             hub.db.doQuery.rejects(new Error('db down'));
 
-            await sd._checkParticipation(30, [], VALIDATORS_3);
+            await sd.checkParticipation(30, [], VALIDATORS_3);
             // Write failed, so the latch is NOT set.
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.not.equal(true);
 
             // Next round the write succeeds and the offense is finally recorded.
             hub.db.doQuery.resetHistory();
             hub.db.doQuery.resolves([]);
-            await sd._checkParticipation(31, [], VALIDATORS_3);
+            await sd.checkParticipation(31, [], VALIDATORS_3);
             expect(hub.db.doQuery.called).to.be.true;
             expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
@@ -501,7 +501,7 @@ describe('SlashDetector', function () {
         });
 
         it('handles empty allValidators gracefully', async function () {
-            await sd._checkParticipation(1, [], []);
+            await sd.checkParticipation(1, [], []);
             expect(hub.db.doQuery.called).to.be.false;
         });
     });
@@ -519,7 +519,7 @@ describe('SlashDetector', function () {
             sd.repeatedDeviationFired.set(stale, true);
             sd.nonParticipationFired.set(stale, true);
 
-            await sd._checkParticipation(1, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            await sd.checkParticipation(1, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
 
             expect(sd.participation.has(stale)).to.equal(false);
             expect(sd.recentDeviations.has(stale)).to.equal(false);
@@ -535,28 +535,28 @@ describe('SlashDetector', function () {
             let regOnly = VALIDATORS_3[1].pubkey;
             sd.recentDeviations.set(regOnly, [{ round: 1, timestamp: Date.now() }]);
 
-            await sd._checkParticipation(1, [], [VALIDATORS_3[0], VALIDATORS_3[2]]);
+            await sd.checkParticipation(1, [], [VALIDATORS_3[0], VALIDATORS_3[2]]);
 
             expect(sd.recentDeviations.has(regOnly)).to.equal(true);
         });
     });
 
     // -----------------------------------------------------------------
-    // _resolveValidatorPubkey()
+    // resolveValidatorPubkey()
     // -----------------------------------------------------------------
 
-    describe('_resolveValidatorPubkey()', function () {
+    describe('resolveValidatorPubkey()', function () {
         it('resolves a known addr to its pubkey', function () {
-            expect(sd._resolveValidatorPubkey(VALIDATORS_3[0].addr)).to.equal(VALIDATORS_3[0].pubkey);
+            expect(sd.resolveValidatorPubkey(VALIDATORS_3[0].addr)).to.equal(VALIDATORS_3[0].pubkey);
         });
 
         it('returns null for unknown addr', function () {
-            expect(sd._resolveValidatorPubkey('ws://unknown:10001')).to.be.null;
+            expect(sd.resolveValidatorPubkey('ws://unknown:10001')).to.be.null;
         });
 
         it('returns null when there is no peer manager', function () {
             hub.getPeerManager.returns(null);
-            expect(sd._resolveValidatorPubkey('x')).to.be.null;
+            expect(sd.resolveValidatorPubkey('x')).to.be.null;
         });
     });
 
@@ -586,8 +586,8 @@ describe('SlashDetector', function () {
 
     describe('checkRound()', function () {
         it('runs both the deviation and participation checks', async function () {
-            let dev  = sinon.stub(sd, '_checkDeviations').resolves();
-            let part = sinon.stub(sd, '_checkParticipation').resolves();
+            let dev  = sinon.stub(sd, 'checkDeviations').resolves();
+            let part = sinon.stub(sd, 'checkParticipation').resolves();
             await sd.checkRound(5, new Map(), [], [], VALIDATORS_3);
             expect(dev.calledOnce).to.be.true;
             expect(part.calledOnce).to.be.true;

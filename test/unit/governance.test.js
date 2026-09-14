@@ -458,10 +458,10 @@ describe('Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _tallyProposal()
+    // tallyProposal()
     // -----------------------------------------------------------------
 
-    describe('_tallyProposal()', function () {
+    describe('tallyProposal()', function () {
 
         it('passes with 2/3+ approval and quorum met', async function () {
             gov.setValidatorSet(VALIDATORS_3);
@@ -477,7 +477,7 @@ describe('Governance', function () {
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
 
-            await gov._tallyProposal({
+            await gov.tallyProposal({
                 proposal_id: 'gov:P:1', parameter: 'P',
                 current_value: '100', proposed_value: '120'
             });
@@ -501,7 +501,7 @@ describe('Governance', function () {
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[1][0]).to.equal('failed');
@@ -517,7 +517,7 @@ describe('Governance', function () {
             ]);
             hub.db.doQuery.onSecondCall().resolves();
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[1][0]).to.equal('failed');
@@ -531,7 +531,7 @@ describe('Governance', function () {
             ]);
             hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 });
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             expect(pm.broadcast.calledOnce).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('GOV_RESULT');
@@ -711,7 +711,7 @@ describe('Governance', function () {
                 'proposal recorded despite cooldown-read failure').to.be.true;
         });
 
-        it('_handleVote persists a registered validator vote with a valid signature (proposal still open)', async function () {
+        it('handleVote persists a registered validator vote with a valid signature (proposal still open)', async function () {
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
@@ -719,7 +719,7 @@ describe('Governance', function () {
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
                 .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
             let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
-            await gov._handleVote({
+            await gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
@@ -727,7 +727,7 @@ describe('Governance', function () {
                 'the vote row is inserted').to.be.true;
         });
 
-        it('_handleVote DROPS a validly-signed vote whose proposal window has closed (GOV-LATEVOTE-1)', async function () {
+        it('handleVote DROPS a validly-signed vote whose proposal window has closed (GOV-LATEVOTE-1)', async function () {
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
@@ -736,7 +736,7 @@ describe('Governance', function () {
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
                 .resolves([{ voting_end: new Date(Date.now() - 1000) }]);
             let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
-            await gov._handleVote({
+            await gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
@@ -744,13 +744,13 @@ describe('Governance', function () {
                 'no vote row inserted for a closed proposal').to.be.false;
         });
 
-        it('_handleVote DROPS a validly-signed vote for a proposal this hub never recorded (GOV-LATEVOTE-1)', async function () {
+        it('handleVote DROPS a validly-signed vote for a proposal this hub never recorded (GOV-LATEVOTE-1)', async function () {
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/)).resolves([]);
             let sig = idn.sign(Governance.voteSigningPayload('gov:GHOST:1', 'approve', kp.pubkeyHex, 1000));
-            await gov._handleVote({
+            await gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:GHOST:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
@@ -758,23 +758,23 @@ describe('Governance', function () {
                 'no vote row inserted with no local proposal').to.be.false;
         });
 
-        it('_handleVote REJECTS a vote whose voterPubkey is not a registered validator (C-1 vote-stuffing guard)', function () {
+        it('handleVote REJECTS a vote whose voterPubkey is not a registered validator (C-1 vote-stuffing guard)', function () {
             // Valid signature, but the pubkey is a fabricated non-member: the exact
             // primitive a Byzantine validator would use to stuff N invented voters.
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
             let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
-            gov._handleVote({
+            gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('_handleVote REJECTS a registered validator vote with a forged signature', function () {
+        it('handleVote REJECTS a registered validator vote with a forged signature', function () {
             let kp = ValidatorIdentity.generate();
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
-            gov._handleVote({
+            gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: 'deadbeef' }
             });
@@ -797,10 +797,10 @@ describe('Governance', function () {
             expect(args[5]).to.equal(''); // rationale
         });
 
-        it('_handleVote REJECTS an unsigned vote (no signature to authenticate the voter)', function () {
+        it('handleVote REJECTS an unsigned vote (no signature to authenticate the voter)', function () {
             let kp = ValidatorIdentity.generate();
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
-            gov._handleVote({
+            gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex }
             });
@@ -821,14 +821,14 @@ describe('Governance', function () {
 
         it('ignores messages with missing fields', function () {
             gov._handlePropose({ sender: 'peer', data: {} });
-            gov._handleVote({ sender: 'peer', data: {} });
+            gov.handleVote({ sender: 'peer', data: {} });
             gov._handleResult({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('_handleMessage routes each governance message type and ignores unknown', function () {
             let p = sinon.spy(gov, '_handlePropose');
-            let v = sinon.spy(gov, '_handleVote');
+            let v = sinon.spy(gov, 'handleVote');
             let r = sinon.spy(gov, '_handleResult');
             gov._handleMessage({ type: 'GOV_PROPOSE', data: {} });
             gov._handleMessage({ type: 'GOV_VOTE', data: {} });
@@ -848,7 +848,7 @@ describe('Governance', function () {
         it('start() subscribes and schedules the tally timer; stop() tears both down', async function () {
             let clock = sinon.useFakeTimers();
             gov.tallyInterval = 1000;
-            let spy = sinon.spy(gov, '_checkExpiredProposals');
+            let spy = sinon.spy(gov, 'checkExpiredProposals');
             await gov.start();
             expect(pm.listenerCount('message')).to.equal(1);
             expect(gov._tallyTimer).to.not.equal(null);
@@ -869,7 +869,7 @@ describe('Governance', function () {
             // rejection would kill the process rather than log and re-arm.
             let clock = sinon.useFakeTimers();
             gov.tallyInterval = 1000;
-            sinon.stub(gov, '_checkExpiredProposals').rejects(new Error('tally tick blew up'));
+            sinon.stub(gov, 'checkExpiredProposals').rejects(new Error('tally tick blew up'));
             let logged = sinon.stub(console, 'error');
             await gov.start();
 
@@ -922,17 +922,17 @@ describe('Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _checkExpiredProposals()
+    // checkExpiredProposals()
     // -----------------------------------------------------------------
 
-    describe('_checkExpiredProposals()', function () {
+    describe('checkExpiredProposals()', function () {
         it('tallies an expired proposal when this node leads it', async function () {
             gov.setValidatorSet([]); // standalone → always leader
             hub.db.doQuery.onFirstCall().resolves([
                 { proposal_id: 'gov:P:1', parameter: 'P', current_value: '100', proposed_value: '120' }
             ]);
-            let tally = sinon.stub(gov, '_tallyProposal').resolves();
-            await gov._checkExpiredProposals();
+            let tally = sinon.stub(gov, 'tallyProposal').resolves();
+            await gov.checkExpiredProposals();
             expect(tally.calledOnce).to.be.true;
             expect(tally.getCall(0).args[0].proposal_id).to.equal('gov:P:1');
         });
@@ -942,15 +942,15 @@ describe('Governance', function () {
             let leader = gov.getProposalLeader('gov:P:1');
             pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
             hub.db.doQuery.onFirstCall().resolves([{ proposal_id: 'gov:P:1' }]);
-            let tally = sinon.stub(gov, '_tallyProposal').resolves();
-            await gov._checkExpiredProposals();
+            let tally = sinon.stub(gov, 'tallyProposal').resolves();
+            await gov.checkExpiredProposals();
             expect(tally.called).to.be.false;
         });
 
         it('logs and returns without crashing when the SELECT throws', async function () {
             hub.db.doQuery.onFirstCall().rejects(new Error('schema drift'));
-            let tally = sinon.stub(gov, '_tallyProposal').resolves();
-            await gov._checkExpiredProposals(); // must not throw
+            let tally = sinon.stub(gov, 'tallyProposal').resolves();
+            await gov.checkExpiredProposals(); // must not throw
             expect(tally.called).to.be.false;
         });
 
@@ -959,10 +959,10 @@ describe('Governance', function () {
             hub.db.doQuery.onFirstCall().resolves([
                 { proposal_id: 'gov:A' }, { proposal_id: 'gov:B' }
             ]);
-            let tally = sinon.stub(gov, '_tallyProposal');
+            let tally = sinon.stub(gov, 'tallyProposal');
             tally.onFirstCall().rejects(new Error('boom'));
             tally.onSecondCall().resolves();
-            await gov._checkExpiredProposals();
+            await gov.checkExpiredProposals();
             expect(tally.callCount).to.equal(2); // did not abort after the first error
         });
     });
@@ -1075,7 +1075,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
 
     // ---- R2-M2 tally uses the locked denominator, immune to set churn ----
 
-    it('_tallyProposal counts against the LOCKED snapshot, not a churned live set', async function () {
+    it('tallyProposal counts against the LOCKED snapshot, not a churned live set', async function () {
         // 2 of 3 snapshot members approve -> quorum(2) + approval(2) met -> passed.
         let votes = [
             { voter_pubkey: kps[0].pubkey, vote: 'approve' },
@@ -1091,18 +1091,18 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
 
         let finalized = null;
         gov.on('proposal:finalized', d => { finalized = d; });
-        await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P', validator_snapshot: snapshotJson });
+        await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P', validator_snapshot: snapshotJson });
 
         let update = hub.db.doQuery.withArgs(sinon.match(/UPDATE governance_proposals/)).getCall(0);
         expect(update.args[1][0], 'passed against the locked denominator').to.equal('passed');
         expect(finalized).to.not.be.null;
     });
 
-    it('_tallyProposal broadcasts GOV_RESULT with authenticated vote evidence', async function () {
+    it('tallyProposal broadcasts GOV_RESULT with authenticated vote evidence', async function () {
         hub.db.doQuery.withArgs(sinon.match(/SELECT voter_pubkey, vote.*FROM governance_votes/))
             .resolves([{ voter_pubkey: kps[0].pubkey, vote: 'approve', signature: 'ab' }]);
         hub.db.doQuery.withArgs(sinon.match(/UPDATE governance_proposals/)).resolves({ affectedRows: 1 });
-        await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P', validator_snapshot: snapshotJson });
+        await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P', validator_snapshot: snapshotJson });
         let bc = hub._peerManager.broadcast.getCalls().find(c => c.args[0] === 'GOV_RESULT');
         expect(bc, 'GOV_RESULT broadcast').to.exist;
         expect(bc.args[1].votes).to.be.an('array').with.length(1);

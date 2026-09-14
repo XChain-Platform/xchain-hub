@@ -60,7 +60,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             sender: v.addr, prices: [{ coinPair: 'XCHAIN/USD', price: '1.20000000' }]
         })));
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         expect(insertedProposals()).to.have.length(0);
     });
 
@@ -73,7 +73,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             { sender: VALIDATORS_3[1].addr, prices: [{ coinPair: 'XCHAIN/USD', price: '1.30000000' }] }
         ]);
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         let calls = insertedProposals();
         expect(calls).to.have.length(1);
         expect(calls[0].args[1][0]).to.equal(VALIDATORS_3[1].pubkey);
@@ -92,7 +92,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'BTC/USD', price: '107000.00000000' }]
         }]);
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         expect(insertedProposals()).to.have.length(1);
     });
 
@@ -113,7 +113,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             ]
         }]);
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         let calls = insertedProposals();
         expect(calls).to.have.length(1);
         let evidence = JSON.parse(calls[0].args[1][3]);
@@ -128,7 +128,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'XCHAIN/USD', price: '1.20000000' }]
         }]);
 
-        await sd._checkDeviations(10, subs, finalized);
+        await sd.checkDeviations(10, subs, finalized);
         expect(insertedProposals()).to.have.length(1);
     });
 
@@ -142,7 +142,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             { sender: VALIDATORS_3[1].addr, prices: [{ coinPair: 'BTC/USD', price: '170000.00000000' }] }
         ]);
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         let calls = insertedProposals();
         expect(calls).to.have.length(1);
         expect(calls[0].args[1][0]).to.equal(VALIDATORS_3[1].pubkey);
@@ -155,7 +155,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'XCHAIN/USD', price: '0.80000000' }]
         }]);
 
-        await sd._checkDeviations(9, subs, finalized);
+        await sd.checkDeviations(9, subs, finalized);
         expect(insertedProposals()).to.have.length(0);
     });
 
@@ -168,7 +168,7 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
             sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'XCHAIN/USD', price: '1.20000000' }]
         }]);
 
-        await lone._checkDeviations(9, subs, finalized);
+        await lone.checkDeviations(9, subs, finalized);
         expect(bare.db.doQuery.getCalls().filter(c => String(c.args[0]).includes('slash_proposals')))
             .to.have.length(1);
     });

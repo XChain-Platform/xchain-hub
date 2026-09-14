@@ -201,10 +201,10 @@ describe('Fuzz: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _tallyProposal() quorum arithmetic
+    // tallyProposal() quorum arithmetic
     // -----------------------------------------------------------------
 
-    describe('_tallyProposal() quorum arithmetic', function () {
+    describe('tallyProposal() quorum arithmetic', function () {
 
         it('unanimous approval always passes for any N >= 1', function () {
             return fc.assert(fc.asyncProperty(
@@ -225,7 +225,7 @@ describe('Fuzz: Governance', function () {
                         current_value:  '1',
                         proposed_value: '1.1'
                     };
-                    await gov._tallyProposal(proposal);
+                    await gov.tallyProposal(proposal);
 
                     let updateCall = hub.db.doQuery.secondCall;
                     expect(updateCall.args[1][0]).to.equal('passed');
@@ -249,7 +249,7 @@ describe('Fuzz: Governance', function () {
                         current_value:  '1',
                         proposed_value: '1.1'
                     };
-                    await gov._tallyProposal(proposal);
+                    await gov.tallyProposal(proposal);
 
                     let updateCall = hub.db.doQuery.secondCall;
                     expect(updateCall.args[1][0]).to.equal('failed');
@@ -276,7 +276,7 @@ describe('Fuzz: Governance', function () {
                         current_value:  '1',
                         proposed_value: '1.1'
                     };
-                    await gov._tallyProposal(proposal);
+                    await gov.tallyProposal(proposal);
 
                     let updateCall = hub.db.doQuery.secondCall;
                     expect(updateCall.args[1][0]).to.equal('failed');

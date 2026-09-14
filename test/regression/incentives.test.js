@@ -153,7 +153,7 @@ describe('Regression: Incentives & Slashing', function () {
                     prices: [{ coinPair: 'BTC/USD', price: '104000' }]
                 }]);
 
-                await sd._checkDeviations(1, subs, finalizedPrices);
+                await sd.checkDeviations(1, subs, finalizedPrices);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
@@ -164,7 +164,7 @@ describe('Regression: Incentives & Slashing', function () {
                     prices: [{ coinPair: 'BTC/USD', price: '106000' }]
                 }]);
 
-                await sd._checkDeviations(1, subs, finalizedPrices);
+                await sd.checkDeviations(1, subs, finalizedPrices);
                 expect(hub.db.doQuery.called).to.be.true;
                 let args = hub.db.doQuery.getCall(0).args;
                 expect(args[1][1]).to.equal('price_deviation');
@@ -177,7 +177,7 @@ describe('Regression: Incentives & Slashing', function () {
                     prices: [{ coinPair: 'BTC/USD', price: '105000' }]
                 }]);
 
-                await sd._checkDeviations(1, subs, finalizedPrices);
+                await sd.checkDeviations(1, subs, finalizedPrices);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
@@ -188,7 +188,7 @@ describe('Regression: Incentives & Slashing', function () {
                     prices: [{ coinPair: 'BTC/USD', price: '93000' }]
                 }]);
 
-                await sd._checkDeviations(1, subs, finalizedPrices);
+                await sd.checkDeviations(1, subs, finalizedPrices);
                 expect(hub.db.doQuery.called).to.be.true;
             });
         });
@@ -244,7 +244,7 @@ describe('Regression: Incentives & Slashing', function () {
             it('29 misses does NOT trigger @regression-p1', async function () {
                 seedMisses(VALIDATORS_3[0].pubkey, 28);
 
-                await sd._checkParticipation(29, [], VALIDATORS_3);
+                await sd.checkParticipation(29, [], VALIDATORS_3);
                 expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(29);
                 expect(hub.db.doQuery.called).to.be.false;
             });
@@ -252,7 +252,7 @@ describe('Regression: Incentives & Slashing', function () {
             it('30 misses triggers non_participation slash @regression-p1', async function () {
                 seedMisses(VALIDATORS_3[0].pubkey, 29);
 
-                await sd._checkParticipation(30, [], VALIDATORS_3);
+                await sd.checkParticipation(30, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.true;
                 let args = hub.db.doQuery.getCall(0).args;
                 expect(args[1][1]).to.equal('non_participation');
@@ -263,9 +263,9 @@ describe('Regression: Incentives & Slashing', function () {
                 // window → fires. The old consecutive counter reset to 0 here.
                 seedMisses(VALIDATORS_3[0].pubkey, 29);
 
-                await sd._checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+                await sd.checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.false;
-                await sd._checkParticipation(31, [], VALIDATORS_3);
+                await sd.checkParticipation(31, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.true;
                 expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
             });
@@ -279,7 +279,7 @@ describe('Regression: Incentives & Slashing', function () {
                 sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, true);
                 hub.db.doQuery.resetHistory();
 
-                await sd._checkParticipation(31, [], VALIDATORS_3);
+                await sd.checkParticipation(31, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
@@ -287,14 +287,14 @@ describe('Regression: Incentives & Slashing', function () {
                 seedMisses(VALIDATORS_3[0].pubkey, 29);
                 hub.db.doQuery.rejects(new Error('db down'));
 
-                await sd._checkParticipation(30, [], VALIDATORS_3);
+                await sd.checkParticipation(30, [], VALIDATORS_3);
                 expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey),
                     'latch re-armed after failed write').to.be.false;
 
                 hub.db.doQuery.resetBehavior();
                 hub.db.doQuery.resolves([]);
                 hub.db.doQuery.resetHistory();
-                await sd._checkParticipation(31, [], VALIDATORS_3);
+                await sd.checkParticipation(31, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called, 'retried past the threshold').to.be.true;
             });
         });
@@ -302,12 +302,12 @@ describe('Regression: Incentives & Slashing', function () {
         // Null safety
         describe('Null safety', function () {
             it('handles null submissions gracefully @regression-p2', async function () {
-                await sd._checkDeviations(1, null, [{ coinPair: 'BTC/USD', price: '100000' }]);
+                await sd.checkDeviations(1, null, [{ coinPair: 'BTC/USD', price: '100000' }]);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
             it('handles empty validators gracefully @regression-p2', async function () {
-                await sd._checkParticipation(1, [], []);
+                await sd.checkParticipation(1, [], []);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
@@ -319,7 +319,7 @@ describe('Regression: Incentives & Slashing', function () {
                     prices: [{ coinPair: 'BTC/USD', price: '200000' }]
                 }]);
 
-                await sd._checkDeviations(1, subs, finalizedPrices);
+                await sd.checkDeviations(1, subs, finalizedPrices);
                 expect(hub.db.doQuery.called).to.be.false;
             });
         });
@@ -339,13 +339,13 @@ describe('Regression: Incentives & Slashing', function () {
         });
 
         // Resolver
-        describe('_resolveValidatorPubkey', function () {
+        describe('resolveValidatorPubkey', function () {
             it('resolves known addr @regression-p2', function () {
-                expect(sd._resolveValidatorPubkey(VALIDATORS_3[0].addr)).to.equal(VALIDATORS_3[0].pubkey);
+                expect(sd.resolveValidatorPubkey(VALIDATORS_3[0].addr)).to.equal(VALIDATORS_3[0].pubkey);
             });
 
             it('returns null for unknown addr @regression-p2', function () {
-                expect(sd._resolveValidatorPubkey('ws://unknown:10001')).to.be.null;
+                expect(sd.resolveValidatorPubkey('ws://unknown:10001')).to.be.null;
             });
         });
     });

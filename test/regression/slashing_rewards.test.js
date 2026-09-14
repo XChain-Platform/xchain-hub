@@ -39,7 +39,7 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
         getPeerManager: () => ({ validatorPubkeys: new Map() })
     };
     const sd = new SlashDetector(hub);
-    sd._resolveValidatorPubkey = (sender) => sender;   // sender IS the pubkey in these tests
+    sd.resolveValidatorPubkey = (sender) => sender;   // sender IS the pubkey in these tests
     const slashed = [];
     // The real recordSlashProposal returns true once the row persists and false
     // on a rejected pubkey or a failed write, and the non-participation latch
@@ -65,7 +65,7 @@ describe('Regression: slashing safety + reward split', function () {
                 [PK('b'), { prices: [{ coinPair: 'BTC/USD', price: '62000' }] }],  // 3.33%
                 [PK('c'), { prices: [{ coinPair: 'BTC/USD', price: '58500' }] }]   // 2.5%
             ]);
-            await sd._checkDeviations(1, subs, FINAL);
+            await sd.checkDeviations(1, subs, FINAL);
             assert.strictEqual(slashed.length, 0, 'honest validators slashed: ' + JSON.stringify(slashed));
         });
 
@@ -75,7 +75,7 @@ describe('Regression: slashing safety + reward split', function () {
                 [PK('a'), { prices: [{ coinPair: 'BTC/USD', price: '60000' }] }],  // honest
                 [PK('d'), { prices: [{ coinPair: 'BTC/USD', price: '66000' }] }]   // 10% > 5%
             ]);
-            await sd._checkDeviations(1, subs, FINAL);
+            await sd.checkDeviations(1, subs, FINAL);
             assert.strictEqual(slashed.length, 1);
             assert.strictEqual(slashed[0].pubkey, PK('d'));
             assert.strictEqual(slashed[0].offenseType, 'price_deviation');
@@ -85,7 +85,7 @@ describe('Regression: slashing safety + reward split', function () {
             const { sd, slashed } = makeSlashDetector('0.05');
             // 63000 vs 60000 = exactly 5.00%
             const subs = new Map([[PK('e'), { prices: [{ coinPair: 'BTC/USD', price: '63000' }] }]]);
-            await sd._checkDeviations(1, subs, FINAL);
+            await sd.checkDeviations(1, subs, FINAL);
             assert.strictEqual(slashed.length, 0, 'boundary deviation was wrongly slashed');
         });
     });
@@ -101,19 +101,19 @@ describe('Regression: slashing safety + reward split', function () {
             const { sd, slashed } = makeSlashDetector('0.05', '3');   // 3 missed rounds in the window
             const all = [{ pubkey: PK('a') }, { pubkey: PK('b') }];
 
-            await sd._checkParticipation(1, [PK('b')], all);   // a misses (1)
-            await sd._checkParticipation(2, [PK('b')], all);   // a misses (2)
+            await sd.checkParticipation(1, [PK('b')], all);   // a misses (1)
+            await sd.checkParticipation(2, [PK('b')], all);   // a misses (2)
             assert.strictEqual(slashed.length, 0, 'slashed before threshold');
 
-            await sd._checkParticipation(3, [PK('b')], all);   // a misses (3 == threshold) → slash
+            await sd.checkParticipation(3, [PK('b')], all);   // a misses (3 == threshold) → slash
             assert.strictEqual(slashed.length, 1);
             assert.strictEqual(slashed[0].pubkey, PK('a'));
             assert.strictEqual(slashed[0].offenseType, 'non_participation');
 
             // One token participation leaves the window saturated, so it neither
             // clears the offense nor earns a second proposal for the same one.
-            await sd._checkParticipation(4, [PK('a'), PK('b')], all);
-            await sd._checkParticipation(5, [PK('b')], all);
+            await sd.checkParticipation(4, [PK('a'), PK('b')], all);
+            await sd.checkParticipation(5, [PK('b')], all);
             assert.strictEqual(slashed.length, 1, 'validator re-slashed for the same offense');
         });
 
@@ -122,18 +122,18 @@ describe('Regression: slashing safety + reward split', function () {
             const all = [{ pubkey: PK('a') }, { pubkey: PK('b') }];
             const both = [PK('a'), PK('b')];
 
-            for (let r = 1; r <= 3; r++) await sd._checkParticipation(r, [PK('b')], all);
+            for (let r = 1; r <= 3; r++) await sd.checkParticipation(r, [PK('b')], all);
             assert.strictEqual(slashed.length, 1, 'first offense not slashed');
 
             // A full window of participation is what re-arms the latch. Anything
             // less and the next miss is still part of the offense already slashed.
             let round = 4;
             for (let i = 0; i < sd.participationWindowSize; i++, round++) {
-                await sd._checkParticipation(round, both, all);
+                await sd.checkParticipation(round, both, all);
             }
             assert.strictEqual(slashed.length, 1, 'slashed while participating');
 
-            for (let i = 0; i < 3; i++, round++) await sd._checkParticipation(round, [PK('b')], all);
+            for (let i = 0; i < 3; i++, round++) await sd.checkParticipation(round, [PK('b')], all);
             assert.strictEqual(slashed.length, 2, 'a fresh offense after a clean window is not slashed');
             assert.strictEqual(slashed[1].offenseType, 'non_participation');
         });

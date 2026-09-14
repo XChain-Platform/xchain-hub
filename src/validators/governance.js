@@ -77,7 +77,7 @@ const GOV_SNAPSHOT_MAX_VALIDATORS = 1000;
 const GOV_SNAPSHOT_MAX_BYTES      = 262144;   // 256 KB serialized
 
 // GOV-VOTE-REPLAY-1: the exact bytes a governance vote is signed over.
-// THREE paths produce these bytes (vote() signs, _handleVote and
+// THREE paths produce these bytes (vote() signs, handleVote and
 // ingestResultVotes verify), and a one-byte disagreement between them silently
 // drops every peer's vote, so they all call this and nothing builds the payload
 // inline. Key order is part of the wire contract: never reorder it.
@@ -263,14 +263,14 @@ class Governance extends EventEmitter {
         this.peerManager.on('message', this._messageHandler);
 
         // Catch the tick's rejection, the same idiom every other periodic loop in the
-        // hub uses. _checkExpiredProposals guards its two awaits but not the leader
+        // hub uses. checkExpiredProposals guards its two awaits but not the leader
         // check between them, so a data fault there (an unorderable proposal_id, a
         // non-iterable result row set) rejects the tick's promise. The hub registers no
         // process.on('unhandledRejection'), and Node's default turns an unhandled
         // rejection into process death, so without this a per-tick fault kills the hub
         // instead of logging and re-arming, which is what the tally path intends.
         this._tallyTimer = setInterval(() => {
-            this._checkExpiredProposals().catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
+            this.checkExpiredProposals().catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
         }, this.tallyInterval);
 
         logger.info('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
@@ -293,7 +293,7 @@ class Governance extends EventEmitter {
     // explicit proposer-supplied block is accepted only if it is at or beyond that minimum. Throws
     // if the hub has not observed a block height yet (cannot anchor) or the explicit value is too
     // soon. The returned value is broadcast in the proposal so every hub anchors to the same block.
-    _computeActivationBlock(explicit) {
+    computeActivationBlock(explicit) {
         let raw = this.hub ? this.hub._latestBlockIndex : null;
         if (raw === null || raw === undefined)   // Number(null) === 0 -- must reject explicitly
             throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
@@ -355,7 +355,7 @@ class Governance extends EventEmitter {
         // the request's block); other parameters carry no activation block because their
         // consumers are not block-anchored.
         let activation = (parseCapabilityMinStakeParam(parameter) || parseAttestationProviderParam(parameter))
-            ? this._computeActivationBlock(activationBlock)
+            ? this.computeActivationBlock(activationBlock)
             : null;
 
         let proposalId = 'gov:' + parameter + ':' + Date.now();
@@ -470,7 +470,7 @@ class Governance extends EventEmitter {
             case GOV_VOTE:
                 // async (a proposal-window lookup): surface rejections instead of
                 // letting them escape the gossip dispatcher as an unhandled rejection.
-                this._handleVote(envelope).catch(e =>
+                this.handleVote(envelope).catch(e =>
                     logger.error(nodeUtil.format('Governance: GOV_VOTE handler error:', e && e.message ? e.message : e)));
                 break;
             case GOV_RESULT:
@@ -533,7 +533,7 @@ class Governance extends EventEmitter {
         // could supply an already-past block or one that is far too soon, defeating the
         // safety buffer designed to ensure every hub finalizes before the change activates.
         // Re-validate the min-bound using this hub's local best-observed block height and
-        // the same formula as `_computeActivationBlock`. A block that passes the proposer's
+        // the same formula as `computeActivationBlock`. A block that passes the proposer's
         // own validation will always pass here (followers lag the leader's block height by
         // at most a few blocks, and the safety buffer is 50 blocks wide). A forged too-soon
         // block is rejected; the proposal is silently dropped so the network never records it.
@@ -602,7 +602,7 @@ class Governance extends EventEmitter {
         // window within gossip-delivery skew (seconds), far inside the >=60s tally margin.
         // Trusting the wire value let a single Byzantine validator broadcast a raw
         // GOV_PROPOSE with a far-future votingEnd: the row's voting_end <= NOW() never
-        // matches in _checkExpiredProposals, so it is never tallied and never leaves
+        // matches in checkExpiredProposals, so it is never tallied and never leaves
         // 'voting', and propose() then refuses every honest proposal for that parameter
         // ('Active proposal already exists') -- permanent governance censorship of that
         // knob, repeatable across every parameter. GOV_RESULT also trusts this voting_end
@@ -670,7 +670,7 @@ class Governance extends EventEmitter {
     // GOV-VOTE-REPLAY-1: persist a vote, accepting it ONLY when its seq is
     // strictly greater than the seq already stored for this
     // (proposal_id, voter_pubkey). One statement rather than read-compare-write:
-    // _handleVote is fire-and-forget and several gossiped copies of the same
+    // handleVote is fire-and-forget and several gossiped copies of the same
     // voter's votes can be in flight at once, so a read-then-write would leave a
     // TOCTOU window in which the loser lands last and wins. GREATEST keeps the
     // stored seq monotonic even when a superseded copy arrives late, so the
@@ -679,7 +679,7 @@ class Governance extends EventEmitter {
         return this.db.setGovernanceVote(proposalId, voterPubkey, vote, String(signature || ''), seq);
     }
 
-    async _handleVote(envelope) {
+    async handleVote(envelope) {
         let { proposalId, vote, voterPubkey, signature, seq } = envelope.data;
         if (!proposalId || !vote || !voterPubkey) return;
 
@@ -772,7 +772,7 @@ class Governance extends EventEmitter {
 
         // Authenticate the result. GOV_RESULT is the federation-final outcome, applied
         // first-writer-wins under the status='voting' guard below -- so it MUST come only from
-        // the proposal's deterministic tally leader (the single hub that runs _tallyProposal).
+        // the proposal's deterministic tally leader (the single hub that runs tallyProposal).
         // Without this, any one registered validator could broadcast a forged 'passed' that
         // every follower records while the real leader tallies the true outcome locally --
         // a permanent governance split-brain. The tally side is already leader-pinned
@@ -786,7 +786,7 @@ class Governance extends EventEmitter {
         if (!leader || leader.addr !== envelope.sender) return;
 
         // Reject a result that arrives before the voting window closes: the legitimate leader
-        // only tallies after voting_end (_checkExpiredProposals), so an early result is
+        // only tallies after voting_end (checkExpiredProposals), so an early result is
         // spurious. Compare the LOCALLY-stored voting_end (recorded from GOV_PROPOSE on every
         // hub); a proposal this hub never saw has no row and is dropped rather than applied
         // blind. Safe against clock skew in practice -- the timer-driven tally fires well after
@@ -826,17 +826,17 @@ class Governance extends EventEmitter {
 
         // Update proposal status locally. Guard side effects on the status-transition (was 'voting')
         // so the tally leader's own loopback of this GOV_RESULT -- which already applied + emitted in
-        // _tallyProposal -- affects 0 rows here and does not double-emit.
+        // tallyProposal -- affects 0 rows here and does not double-emit.
         let res;
         try {
             res = await this.db.updateGovernanceProposal(applyStatus, proposalId);
         } catch (e) { return; }
 
         // A passed proposal's 'proposal:finalized' listeners (capability hot-reload, provider
-        // registry) are registered on EVERY hub, but _tallyProposal only runs on the deterministic
+        // registry) are registered on EVERY hub, but tallyProposal only runs on the deterministic
         // tally leader -- so without emitting here followers update the row yet never APPLY the
         // change, and capability thresholds (min_stake etc.) diverge federation-wide until restart.
-        // Emit on the same transition + payload shape the leader uses in _tallyProposal.
+        // Emit on the same transition + payload shape the leader uses in tallyProposal.
         if (applyStatus === 'passed' && res && res.affectedRows > 0) {
             try {
                 let rows = await this.db.getGovernanceProposalParameterChange(proposalId);
@@ -858,7 +858,7 @@ class Governance extends EventEmitter {
     // entry is self-authenticating and independently checked (never trusted
     // because the leader relayed it): the voter must be in the locked electorate,
     // and its ed25519 signature must verify over the exact canonical payload
-    // vote()/_handleVote sign. Upsert is idempotent, so the leader's own loopback
+    // vote()/handleVote sign. Upsert is idempotent, so the leader's own loopback
     // and duplicate deliveries are harmless. A malformed/oversized `votes` array
     // is skipped (the local re-tally still runs on whatever votes we already hold).
     async ingestResultVotes(proposalId, wireVotes, electorate) {
@@ -904,7 +904,7 @@ class Governance extends EventEmitter {
     }
 
     // Check for proposals whose voting period has ended and tally them
-    async _checkExpiredProposals() {
+    async checkExpiredProposals() {
         let expired;
         try {
             expired = await this.db.findGovernanceProposalsByStatusAndVotingEnd();
@@ -924,14 +924,14 @@ class Governance extends EventEmitter {
             // contradictory passed/failed conclusions (split-brain).
             if (!this.isTallyLeader(proposal.proposal_id)) continue;
             try {
-                await this._tallyProposal(proposal);
+                await this.tallyProposal(proposal);
             } catch (e) {
                 logger.error(nodeUtil.format('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e));
             }
         }
     }
 
-    async _tallyProposal(proposal) {
+    async tallyProposal(proposal) {
         // R2-M2: include the signature so followers can re-verify each vote when
         // they re-tally locally (R2-H2), not accept the leader's status blind.
         // vote_seq travels with the evidence: a follower re-verifying these
@@ -948,7 +948,7 @@ class Governance extends EventEmitter {
         let newStatus = approved ? 'passed' : 'failed';
 
         // Gate the broadcast + emit on the status transition actually landing on THIS
-        // row. setInterval(_checkExpiredProposals) does not await its async pass, so a
+        // row. setInterval(checkExpiredProposals) does not await its async pass, so a
         // slow DB lets the next tick re-select the still-'voting' proposal and re-tally
         // it; the status='voting' WHERE clause makes only one UPDATE affect a row, but
         // without this affectedRows check both passes would broadcast GOV_RESULT and

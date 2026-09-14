@@ -40,7 +40,7 @@
  *      reference. (Previously this divided by the local value, opening a
  *      price-ratio window where the leader publishes a pair the follower
  *      then withholds the whole round over.)
- *   3. Slash detection (SlashDetector._checkDeviations): a submission
+ *   3. Slash detection (SlashDetector.checkDeviations): a submission
  *      measured against the FINALIZED round price as reference.
  *
  * All arithmetic is bcmath bignumber per the platform mandate, so the

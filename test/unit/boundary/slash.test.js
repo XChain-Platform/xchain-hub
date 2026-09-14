@@ -39,7 +39,7 @@ describe('Boundary: SlashDetector', function () {
     // Deviation threshold: boundary is STRICT greater-than 0.05
     // -----------------------------------------------------------------
 
-    describe('_checkDeviations(): deviation threshold boundary', function () {
+    describe('checkDeviations(): deviation threshold boundary', function () {
 
         let finalizedPrices;
 
@@ -53,7 +53,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '105000' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(0);
@@ -65,7 +65,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '105010' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(1);
@@ -78,7 +78,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '104990' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(0);
@@ -90,7 +90,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '95000' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(0);
@@ -102,7 +102,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '94990' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(1);
@@ -115,7 +115,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '0' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(0);
@@ -127,7 +127,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '105010' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, [{ coinPair: 'BTC/USD', price: '0' }]);
+            await sd.checkDeviations(1, submissions, [{ coinPair: 'BTC/USD', price: '0' }]);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(0);
@@ -139,7 +139,7 @@ describe('Boundary: SlashDetector', function () {
                 prices: [{ coinPair: 'BTC/USD', price: '200000' }]
             }]);
 
-            await sd._checkDeviations(1, submissions, finalizedPrices);
+            await sd.checkDeviations(1, submissions, finalizedPrices);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
             expect(calls).to.have.length(1);
@@ -151,7 +151,7 @@ describe('Boundary: SlashDetector', function () {
     // Missed rounds: fires exactly once at count === 30 (EXACT equality)
     // -----------------------------------------------------------------
 
-    describe('_checkParticipation(): missed rounds threshold boundary', function () {
+    describe('checkParticipation(): missed rounds threshold boundary', function () {
 
         function slashCalls() {
             return hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
@@ -159,7 +159,7 @@ describe('Boundary: SlashDetector', function () {
 
         async function simulateMisses(count) {
             for (let i = 1; i <= count; i++) {
-                await sd._checkParticipation(i, [], [VALIDATORS_3[0]]);
+                await sd.checkParticipation(i, [], [VALIDATORS_3[0]]);
             }
         }
 
@@ -188,20 +188,20 @@ describe('Boundary: SlashDetector', function () {
             // A single participation does NOT re-arm: the window is still
             // saturated with misses (the old consecutive counter reset here,
             // which let 1-in-30 participation evade forever, S-F4).
-            await sd._checkParticipation(31, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
-            await sd._checkParticipation(32, [], [VALIDATORS_3[0]]);
+            await sd.checkParticipation(31, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
+            await sd.checkParticipation(32, [], [VALIDATORS_3[0]]);
             expect(slashCalls()).to.have.length(1); // latched, no new slash
 
             // Sustained participation until the old misses age out of the
             // window (window = 60 rounds) re-arms the latch.
             for (let i = 33; i <= 92; i++) {
-                await sd._checkParticipation(i, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
+                await sd.checkParticipation(i, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
             }
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.equal(false);
 
             // A fresh 30-miss accumulation fires again.
             for (let i = 93; i <= 122; i++) {
-                await sd._checkParticipation(i, [], [VALIDATORS_3[0]]);
+                await sd.checkParticipation(i, [], [VALIDATORS_3[0]]);
             }
             expect(slashCalls()).to.have.length(2);
         });
@@ -213,7 +213,7 @@ describe('Boundary: SlashDetector', function () {
 
             // v0 participates every round, v1 misses all 30
             for (let i = 1; i <= 30; i++) {
-                await sd._checkParticipation(i, [v0.pubkey], allValidators);
+                await sd.checkParticipation(i, [v0.pubkey], allValidators);
             }
 
             let calls = slashCalls();

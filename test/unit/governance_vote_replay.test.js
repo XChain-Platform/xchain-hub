@@ -18,7 +18,7 @@
 // the sink was a plain last-write-wins upsert, so anyone who had seen a
 // validator's earlier "approve" gossip could re-broadcast it after that
 // validator switched to "reject" and silently reinstate the superseded choice.
-// _handleVote authenticates the vote by its own signature, so the replayed copy
+// handleVote authenticates the vote by its own signature, so the replayed copy
 // verified perfectly: nothing in the payload said WHEN it was cast.
 //
 // The fix puts a monotonic `seq` inside the signed bytes and only accepts a
@@ -108,7 +108,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
 
     it('DROPS a validly-signed vote that carries no seq (older peer or a stripped replay)', async function () {
         let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
-        await gov._handleVote({
+        await gov.handleVote({
             sender: 'peer', type: 'GOV_VOTE',
             data: { proposalId: PROPOSAL, vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
         });
@@ -116,12 +116,12 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
     });
 
     it('DROPS a vote whose seq was edited in flight (signed at one seq, sent at another)', async function () {
-        await gov._handleVote(inbound('approve', 5000, 1000));
+        await gov.handleVote(inbound('approve', 5000, 1000));
         expect(upsertCalls().length, 'signature no longer matches the rebuilt bytes').to.equal(0);
     });
 
     it('accepts a properly seq-stamped vote and persists it with its seq', async function () {
-        await gov._handleVote(inbound('approve', 1000));
+        await gov.handleVote(inbound('approve', 1000));
         let calls = upsertCalls();
         expect(calls.length, 'one persist').to.equal(1);
         expect(calls[0].args[1]).to.include(1000);
@@ -130,7 +130,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
     // ---- the guard reaches the sink --------------------------------------
 
     it('persists through a seq-conditional statement, not a bare last-write-wins upsert', async function () {
-        await gov._handleVote(inbound('approve', 1000));
+        await gov.handleVote(inbound('approve', 1000));
         let sql = String(upsertCalls()[0].args[0]).replace(/\s+/g, ' ');
         expect(sql, 'the overwrite is gated on a strictly greater seq')
             .to.match(/vote\s*=\s*IF\(VALUES\(vote_seq\) > COALESCE\(vote_seq, 0\), VALUES\(vote\), vote\)/);
@@ -143,10 +143,10 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
     });
 
     it('does the comparison in ONE statement (no read-compare-write TOCTOU on the gossip path)', async function () {
-        await gov._handleVote(inbound('approve', 1000));
+        await gov.handleVote(inbound('approve', 1000));
         let reads = hub.db.doQuery.getCalls()
             .filter(c => /SELECT vote_seq FROM governance_votes/.test(String(c.args[0])));
-        expect(reads.length, '_handleVote must not read the stored seq before writing').to.equal(0);
+        expect(reads.length, 'handleVote must not read the stored seq before writing').to.equal(0);
     });
 
     // ---- vote(), the signer ----------------------------------------------

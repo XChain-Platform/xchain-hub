@@ -581,7 +581,7 @@ function createCluster(nodeCount, overrides) {
         async triggerGovernanceTally(index) {
             let hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.governance) throw new Error('No governance on node ' + index);
-            await hub.governance._checkExpiredProposals();
+            await hub.governance.checkExpiredProposals();
         },
 
         /** Number of nodes in the cluster */

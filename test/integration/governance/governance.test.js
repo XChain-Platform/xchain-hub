@@ -105,7 +105,7 @@ describe('Integration: Governance (SC-7.x)', function () {
                 [proposal.proposalId]
             );
             // Force tally
-            await gov._tallyProposal(proposalRow[0]);
+            await gov.tallyProposal(proposalRow[0]);
 
             // Verify passed
             let result = await db.doQuery(
@@ -153,7 +153,7 @@ describe('Integration: Governance (SC-7.x)', function () {
             let proposalRow = await db.doQuery(
                 "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposal.proposalId]
             );
-            await gov._tallyProposal(proposalRow[0]);
+            await gov.tallyProposal(proposalRow[0]);
 
             let result = await db.doQuery(
                 "SELECT status FROM governance_proposals WHERE proposal_id = ?", [proposal.proposalId]
@@ -229,7 +229,7 @@ describe('Integration: Governance (SC-7.x)', function () {
             let proposalRow = await db.doQuery(
                 "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposal.proposalId]
             );
-            await gov._tallyProposal(proposalRow[0]); // No votes = failed
+            await gov.tallyProposal(proposalRow[0]); // No votes = failed
 
             // Try to re-propose immediately
             try {

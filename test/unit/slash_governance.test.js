@@ -306,7 +306,7 @@ describe('SlashGovernance', function () {
                 current_value: 'pending', proposed_value: 'suspend',
                 validator_snapshot: null, activation_block: null
             };
-            // _tallyProposal: votes query, UPDATE status; then applyFinalized's
+            // tallyProposal: votes query, UPDATE status; then applyFinalized's
             // audit read, evidence UPDATE, validators UPDATE.
             let votes = VALIDATORS_3.map(v => ({ voter_pubkey: v.pubkey, vote: 'approve', signature: '' }));
             ghub.db.doQuery.onCall(0).resolves(votes);
@@ -315,7 +315,7 @@ describe('SlashGovernance', function () {
             ghub.db.doQuery.onCall(3).resolves({ affectedRows: 1 });
             ghub.db.doQuery.onCall(4).resolves({ affectedRows: 1 });
 
-            await gov._tallyProposal(proposal);
+            await gov.tallyProposal(proposal);
             await appliedPromise;
 
             expect(applied).to.deep.equal({ validatorPubkey: PK, penalty: 'suspend', evidenceRowsUpdated: 1, suspended: true });

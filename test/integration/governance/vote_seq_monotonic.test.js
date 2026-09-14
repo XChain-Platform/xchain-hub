@@ -15,7 +15,7 @@
 //
 // WHY THIS EXISTS SEPARATELY FROM THE UNIT SUITE. The replay guard is one atomic
 // ON DUPLICATE KEY UPDATE with IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), ...)
-// and GREATEST(...). It is a single statement on purpose: _handleVote is
+// and GREATEST(...). It is a single statement on purpose: handleVote is
 // fire-and-forget, so several gossiped copies of one voter's votes can be in
 // flight together and a read-compare-write would let the loser land last. A
 // stubbed db can only assert the statement's TEXT, which would pass just as
@@ -133,7 +133,7 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
     });
 
     it('concurrent copies of the same voter converge on the highest seq, in any arrival order', async function () {
-        // The real hazard the single-statement guard exists for: _handleVote does not
+        // The real hazard the single-statement guard exists for: handleVote does not
         // await, so these interleave. Whatever order the DB serialises them in, every
         // hub must end up with the same row or the tally diverges.
         await Promise.all([

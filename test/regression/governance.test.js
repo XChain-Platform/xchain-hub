@@ -134,7 +134,7 @@ describe('Regression: Governance', function () {
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
 
-            await gov._tallyProposal({
+            await gov.tallyProposal({
                 proposal_id: 'gov:P:1', parameter: 'P',
                 current_value: '100', proposed_value: '120'
             });
@@ -152,7 +152,7 @@ describe('Regression: Governance', function () {
             ]);
             hub.db.doQuery.onSecondCall().resolves();
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[1][0]).to.equal('failed');
@@ -164,7 +164,7 @@ describe('Regression: Governance', function () {
             ]);
             hub.db.doQuery.onSecondCall().resolves();
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[1][0]).to.equal('failed');
@@ -257,7 +257,7 @@ describe('Regression: Governance', function () {
             ]);
             hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 });
 
-            await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
+            await gov.tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
             expect(pm.broadcast.calledOnce).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('GOV_RESULT');
@@ -309,13 +309,13 @@ describe('Regression: Governance', function () {
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
         });
 
-        it('_handleVote drops a forged vote and stores an authenticated one @regression-p2', async function () {
+        it('handleVote drops a forged vote and stores an authenticated one @regression-p2', async function () {
             // Votes are consensus-tally-affecting, so the gossip path now
             // authenticates them: voterPubkey must be a registered validator
             // and the ed25519 signature must verify over the canonical vote
             // payload, and the proposal must be open locally. A forged vote
             // must never reach the DB.
-            await gov._handleVote({
+            await gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc', signature: 'sig', seq: 1 }
             });
@@ -332,7 +332,7 @@ describe('Regression: Governance', function () {
             // admitted at seq 0.
             let seq = 1;
             let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex, seq }));
-            await gov._handleVote({
+            await gov.handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq }
             });
@@ -342,7 +342,7 @@ describe('Regression: Governance', function () {
 
         it('ignores messages with missing fields @regression-p2', function () {
             gov._handlePropose({ sender: 'peer', data: {} });
-            gov._handleVote({ sender: 'peer', data: {} });
+            gov.handleVote({ sender: 'peer', data: {} });
             gov._handleResult({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
         });
