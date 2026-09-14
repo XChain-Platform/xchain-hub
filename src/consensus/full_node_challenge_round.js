@@ -251,7 +251,7 @@ class FullNodeChallengeRound {
     // directly (a driver, a future wiring site, an operator patch) would otherwise
     // sign a BTC verdict with a foreign key and pay that chain's fee for a payload
     // BTC cannot read. Returns a reason string, or null when the wiring is sound.
-    _signerChainMismatch(){
+    signerChainMismatch(){
         let wrong = [];
         if(this._broadcastHookChain && this._broadcastHookChain !== this.signingChain)
             wrong.push('broadcast hook wired for ' + this._broadcastHookChain);
@@ -315,7 +315,7 @@ class FullNodeChallengeRound {
         return result;
     }
 
-    async _coinCall(method, params){
+    async coinCall(method, params){
         if(!this.coinRpcUrl) throw new Error('no coin RPC');
         let resp = await axios.post(this.coinRpcUrl, { jsonrpc: '1.0', id: 'fnproof', method, params: params || [] }, { timeout: 15000 });
         if(resp.data && resp.data.error) throw new Error('coin RPC error: ' + JSON.stringify(resp.data.error));
@@ -352,7 +352,7 @@ class FullNodeChallengeRound {
                     if(!st.closed || rank > st.leadRank){
                         st.closed = true;
                         st.leadRank = rank;
-                        this._closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+                        this.closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
                     }
                 }
                 if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
@@ -389,7 +389,7 @@ class FullNodeChallengeRound {
             console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (eligible-verifier set unresolved; abstaining rather than running on a genesis-only subset)');
             return;
         }
-        let claimants = await this._claimantSet(epoch);
+        let claimants = await this.claimantSet(epoch);
         // Unresolved claimant set (capability-snapshot failure): ABSTAIN for this
         // epoch alongside the eligible-set gate above, rather than lock an empty
         // (full_node, epoch) universe that diverges from hubs whose snapshot resolved.
@@ -429,9 +429,9 @@ class FullNodeChallengeRound {
                     // the plaintext answer. `answers` holds digests for every
                     // claimant including self, so the leader/verifier comparison
                     // paths treat self and peers identically.
-                    let digest = this._answerDigest(challengeId, myPubkey, state.myAnswer);
+                    let digest = this.answerDigest(challengeId, myPubkey, state.myAnswer);
                     state.answers.set(myPubkey, digest);
-                    let sig = this.identity.sign(this._answerCanonical(challengeId, digest));
+                    let sig = this.identity.sign(this.answerCanonical(challengeId, digest));
                     this.peerManager && this.peerManager.broadcast(XNODE_ANSWER, {
                         epoch, challengeId, answer_digest: digest, sig_pubkey: myPubkey, sig
                     });
@@ -452,7 +452,7 @@ class FullNodeChallengeRound {
         // have broadcast their answers.
     }
 
-    async _closeCollection(epoch){
+    async closeCollection(epoch){
         let state = this.rounds.get(epoch);
         if(!state) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
@@ -465,19 +465,19 @@ class FullNodeChallengeRound {
         if(this._isLeader(state, myPubkey) && state.myAnswer && !state.passList){
             let pass = [];
             for(let pk of state.claimants){
-                if(state.answers.get(pk) === this._answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
+                if(state.answers.get(pk) === this.answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
             }
             pass.sort(PASS_CMP);
             state.passList = pass;
             if(pass.length > 0){
                 // Self-sign, then request peer signatures.
-                let sig = this.identity.sign(this._verdictCanonical(state.challengeId, epoch, pass));
+                let sig = this.identity.sign(this.verdictCanonical(state.challengeId, epoch, pass));
                 state.sigs.set(myPubkey, sig);
                 this.peerManager && this.peerManager.broadcast(XNODE_SIGN_REQ, {
                     epoch, challengeId: state.challengeId, target: state.target, passList: pass,
                     sig_pubkey: myPubkey
                 });
-                await this._maybeFinalize(epoch);
+                await this.maybeFinalize(epoch);
             }
         }
     }
@@ -485,14 +485,14 @@ class FullNodeChallengeRound {
     _handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
-            case XNODE_ANSWER:   return this._onAnswer(env.data);
-            case XNODE_SIGN_REQ: return this._onSignReq(env.data);
+            case XNODE_ANSWER:   return this.onAnswer(env.data);
+            case XNODE_SIGN_REQ: return this.onSignReq(env.data);
             case XNODE_SIGN:     return this._onSign(env.data);
-            case XNODE_DONE:     return this._onDone(env.data);
+            case XNODE_DONE:     return this.onDone(env.data);
         }
     }
 
-    _onAnswer(d){
+    onAnswer(d){
         let state = this.rounds.get(Number(d.epoch));
         if(!state || state.finalized) return;
         let pk = String(d.sig_pubkey || '').toLowerCase();
@@ -506,11 +506,11 @@ class FullNodeChallengeRound {
         // claimant can never match this sender's expected digest.
         let digest = String(d.answer_digest || '').toLowerCase();
         if(!/^[0-9a-f]{64}$/.test(digest)) return;
-        if(!ValidatorIdentity.verify(this._answerCanonical(state.challengeId, digest), String(d.sig || ''), pk)) return;
+        if(!ValidatorIdentity.verify(this.answerCanonical(state.challengeId, digest), String(d.sig || ''), pk)) return;
         if(!state.answers.has(pk)) state.answers.set(pk, digest);
     }
 
-    async _onSignReq(d){
+    async onSignReq(d){
         let state = this.rounds.get(Number(d.epoch));
         if(!state || state.finalized) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
@@ -541,7 +541,7 @@ class FullNodeChallengeRound {
             // R2-FN2: confirm the claimant's pubkey-bound digest against the one
             // derived from OUR OWN node's answer. A digest copied from another
             // claimant hashes over the wrong pubkey and never matches.
-            if(a === undefined || a !== this._answerDigest(state.challengeId, pk, state.myAnswer)) return; // can't confirm: refuse to sign
+            if(a === undefined || a !== this.answerDigest(state.challengeId, pk, state.myAnswer)) return; // can't confirm: refuse to sign
         }
         // Completeness (R2-FN3): the leader could silently DROP an honest claimant
         // from the pass list (the loop above only validates listed entries, not
@@ -551,10 +551,10 @@ class FullNodeChallengeRound {
         // signature. (Answers still in flight are simply not yet in our set, so
         // this never forces a premature refusal; the round re-signs as they land.)
         for(let [pk, a] of state.answers){
-            if(state.claimants.has(pk) && a === this._answerDigest(state.challengeId, pk, state.myAnswer) && !passSet.has(pk)) return;
+            if(state.claimants.has(pk) && a === this.answerDigest(state.challengeId, pk, state.myAnswer) && !passSet.has(pk)) return;
         }
         let sorted = pass.slice().sort(PASS_CMP);
-        let sig = this.identity.sign(this._verdictCanonical(state.challengeId, state.epoch, sorted));
+        let sig = this.identity.sign(this.verdictCanonical(state.challengeId, state.epoch, sorted));
         if(!state.passList) state.passList = sorted;
         state.sigs.set(myPubkey, sig);
         this.peerManager && this.peerManager.broadcast(XNODE_SIGN, {
@@ -568,13 +568,13 @@ class FullNodeChallengeRound {
         let pk = String(d.sig_pubkey || '').toLowerCase();
         if(!pk || !state.eligible.has(pk)) return;
         if(String(d.challengeId) !== state.challengeId) return;
-        let canonical = this._verdictCanonical(state.challengeId, state.epoch, state.passList.slice().sort(PASS_CMP));
+        let canonical = this.verdictCanonical(state.challengeId, state.epoch, state.passList.slice().sort(PASS_CMP));
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), pk)) return;
         state.sigs.set(pk, String(d.sig));
-        await this._maybeFinalize(state.epoch);
+        await this.maybeFinalize(state.epoch);
     }
 
-    _onDone(d){
+    onDone(d){
         let state = this.rounds.get(Number(d.epoch));
         if(!state) return;
         state.finalized = true;
@@ -618,7 +618,7 @@ class FullNodeChallengeRound {
             if(state === 'sent' || state === 'intent') this._committedEpochs.add(epoch);
     }
 
-    async _maybeFinalize(epoch){
+    async maybeFinalize(epoch){
         let state = this.rounds.get(epoch);
         if(!state || state.finalized || !state.passList) return;
         // A prior process already committed this epoch's BTC fee. The epoch is
@@ -641,7 +641,7 @@ class FullNodeChallengeRound {
         // anything the encoder builds: a mismatch is a standing configuration fact, not
         // a transient send failure, so it must not consume this window's budget or
         // claim the round. Warned once, then the round simply stays observe-only.
-        let chainMismatch = this._signerChainMismatch();
+        let chainMismatch = this.signerChainMismatch();
         if(chainMismatch){
             if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
             return;
@@ -678,7 +678,7 @@ class FullNodeChallengeRound {
         // twice (wasted BTC fee; the second is a same-challenge replay). Claim the round
         // now and revert on failure so a later sig/tick can still retry.
         state.finalized = true;
-        let wire = this._buildVerdictWire(state);
+        let wire = this.buildVerdictWire(state);
 
         // Durable intent record BEFORE the money moves, and the broadcast
         // is GATED on it, matching the rule AttestationPublisher states at its own
@@ -698,7 +698,7 @@ class FullNodeChallengeRound {
         }
 
         try {
-            let res = await this._broadcastVerdict(wire);
+            let res = await this.broadcastVerdict(wire);
             this.spendGuard.commit(spendToken);   // the reservation IS the BTC fee charged
             state.txid = res && res.txid ? res.txid : null;
             // Mirror the reload rule in-process, so a spend is gated identically
@@ -781,8 +781,8 @@ class FullNodeChallengeRound {
 
     // scriptPubKey (hex) of a seed-selected output in the buried target block.
     async _computeAnswer(target, seed){
-        let blockHash = await this._coinCall('getblockhash', [Number(target)]);
-        let block     = await this._coinCall('getblock', [blockHash, 2]);
+        let blockHash = await this.coinCall('getblockhash', [Number(target)]);
+        let block     = await this.coinCall('getblock', [blockHash, 2]);
         let txs = (block && block.tx) || [];
         if(txs.length === 0) throw new Error('empty target block');
         let txIndex = Number(BigInt('0x' + seed.slice(0, 16)) % BigInt(txs.length));
@@ -797,7 +797,7 @@ class FullNodeChallengeRound {
 
     // Signed canonical for an XNODE_ANSWER broadcast. Since R2-FN2 the second
     // field is the pubkey-bound answer DIGEST, never the plaintext answer.
-    _answerCanonical(challengeId, answerDigest){
+    answerCanonical(challengeId, answerDigest){
         return 'XNODEANS|' + challengeId + '|' + String(answerDigest);
     }
 
@@ -807,14 +807,14 @@ class FullNodeChallengeRound {
     // is useless without the answer preimage, which only a real full node can
     // compute. Verifiers hold the preimage from their own node and recompute the
     // expected digest per claimant, so no reveal phase is needed.
-    _answerDigest(challengeId, pubkey, answer){
+    answerDigest(challengeId, pubkey, answer){
         return crypto.createHash('sha256')
             .update('XNODEANSV1|' + challengeId + '|' + String(pubkey).toLowerCase() + '|' + String(answer))
             .digest('hex');
     }
 
     // CONSENSUS-CRITICAL: must byte-match the indexer's nodeproof.js canonical.
-    _verdictCanonical(challengeId, epoch, sortedPassList){
+    verdictCanonical(challengeId, epoch, sortedPassList){
         let raw = challengeId + '|' + epoch + '|' + sortedPassList.join(',');
         if(eq.isEquivHeaderActive(epoch, this.network))
             raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.NODEPROOF, challengeId, 0, raw);
@@ -822,7 +822,7 @@ class FullNodeChallengeRound {
     }
 
     // NODEPROOF|0|CHALLENGE_ID|EPOCH_HEIGHT|PASS_COUNT|PASS_PK...|SIG_COUNT|PK|SIG|...
-    _buildVerdictWire(state){
+    buildVerdictWire(state){
         let pass = state.passList.slice().sort(PASS_CMP);
         let sigTokens = [];
         for(let [pk, sig] of state.sigs.entries()) sigTokens.push(pk, sig);
@@ -937,7 +937,7 @@ class FullNodeChallengeRound {
     // array (_coerceValidators guarantees one on the SUCCESS branch) and still
     // yields a real, empty Set. This fails CLOSED, trading liveness on a prolonged
     // snapshot outage for cross-hub safety.
-    async _claimantSet(epoch){
+    async claimantSet(epoch){
         let set = new Set();
         try {
             let snap = await this.capabilitySnapshot.getSnapshot('full_node', epoch);
@@ -960,11 +960,11 @@ class FullNodeChallengeRound {
         return set;
     }
 
-    async _broadcastVerdict(wire){
+    async broadcastVerdict(wire){
         // Second gate on the same fact, for every caller that does not come through
         // _maybeFinalize. Refuse before the hook runs and before the encoder fetches a
         // UTXO, so a wrong-chain wiring costs nothing.
-        let chainMismatch = this._signerChainMismatch();
+        let chainMismatch = this.signerChainMismatch();
         if(chainMismatch){
             if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
             throw new Error(chainMismatch);

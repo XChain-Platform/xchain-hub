@@ -228,7 +228,7 @@ describe('FullNodeChallengeRound', function () {
         it('_verdictCanonical = challenge|epoch|sorted-pass, EQUIV-wrapped on regtest', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             const cid = 'f'.repeat(64);
-            const out = eng._verdictCanonical(cid, 288, [P1, P2]);
+            const out = eng.verdictCanonical(cid, 288, [P1, P2]);
             // regtest activates EQUIV at genesis → header-wrapped
             expect(out.startsWith('EQUIV|XNODEPROOF|' + cid + '|0||')).to.equal(true);
             expect(out.endsWith(cid + '|288|' + [P1, P2].join(','))).to.equal(true);
@@ -243,7 +243,7 @@ describe('FullNodeChallengeRound', function () {
             const astral = '\u{1F600}';   // UTF-8 F0 9F 98 80, UTF-16 lead unit D83D
             // The default sort compares D83D < FF01 and would emit the astral one first.
             expect([wide, astral].slice().sort()).to.deep.equal([astral, wide]);
-            const wire = eng._buildVerdictWire({
+            const wire = eng.buildVerdictWire({
                 challengeId: 'cid', epoch: 288, passList: [astral, wide], sigs: new Map(),
             }).split('|');
             expect(wire.slice(5, 7)).to.deep.equal([wide, astral]);
@@ -251,7 +251,7 @@ describe('FullNodeChallengeRound', function () {
 
         it('_answerCanonical binds challenge + answer', function () {
             const eng = new FullNodeChallengeRound(makeHub());
-            expect(eng._answerCanonical('cid', 'deadbeef')).to.equal('XNODEANS|cid|deadbeef');
+            expect(eng.answerCanonical('cid', 'deadbeef')).to.equal('XNODEANS|cid|deadbeef');
         });
         it('_buildVerdictWire emits NODEPROOF|0|cid|epoch|n|pass…|m|pk|sig…', function () {
             const eng = new FullNodeChallengeRound(makeHub());
@@ -260,7 +260,7 @@ describe('FullNodeChallengeRound', function () {
                 passList: [P2, P1],                       // unsorted on input
                 sigs: new Map([[V1, 'sigV1'], [V2, 'sigV2']]),
             };
-            const wire = eng._buildVerdictWire(state).split('|');
+            const wire = eng.buildVerdictWire(state).split('|');
             expect(wire.slice(0, 5)).to.deep.equal(['NODEPROOF', '0', 'cid', '288', '2']);
             expect(wire.slice(5, 7)).to.deep.equal([P1, P2]);          // pass sorted
             expect(wire[7]).to.equal('2');                              // sig count
@@ -418,7 +418,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: P1 }, { pubkey: P2 }] });
             const eng = new FullNodeChallengeRound(hub);
-            const set = await eng._claimantSet(288);
+            const set = await eng.claimantSet(288);
             expect([...set].sort()).to.deep.equal([P1, P2].sort());
             expect(hub.capabilitySnapshot.getSnapshot.calledWith('full_node', 288)).to.equal(true);
         });
@@ -428,13 +428,13 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves(null);
             const eng = new FullNodeChallengeRound(hub);
-            expect(await eng._claimantSet(288)).to.equal(null);
+            expect(await eng.claimantSet(288)).to.equal(null);
         });
         it('_claimantSet returns null when the snapshot shape is malformed (validators not an array)', async function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: 'nope' });
             const eng = new FullNodeChallengeRound(hub);
-            expect(await eng._claimantSet(288)).to.equal(null);
+            expect(await eng.claimantSet(288)).to.equal(null);
         });
         it('_claimantSet returns a real empty Set for a legitimately empty snapshot', async function () {
             // A genuinely empty validators array is distinct from unresolved and
@@ -442,7 +442,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [] });
             const eng = new FullNodeChallengeRound(hub);
-            const set = await eng._claimantSet(288);
+            const set = await eng.claimantSet(288);
             expect(set).to.be.instanceOf(Set);
             expect(set.size).to.equal(0);
         });
@@ -491,7 +491,7 @@ describe('FullNodeChallengeRound', function () {
             expect(st.myAnswer).to.equal(ANSWER);
             const ans = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_ANSWER');
             expect(ans, 'XNODE_ANSWER broadcast').to.exist;
-            expect(ans.args[1].answer_digest).to.equal(eng._answerDigest(st.challengeId, V1, ANSWER));
+            expect(ans.args[1].answer_digest).to.equal(eng.answerDigest(st.challengeId, V1, ANSWER));
             expect(ans.args[1].answer, 'plaintext answer must never ride the wire').to.not.exist;
             expect(JSON.stringify(ans.args[1])).to.not.include(ANSWER);
         });
@@ -501,8 +501,8 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
             // P1 (a claimant) submitted the CORRECT pubkey-bound digest.
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             // V1 is the only eligible verifier → it is leader → broadcasts a sign request
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
             expect(req, 'XNODE_SIGN_REQ broadcast').to.exist;
@@ -513,8 +513,8 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                       // V1 = sole genesis verifier → quorum 1
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);             // leader self-signs (V1) → quorum 1 met
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);             // leader self-signs (V1) → quorum 1 met
             expect(eng.broadcastFn.calledOnce, 'verdict broadcast on-chain').to.equal(true);
             const wire = eng.broadcastFn.firstCall.args[0];
             expect(wire.startsWith('NODEPROOF|0|' + st.challengeId + '|288|')).to.equal(true);
@@ -528,12 +528,12 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                       // V1 = sole genesis verifier → quorum 1
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             // Hold the verdict broadcast open so a second finalize can race the first's await.
             let release = null, calls = 0;
             eng.broadcastFn = () => { calls++; return new Promise(res => { release = () => res({ txid: 'TX' + calls }); }); };
-            const p1 = eng._closeCollection(288);        // leader self-signs → quorum 1 → _maybeFinalize (broadcast held open)
-            const p2 = eng._maybeFinalize(288);          // a second trigger during the broadcast await must NOT re-broadcast
+            const p1 = eng.closeCollection(288);        // leader self-signs → quorum 1 → _maybeFinalize (broadcast held open)
+            const p2 = eng.maybeFinalize(288);          // a second trigger during the broadcast await must NOT re-broadcast
             release();
             await Promise.all([p1, p2]);
             expect(calls, 'verdict broadcast exactly once').to.equal(1);
@@ -554,8 +554,8 @@ describe('FullNodeChallengeRound', function () {
                 sawIntentBeforeSpend = seen.some(e => e.phase === 'intent');
                 return Promise.resolve({ txid: 'TX' });
             };
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             expect(sawIntentBeforeSpend, 'intent must be durable before the fee moves').to.equal(true);
             expect(seen.map(e => e.phase)).to.deep.equal(['intent', 'sent']);
             expect(seen[0].challengeId).to.equal(st.challengeId);
@@ -568,8 +568,8 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             eng._recordSpend = () => false;              // disk full / bad permissions
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             expect(eng.broadcastFn.called, 'no BTC fee without a durable record').to.equal(false);
             // Deferred, not lost: the finalize lock is released so a later tick retries.
             expect(st.finalized).to.equal(false);
@@ -582,8 +582,8 @@ describe('FullNodeChallengeRound', function () {
             let seen = [];
             eng._recordSpend = (entry) => { seen.push(entry); return true; };
             eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             expect(seen.map(e => e.phase)).to.deep.equal(['intent', 'ambiguous']);
             // The round stays claimed: an ambiguous send may already have cost the fee.
             expect(st.finalized).to.equal(true);
@@ -600,8 +600,8 @@ describe('FullNodeChallengeRound', function () {
             const st  = eng.rounds.get(288);
             eng._recordSpend = () => true;
             eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             expect(eng.spendGuard.spentInWindow(),
                    'a possibly-paid BTC fee consumes the window').to.equal(eng.spendGuard.estSpendUsdCents);
         });
@@ -614,8 +614,8 @@ describe('FullNodeChallengeRound', function () {
             const st  = eng.rounds.get(288);
             eng._recordSpend = () => true;
             eng.broadcastFn = () => Promise.reject(new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             expect(eng.spendGuard.spentInWindow(),
                    'nothing left the process, so nothing is charged').to.equal(0);
             expect(st.finalized, 'and the round unlocks for a later retry').to.equal(false);
@@ -635,8 +635,8 @@ describe('FullNodeChallengeRound', function () {
             st.leadRank = 2;                   // _tick promoted rank 2: nothing landed at 0 or 1
             const logged = sinon.stub(console, 'log');
             try {
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
             } finally { logged.restore(); }
             const sent = seen.find(e => e.phase === 'sent');
             expect(sent, 'verdict sent').to.exist;
@@ -654,8 +654,8 @@ describe('FullNodeChallengeRound', function () {
             eng._recordSpend = (entry) => { seen.push(entry); return true; };
             const logged = sinon.stub(console, 'log');
             try {
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
             } finally { logged.restore(); }
             const sent = seen.find(e => e.phase === 'sent');
             expect(sent.leadRank, 'the elected leader broadcasts at rank 0').to.equal(0);
@@ -673,8 +673,8 @@ describe('FullNodeChallengeRound', function () {
             const eng = await startEpoch(hub);
             eng.spendLogPath = logPath;                  // directory does not exist yet
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').map(JSON.parse);
             expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'sent']);
             expect(lines[0].effector).to.equal('FULLNODE_VERDICT');
@@ -715,8 +715,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 288 }, { phase: 'sent', epoch: 288, txid: 'TXPRIOR' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.called, 'no second BTC fee for an epoch already spent').to.equal(false);
                 expect(st.finalized, 'the round is claimed, not left retrying').to.equal(true);
             });
@@ -724,8 +724,8 @@ describe('FullNodeChallengeRound', function () {
             it('a bare intent (crashed mid-flight) also blocks the re-broadcast', async function () {
                 const { eng } = await restartWith(writeLog([{ phase: 'intent', epoch: 288 }]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.called, 'a dangling intent may already have paid').to.equal(false);
             });
 
@@ -734,8 +734,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 288 }, { phase: 'ambiguous', epoch: 288, error: 'socket hang up' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.called).to.equal(false);
             });
 
@@ -746,8 +746,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.calledOnce, 'a never-sent verdict must still land').to.equal(true);
             });
 
@@ -760,8 +760,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 288 },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.called, 'the retry may already have paid the fee').to.equal(false);
             });
 
@@ -771,8 +771,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected again' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.calledOnce, 'nothing was ever spent, so liveness wins').to.equal(true);
             });
 
@@ -782,8 +782,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'failed', epoch: 288, error: 'a trailing line must not clear a paid epoch' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.called).to.equal(false);
             });
 
@@ -792,8 +792,8 @@ describe('FullNodeChallengeRound', function () {
                     { phase: 'intent', epoch: 144 }, { phase: 'sent', epoch: 144, txid: 'TXOLD' },
                 ]));
                 const st = eng.rounds.get(288);
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng.broadcastFn.calledOnce).to.equal(true);
             });
 
@@ -815,8 +815,8 @@ describe('FullNodeChallengeRound', function () {
                 const eng = await startEpoch(hub);
                 const st  = eng.rounds.get(288);
                 eng._recordSpend = () => true;
-                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-                await eng._closeCollection(288);
+                eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng.closeCollection(288);
                 expect(eng._committedEpochs.has(288)).to.equal(true);
             });
         });
@@ -828,8 +828,8 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
             // quorum is 2 (V=2) but only one self-sign so far → no finalize
             expect(eng.broadcastFn.called).to.equal(false);
         });
@@ -866,11 +866,11 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                        // identity V1 = sole verifier/leader
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            const honest = eng._answerDigest(st.challengeId, P1, ANSWER);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
+            const honest = eng.answerDigest(st.challengeId, P1, ANSWER);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
             // P2 copies P1's public gossip verbatim and re-signs it as its own.
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
-            await eng._closeCollection(288);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
+            await eng.closeCollection(288);
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
             expect(req, 'XNODE_SIGN_REQ broadcast').to.exist;
             expect(req.args[1].passList).to.include(P1);
@@ -881,11 +881,11 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                        // identity V1 (verifier)
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            const honest = eng._answerDigest(st.challengeId, P1, ANSWER);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
+            const honest = eng.answerDigest(st.challengeId, P1, ANSWER);
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
             const leader = eng._electedLeader(st);
-            await eng._onSignReq({ epoch: 288, challengeId: st.challengeId, sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
+            await eng.onSignReq({ epoch: 288, challengeId: st.challengeId, sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
             const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
             expect(signed, 'must not co-sign a pass list containing a copier').to.not.exist;
         });
@@ -894,18 +894,18 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: ANSWER, sig_pubkey: P1, sig: 's' });
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: ANSWER, sig_pubkey: P1, sig: 's' });
             expect(st.answers.has(P1)).to.equal(false);
         });
 
         it('_answerDigest binds challenge, pubkey, and answer', function () {
             const eng = new FullNodeChallengeRound(makeHub());
-            const d1 = eng._answerDigest('cid', P1, 'ans');
+            const d1 = eng.answerDigest('cid', P1, 'ans');
             expect(d1).to.match(/^[0-9a-f]{64}$/);
-            expect(eng._answerDigest('cid', P2, 'ans')).to.not.equal(d1);   // pubkey-bound
-            expect(eng._answerDigest('cid2', P1, 'ans')).to.not.equal(d1);  // challenge-bound
-            expect(eng._answerDigest('cid', P1, 'ans2')).to.not.equal(d1);  // answer-bound
-            expect(eng._answerDigest('cid', P1.toUpperCase(), 'ans')).to.equal(d1); // case-normalized pubkey
+            expect(eng.answerDigest('cid', P2, 'ans')).to.not.equal(d1);   // pubkey-bound
+            expect(eng.answerDigest('cid2', P1, 'ans')).to.not.equal(d1);  // challenge-bound
+            expect(eng.answerDigest('cid', P1, 'ans2')).to.not.equal(d1);  // answer-bound
+            expect(eng.answerDigest('cid', P1.toUpperCase(), 'ans')).to.equal(d1); // case-normalized pubkey
         });
     });
 
@@ -920,8 +920,8 @@ describe('FullNodeChallengeRound', function () {
                 claimants: new Set([P1, P2]),
                 // Both confirmed correct: pubkey-bound digests of the same answer (R2-FN2).
                 answers: new Map([
-                    [P1, eng._answerDigest('cidFN3', P1, 'ANS')],
-                    [P2, eng._answerDigest('cidFN3', P2, 'ANS')],
+                    [P1, eng.answerDigest('cidFN3', P1, 'ANS')],
+                    [P2, eng.answerDigest('cidFN3', P2, 'ANS')],
                 ]),
                 myAnswer: 'ANS', target: 188, seed: SEED,
                 sigs: new Map(), passList: null, leadRank: 0,
@@ -937,7 +937,7 @@ describe('FullNodeChallengeRound', function () {
             const st  = seedRound(eng);
             const leader = eng._electedLeader(st);
             // Leader's list drops P2 (which this node independently confirmed).
-            await eng._onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1], sig: 'x' });
+            await eng.onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1], sig: 'x' });
             expect(st.sigs.has(V2)).to.equal(false);
             const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
             expect(signed, 'must not sign an incomplete pass list').to.not.exist;
@@ -949,7 +949,7 @@ describe('FullNodeChallengeRound', function () {
             const eng = new FullNodeChallengeRound(hub);
             const st  = seedRound(eng);
             const leader = eng._electedLeader(st);
-            await eng._onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
+            await eng.onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
             const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
             expect(signed, 'signs when the pass list is complete').to.exist;
         });
@@ -1053,7 +1053,7 @@ describe('FullNodeChallengeRound', function () {
             const encoder = makeMockEncoder();
             wireEncoder(eng, encoder);
 
-            const res = await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0');
+            const res = await eng.broadcastVerdict('NODEPROOF|0|cid|288|0|0');
 
             expect(encoder.getUtxos.calledOnceWith(eng.btcAddress), 'UTXOs fetched first').to.equal(true);
             expect(encoder.createTxArgs).to.be.an('object');
@@ -1077,7 +1077,7 @@ describe('FullNodeChallengeRound', function () {
             wireEncoder(eng, encoder);
 
             let threw = false;
-            try { await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
+            try { await eng.broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
             catch (e) { threw = true; expect(e.message).to.include('no PSBT'); }
             expect(threw).to.equal(true);
             expect(eng.walletSignFn.called, 'never signs an absent PSBT').to.equal(false);
@@ -1091,7 +1091,7 @@ describe('FullNodeChallengeRound', function () {
             wireEncoder(eng, encoder);
 
             let threw = false;
-            try { await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
+            try { await eng.broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
             catch (e) { threw = true; expect(e.message).to.include('no UTXOs'); }
             expect(threw).to.equal(true);
             expect(encoder.createTxArgs, 'no build attempted').to.equal(null);
@@ -1103,7 +1103,7 @@ describe('FullNodeChallengeRound', function () {
             wireEncoder(eng, encoder);
             eng.broadcastFn = sinon.stub().resolves({ txid: 'hook-txid' });
 
-            const res = await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0');
+            const res = await eng.broadcastVerdict('NODEPROOF|0|cid|288|0|0');
             expect(res.txid).to.equal('hook-txid');
             expect(encoder.getUtxos.called).to.equal(false);
         });

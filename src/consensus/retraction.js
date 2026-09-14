@@ -142,13 +142,13 @@ class RetractionConsensus {
         return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
     }
 
-    _pruneIntents(){
+    pruneIntents(){
         let cutoff = Date.now() - this.intentTtlMs;
         for(let [k, ts] of this.localIntents)
             if(ts < cutoff) this.localIntents.delete(k);
     }
 
-    _rememberFinalized(id){
+    rememberFinalized(id){
         this.finalized.add(id);
         if(this.finalized.size > 512){
             let first = this.finalized.values().next().value;
@@ -161,18 +161,18 @@ class RetractionConsensus {
     // indexer pushed this), then either runs the signing round (gate active)
     // or falls through to the legacy unsigned broadcast.
     async submitLocal(evt){
-        this._pruneIntents();
+        this.pruneIntents();
         this.localIntents.set(RetractionConsensus.intentKey(evt), Date.now());
 
-        if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this._broadcastUnsigned(evt);
-        if(!this.identity || !this.peerManager || !this.capSnapshot) return this._broadcastUnsigned(evt);
+        if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this.broadcastUnsigned(evt);
+        if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
 
         let snapshotBlock = await this._resolveSnapshotBlock();
         if(snapshotBlock == null || !isRetractionSigningActive(snapshotBlock, this.network))
-            return this._broadcastUnsigned(evt);
+            return this.broadcastUnsigned(evt);
 
         let validators = await this._resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);
-        if(!validators.length) return this._broadcastUnsigned(evt);
+        if(!validators.length) return this.broadcastUnsigned(evt);
 
         let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
         let canonical = RetractionConsensus.canonicalRetraction(signedEvt);
@@ -215,7 +215,7 @@ class RetractionConsensus {
                 // converge under the activation fences. Never silently drop a retraction.
                 console.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
                     pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
-                this._broadcastUnsigned(evt);
+                this.broadcastUnsigned(evt);
             }
         }, this.roundTimeoutMs);
         if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
@@ -224,7 +224,7 @@ class RetractionConsensus {
         this._checkQuorum(id);
     }
 
-    _broadcastUnsigned(evt){
+    broadcastUnsigned(evt){
         if(this.broadcaster) this.broadcaster.broadcastDeletion(evt);
     }
 
@@ -237,7 +237,7 @@ class RetractionConsensus {
         }
     }
 
-    _normalizeRetraction(d){
+    normalizeRetraction(d){
         if(!d || typeof d !== 'object') return null;
         if(!QUORUM_CLASS_TABLES.has(String(d.table))) return null;
         let evt = {
@@ -263,7 +263,7 @@ class RetractionConsensus {
     // independently pushed to this hub (never adopt the initiator's claim).
     async _handleSignReq(envelope){
         let d   = envelope.data;
-        let evt = this._normalizeRetraction(d.retraction);
+        let evt = this.normalizeRetraction(d.retraction);
         if(!evt || !this.identity) return;
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let sender   = String(d.sig_pubkey || '').toLowerCase();
@@ -287,7 +287,7 @@ class RetractionConsensus {
         // The load-bearing check: OUR indexer must have pushed a matching
         // retraction (same table/chain/from/to; the generation is the
         // initiator's instance-local counter and is signed, not compared).
-        this._pruneIntents();
+        this.pruneIntents();
         let intentTs = this.localIntents.get(RetractionConsensus.intentKey(evt));
         if(intentTs === undefined) return;                         // nothing we observed -> never sign
 
@@ -332,7 +332,7 @@ class RetractionConsensus {
     // the quorum independently - a Byzantine initiator cannot shortcut this.
     async _handleFinalized(envelope){
         let d   = envelope.data;
-        let evt = this._normalizeRetraction(d.retraction);
+        let evt = this.normalizeRetraction(d.retraction);
         if(!evt || !Array.isArray(d.signatures)) return;
         if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
 
@@ -385,7 +385,7 @@ class RetractionConsensus {
     // forgetFinalized on the error paths is what makes that ordering safe.
     // Returns true when the signed deletion was actually streamed.
     async _finalize(evt, canonical, id, sigs, isInitiator){
-        this._rememberFinalized(id);
+        this.rememberFinalized(id);
         let label = evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
                     ' (snapshot ' + evt.snapshot_block + ')';
         let persistedRows = 0;

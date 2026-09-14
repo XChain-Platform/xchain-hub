@@ -169,7 +169,7 @@ class Consensus {
     // rows of `validators` WHERE status='active', so length > 1 means real
     // peers to diverge from regardless of what the operator declared. Strictly
     // widening: every case minValidators > 1 caught is still caught.
-    _isFederated() {
+    isFederated() {
         return this.minValidators > 1 || this.validatorSet.length > 1;
     }
 
@@ -197,12 +197,12 @@ class Consensus {
     // _hasDeterministicSnapshot (fail closed for federations); this is only the
     // present-but-empty case.
     _isEmptyFederationSnapshot(snapshot) {
-        return this._isFederated() && !!snapshot &&
+        return this.isFederated() && !!snapshot &&
             Array.isArray(snapshot.validators) && snapshot.validators.length === 0;
     }
 
     async start() {
-        await this._loadSeq();
+        await this.loadSeq();
 
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
@@ -245,14 +245,14 @@ class Consensus {
         // Falls back to live _getQuorum() when the indexer or BTC tip
         // can't be resolved (graceful degradation; same behavior as before
         // the snapshot wiring landed).
-        let { snapshot, weighted, requestedBlockIndex } = await this._lockSnapshot();
+        let { snapshot, weighted, requestedBlockIndex } = await this.lockSnapshot();
         // Federation-split guard (fail closed). In a multi-hub federation, a null
         // snapshot means each hub would fall back to its own LOCAL validatorSet,
         // so two hubs could finalize the same config-change round over different
         // sets. Refuse to propose rather than split. Genuine single-host hubs
         // (not _isFederated) have no peer to diverge from, so they keep the
         // existing fallback/single-node path below.
-        if (this._isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
+        if (this.isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
             throw new Error('Consensus: refusing to PROPOSE config change without a deterministic ' +
                 'validator snapshot (federated hub); indexer capability snapshot unavailable');
         }
@@ -281,7 +281,7 @@ class Consensus {
             if (this.minValidators > 1) {
                 console.warn('Consensus: operating in single-node mode (MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0)');
             }
-            await this._applyConfig(config);
+            await this.applyConfig(config);
             return true;
         }
 
@@ -373,7 +373,7 @@ class Consensus {
             };
 
             proposal.prepares.add(this.peerManager.validatorAddr);
-            this._addSelfPubkey(proposal.preparePubkeys);
+            this.addSelfPubkey(proposal.preparePubkeys);
 
             this.pendingProposals.set(seq, proposal);
 
@@ -405,7 +405,7 @@ class Consensus {
                 config:         config,
                 btcBlockHeight: proposal.btcBlockHeight,
                 weighted:       proposal.weighted
-            }, this._equivVote(seq, this.view, digest, proposal.btcBlockHeight)));
+            }, this.equivVote(seq, this.view, digest, proposal.btcBlockHeight)));
 
             // Check if we already have quorum (unlikely but handles edge case)
             this._checkPrepareQuorum(seq);
@@ -431,7 +431,7 @@ class Consensus {
     // snapshot's own `blockIndex` is the buried height it resolved at. The two
     // are not interchangeable and the leader must stamp the requested one (see
     // the PRE_PREPARE stamp in propose()).
-    async _lockSnapshot(blockHeightOverride) {
+    async lockSnapshot(blockHeightOverride) {
         if (!this.hub || !this.hub.capabilitySnapshot) {
             return { snapshot: null, weighted: false, requestedBlockIndex: null };
         }
@@ -527,7 +527,7 @@ class Consensus {
             // CapabilitySnapshot._blockEchoOk; only the null/omitted case reaches
             // the own-tip fallback, so this closes that specific hole. Genuine
             // single-node / regtest hubs keep the local-tip fallback.
-            if (this._isFederated() && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
+            if (this.isFederated() && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' from ' + envelope.sender + ': PRE_PREPARE carries no valid btcBlockHeight ' +
                     '(federated hub); refusing to pin the validator snapshot at the local BTC tip, ' +
@@ -550,7 +550,7 @@ class Consensus {
             // StateCheckpointEngine's co-sign guard and CrossChainCallEngine's
             // snapshot_block bound. The reorg buffer needs no adjustment: it is
             // applied identically on both sides, so the bound belongs on the wire value.
-            if (this._isFederated()) {
+            if (this.isFederated()) {
                 let myTip = this.hub && this.hub._resolveBtcLatestBlock
                     ? await this.hub._resolveBtcLatestBlock()
                     : null;
@@ -573,14 +573,14 @@ class Consensus {
             // the leader snapshotted at (stamped into the PRE_PREPARE
             // envelope). Follower quorum-checks use proposal.quorum, so we
             // stay in lockstep with the leader for the whole round.
-            let { snapshot, weighted } = await this._lockSnapshot(btcBlockHeight);
+            let { snapshot, weighted } = await this.lockSnapshot(btcBlockHeight);
             // Federation-split guard (fail closed), the follower twin of the
             // propose() gate. On a federated hub, declining to PREPARE when
             // no deterministic snapshot is available keeps this hub from voting
             // over its own LOCAL validatorSet while the leader (and peers) used a
             // different set. We create no proposal and emit no PREPARE; the round
             // either reaches quorum without us or times out into view change.
-            if (this._isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
+            if (this.isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' without a deterministic validator snapshot (federated hub); ' +
                     'indexer capability snapshot unavailable');
@@ -618,7 +618,7 @@ class Consensus {
             // follower proposal is created, or an authenticated non-leader could
             // seed a proposal for an uncontested seq and drive every follower to
             // PREPARE/COMMIT its config.
-            if (!this._leaderIdentityOk(seq, view, envelope, this._memberPubkeySet(snapshot))) return;
+            if (!this.leaderIdentityOk(seq, view, envelope, this._memberPubkeySet(snapshot))) return;
 
             // Create a follower proposal (no resolve/reject; we didn't initiate it)
             let proposal = {
@@ -651,7 +651,7 @@ class Consensus {
             }, this.timeout * 2); // Followers wait longer; they don't report to a client
 
             this.pendingProposals.set(seq, proposal);
-        } else if (!this._leaderIdentityOk(seq, view, envelope,
+        } else if (!this.leaderIdentityOk(seq, view, envelope,
                 this.pendingProposals.get(seq).memberPubkeys)) {
             // Repeat PRE_PREPARE for a seq this hub already opened: re-run the
             // same guard against the population that round was opened over, so
@@ -676,12 +676,12 @@ class Consensus {
         proposal.prepares.add(this.peerManager.validatorAddr);
         let proposerPk = this._resolveSenderPubkey(envelope);
         if (proposerPk) proposal.preparePubkeys.add(proposerPk);
-        this._addSelfPubkey(proposal.preparePubkeys);
+        this.addSelfPubkey(proposal.preparePubkeys);
 
         this.peerManager.broadcast(PBFT_PREPARE, Object.assign({
             seq:          seq,
             configDigest: configDigest
-        }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
+        }, this.equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
         this._checkPrepareQuorum(seq);
 
@@ -689,12 +689,12 @@ class Consensus {
         // while the snapshot lock was still in flight. Without this the leader's
         // own COMMIT can be lost for good and this hub never applies a config the
         // federation finalized.
-        this._replayEarlyVotes(seq);
+        this.replayEarlyVotes(seq);
     }
 
     // --- Early-arrival vote buffering (the config-change twin of finding F7) ---
 
-    _pruneEarlyVotes(now) {
+    pruneEarlyVotes(now) {
         now = now || Date.now();
         for (let [seq, expiresAt] of this.earlyVoteTtl) {
             // Expired, or the round has since been applied and is finished.
@@ -708,7 +708,7 @@ class Consensus {
     // Hold a vote for a round this hub has not opened yet. Callers have already
     // established that the sender is a registered validator, so nothing here
     // accepts a message the handlers would have refused; it only defers one.
-    _bufferEarlyVote(envelope) {
+    bufferEarlyVote(envelope) {
         let seq = envelope && envelope.data ? envelope.data.seq : null;
         if (!Number.isInteger(seq) || seq <= 0) return false;
         // An applied round is finished, and a replay in progress is already
@@ -717,7 +717,7 @@ class Consensus {
         if (this._replayingSeq === seq) return false;
 
         let now = Date.now();
-        this._pruneEarlyVotes(now);
+        this.pruneEarlyVotes(now);
 
         let bucket = this.earlyVotes.get(seq);
         if (!bucket) {
@@ -741,7 +741,7 @@ class Consensus {
     // Deliver the votes this hub held for `seq`, now that it has a proposal to
     // count them against. Replayed through the normal dispatch path, in arrival
     // order, with the queue removed up front so a replay cannot re-buffer.
-    _replayEarlyVotes(seq) {
+    replayEarlyVotes(seq) {
         let bucket = this.earlyVotes.get(seq);
         if (!bucket || bucket.length === 0) return 0;
         this.earlyVotes.delete(seq);
@@ -778,7 +778,7 @@ class Consensus {
         // No proposal yet: this hub is still locking the snapshot for a
         // PRE_PREPARE it has already received (or has yet to receive it). Hold
         // the vote rather than discard it; see EARLY_VOTE_MAX_SEQS.
-        if (!proposal) { this._bufferEarlyVote(envelope); return; }
+        if (!proposal) { this.bufferEarlyVote(envelope); return; }
 
         if (configDigest !== proposal.digest) return;
 
@@ -882,8 +882,8 @@ class Consensus {
     // propose in a (seq, view) for which it is already the legitimate leader.
     // The rotation is evaluated over `memberPubkeys` when the round has a pinned
     // population, else over the live set (unchanged legacy behavior).
-    _leaderIdentityOk(seq, view, envelope, memberPubkeys) {
-        let leader = this._leaderAt(seq, view, memberPubkeys);
+    leaderIdentityOk(seq, view, envelope, memberPubkeys) {
+        let leader = this.leaderAt(seq, view, memberPubkeys);
         if (!leader) {
             console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
                 ' from ' + envelope.sender + ': no leader can be elected (empty validator set)');
@@ -902,7 +902,7 @@ class Consensus {
     // context the initiator stashed after the proposal was cleared. Null when
     // neither survives, which is the graceful-degradation path back to live-set
     // rotation.
-    _memberPubkeysForSeq(seq) {
+    memberPubkeysForSeq(seq) {
         let proposal = this.pendingProposals.get(seq);
         if (proposal && proposal.memberPubkeys) return proposal.memberPubkeys;
         let vcCtx = this.viewChangeQuorums.get(seq);
@@ -912,7 +912,7 @@ class Consensus {
 
     // Add this hub's own signing pubkey to a weighted vote set (no-op if the
     // identity isn't available yet, e.g. before the hub finishes initializing).
-    _addSelfPubkey(pubkeySet) {
+    addSelfPubkey(pubkeySet) {
         if (!pubkeySet) return;
         let identity = this.hub.getIdentity && this.hub.getIdentity();
         if (identity) pubkeySet.add(identity.getPubkeyHex().toLowerCase());
@@ -933,7 +933,7 @@ class Consensus {
     // digest are pipe-free, so the wire action splits cleanly. Carried as {equiv_sig,
     // equiv_pubkey} per vote, additive to the count + weighted tally, gated on tip + network.
     // Returns {} below the flag-day or when no identity is available (vote still counts).
-    _equivVote(seq, view, digest, blockHeight) {
+    equivVote(seq, view, digest, blockHeight) {
         if (!eq.isEquivHeaderActive(blockHeight, this.hub && this.hub.network)) return {};
         let identity = this.hub.getIdentity && this.hub.getIdentity();
         if (!identity) return {};
@@ -989,12 +989,12 @@ class Consensus {
                 proposal._commitSent = true;
 
                 proposal.commits.add(this.peerManager.validatorAddr);
-                this._addSelfPubkey(proposal.commitPubkeys);
+                this.addSelfPubkey(proposal.commitPubkeys);
 
                 this.peerManager.broadcast(PBFT_COMMIT, Object.assign({
                     seq:          seq,
                     configDigest: proposal.digest
-                }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
+                }, this.equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
                 this._checkCommitQuorum(seq);
             }
@@ -1015,7 +1015,7 @@ class Consensus {
         // The vote that this buffer exists for: a leader heavy enough to meet the
         // round's threshold alone sends COMMIT immediately after PRE_PREPARE, so
         // it regularly overtakes the follower's snapshot lock.
-        if (!proposal) { this._bufferEarlyVote(envelope); return; }
+        if (!proposal) { this.bufferEarlyVote(envelope); return; }
 
         if (configDigest !== proposal.digest) return;
 
@@ -1049,7 +1049,7 @@ class Consensus {
             // config is durable but lastAppliedSeq is not advanced and the seq row
             // is never persisted. The comment at ~565 ("the proposal is NOT marked
             // applied") was the intent; this matches the code to that intent.
-            this._applyConfig(proposal.config).then(async () => {
+            this.applyConfig(proposal.config).then(async () => {
                 // Persist the sequence together with the apply: await so that a
                 // failure propagates to the catch below and leaves proposal.applied
                 // false. If the seq write is lost, the config rows and last_seq
@@ -1096,7 +1096,7 @@ class Consensus {
         }
     }
 
-    async _applyConfig(config) {
+    async applyConfig(config) {
         await this.hub.applyConfig(config);
     }
 
@@ -1230,8 +1230,8 @@ class Consensus {
         // no round context for `seq`, whose live set has drifted from the
         // block-locked staker set) is the divergence the operator accepted on
         // 2026-08-11 when ruling this fix landable as a partial one.
-        let memberPubkeys = this._memberPubkeysForSeq(seq);
-        let expectedLeader = this._leaderAt(seq, view, memberPubkeys);
+        let memberPubkeys = this.memberPubkeysForSeq(seq);
+        let expectedLeader = this.leaderAt(seq, view, memberPubkeys);
         if (!expectedLeader ||
             !this._isLeaderIdentity(expectedLeader, envelope.sender, this._resolveSenderPubkey(envelope))) {
             console.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
@@ -1285,7 +1285,7 @@ class Consensus {
         if (lockedWeighted) {
             if (!this.pendingViewChangePubkeys.has(this.view))
                 this.pendingViewChangePubkeys.set(this.view, new Set());
-            this._addSelfPubkey(this.pendingViewChangePubkeys.get(this.view));
+            this.addSelfPubkey(this.pendingViewChangePubkeys.get(this.view));
         }
     }
 
@@ -1299,7 +1299,7 @@ class Consensus {
     // two rotations are identical: setValidatorSet canonicalizes the live set by
     // lowercased pubkey ascending (validator_order.js), the same order the
     // sorted member keys give.
-    _leaderAt(seq, view, memberPubkeys) {
+    leaderAt(seq, view, memberPubkeys) {
         if (memberPubkeys && memberPubkeys.size > 0) {
             let keys = [...memberPubkeys].sort();
             let pubkey = keys[(seq + view) % keys.length];
@@ -1310,7 +1310,7 @@ class Consensus {
     }
 
     _getLeader(seq, memberPubkeys) {
-        return this._leaderAt(seq, this.view, memberPubkeys);
+        return this.leaderAt(seq, this.view, memberPubkeys);
     }
 
     _isLeader(seq, memberPubkeys) {
@@ -1351,7 +1351,7 @@ class Consensus {
         return crypto.createHash('sha256').update(json).digest('hex');
     }
 
-    async _loadSeq() {
+    async loadSeq() {
         try {
             let rows = await this.db.findConsensusState('last_seq');
             if (rows.length > 0) {

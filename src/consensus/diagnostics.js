@@ -250,7 +250,7 @@ function noteShutdown(signal) {
 }
 
 // Tests only: the dedupe table and counter handles are process-wide.
-function _resetDiagnostics() {
+function resetDiagnostics() {
     _dedupe = new Map();
     _counters = null;
 }
@@ -259,5 +259,5 @@ module.exports = {
     noteDrop, noteRoundLost, notePeerReject, noteShutdown, noteCheckpointStalled, installCrashHandlers,
     stampRemoteIp, remoteIpOf, REMOTE_IP,
     DROP_REASONS, DEDUPE_MAX_KEYS, DEDUPE_WINDOW_MS,
-    _resetDiagnostics
+    resetDiagnostics
 };

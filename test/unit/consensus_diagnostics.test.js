@@ -62,7 +62,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
 
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -88,7 +88,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         oc.stop();
         sinon.restore();
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('records a PREPARE whose digest disagrees with the pending round', async function () {
@@ -172,7 +172,7 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
 
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -181,7 +181,7 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
     });
     afterEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('throttles a flood from one IP to one line while still counting every drop', function () {
@@ -250,7 +250,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     let sink;
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -259,7 +259,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
     });
     afterEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('records every stalled tick, not one in sixty', function () {

@@ -78,10 +78,10 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
         it('indexes sorted snapshot pubkeys by (seq + view) % N', function () {
             let members = memberSetOf(SNAPSHOT_SET);
-            expect(consensus._leaderAt(0, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey);
-            expect(consensus._leaderAt(1, 0, members).pubkey).to.equal(SNAPSHOT_SET[1].pubkey);
-            expect(consensus._leaderAt(0, 2, members).pubkey).to.equal(SNAPSHOT_SET[2].pubkey);
-            expect(consensus._leaderAt(4, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey); // wraps
+            expect(consensus.leaderAt(0, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey);
+            expect(consensus.leaderAt(1, 0, members).pubkey).to.equal(SNAPSHOT_SET[1].pubkey);
+            expect(consensus.leaderAt(0, 2, members).pubkey).to.equal(SNAPSHOT_SET[2].pubkey);
+            expect(consensus.leaderAt(4, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey); // wraps
         });
 
         it('is unaffected by live validatorSet drift when a snapshot exists', function () {
@@ -332,7 +332,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             let members = memberSetOf(SNAPSHOT_SET);
             consensus._initiateViewChange(SEQ, 2, false, [], members);
             expect(consensus.viewChangeQuorums.get(SEQ).memberPubkeys).to.deep.equal(members);
-            expect(consensus._memberPubkeysForSeq(SEQ)).to.deep.equal(members);
+            expect(consensus.memberPubkeysForSeq(SEQ)).to.deep.equal(members);
         });
     });
 
@@ -374,7 +374,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
         // used exactly as before. Named here so the divergence window is a
         // recorded property rather than an omission.
         it('ACCEPTED RESIDUAL: with no round context it falls back to the live set', function () {
-            expect(consensus._memberPubkeysForSeq(SEQ)).to.equal(null);
+            expect(consensus.memberPubkeysForSeq(SEQ)).to.equal(null);
 
             consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the snapshot leader is NOT recognized here').to.equal(0);

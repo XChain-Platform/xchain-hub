@@ -238,13 +238,13 @@ describe('Regression: Consensus (PBFT)', function () {
     describe('REG-CON-006: Sequence number persistence', function () {
         it('_loadSeq reads from DB @regression-p1', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
         it('_loadSeq defaults to 0 on empty result @regression-p1', async function () {
             hub.db.doQuery.resolves([]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
@@ -367,7 +367,7 @@ describe('Regression: Consensus (PBFT)', function () {
             let follower = new Consensus(createMockHub());
             follower.hub.capabilitySnapshot = buryingSnapshotFake();
             let { snapshot: followerSnapshot } =
-                await follower._lockSnapshot(data.btcBlockHeight);
+                await follower.lockSnapshot(data.btcBlockHeight);
             expect(followerSnapshot.blockIndex).to.equal(leaderBlock);
 
             clearTimeout(pending.timer);
@@ -379,7 +379,7 @@ describe('Regression: Consensus (PBFT)', function () {
         it('_lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
             hub.capabilitySnapshot = buryingSnapshotFake();
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-            let { snapshot, requestedBlockIndex } = await consensus._lockSnapshot();
+            let { snapshot, requestedBlockIndex } = await consensus.lockSnapshot();
             expect(requestedBlockIndex).to.equal(800000);
             expect(snapshot.blockIndex).to.equal(800000 - BUFFER);
         });

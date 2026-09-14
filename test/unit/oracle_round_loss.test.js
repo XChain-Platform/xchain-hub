@@ -58,7 +58,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
     beforeEach(function () {
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
         sink = { lines: [] };
         const push = (m) => sink.lines.push(m);
         observability.installObservability(null, {
@@ -71,7 +71,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         clock.restore();
         sinon.restore();
         observability._resetObservability();
-        diagnostics._resetDiagnostics();
+        diagnostics.resetDiagnostics();
     });
 
     it('round_lost is a closed-set reason, so the record is never downgraded to unknown_reason', function () {

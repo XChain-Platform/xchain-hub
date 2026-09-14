@@ -523,7 +523,7 @@ describe('Consensus (PBFT)', function () {
                 wire(null);
                 consensus.minValidators = 1;
                 consensus.validatorSet  = [];
-                expect(consensus._isFederated()).to.be.false;
+                expect(consensus.isFederated()).to.be.false;
                 expect(await send(700000)).to.not.equal(undefined);
             });
         });
@@ -853,13 +853,13 @@ describe('Consensus (PBFT)', function () {
     describe('sequence persistence', function () {
         it('_loadSeq reads from DB', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
         it('_loadSeq defaults to 0 on empty result (genuine fresh install)', async function () {
             hub.db.doQuery.resolves([]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
@@ -869,7 +869,7 @@ describe('Consensus (PBFT)', function () {
             consensus.lastAppliedSeq = 5;
             hub.db.doQuery.rejects(new Error('injected DB read fault'));
             let threw = false;
-            try { await consensus._loadSeq(); } catch (e) { threw = true; }
+            try { await consensus.loadSeq(); } catch (e) { threw = true; }
             expect(threw, 'read fault must propagate out of _loadSeq').to.be.true;
             expect(consensus.lastAppliedSeq, 'guard baseline must not reset to 0').to.equal(5);
         });
@@ -895,7 +895,7 @@ describe('Consensus (PBFT)', function () {
             // stale-seq replay guard. Now mirrors _saveSeq and rethrows.
             hub.db.doQuery.rejects(new Error('db down'));
             let threw = false;
-            try { await consensus._loadSeq(); } catch (e) { threw = true; }
+            try { await consensus.loadSeq(); } catch (e) { threw = true; }
             expect(threw).to.be.true;
         });
     });
@@ -991,7 +991,7 @@ describe('Consensus (PBFT)', function () {
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-            let { snapshot, weighted } = await consensus._lockSnapshot();
+            let { snapshot, weighted } = await consensus.lockSnapshot();
             expect(snapshot).to.deep.equal({ blockIndex: 800000 });
             expect(weighted).to.equal(false); // hub.network unset → count path
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
@@ -1003,19 +1003,19 @@ describe('Consensus (PBFT)', function () {
                 getQuorum: sinon.stub().returns(1)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(999);
-            await consensus._lockSnapshot(42);
+            await consensus.lockSnapshot(42);
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(42)).to.be.true;
             expect(hub._resolveBtcLatestBlock.called).to.be.false;
         });
 
         it('returns null snapshot when no capabilitySnapshot is wired', async function () {
-            expect((await consensus._lockSnapshot()).snapshot).to.equal(null);
+            expect((await consensus.lockSnapshot()).snapshot).to.equal(null);
         });
 
         it('returns null snapshot when no BTC tip can be resolved', async function () {
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: sinon.stub(), getQuorum: sinon.stub() };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
-            expect((await consensus._lockSnapshot()).snapshot).to.equal(null);
+            expect((await consensus.lockSnapshot()).snapshot).to.equal(null);
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
         });
 
@@ -1407,7 +1407,7 @@ describe('Consensus (PBFT)', function () {
 
         it('_loadSeq treats a non-numeric stored value as 0', async function () {
             hub.db.doQuery.resolves([{ value: 'abc' }]);
-            await consensus._loadSeq();
+            await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
     });
@@ -1447,7 +1447,7 @@ describe('Consensus (PBFT)', function () {
                     getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 1, count: 4, validators: [] }),
                     getQuorum:                  sinon.stub().returns(3)
                 };
-                let { snapshot, weighted } = await consensus._lockSnapshot();
+                let { snapshot, weighted } = await consensus.lockSnapshot();
                 expect(weighted).to.equal(true);
                 expect(hub.capabilitySnapshot.getActiveWeightSnapshot.calledWith(1)).to.be.true;
                 expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
@@ -1462,7 +1462,7 @@ describe('Consensus (PBFT)', function () {
                     getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 800000, count: 4, validators: [] }),
                     getQuorum:                  sinon.stub().returns(3)
                 };
-                let { weighted } = await consensus._lockSnapshot();
+                let { weighted } = await consensus.lockSnapshot();
                 expect(weighted).to.equal(false);
                 expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
                 expect(hub.capabilitySnapshot.getActiveWeightSnapshot.called).to.be.false;
