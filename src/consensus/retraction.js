@@ -65,29 +65,20 @@
  ********************************************************************/
 
 const crypto            = require('crypto');
-const ValidatorIdentity = require('../validators/identity');
 const swq               = require('../stake_weighted_quorum.js');
-const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
-const { isRetractionSigningActive } = require('../retraction_signing_activation.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
-const XRETRACT_SIGN_REQ  = 'XRETRACT_SIGN_REQ';
-const XRETRACT_SIGN      = 'XRETRACT_SIGN';
-const XRETRACT_FINALIZED = 'XRETRACT_FINALIZED';
+const { canonicalRetraction, intentKey, bindRetractionClass } = require('./retraction/canonical.js');
+const { XRETRACT_SIGN_REQ, XRETRACT_SIGN, XRETRACT_FINALIZED } = require('./retraction/wire.js');
 
-// Tables whose retractions require the co-signature set (their insertions are
-// the quorum-signed relay rows this consensus protects). Price-table retractions stay
-// on the fence-guarded legacy path: their insertions are not quorum-signed
-// either, so signing their deletions would claim a trust tier the data lacks.
-const QUORUM_CLASS_TABLES = new Set(['cross_chain_calls', 'cross_chain_matches']);
-
-// Leader-supplied snapshot_block drift bound, in BTC blocks, against the
-// follower's own resolved tip (same bound CrossChainCallEngine applies to
-// relay-row proposals; ~1 day).
-const SNAPSHOT_DRIFT_BLOCKS = 144;
+// One part per side of a signing round, each an object of methods installed on
+// RetractionConsensus.prototype below. The class file keeps the round state,
+// the dispatch, the finalize and the capability-snapshot persist.
+const submitPart = require('./retraction/submit.js');
+const cosignPart = require('./retraction/cosign.js');
 
 class RetractionConsensus {
 
@@ -124,21 +115,16 @@ class RetractionConsensus {
             this.peerManager.removeListener('message', this._messageHandler);
     }
 
-    // The signed canonical. MUST byte-match the consumer rebuild in
-    // hub_db_sync.js (xchain-indexer + xchain-explorer vendored copy).
+
+    // The signed canonical and the follower intent key, spelled in
+    // retraction/canonical.js and kept as statics here because that is how every
+    // caller and the consumer-parity suite name them.
     static canonicalRetraction(evt){
-        let to  = (evt.to_action_index       !== undefined && evt.to_action_index       !== null) ? String(evt.to_action_index)       : '';
-        let gen = (evt.retraction_generation !== undefined && evt.retraction_generation !== null) ? String(evt.retraction_generation) : '';
-        return 'XRETRACTV1|' + String(evt.table) + '|' + String(evt.source_chain) + '|' +
-               String(evt.from_action_index) + '|' + to + '|' + gen + '|' + String(evt.snapshot_block);
+        return canonicalRetraction(evt);
     }
 
-    // Intent identity for follower matching: what an independent honest indexer
-    // of the same chain derives from the same reorg. Deliberately EXCLUDES the
-    // generation (instance-local counter) and snapshot_block (leader-resolved).
     static intentKey(evt){
-        let to = (evt.to_action_index !== undefined && evt.to_action_index !== null) ? String(evt.to_action_index) : '';
-        return String(evt.table) + '|' + String(evt.source_chain) + '|' + String(evt.from_action_index) + '|' + to;
+        return intentKey(evt);
     }
 
     _roundId(canonical){
@@ -159,74 +145,6 @@ class RetractionConsensus {
         }
     }
 
-    // Entry point from the engines' retract paths, in place of a direct
-    // broadcaster.broadcastDeletion(evt). Records the local intent (our own
-    // indexer pushed this), then either runs the signing round (gate active)
-    // or falls through to the legacy unsigned broadcast.
-    async submitLocal(evt){
-        this.pruneIntents();
-        this.localIntents.set(RetractionConsensus.intentKey(evt), Date.now());
-
-        if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this.broadcastUnsigned(evt);
-        if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
-
-        let snapshotBlock = await this.resolveSnapshotBlock();
-        if(snapshotBlock == null || !isRetractionSigningActive(snapshotBlock, this.network))
-            return this.broadcastUnsigned(evt);
-
-        let validators = await this.resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);
-        if(!validators.length) return this.broadcastUnsigned(evt);
-
-        let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
-        let canonical = RetractionConsensus.canonicalRetraction(signedEvt);
-        let id        = this._roundId(canonical);
-        if(this.pending.has(id) || this.finalized.has(id)) return;   // duplicate submit (e.g. per-row DEX loop)
-
-        let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
-        let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, this.network);
-        let snapCount = validators.length;
-        let quorum   = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
-
-        if(snapCount <= 1){
-            await this.finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
-            return;
-        }
-
-        let pendingValidators = validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) }));
-        if(validators.truncated === true) pendingValidators.truncated = true;
-        let pending = {
-            id, evt: signedEvt, canonical, quorum, weighted,
-            validators: pendingValidators,
-            signatures: new Map([[myPubkey, mySig]]),
-            done: false, timeoutTimer: null, retryTimer: null
-        };
-        this.pending.set(id, pending);
-
-        let signReq = { retraction: signedEvt, sig_pubkey: myPubkey, sig: mySig };
-        // Followers can only sign once their own indexer observes the reorg,
-        // which lags ours by an unknowable few seconds/blocks: keep re-asking
-        // until quorum or timeout instead of relying on one broadcast.
-        pending.retryTimer = setInterval(() => this.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq), this.retrySignReqMs);
-        if(pending.retryTimer.unref) pending.retryTimer.unref();
-        pending.timeoutTimer = setTimeout(() => {
-            this.pending.delete(id);
-            if(pending.retryTimer) clearInterval(pending.retryTimer);
-            if(!pending.done){
-                // Liveness over the signature tier: mirrors past the gate refuse the
-                // unsigned event anyway (fail closed there), mirrors below it still
-                // converge under the activation fences. Never silently drop a retraction.
-                logger.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
-                    pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
-                this.broadcastUnsigned(evt);
-            }
-        }, this.roundTimeoutMs);
-        if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
-
-        this.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
-        this.checkQuorum(id);
-    }
-
     broadcastUnsigned(evt){
         if(this.broadcaster) this.broadcaster.broadcastDeletion(evt);
     }
@@ -238,132 +156,6 @@ class RetractionConsensus {
             case XRETRACT_SIGN:      this.handleSign(envelope); break;
             case XRETRACT_FINALIZED: this.handleFinalized(envelope).catch(e => logger.error('RetractionConsensus: FINALIZED error: ' + (e && e.message))); break;
         }
-    }
-
-    normalizeRetraction(d){
-        if(!d || typeof d !== 'object') return null;
-        if(!QUORUM_CLASS_TABLES.has(String(d.table))) return null;
-        let evt = {
-            table:             String(d.table),
-            source_chain:      String(d.source_chain || ''),
-            from_action_index: Number(d.from_action_index),
-            snapshot_block:    Number(d.snapshot_block)
-        };
-        if(!evt.source_chain || !Number.isFinite(evt.from_action_index) || evt.from_action_index < 0) return null;
-        if(!Number.isFinite(evt.snapshot_block) || evt.snapshot_block < 0) return null;
-        if(d.to_action_index !== undefined && d.to_action_index !== null){
-            evt.to_action_index = Number(d.to_action_index);
-            if(!Number.isFinite(evt.to_action_index) || evt.to_action_index < evt.from_action_index) return null;
-        }
-        if(d.retraction_generation !== undefined && d.retraction_generation !== null){
-            evt.retraction_generation = Number(d.retraction_generation);
-            if(!Number.isFinite(evt.retraction_generation) || evt.retraction_generation < 0) return null;
-        }
-        return evt;
-    }
-
-    // Follower: co-sign ONLY a retraction our own source-chain indexer
-    // independently pushed to this hub (never adopt the initiator's claim).
-    async handleSignReq(envelope){
-        let d   = envelope.data;
-        let evt = this.normalizeRetraction(d.retraction);
-        if(!evt || !this.identity) return;
-        let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let sender   = String(d.sig_pubkey || '').toLowerCase();
-        if(sender === myPubkey) return;                            // our own broadcast
-
-        if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
-
-        // Freshness (fail-closed): bound the initiator-chosen snapshot_block
-        // against our own tip view before it can select the validator set.
-        let myBlock = await this.resolveSnapshotBlock();
-        if(myBlock == null || !Number.isFinite(Number(myBlock))) return;
-        if(Math.abs(Number(evt.snapshot_block) - Number(myBlock)) > SNAPSHOT_DRIFT_BLOCKS) return;
-
-        let validators = await this.resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
-        let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
-        if(!pubkeys.has(myPubkey) || !pubkeys.has(sender)) return;
-
-        let canonical = RetractionConsensus.canonicalRetraction(evt);
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
-
-        // The load-bearing check: OUR indexer must have pushed a matching
-        // retraction (same table/chain/from/to; the generation is the
-        // initiator's instance-local counter and is signed, not compared).
-        this.pruneIntents();
-        let intentTs = this.localIntents.get(RetractionConsensus.intentKey(evt));
-        if(intentTs === undefined) return;                         // nothing we observed -> never sign
-
-        this.peerManager.broadcast(XRETRACT_SIGN, {
-            id: this._roundId(canonical), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
-        });
-    }
-
-    // Initiator: collect follower signatures.
-    handleSign(envelope){
-        let d  = envelope.data;
-        let id = String(d.id || '');
-        let pending = this.pending.get(id);
-        if(!pending || pending.done) return;
-        let pubkey = String(d.sig_pubkey || '').toLowerCase();
-        if(!pending.validators.some(v => v.pubkey === pubkey)) return;
-        if(!ValidatorIdentity.verify(pending.canonical, String(d.sig || ''), pubkey)) return;
-        pending.signatures.set(pubkey, String(d.sig));
-        this.checkQuorum(id);
-    }
-
-    checkQuorum(id){
-        let pending = this.pending.get(id);
-        if(!pending || pending.done) return;
-        let met = pending.weighted
-            ? swq.meetsStakeThreshold(pending.validators, pending.signatures.keys())
-            : (pending.signatures.size >= pending.quorum);
-        if(!met) return;
-        pending.done = true;
-        if(pending.timeoutTimer){ clearTimeout(pending.timeoutTimer); pending.timeoutTimer = null; }
-        if(pending.retryTimer){ clearInterval(pending.retryTimer); pending.retryTimer = null; }
-        this.pending.delete(id);
-        let sigs = [];
-        for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
-        this.peerManager.broadcast(XRETRACT_FINALIZED, { retraction: pending.evt, signatures: sigs });
-        this.finalize(pending.evt, pending.canonical, id, sigs, true)
-            .catch(e => logger.error('RetractionConsensus: finalize error: ' + (e && e.message)));
-    }
-
-    // Every hub streams the finalized signed deletion to ITS OWN mirror
-    // subscribers (each hub serves its own indexer fleet), after re-verifying
-    // the quorum independently - a Byzantine initiator cannot shortcut this.
-    async handleFinalized(envelope){
-        let d   = envelope.data;
-        let evt = this.normalizeRetraction(d.retraction);
-        if(!evt || !Array.isArray(d.signatures)) return;
-        if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
-
-        let canonical = RetractionConsensus.canonicalRetraction(evt);
-        let id        = this._roundId(canonical);
-        if(this.finalized.has(id)) return;                         // already streamed (we initiated it)
-
-        let validators = await this.resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);
-        let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
-        let snapCount  = pubkeys.size;
-        let weighted   = swq.isStakeWeightedQuorumActive(evt.snapshot_block, this.network);
-        let quorum     = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
-
-        let seen = new Set(), sigs = [];
-        for(let s of d.signatures){
-            let pk = String(s && s.pubkey || '').toLowerCase();
-            if(!pk || seen.has(pk) || !pubkeys.has(pk)) continue;
-            if(!ValidatorIdentity.verify(canonical, String(s.sig || ''), pk)) continue;
-            seen.add(pk);
-            sigs.push({ pubkey: pk, sig: String(s.sig) });
-        }
-        let vset = validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) }));
-        if(validators.truncated === true) vset.truncated = true;
-        let met = weighted
-            ? swq.meetsStakeThreshold(vset, sigs.map(s => s.pubkey))
-            : (sigs.length >= quorum);
-        if(!met) return;                                           // sub-quorum, ignore
-        await this.finalize(evt, canonical, id, sigs, false);
     }
 
     // Mirrors verify against the capability_snapshots rows at snapshot_block,
@@ -500,5 +292,26 @@ class RetractionConsensus {
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     }
 }
+
+// The parts go on with enumerable false, NOT Object.assign, for the reason
+// src/db/index.js gives at its own install: class methods are non-enumerable, so
+// assigned members would be the only ones for...in and Object.keys(prototype) can
+// see, which changes what the prototype enumerates. writable and configurable stay
+// true so a test can still stub and restore a moved method.
+function installParts(target, parts) {
+    for(const part of parts) {
+        const descriptors = {};
+        for(const name of Object.keys(part)) {
+            if(Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate retraction method: ' + name + ' is already defined on ' +
+                    'RetractionConsensus.prototype. Two parts, or a part and the class, claim the same name.');
+            descriptors[name] = { value: part[name], enumerable: false, writable: true, configurable: true };
+        }
+        Object.defineProperties(target, descriptors);
+    }
+}
+
+bindRetractionClass(RetractionConsensus);
+installParts(RetractionConsensus.prototype, [submitPart, cosignPart]);
 
 module.exports = RetractionConsensus;
