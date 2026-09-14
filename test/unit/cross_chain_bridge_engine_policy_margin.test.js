@@ -67,25 +67,25 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
     });
 
     it('copies {DOGE} gives 240 s, not BTC\'s 2400', function(){
-        expect(bareEngine()._policyMarginS(new Set(['DOGE']), 'BTC')).to.equal(240);
+        expect(bareEngine().policyMarginS(new Set(['DOGE']), 'BTC')).to.equal(240);
     });
 
     it('copies {DOGE, LTC} gives the larger of the two', function(){
-        expect(bareEngine()._policyMarginS(new Set(['DOGE', 'LTC']), 'BTC')).to.equal(600);
+        expect(bareEngine().policyMarginS(new Set(['DOGE', 'LTC']), 'BTC')).to.equal(600);
     });
 
     it('a BTC copy pins it at 2400 s however fast the other copies are', function(){
-        expect(bareEngine()._policyMarginS(new Set(['DOGE', 'BTC']), 'DOGE')).to.equal(2400);
-        expect(bareEngine()._policyMarginS(new Set(['BTC']), 'DOGE')).to.equal(2400);
+        expect(bareEngine().policyMarginS(new Set(['DOGE', 'BTC']), 'DOGE')).to.equal(2400);
+        expect(bareEngine().policyMarginS(new Set(['BTC']), 'DOGE')).to.equal(2400);
     });
 
     // No copy means no destination to reach, but the row still has to sit far enough in the
     // future that an honest follower will co-sign it.
     it('with no copies it falls back to the origin chain, and stays above the follower floor', function(){
         const engine = bareEngine();
-        expect(engine._policyMarginS(new Set(), 'DOGE')).to.equal(240);
-        expect(engine._policyMarginS(new Set(), 'LTC')).to.equal(600);
-        expect(engine._policyMarginS(new Set(), 'DOGE')).to.be.above(RELAY_MIN_FUTURE_S);
+        expect(engine.policyMarginS(new Set(), 'DOGE')).to.equal(240);
+        expect(engine.policyMarginS(new Set(), 'LTC')).to.equal(600);
+        expect(engine.policyMarginS(new Set(), 'DOGE')).to.be.above(RELAY_MIN_FUTURE_S);
     });
 
     // The margin reaches the signed row through _maybeSnapshotPolicy, which is where a
@@ -105,7 +105,7 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
             return null;
         };
         const before = engine._nowSeconds();
-        await engine._maybeSnapshotPolicy(
+        await engine.maybeSnapshotPolicy(
             { origin_chain: 'BTC', tick: 'FUFU', copies: new Set(['DOGE']) }, 'regtest', 150);
 
         expect(engine.policyConsensus.propose.calledOnce).to.equal(true);

@@ -68,7 +68,7 @@ describe('CrossChainEngine', function () {
             engine.chainPairValidators = new Map([['BTC-LTC', pairValidators]]);
             engine.setValidatorSet(VALIDATORS_7);
 
-            let set = engine._getChainPairSet('BTC', 'LTC');
+            let set = engine.getChainPairSet('BTC', 'LTC');
             expect(set).to.equal(pairValidators);
         });
 
@@ -76,7 +76,7 @@ describe('CrossChainEngine', function () {
             let pairValidators = [makeValidator(1)];
             engine.chainPairValidators = new Map([['LTC-BTC', pairValidators]]);
 
-            let set = engine._getChainPairSet('BTC', 'LTC');
+            let set = engine.getChainPairSet('BTC', 'LTC');
             expect(set).to.equal(pairValidators);
         });
 
@@ -84,7 +84,7 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet(VALIDATORS_3);
             engine.chainPairValidators = new Map();
 
-            let set = engine._getChainPairSet('BTC', 'DOGE');
+            let set = engine.getChainPairSet('BTC', 'DOGE');
             expect(set).to.equal(VALIDATORS_3);
         });
 
@@ -92,7 +92,7 @@ describe('CrossChainEngine', function () {
             engine.chainPairValidators = new Map([['BTC-DOGE', []]]);
             engine.setValidatorSet(VALIDATORS_3);
 
-            let set = engine._getChainPairSet('BTC', 'DOGE');
+            let set = engine.getChainPairSet('BTC', 'DOGE');
             expect(set).to.equal(VALIDATORS_3);
         });
     });
@@ -750,7 +750,7 @@ describe('CrossChainEngine', function () {
             hub.capabilitySnapshot = null;
             engine.setValidatorSet(MEMBERS);
             let pending = { quorum: 2, memberPubkeys: null, prepares: new Set(['a', 'b']) };
-            expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
+            expect(engine.countedVotes(pending, pending.prepares)).to.equal(2);
         });
 
         it('an empty registry no longer buys a non-member a vote', async function () {
@@ -762,7 +762,7 @@ describe('CrossChainEngine', function () {
             pm.validatorPubkeys = new Map();
             let pending = { quorum: 2, memberPubkeys: new Set([MEMBERS[0].pubkey]),
                             prepares: new Set([MEMBERS[0].pubkey, 'ff'.repeat(32)]) };
-            expect(engine._countedVotes(pending, pending.prepares)).to.equal(1);
+            expect(engine.countedVotes(pending, pending.prepares)).to.equal(1);
         });
     });
 

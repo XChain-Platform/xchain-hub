@@ -190,10 +190,10 @@ describe('CrossChainBridgeEngine', function(){
 
         it('reads canonical membership order as BYTES, not UTF-16 code units', function(){
             const { engine } = makeEngine();
-            expect(engine._isCanonicalOrder(['a', 'b', 'c'])).to.equal(true);
-            expect(engine._isCanonicalOrder(['b', 'a'])).to.equal(false);
-            expect(engine._isCanonicalOrder(['a', 'a'])).to.equal(false);   // strictly ascending
-            expect(engine._isCanonicalOrder(null)).to.equal(true);
+            expect(engine.isCanonicalOrder(['a', 'b', 'c'])).to.equal(true);
+            expect(engine.isCanonicalOrder(['b', 'a'])).to.equal(false);
+            expect(engine.isCanonicalOrder(['a', 'a'])).to.equal(false);   // strictly ascending
+            expect(engine.isCanonicalOrder(null)).to.equal(true);
         });
     });
 
@@ -235,18 +235,18 @@ describe('CrossChainBridgeEngine', function(){
             };
 
             // DOGE below its own instant: refused, even though BTC (the snapshot anchor) is armed.
-            await engine._maybeFinalizeTransfer('DOGE', 'regtest', 200, 150,
+            await engine.maybeFinalizeTransfer('DOGE', 'regtest', 200, 150,
                 pendingLeg({ transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC', block_index: 100 }));
             expect(engine.transferConsensus.propose.called).to.equal(false);
             expect(seen).to.include('DOGE@100');
 
             // A BTC leg at the very same height is signed: the refusal above was the CHAIN,
             // not the height.
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ block_index: 100 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ block_index: 100 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
 
             // And DOGE at its own instant goes through.
-            await engine._maybeFinalizeTransfer('DOGE', 'regtest', 700, 150,
+            await engine.maybeFinalizeTransfer('DOGE', 'regtest', 700, 150,
                 pendingLeg({ transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC',
                              block_index: 600, src_action_index: 43 }));
             expect(engine.transferConsensus.propose.callCount).to.equal(2);
@@ -282,9 +282,9 @@ describe('CrossChainBridgeEngine', function(){
 
         it('holds a non-XCHAIN leg behind the token gate while XCHAIN rides the bridge gate', async function(){
             const { engine } = makeEngine({ tokenActive: false });
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ tick: 'FUFU' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ tick: 'FUFU' }));
             expect(engine.transferConsensus.propose.called).to.equal(false);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
         });
     });
@@ -303,17 +303,17 @@ describe('CrossChainBridgeEngine', function(){
         it('holds a leg below its effective depth and proposes at it', async function(){
             const { engine } = makeEngine();
             // BTC floor is 6: block 100 at latest 104 is depth 5.
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg());
             expect(engine.transferConsensus.propose.called).to.equal(false);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 105, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 105, 150, pendingLeg());
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
         });
 
         it('holds a MIN_DEPTH=20 leg that clears the platform floor', async function(){
             const { engine } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 110, 150, pendingLeg({ min_depth: 20 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 110, 150, pendingLeg({ min_depth: 20 }));
             expect(engine.transferConsensus.propose.called).to.equal(false);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 119, 150, pendingLeg({ min_depth: 20 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 119, 150, pendingLeg({ min_depth: 20 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
         });
     });
@@ -323,7 +323,7 @@ describe('CrossChainBridgeEngine', function(){
 
         it('stamps the record the spec describes and reserves the round', async function(){
             const { engine } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
             const [roundId, ctx] = engine.transferConsensus.propose.firstCall.args;
             expect(roundId).to.equal(sha256('XBRIDGE|regtest|BTC:41|DOGE:nDestAddress'));
             expect(ctx.row.transfer_id).to.equal(roundId);
@@ -339,13 +339,13 @@ describe('CrossChainBridgeEngine', function(){
 
         it('never proposes a same-chain, unknown-chain, zero-amount or already-recorded leg', async function(){
             const { engine, db } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ dest_chain: 'BTC' }));
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ dest_chain: 'XRP' }));
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ amount: '0' }));
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ transfer_kind: 'settle' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ dest_chain: 'BTC' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ dest_chain: 'XRP' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ amount: '0' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ transfer_kind: 'settle' }));
             expect(engine.transferConsensus.propose.called).to.equal(false);
             db.state.exists = true;
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
             expect(engine.transferConsensus.propose.called).to.equal(false);
         });
 
@@ -358,12 +358,12 @@ describe('CrossChainBridgeEngine', function(){
         // written anything opens exactly one round.
         it('refuses a second round for a source leg still in flight at a new snapshot height (DEFECT 1, drive 11)', async function(){
             const { engine, db } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             const firstId = engine.transferConsensus.propose.firstCall.args[0];
             expect(firstId).to.equal(sha256('XBRIDGE|regtest|BTC:95|DOGE:nDestAddress'));
             expect(db.state.exists).to.equal(false); // proves this is NOT the persisted-row check
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 201, 1018, pendingLeg({ src_action_index: 95 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 201, 1018, pendingLeg({ src_action_index: 95 }));
             expect(engine.transferConsensus.propose.calledOnce,
                    'must not open a second round for one source leg at a new snapshot height').to.equal(true);
         });
@@ -375,8 +375,8 @@ describe('CrossChainBridgeEngine', function(){
         it('derives the SAME transfer_id for one leg from BTC views one block apart (row 41)', async function(){
             const a = makeEngine({ btcBlock: 150 });
             const b = makeEngine({ btcBlock: 151 });
-            await a.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
-            await b.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg());
+            await a.engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await b.engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg());
             const idA = a.engine.transferConsensus.propose.firstCall.args[0];
             const idB = b.engine.transferConsensus.propose.firstCall.args[0];
             expect(idA, 'two hubs one BTC block apart must open the same round for one leg').to.equal(idB);
@@ -395,15 +395,15 @@ describe('CrossChainBridgeEngine', function(){
             const engine = new CrossChainBridgeEngine(hub);
             engine.activation = { bridge: () => true, token: () => true, policy: () => true };
             engine.transferConsensus.propose = sinon.stub().resolves();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg());
             const id = engine.transferConsensus.propose.firstCall.args[0];
             expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 201, 151, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 201, 151, pendingLeg());
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             engine.transferConsensus.emit('match:abandoned', { matchId: id.toLowerCase() });
             expect(engine._inflight.has(id)).to.equal(false);
             expect(engine._inflightSourceLegs.has('regtest|BTC:41'), 'abandon must release the leg').to.equal(false);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 202, 152, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 202, 152, pendingLeg());
             expect(engine.transferConsensus.propose.callCount, 'the leg must be re-proposed after an abandon').to.equal(2);
             expect(engine.transferConsensus.propose.secondCall.args[0]).to.equal(id);
         });
@@ -414,18 +414,18 @@ describe('CrossChainBridgeEngine', function(){
             const { engine } = makeEngine();
             const log = sinon.stub(console, 'log');
             // BTC floor is 6: block 100 at latest 104 is depth 4, held.
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 103, 150, pendingLeg());
             // The next block moves the depth to 5 of 6 and must NOT produce a second line.
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg());
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg());
             const held = log.getCalls().map(c => String(c.args[0])).filter(s => s.includes('not proposing BTC:41'));
             expect(held).to.have.length(1);
             expect(held[0]).to.contain('below depth 6');
             // A different reason for the same leg is a different line, and a different leg
             // with the same reason is too.
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ amount: '0', block_index: 90 }));
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ src_action_index: 42 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ amount: '0', block_index: 90 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 104, 150, pendingLeg({ src_action_index: 42 }));
             const all = log.getCalls().map(c => String(c.args[0])).filter(s => s.includes('not proposing'));
             expect(all).to.have.length(3);
             expect(all[1]).to.contain('BTC:41').and.to.contain('amount 0 is not positive');
@@ -435,23 +435,23 @@ describe('CrossChainBridgeEngine', function(){
         it('releases the source-leg guard once the round writes, so the leg is governed by the persisted check', async function(){
             const { engine, db } = makeEngine();
             engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
             const [, ctx] = engine.transferConsensus.propose.firstCall.args;
             expect(engine._inflightSourceLegs.has('regtest|BTC:95')).to.equal(true);
-            await engine._writeFinalizedTransfer({ row: ctx.row, signatures: [], view: 0 });
+            await engine.writeFinalizedTransfer({ row: ctx.row, signatures: [], view: 0 });
             expect(engine._inflightSourceLegs.has('regtest|BTC:95'), 'guard must not leak past a finalize write')
                 .to.equal(false);
             // Now persisted: db.state.exists is what refuses a THIRD round for the same leg.
             db.state.exists = true;
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 202, 1019, pendingLeg({ src_action_index: 95 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 202, 1019, pendingLeg({ src_action_index: 95 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
         });
 
         it('learns a tick origin from the leg kind: a lock is mined where the token is native', async function(){
             const { engine } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ tick: 'FUFU' }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ tick: 'FUFU' }));
             expect(engine._tickOrigin.get('regtest|FUFU')).to.equal('BTC');
-            await engine._maybeFinalizeTransfer('DOGE', 'regtest', 200, 150,
+            await engine.maybeFinalizeTransfer('DOGE', 'regtest', 200, 150,
                 pendingLeg({ tick: 'PEPE', transfer_kind: 'burn', src_chain: 'DOGE', dest_chain: 'BTC', src_action_index: 7 }));
             expect(engine._tickOrigin.get('regtest|PEPE')).to.equal('BTC');
         });
@@ -462,11 +462,11 @@ describe('CrossChainBridgeEngine', function(){
         it('releases the source-leg guard when the finalize write path throws', async function(){
             const { engine } = makeEngine();
             engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({ src_action_index: 95 }));
             const [, ctx] = engine.transferConsensus.propose.firstCall.args;
             expect(engine._inflightSourceLegs.has('regtest|BTC:95')).to.equal(true);
-            engine._resolveBtcChainId = sinon.stub().rejects(new Error('btc chain id read failed'));
-            await engine._writeFinalizedTransfer({ row: ctx.row, signatures: [], view: 0 });
+            engine.resolveBtcChainId = sinon.stub().rejects(new Error('btc chain id read failed'));
+            await engine.writeFinalizedTransfer({ row: ctx.row, signatures: [], view: 0 });
             expect(engine._inflightSourceLegs.has('regtest|BTC:95'),
                    'a throw in the write path must not strand the leg under a dead round').to.equal(false);
             expect(engine.transferConsensus.forgetFinalized.calledWith(ctx.row.transfer_id)).to.equal(true);
@@ -493,7 +493,7 @@ describe('CrossChainBridgeEngine', function(){
                 pendingLeg({ src_action_index: 42, amount: '7.00000000' })
             ]));
             const pending = new Map();
-            await engine._pollPendingTransfers('BTC', 150, pending);
+            await engine.pollPendingTransfers('BTC', 150, pending);
             expect(pending.get('XCHAIN|DOGE')).to.deep.equal(['7.00000000']);
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             expect(engine.transferConsensus.propose.firstCall.args[1].row.src_action_index).to.equal(42);
@@ -504,7 +504,7 @@ describe('CrossChainBridgeEngine', function(){
             engine._indexerCall = sinon.stub().resolves(pendingPage([
                 pendingLeg({ src_action_index: 41 }), pendingLeg({ src_action_index: 42 }), pendingLeg({ src_action_index: 43 })
             ]));
-            await engine._pollPendingTransfers('BTC', 150, new Map());
+            await engine.pollPendingTransfers('BTC', 150, new Map());
             const reads = db.calls.filter(c => c.sql.startsWith('SELECT src_action_index FROM bridge_transfers'));
             expect(reads).to.have.length(1);
             expect(reads[0].params).to.deep.equal(['regtest', 'BTC', 41, 42, 43]);
@@ -574,7 +574,7 @@ describe('CrossChainBridgeEngine', function(){
         // co-signs, and the mesh finalizes two transfers for one lock inside the window.
         it('refuses to co-sign a duplicate for a source leg its OWN round still has in flight', async function(){
             const { engine, db } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
             expect(db.state.sourceTransferId).to.equal(null); // nothing persisted: the DB read cannot refuse
@@ -594,8 +594,8 @@ describe('CrossChainBridgeEngine', function(){
         it('co-signs the leader\'s row for a leg it has in flight when the snapshot heights differ by a block (row 41)', async function(){
             const follower = makeEngine({ btcBlock: 150 });
             const leader   = makeEngine({ btcBlock: 151 });
-            await follower.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
-            await leader.engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg({ src_action_index: 41 }));
+            await follower.engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
+            await leader.engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 151, pendingLeg({ src_action_index: 41 }));
             const leaderRow = leader.engine.transferConsensus.propose.firstCall.args[1].row;
             expect(leaderRow.snapshot_block).to.equal(151);
             expect(leaderRow.transfer_id).to.equal(follower.engine.transferConsensus.propose.firstCall.args[0]);
@@ -623,7 +623,7 @@ describe('CrossChainBridgeEngine', function(){
         // self-validates would refuse its own proposal and no transfer would ever finalize.
         it('still validates the row of its own in-flight round', async function(){
             const { engine } = makeEngine();
-            await engine._maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
+            await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 150, pendingLeg({ src_action_index: 41 }));
             const ownRow = engine.transferConsensus.propose.firstCall.args[1].row;
             expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
             withLeg(engine, {});
@@ -709,7 +709,7 @@ describe('CrossChainBridgeEngine', function(){
             const { engine } = makeEngine();
             const policy = withPolicy(engine);
             engine._tickOrigin.set('regtest|FUFU', 'BTC');
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set(['DOGE']) }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set(['DOGE']) }, 'regtest', 150);
             const [roundId, ctx] = engine.policyConsensus.propose.firstCall.args;
             expect(ctx.row.policy_seq).to.equal(1);
             expect(ctx.row.origin_block).to.equal(900);   // 906 tip minus BTC depth 6
@@ -724,10 +724,10 @@ describe('CrossChainBridgeEngine', function(){
             const policy = withPolicy(engine);
             db.state.seq = 4;
             db.state.atSeq = { policy_hash: policy.policy_hash };
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.called).to.equal(false);
             db.state.atSeq = { policy_hash: 'a'.repeat(64) };
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.firstCall.args[1].row.policy_seq).to.equal(5);
         });
 
@@ -736,28 +736,28 @@ describe('CrossChainBridgeEngine', function(){
             const big = [];
             for(let i = 0; i < 10001; i++) big.push('addr' + String(i).padStart(6, '0'));
             withPolicy(engine, { block_list: big });
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.called).to.equal(false);
         });
 
         it('declines to sign when the indexer answer does not hash to its own policy_hash', async function(){
             const { engine } = makeEngine();
             withPolicy(engine, { policy_hash: 'b'.repeat(64) });
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.called).to.equal(false);
         });
 
         it('declines to sign an out-of-canonical-order membership rather than re-sorting it', async function(){
             const { engine } = makeEngine();
             withPolicy(engine, { block_list: ['nZ', 'nA'], policy_hash: undefined });
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.called).to.equal(false);
         });
 
         it('abstains, never refuses, when its origin indexer read fails', async function(){
             const { engine } = makeEngine();
             engine._indexerCall = sinon.stub().rejects(new Error('ECONNREFUSED'));
-            await engine._maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
+            await engine.maybeSnapshotPolicy({ origin_chain: 'BTC', tick: 'FUFU', copies: new Set() }, 'regtest', 150);
             expect(engine.policyConsensus.propose.called).to.equal(false);
         });
 
@@ -838,7 +838,7 @@ describe('CrossChainBridgeEngine', function(){
             engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
             const row = finalized(engine);
             engine._inflight.add(row.transfer_id);
-            await engine._writeFinalizedTransfer({ row, signatures: [{ pubkey: 'a', sig: 'b' }], view: 2 });
+            await engine.writeFinalizedTransfer({ row, signatures: [{ pubkey: 'a', sig: 'b' }], view: 2 });
             const insert = db.calls.find(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'));
             expect(insert, 'the record must be written').to.not.equal(undefined);
             // The signed content plus the two fences and the transport chain id.
@@ -854,7 +854,7 @@ describe('CrossChainBridgeEngine', function(){
             engine._persistCapabilitySnapshot = sinon.stub().resolves(0);
             const row = finalized(engine);
             engine._inflight.add(row.transfer_id);
-            await engine._writeFinalizedTransfer({ row, signatures: [], view: 0 });
+            await engine.writeFinalizedTransfer({ row, signatures: [], view: 0 });
             expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'))).to.equal(false);
             expect(broadcaster.broadcastRow.called).to.equal(false);
             // Deferred, not retired: the next poll must be able to re-propose it.
@@ -867,7 +867,7 @@ describe('CrossChainBridgeEngine', function(){
             engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
             db.state.insertAffected = 0;      // INSERT IGNORE no-ops against the retracted row
             db.state.reviveAffected = 1;
-            await engine._writeFinalizedTransfer({ row: finalized(engine), signatures: [], view: 0 });
+            await engine.writeFinalizedTransfer({ row: finalized(engine), signatures: [], view: 0 });
             const revive = db.calls.find(c => c.sql.startsWith("UPDATE bridge_transfers SET status = 'finalized'"));
             expect(revive, 'a retracted row must be revived').to.not.equal(undefined);
             expect(revive.sql).to.contain("status = 'retracted'");
@@ -879,7 +879,7 @@ describe('CrossChainBridgeEngine', function(){
             engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
             db.state.insertAffected = 0;
             db.state.reviveAffected = 0;      // the row is already 'finalized'
-            await engine._writeFinalizedTransfer({ row: finalized(engine), signatures: [], view: 0 });
+            await engine.writeFinalizedTransfer({ row: finalized(engine), signatures: [], view: 0 });
             expect(broadcaster.broadcastRow.called).to.equal(false);
         });
 
@@ -892,7 +892,7 @@ describe('CrossChainBridgeEngine', function(){
                 allow_list: null, block_list: '["nA"]', sleeping: 0,
                 effective_time: 1757000000, network: 'regtest', push_generation: 0
             };
-            await engine._writeFinalizedPolicy({ row, signatures: [], view: 0 });
+            await engine.writeFinalizedPolicy({ row, signatures: [], view: 0 });
             expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO policy_snapshots'))).to.equal(true);
             expect(db.calls.some(c => c.sql.startsWith("UPDATE policy_snapshots"))).to.equal(false);
             expect(broadcaster.broadcastRow.calledWithMatch({ table: 'policy_snapshots' })).to.equal(true);

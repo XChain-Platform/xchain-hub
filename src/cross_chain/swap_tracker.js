@@ -33,7 +33,7 @@ class SwapTracker {
     start(crossChainEngine) {
         if (!crossChainEngine) return;
         this._attestationHandler = (attestation) => {
-            this._onAttestationFinalized(attestation).catch(err =>
+            this.onAttestationFinalized(attestation).catch(err =>
                 console.error('SwapTracker: attestation:finalized handling failed:', err && err.message ? err.message : err));
         };
         crossChainEngine.on('attestation:finalized', this._attestationHandler);
@@ -78,7 +78,7 @@ class SwapTracker {
     }
 
     // Called when an attestation is finalized; progresses matching swap to 'attested'
-    async _onAttestationFinalized(attestation) {
+    async onAttestationFinalized(attestation) {
         if (!attestation || !attestation.sourceChain || !attestation.sourceActionIndex) return;
 
         let swap = await this.getSwap(attestation.sourceChain, attestation.sourceActionIndex);

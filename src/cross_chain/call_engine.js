@@ -205,7 +205,7 @@ class CrossChainCallEngine extends EventEmitter {
             idField: 'round_id'
         });
         this.consensus.on('match:finalized', (ev) => {
-            this._writeFinalizedRow(ev).catch(err =>
+            this.writeFinalizedRow(ev).catch(err =>
                 console.error('CrossChainCall: write finalized row error:', err && err.message));
         });
         // A round the consensus abandons (churned past its max lifetime under
@@ -315,8 +315,8 @@ class CrossChainCallEngine extends EventEmitter {
         try {
             for(let coin of ALLOWED_CHAINS){
                 if(!this.indexers[coin].url) continue;
-                await this._pollSourceRequests(coin);
-                await this._pollTargetResults(coin);
+                await this.pollSourceRequests(coin);
+                await this.pollTargetResults(coin);
             }
         } finally {
             this._polling = false;
@@ -325,7 +325,7 @@ class CrossChainCallEngine extends EventEmitter {
 
     // Discover XCALL v0 requests on `coin` that have reached confirmation depth
     // and have no dispatch row yet, and run a dispatch round for each.
-    async _pollSourceRequests(coin){
+    async pollSourceRequests(coin){
         let res;
         try { res = await this._indexerCall(coin, 'getpendingcrosschaincalls', { limit: 100 }); }
         catch(e){ return; }
@@ -334,13 +334,13 @@ class CrossChainCallEngine extends EventEmitter {
         if(!Number.isFinite(latest)) return;
 
         for(let call of res.calls){
-            try { await this._maybeDispatch(coin, String(res.network), latest, call); }
+            try { await this.maybeDispatch(coin, String(res.network), latest, call); }
             catch(e){ console.warn('CrossChainCall: dispatch attempt failed for ' +
                                    String(call && call.call_id).substring(0, 16) + '...: ' + (e && e.message)); }
         }
     }
 
-    async _maybeDispatch(coin, network, latestBlock, call){
+    async maybeDispatch(coin, network, latestBlock, call){
         let callId = String(call.call_id || '').toLowerCase();
         if(!/^[0-9a-f]{64}$/.test(callId)) return;
         if(!ALLOWED_CHAINS.includes(call.target_chain) || call.target_chain === coin) return;
@@ -363,7 +363,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         let roundId = this._roundId('dispatch', callId);
         if(this._inflight.has(roundId)) return;
-        if(await this._rowExists(callId, 'dispatch')) return;
+        if(await this.rowExists(callId, 'dispatch')) return;
 
         let snapshotBlock = await this._resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
@@ -393,7 +393,7 @@ class CrossChainCallEngine extends EventEmitter {
             push_generation:       Number(call.push_generation) || 0
         };
 
-        if(!await this._stampAdmission(row)) return;
+        if(!await this.stampAdmission(row)) return;
 
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
@@ -407,7 +407,7 @@ class CrossChainCallEngine extends EventEmitter {
 
     // Discover dispatch rows targeting `coin` whose injected execution has
     // completed at confirmation depth, and run a result round for each.
-    async _pollTargetResults(coin){
+    async pollTargetResults(coin){
         // The result-leg join carries `AND r.status <> 'retracted'` for the same
         // reason _rowExists does: after a deep reorg leaves a 'retracted'
         // result row, an unfiltered join would see r.id IS NOT NULL, exclude the
@@ -433,11 +433,11 @@ class CrossChainCallEngine extends EventEmitter {
                 // (missing / below depth): park it so it leaves the hot window. Any
                 // other outcome (round proposed, or already in flight) clears backoff.
                 let relayed = await this._maybeRelayResult(coin, d);
-                if(relayed === false) this._parkResult(callId);
+                if(relayed === false) this.parkResult(callId);
                 else this._resultBackoff.delete(callId);
             } catch(e){
                 this._resultAttemptFailures++;
-                this._parkResult(callId);
+                this.parkResult(callId);
                 console.warn('CrossChainCall: result attempt failed for ' +
                              callId.substring(0, 16) + '...: ' + (e && e.message));
             }
@@ -446,7 +446,7 @@ class CrossChainCallEngine extends EventEmitter {
 
     // Park a result-less dispatch with exponential backoff so it exits the hot poll
     // window; it re-enters once nextAt elapses. See RESULT_BACKOFF_* rationale.
-    _parkResult(callId){
+    parkResult(callId){
         let evicting = !this._resultBackoff.has(callId) && this._resultBackoff.size >= RESULT_BACKOFF_MAP_MAX;
         if(evicting){
             let oldest = this._resultBackoff.keys().next().value;
@@ -507,7 +507,7 @@ class CrossChainCallEngine extends EventEmitter {
             push_generation:       Number(dispatch.push_generation) || 0
         };
 
-        if(!await this._stampAdmission(row)) return;
+        if(!await this.stampAdmission(row)) return;
 
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
@@ -536,7 +536,7 @@ class CrossChainCallEngine extends EventEmitter {
     // than guessing a height, because a guessed height forks while a refusal stalls one
     // rail. Every column is named at every height so a legacy row carries explicit NULLs,
     // which is the legacy binding rule rather than an absent key.
-    async _stampAdmission(row){
+    async stampAdmission(row){
         let map = null;
         if(ah.isAdmissionEra(row.network, row.snapshot_block)){
             let readSet = ah.admissionReadSet('cross_chain_calls', row);
@@ -579,7 +579,7 @@ class CrossChainCallEngine extends EventEmitter {
     // Every failure below is a refusal, including the ones that are our own fault (no
     // resolver, a dead indexer, a frozen decoder). Adopting a height we could not check
     // would sign the proposer's own claim back to it, which is what a bound is for.
-    async _checkProposedAdmission(row){
+    async checkProposedAdmission(row){
         let scope;
         try { scope = this.admissionScope(row); }
         catch (err) {
@@ -680,14 +680,14 @@ class CrossChainCallEngine extends EventEmitter {
         // The admission map is a leader-choice field too, and above the activation it is
         // the field that decides WHEN every indexer binds this row. Bound it against our
         // own tips before the phase re-derivation, which is the expensive half.
-        if(!(await this._checkProposedAdmission(row))) return false;
+        if(!(await this.checkProposedAdmission(row))) return false;
 
-        if(row.phase === 'dispatch') return await this._validateDispatch(row);
-        if(row.phase === 'result')   return await this._validateResult(row);
+        if(row.phase === 'dispatch') return await this.validateDispatch(row);
+        if(row.phase === 'result')   return await this.validateResult(row);
         return false;
     }
 
-    async _validateDispatch(row){
+    async validateDispatch(row){
         let res;
         try { res = await this._indexerCall(row.source_chain, 'getcrosschaincall', { call_id: String(row.call_id) }); }
         catch(e){ return false; }
@@ -728,7 +728,7 @@ class CrossChainCallEngine extends EventEmitter {
                (Number(call.push_generation) || 0) === (Number(row.push_generation) || 0);
     }
 
-    async _validateResult(row){
+    async validateResult(row){
         // The dispatch row must already be finalized in our own DB (we never
         // vouch for a result of a dispatch we don't know).
         // Treat a retracted dispatch as absent, exactly as the sibling dispatch lookups
@@ -767,25 +767,25 @@ class CrossChainCallEngine extends EventEmitter {
                this._sha256(payload) === this._sha256(String(row.return_payload_b64 == null ? '' : row.return_payload_b64));
     }
 
-    async _writeFinalizedRow(ev){
+    async writeFinalizedRow(ev){
         let row = ev.row;
         // Sequence this write against the retraction fence before the first await. Every
         // retraction recorded from here on is one this write has to answer for, and the
         // registration keeps those entries alive while the awaits below run.
         // The token is an object, not the number: concurrent writes share a start sequence
         // and a Set of numbers would let one write's completion unregister the other.
-        this._ensureRetractionFence();
+        this.ensureRetractionFence();
         let token = { seq: this._retractionSeq };
         this._pendingWrites.add(token);
         try {
-            await this._writeFinalizedRowFenced(ev, row, token.seq);
+            await this.writeFinalizedRowFenced(ev, row, token.seq);
         } finally {
             this._pendingWrites.delete(token);
-            this._pruneRetractionFence();
+            this.pruneRetractionFence();
         }
     }
 
-    async _writeFinalizedRowFenced(ev, row, startSeq){
+    async writeFinalizedRowFenced(ev, row, startSeq){
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
@@ -810,31 +810,31 @@ class CrossChainCallEngine extends EventEmitter {
         } catch(e){
             console.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         if(!persistedRows){
             console.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring ' +
                           row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round)');
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         // Resolved into the value list rather than onto `row`: the row object feeds the
         // canonical and the retraction paths, and btc_chain_id is transport, never consensus.
         // The XCALL canonical enumerates its fields explicitly, so this value has no path
         // into a signed preimage.
-        let btcChainId = await this._resolveBtcChainId(row.network);
+        let btcChainId = await this.resolveBtcChainId(row.network);
         // Last gate before the insert, after every await on this path. A retraction that
         // landed while this write was parked owns no row to flip, so the fence is the only
         // record of it. Take the same fail-closed exit the persist failures take: no insert,
         // no mirror, round released, so a later poll re-proposes only if the source chain
         // still carries the call.
-        if(this._retractedSince(startSeq, row)){
+        if(this.retractedSince(startSeq, row)){
             console.warn('CrossChainCall: retraction landed while finalizing ' + row.phase + ' ' +
                          String(row.call_id).substring(0, 16) + '... (' + row.source_chain + ':' +
                          row.source_action_index + '); skipping the row write and the mirror');
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         // The row write is an upsert (db/cross_chain.js setCrossChainCallFinalized), so a
@@ -852,13 +852,13 @@ class CrossChainCallEngine extends EventEmitter {
         } catch(e){
             console.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
                           String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         // Release the in-flight slot BEFORE the mirror: the row is durable, so a delivery
         // failure must not wedge the round. _mirrorCallRow cannot throw.
         this._inflight.delete(row.round_id);
-        await this._mirrorCallRow(row);
+        await this.mirrorCallRow(row);
         console.log('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
                     row.source_chain + ':' + row.source_action_index + ' -> ' + row.target_chain + ':' + row.target_contract_index +
                     (row.phase === 'result' ? (' [' + row.result_status + ']') : '') +
@@ -877,28 +877,28 @@ class CrossChainCallEngine extends EventEmitter {
     // and the SQL predicate in retractCallsForReorg read the same fields the same way.
     // Bring the fence fields up on an instance that reaches these paths without the
     // constructor, which several suites build with Object.create(Engine.prototype).
-    _ensureRetractionFence(){
+    ensureRetractionFence(){
         if(!this._retractionFence) this._retractionFence = [];
         if(!this._pendingWrites)   this._pendingWrites   = new Set();
         if(typeof this._retractionSeq !== 'number') this._retractionSeq = 0;
     }
 
-    _recordRetraction(chain, bounds){
-        this._ensureRetractionFence();
+    recordRetraction(chain, bounds){
+        this.ensureRetractionFence();
         this._retractionFence.push({
             seq: ++this._retractionSeq,
             chain: String(chain),
             from: bounds.from, to: bounds.to, gen: bounds.gen,
             bounded: bounds.bounded, fenced: bounds.fenced
         });
-        this._pruneRetractionFence();
+        this.pruneRetractionFence();
     }
 
     // Drop fence entries no pending write can still consult: a write only reads entries
     // recorded after it started, so anything at or below the oldest pending write's start
     // sequence is unreachable. With no write pending the whole list is unreachable.
-    _pruneRetractionFence(){
-        this._ensureRetractionFence();
+    pruneRetractionFence(){
+        this.ensureRetractionFence();
         let floor = this._retractionSeq;
         for(let t of this._pendingWrites) if(t.seq < floor) floor = t.seq;
         this._retractionFence = this._retractionFence.filter(e => e.seq > floor);
@@ -908,8 +908,8 @@ class CrossChainCallEngine extends EventEmitter {
     // mirrors retractCallsForReorg's SQL tail: same source chain, index at or above the
     // lower bound, within the closed upper bound when the retraction is bounded, and at or
     // below the fenced generation when it is generation-fenced.
-    _retractedSince(sinceSeq, row){
-        this._ensureRetractionFence();
+    retractedSince(sinceSeq, row){
+        this.ensureRetractionFence();
         let idx = Number(row.source_action_index);
         let gen = Number(row.push_generation || 0);
         return this._retractionFence.some(e =>
@@ -920,7 +920,7 @@ class CrossChainCallEngine extends EventEmitter {
             (!e.fenced  || gen <= e.gen));
     }
 
-    _deferFinalize(row){
+    deferFinalize(row){
         this._inflight.delete(row.round_id);
         if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
             this.consensus.forgetFinalized(row.round_id);
@@ -934,7 +934,7 @@ class CrossChainCallEngine extends EventEmitter {
     // ._broadcastRowOrResync and the OracleConsensus price-round path are the in-repo
     // precedents), because the watermark heartbeat would otherwise certify completeness
     // past a committed, quorum-signed call row until the socket happened to reconnect.
-    async _mirrorCallRow(row){
+    async mirrorCallRow(row){
         let b = this.broadcaster;
         if(!b) return;
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
@@ -960,7 +960,7 @@ class CrossChainCallEngine extends EventEmitter {
     // that survived a re-genesis can refuse a call minted on the dead chain. Unknown reads as
     // NULL, which every mirror accepts, and a lookup failure must never fail a finalized row,
     // so it degrades to NULL. Twin of CrossChainDexEngine._resolveBtcChainId; keep in lockstep.
-    async _resolveBtcChainId(network){
+    async resolveBtcChainId(network){
         try {
             if(!this.db || typeof this.db.getChainTip !== 'function') return null;
             let tip = await this.db.getChainTip('bitcoin', network || this.network || '');
@@ -1000,7 +1000,7 @@ class CrossChainCallEngine extends EventEmitter {
         // engine knows the row's network, so the snapshot a call is verified against carries
         // the same identity the call row does, even on a hub whose HUB_NETWORK is unset.
         let rows = await snapWrite.writeCapabilitySnapshotRows(
-            this.db, capability, block, validators, await this._resolveBtcChainId(network));
+            this.db, capability, block, validators, await this.resolveBtcChainId(network));
         for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
@@ -1073,7 +1073,7 @@ class CrossChainCallEngine extends EventEmitter {
         // Fence the in-process writes FIRST, before the select decides whether any persisted
         // row matches. A round whose row is not inserted yet is invisible to the SQL below,
         // and the early return on an empty select leaves no other trace of this retraction.
-        this._recordRetraction(chain, bounds);
+        this.recordRetraction(chain, bounds);
         let rows = await this.db.findFinalizedCrossChainCallsInRetractionRange(chain, bounds);
         if(!rows.length) return;
         await this.db.updateCrossChainCallsRetractedInRange(chain, bounds);
@@ -1105,7 +1105,7 @@ class CrossChainCallEngine extends EventEmitter {
                      (fenced ? ' (gen <= ' + gen + ')' : '') + ' (should not happen past confirmation depth)');
     }
 
-    async _rowExists(callId, phase){
+    async rowExists(callId, phase){
         let rows = await this.db.hasCrossChainCalls(callId, phase);
         return rows.length > 0;
     }

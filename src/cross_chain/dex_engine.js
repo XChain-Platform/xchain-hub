@@ -178,7 +178,7 @@ class CrossChainDexEngine extends EventEmitter {
         // immediate self-sign + finalize, so behavior with no federation is unchanged.
         this.consensus = new CrossChainDexConsensus(this);
         this.consensus.on('match:finalized', (ev) => {
-            this._writeFinalizedMatch(ev).catch(err =>
+            this.writeFinalizedMatch(ev).catch(err =>
                 console.error('CrossChainDex: write finalized match error:', err && err.message));
         });
         // Release the inflight slot for a round the consensus abandons (stale under
@@ -210,7 +210,7 @@ class CrossChainDexEngine extends EventEmitter {
             if(!this.indexers[coin] || !this.indexers[coin].url)
                 console.warn('CrossChainDex: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
         }
-        await this._rebuildCommitted();
+        await this.rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
         this._pollTimer = setInterval(() => {
             this._discoverAndMatch().catch(err => console.error('CrossChainDex: tick error:', err && err.message));
@@ -234,7 +234,7 @@ class CrossChainDexEngine extends EventEmitter {
     // because the old clear-then-swallow-everything shape resolved with ZERO reservations
     // and let start() proceed to matching against them. Returns true when the ledger is
     // trustworthy, so the poll tick can retry without a second timer.
-    async _rebuildCommitted(){
+    async rebuildCommitted(){
         let next = new Map();
         try {
             let rows = await this.db.findCrossChainMatchesByStatus();
@@ -256,15 +256,15 @@ class CrossChainDexEngine extends EventEmitter {
         return true;
     }
 
-    _offerKey(chain, actionIndex){ return chain + ':' + Number(actionIndex); }
+    offerKey(chain, actionIndex){ return chain + ':' + Number(actionIndex); }
 
     // Apply (sign=+1) or reverse (sign=-1) a match row's fills against both legs' ledgers.
     // `target` lets _rebuildCommitted accumulate into an off-to-the-side map it only
     // installs on success; every other caller mutates the live ledger.
     _applyCommit(r, sign, target){
         let ledger = target || this.committed;
-        let kA = this._offerKey(r.a_chain, r.a_action_index);
-        let kB = this._offerKey(r.b_chain, r.b_action_index);
+        let kA = this.offerKey(r.a_chain, r.a_action_index);
+        let kB = this.offerKey(r.b_chain, r.b_action_index);
         let a  = ledger.get(kA) || { give: '0', get: '0' };
         let b  = ledger.get(kB) || { give: '0', get: '0' };
         let aAmt = String(r.a_amount), bAmt = String(r.b_amount);
@@ -277,15 +277,15 @@ class CrossChainDexEngine extends EventEmitter {
         ledger.set(kB, b);
     }
 
-    _committedFor(offer){
-        return this.committed.get(this._offerKey(offer.home_coin, offer.action_index)) || { give: '0', get: '0' };
+    committedFor(offer){
+        return this.committed.get(this.offerKey(offer.home_coin, offer.action_index)) || { give: '0', get: '0' };
     }
 
     // Remaining { give, get } capacity = full offer amount − committed (never below 0).
     // For a SWAP the "full" amount is the offer amount; once matched (committed == full)
     // both sides read 0 and it drops out of matching (the Phase-A single-fill behavior).
-    _effectiveRemaining(offer){
-        let c       = this._committedFor(offer);
+    effectiveRemaining(offer){
+        let c       = this.committedFor(offer);
         let fullGive = String(offer.give_amount != null ? offer.give_amount : '0');
         let fullGet  = String(offer.get_amount  != null ? offer.get_amount  : '0');
         let give = bc.bcsub(fullGive, c.give, 64);
@@ -318,7 +318,7 @@ class CrossChainDexEngine extends EventEmitter {
             // rebuilt re-offers escrow already locked into finalized matches. Retry the
             // rebuild on this tick rather than on a second timer, and propose nothing until
             // it succeeds; every other engine startCrossChain brings up stays running.
-            if(!this._committedReady && !(await this._rebuildCommitted())) return;
+            if(!this._committedReady && !(await this.rebuildCommitted())) return;
             let offersByCoin = {};
             // Fetch each coin's order book in parallel: the three RPC calls are fully
             // independent (each populates its own offersByCoin slot) and matching runs
@@ -380,12 +380,12 @@ class CrossChainDexEngine extends EventEmitter {
         for(let coin of ALLOWED_CHAINS) all = all.concat(offersByCoin[coin] || []);
         let matches = [], used = new Set();
         for(let i = 0; i < all.length; i++){
-            let a = all[i], aKey = this._offerKey(a.home_coin, a.action_index);
+            let a = all[i], aKey = this.offerKey(a.home_coin, a.action_index);
             if(used.has(aKey)) continue;
             for(let j = i + 1; j < all.length; j++){
-                let b = all[j], bKey = this._offerKey(b.home_coin, b.action_index);
+                let b = all[j], bKey = this.offerKey(b.home_coin, b.action_index);
                 if(used.has(bKey)) continue;
-                let desc = this._tryMatch(a, b);
+                let desc = this.tryMatch(a, b);
                 if(desc){
                     matches.push(desc);
                     used.add(aKey); used.add(bKey);
@@ -397,27 +397,27 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     // Attempt to match offers a and b. Returns a canonical-ordered descriptor or null.
-    _tryMatch(a, b){
+    tryMatch(a, b){
         if(a.home_coin === b.home_coin) return null;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return null; // never match across networks
         let aKind = (a.kind === 'order') ? 'order' : 'swap';
         let bKind = (b.kind === 'order') ? 'order' : 'swap';
         if(aKind === 'swap' && bKind === 'swap'){
-            if(!this._isExactMatch(a, b)) return null;
+            if(!this.isExactMatch(a, b)) return null;
             // Skip a swap already committed to a finalized match (it stays in the open book
             // until the indexer settles it). The committed ledger (not matchedOffers) is now
             // the reservation gate. Ownership offers expose amount '1' (see getOpenCrossChain*).
-            if(bc.bclte(this._effectiveRemaining(a).give, 0) || bc.bclte(this._effectiveRemaining(b).give, 0)) return null;
+            if(bc.bclte(this.effectiveRemaining(a).give, 0) || bc.bclte(this.effectiveRemaining(b).give, 0)) return null;
             // Single full fill (committed is 0 pre-match → filled_before 0).
-            return this._buildDesc(a, b, 'swap', 'swap', String(a.give_amount), String(b.give_amount));
+            return this.buildDesc(a, b, 'swap', 'swap', String(a.give_amount), String(b.give_amount));
         }
-        if(aKind === 'order' && bKind === 'order') return this._tryOrderMatch(a, b);
+        if(aKind === 'order' && bKind === 'order') return this.tryOrderMatch(a, b);
         return null;                                   // SWAP↔ORDER: carry-forward
     }
 
     // Deterministic total order over offers for price-time priority (maker = earlier).
     // Reproducible by every node from the polled books: (block_index, home_coin, action_index).
-    _offerCmp(a, b){
+    offerCmp(a, b){
         let ab = Number(a.block_index || 0), bb = Number(b.block_index || 0);
         if(ab !== bb) return ab < bb ? -1 : 1;
         if(a.home_coin !== b.home_coin) return a.home_coin < b.home_coin ? -1 : 1;
@@ -431,7 +431,7 @@ class CrossChainDexEngine extends EventEmitter {
     // gate, then the bottleneck clamp with orderInfo = taker (later) / matchInfo = maker
     // (earlier). Fill quantities are computed on effective_remaining (committed-aware), so
     // the same mirrored state always re-derives the same fill (PBFT determinism).
-    _tryOrderMatch(a, b){
+    tryOrderMatch(a, b){
         // Each side must give what the other wants (same token pair, mirrored ownership flags).
         if(a.give_coin !== b.get_coin || a.get_coin !== b.give_coin) return null;
         if((a.give_tick || '') !== (b.get_tick || '')) return null;
@@ -442,7 +442,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Price-time priority: earlier = maker, later = taker (use the taker's limit prices
         // for the fill math, exactly as order_match.js uses the new order's prices).
         let maker, taker;
-        if(this._offerCmp(a, b) <= 0){ maker = a; taker = b; } else { maker = b; taker = a; }
+        if(this.offerCmp(a, b) <= 0){ maker = a; taker = b; } else { maker = b; taker = a; }
 
         let ownership = Number(a.give_ownership || 0) === 1 || Number(a.get_ownership || 0) === 1 ||
                         Number(b.give_ownership || 0) === 1 || Number(b.get_ownership || 0) === 1;
@@ -454,8 +454,8 @@ class CrossChainDexEngine extends EventEmitter {
         // Skip price mismatch (order_match.js:118): maker's bid must reach the taker's ask.
         if(bc.bcgt(makerGetPrice, takerGivePrice)) return null;
 
-        let takerRem = this._effectiveRemaining(taker);
-        let makerRem = this._effectiveRemaining(maker);
+        let takerRem = this.effectiveRemaining(taker);
+        let makerRem = this.effectiveRemaining(maker);
         if(bc.bclte(takerRem.give, 0) || bc.bclte(makerRem.give, 0)) return null;
         if(bc.bclte(takerRem.get,  0) || bc.bclte(makerRem.get,  0)) return null;
 
@@ -505,8 +505,8 @@ class CrossChainDexEngine extends EventEmitter {
         // way to see missing decimals is a hub polling a pre-batch indexer, i.e. exactly
         // the half-deployed pair this package is documented to ship against: it stalls
         // matching (livelock) instead of settling a wrong quantity.
-        let takerDecimals = this._giveDecimals(taker);
-        let makerDecimals = this._giveDecimals(maker);
+        let takerDecimals = this.giveDecimals(taker);
+        let makerDecimals = this.giveDecimals(maker);
         if(takerDecimals === null || makerDecimals === null){
             console.warn('XDEX: skipping match, missing give_decimals on ' +
                          (takerDecimals === null ? 'taker' : 'maker') + ' offer ' +
@@ -526,13 +526,13 @@ class CrossChainDexEngine extends EventEmitter {
             // equal the full canonical sides, no partials.
             let expGive = Number(taker.give_ownership || 0) === 1 ? '1' : String(taker.give_amount);
             let expGet  = Number(taker.get_ownership  || 0) === 1 ? '1' : String(taker.get_amount);
-            if(!this._amountsEqual(takerGive, expGive) || !this._amountsEqual(takerGet, expGet)) return null;
+            if(!this.amountsEqual(takerGive, expGive) || !this.amountsEqual(takerGet, expGet)) return null;
         }
 
         // taker gives takerGive (its escrow); maker gives takerGet (== what the taker receives).
         let aGiveFill = (a === taker) ? takerGive : takerGet;
         let bGiveFill = (b === taker) ? takerGive : takerGet;
-        return this._buildDesc(a, b, 'order', 'order', aGiveFill, bGiveFill);
+        return this.buildDesc(a, b, 'order', 'order', aGiveFill, bGiveFill);
     }
 
     // The decimal grid of an offer's GIVE side, or null when it cannot be established.
@@ -545,7 +545,7 @@ class CrossChainDexEngine extends EventEmitter {
     // null here makes the caller decline the match, which is why the range check is
     // strict rather than coercing. 0 is valid and meaningful (indivisible/NFT ticks), so
     // this must not be written as a falsy test; 18 is the protocol maximum.
-    _giveDecimals(offer){
+    giveDecimals(offer){
         if(!offer) return null;
         let d = offer.give_decimals;
         if(d === null || d === undefined || d === '') return null;
@@ -556,15 +556,15 @@ class CrossChainDexEngine extends EventEmitter {
 
     // Canonical-order a matched pair (lo = home_coin-lower side) into a finalize descriptor,
     // capturing each leg's pre-fill committed offset (binds the match_id + canonical).
-    _buildDesc(a, b, aKind, bKind, aGiveFill, bGiveFill){
+    buildDesc(a, b, aKind, bKind, aGiveFill, bGiveFill){
         let lo, hi, loKind, hiKind, loFill, hiFill;
         if(a.home_coin <= b.home_coin){ lo = a; hi = b; loKind = aKind; hiKind = bKind; loFill = aGiveFill; hiFill = bGiveFill; }
         else                          { lo = b; hi = a; loKind = bKind; hiKind = aKind; loFill = bGiveFill; hiFill = aGiveFill; }
         return {
             lo, hi, loKind, hiKind,
             loFill: String(loFill), hiFill: String(hiFill),
-            loFilledBefore: String(this._committedFor(lo).give),
-            hiFilledBefore: String(this._committedFor(hi).give),
+            loFilledBefore: String(this.committedFor(lo).give),
+            hiFilledBefore: String(this.committedFor(hi).give),
             network: a.home_network
         };
     }
@@ -573,15 +573,15 @@ class CrossChainDexEngine extends EventEmitter {
     // Amounts compare by normalized decimal value (the two compared amounts are always the
     // SAME token, so same decimals). Not raw string: give_amount/get_amount are stored
     // VARCHAR as the user wrote them, so "100" and "100.00000000" are the same offer.
-    _isExactMatch(a, b){
+    isExactMatch(a, b){
         if(a.home_coin === b.home_coin) return false;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return false; // never match across networks
 
         if(a.give_coin !== b.get_coin || a.get_coin !== b.give_coin) return false;
         if((a.give_tick || '') !== (b.get_tick || '')) return false;
         if((a.get_tick || '') !== (b.give_tick || '')) return false;
-        if(!this._amountsEqual(a.give_amount, b.get_amount)) return false;
-        if(!this._amountsEqual(a.get_amount, b.give_amount)) return false;
+        if(!this.amountsEqual(a.give_amount, b.get_amount)) return false;
+        if(!this.amountsEqual(a.get_amount, b.give_amount)) return false;
         if(Number(a.give_ownership || 0) !== Number(b.get_ownership || 0)) return false;
         if(Number(a.get_ownership || 0)  !== Number(b.give_ownership || 0)) return false;
         return true;
@@ -591,7 +591,7 @@ class CrossChainDexEngine extends EventEmitter {
     // strip insignificant leading (int) and trailing (fraction) zeros. Pure string math,
     // no float, no bignumber dep. It's exact at any precision and deterministic. null/empty
     // (ownership offers carry no amount) normalize to '' and compare equal to each other.
-    _normalizeAmount(v){
+    normalizeAmount(v){
         if(v === null || v === undefined) return '';
         let s = String(v).trim();
         if(s === '') return '';
@@ -604,8 +604,8 @@ class CrossChainDexEngine extends EventEmitter {
         return (neg && out !== '0') ? '-' + out : out;
     }
 
-    _amountsEqual(x, y){
-        return this._normalizeAmount(x) === this._normalizeAmount(y);
+    amountsEqual(x, y){
+        return this.normalizeAmount(x) === this.normalizeAmount(y);
     }
 
     async _finalizeMatch(desc){
@@ -713,7 +713,7 @@ class CrossChainDexEngine extends EventEmitter {
     // Persist a consensus-finalized match (2f+1 signatures attached) and mirror it. Update
     // the committed ledger only when the row is actually inserted (INSERT IGNORE), so a
     // duplicate finalize (another hub / restart race) never double-counts a fill.
-    async _writeFinalizedMatch(ev){
+    async writeFinalizedMatch(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical (WI-2 bump 2)
@@ -739,14 +739,14 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){
             console.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         if(!persistedRows){
             console.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round)');
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         // The durable INSERT is the fill, so account it in the reservation ledger BEFORE
@@ -759,12 +759,12 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){
             console.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this._deferFinalize(row);
+            this.deferFinalize(row);
             return;
         }
         if(inserted) this._applyCommit(row, +1);
         this._inflight.delete(row.match_id);
-        await this._mirrorMatchRow(row);
+        await this.mirrorMatchRow(row);
         console.log('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
                     row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
                     ' [' + row.a_kind + '/' + row.b_kind + '] fill ' + row.a_amount + '⇄' + row.b_amount +
@@ -778,7 +778,7 @@ class CrossChainDexEngine extends EventEmitter {
     // 'match:finalized' event is emitted, because nothing was written in this hub's DB.
     // Named and shaped to match CrossChainCallEngine._deferFinalize; the two engines are
     // kept in lockstep by design.
-    _deferFinalize(row){
+    deferFinalize(row){
         this._inflight.delete(row.match_id);
         if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
             this.consensus.forgetFinalized(row.match_id);
@@ -831,12 +831,12 @@ class CrossChainDexEngine extends EventEmitter {
         // Re-derive the WHOLE match (kind, fill amounts, filled-before offsets, match_id)
         // independently from our own view: offers + our committed ledger. The proposer's
         // a/b are canonical (a_chain <= b_chain), so _tryMatch(a, b) keeps lo=a, hi=b.
-        let desc = this._tryMatch(a, b);
+        let desc = this.tryMatch(a, b);
         if(!desc) return false;
         if(desc.loKind !== row.a_kind || desc.hiKind !== row.b_kind) return false;
-        if(!this._amountsEqual(desc.loFill, row.a_amount) || !this._amountsEqual(desc.hiFill, row.b_amount)) return false;
-        if(!this._amountsEqual(desc.loFilledBefore, row.a_filled_before) ||
-           !this._amountsEqual(desc.hiFilledBefore, row.b_filled_before)) return false;
+        if(!this.amountsEqual(desc.loFill, row.a_amount) || !this.amountsEqual(desc.hiFill, row.b_amount)) return false;
+        if(!this.amountsEqual(desc.loFilledBefore, row.a_filled_before) ||
+           !this.amountsEqual(desc.hiFilledBefore, row.b_filled_before)) return false;
         // Royalty legs must match OUR OWN indexer's view of each order. The canonical is
         // built from the proposed row, so without this check a Byzantine leader could
         // strip or rewrite the legs and still collect honest signatures; the source
@@ -917,7 +917,7 @@ class CrossChainDexEngine extends EventEmitter {
     // mirror that survived a re-genesis can refuse a match minted on the dead chain instead
     // of re-evaluating it at every block forever. Unknown reads as NULL, which every mirror
     // accepts, and a lookup failure must never fail a finalized match, so it degrades to NULL.
-    async _resolveBtcChainId(network){
+    async resolveBtcChainId(network){
         try {
             if(!this.db || typeof this.db.getChainTip !== 'function') return null;
             let tip = await this.db.getChainTip('bitcoin', network || this.network || '');
@@ -935,7 +935,7 @@ class CrossChainDexEngine extends EventEmitter {
         // never consensus. _canonicalMatch enumerates its fields explicitly, so this value has
         // no path into a signed preimage. The column list and the statement live in
         // db.createCrossChainMatch.
-        let btcChainId = await this._resolveBtcChainId(row.network);
+        let btcChainId = await this.resolveBtcChainId(row.network);
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
         let res = await this.db.createCrossChainMatch(row, btcChainId);
@@ -970,7 +970,7 @@ class CrossChainDexEngine extends EventEmitter {
     // price-round path are the in-repo precedents): the watermark heartbeat advances on
     // its own wall clock and would otherwise certify completeness past a committed,
     // quorum-signed match until the socket happened to reconnect.
-    async _mirrorMatchRow(row){
+    async mirrorMatchRow(row){
         let b = this.broadcaster;
         if(!b) return;
         if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
@@ -1064,7 +1064,7 @@ class CrossChainDexEngine extends EventEmitter {
         // engine knows the row's network, so the snapshot a match is verified against carries
         // the same identity the match row does, even on a hub whose HUB_NETWORK is unset.
         let rows = await snapWrite.writeCapabilitySnapshotRows(
-            this.db, capability, block, validators, await this._resolveBtcChainId(network));
+            this.db, capability, block, validators, await this.resolveBtcChainId(network));
         for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
@@ -1181,8 +1181,8 @@ class CrossChainDexEngine extends EventEmitter {
     // "0" == "0.00000000").
     _deriveMatchId(lo, hi, snapshotBlock, loFilledBefore, hiFilledBefore){
         let s = (lo.home_network || '') +
-                '|' + lo.home_coin + ':' + lo.action_index + ':' + this._normalizeAmount(loFilledBefore) +
-                '|' + hi.home_coin + ':' + hi.action_index + ':' + this._normalizeAmount(hiFilledBefore) +
+                '|' + lo.home_coin + ':' + lo.action_index + ':' + this.normalizeAmount(loFilledBefore) +
+                '|' + hi.home_coin + ':' + hi.action_index + ':' + this.normalizeAmount(hiFilledBefore) +
                 '|' + snapshotBlock;
         return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
     }

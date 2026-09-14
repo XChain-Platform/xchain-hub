@@ -236,7 +236,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
         const self = Object.create(CrossChainEngine.prototype);
         const pending = { memberPubkeys: new Set([KEY_CHAIN]) };
         const votes = new Set([KEY_CHAIN, KEY_STRANGER]);
-        expect(self._countedVotes(pending, votes)).to.equal(1);
+        expect(self.countedVotes(pending, votes)).to.equal(1);
     });
 });
 

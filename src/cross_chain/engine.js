@@ -185,7 +185,7 @@ class CrossChainEngine extends EventEmitter {
 
         // Check if already attested
         if (this.finalized.has(attestationId)) {
-            return await this._getStoredAttestation(attestationId);
+            return await this.getStoredAttestation(attestationId);
         }
 
         // Resolve the cross_chain validator set at the current BTC block
@@ -222,7 +222,7 @@ class CrossChainEngine extends EventEmitter {
                 destChain, confirmations, status: 'attested',
                 validatorCount: 1, consensusProof: '[]'
             };
-            await this._storeAttestation(attestation);
+            await this.storeAttestation(attestation);
             // Same post-store bookkeeping the consensus path does in
             // _checkCommitQuorum. Without it a single-operator hub wrote an
             // 'attested' row that nothing downstream ever heard about: SwapTracker
@@ -245,7 +245,7 @@ class CrossChainEngine extends EventEmitter {
 
         // Lock the VOTE POPULATION alongside the quorum, from the same snapshot that
         // sized it, so N's divisor and its numerator read one set (see _countedVotes).
-        let memberPubkeys = await this._resolveMemberPubkeys(btcBlockHeight);
+        let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
 
         return new Promise((resolve, reject) => {
             let pending = {
@@ -366,7 +366,7 @@ class CrossChainEngine extends EventEmitter {
     // Never throws: a failure here degrades to the legacy unfiltered tally, exactly as an
     // unresolved snapshot already does, and _resolveQuorum has already refused the round
     // outright in the federated case.
-    async _resolveMemberPubkeys(btcBlockHeight) {
+    async resolveMemberPubkeys(btcBlockHeight) {
         if (!this.hub.capabilitySnapshot || btcBlockHeight == null) return null;
         try {
             return this._memberPubkeySet(
@@ -398,7 +398,7 @@ class CrossChainEngine extends EventEmitter {
     // empty-registry degradation is gone with the registry lookup it protected: a
     // key that no longer needs resolving through the registry cannot be un-resolvable
     // because the registry is empty.
-    _countedVotes(pending, voteSet) {
+    countedVotes(pending, voteSet) {
         if (!pending || !pending.memberPubkeys) return voteSet ? voteSet.size : 0;
         let counted = 0;
         for (let pk of voteSet) {
@@ -491,7 +491,7 @@ class CrossChainEngine extends EventEmitter {
             }
             // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
             // follower and leader gate their tallies on the identical member set.
-            let memberPubkeys = await this._resolveMemberPubkeys(btcBlockHeight);
+            let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
             this.pendingAttestations.set(attestationId, {
                 attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest,
@@ -612,7 +612,7 @@ class CrossChainEngine extends EventEmitter {
         // Votes are counted against the round's locked snapshot population (_countedVotes),
         // so the threshold and the electorate come from one set.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (this._countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
+        if (this.countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             let selfPkOnCommit = this.selfPubkey();
             if (selfPkOnCommit) pending.commits.add(selfPkOnCommit);
@@ -632,7 +632,7 @@ class CrossChainEngine extends EventEmitter {
 
         // Same locked quorum and same snapshot-gated tally as _checkPrepareQuorum.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (this._countedVotes(pending, pending.commits) >= quorum) {
+        if (this.countedVotes(pending, pending.commits) >= quorum) {
             pending.finalized = true;
             // Do NOT clear the round timer here: it is the backstop for a store
             // that never succeeds. It is cleared on the success path instead.
@@ -687,7 +687,7 @@ class CrossChainEngine extends EventEmitter {
         let delay = this.storeRetryBaseMs;
         for (let attempt = 1; ; attempt++) {
             try {
-                await this._storeAttestation(attestation);
+                await this.storeAttestation(attestation);
                 return;
             } catch (err) {
                 if (attempt >= this.storeRetryAttempts) throw err;
@@ -700,7 +700,7 @@ class CrossChainEngine extends EventEmitter {
         }
     }
 
-    async _storeAttestation(attestation) {
+    async storeAttestation(attestation) {
         await this.db.setAttestation(
             attestation.attestationId, attestation.sourceChain, attestation.sourceActionIndex,
             attestation.destChain, attestation.confirmations, attestation.status,
@@ -709,7 +709,7 @@ class CrossChainEngine extends EventEmitter {
         );
     }
 
-    async _getStoredAttestation(attestationId) {
+    async getStoredAttestation(attestationId) {
         let rows = await this.db.getAttestation(attestationId);
         return rows.length > 0 ? rows[0] : null;
     }
@@ -717,7 +717,7 @@ class CrossChainEngine extends EventEmitter {
     // --- Utilities ---
 
     // Get the validator set for a specific chain pair, or fall back to the full set
-    _getChainPairSet(sourceChain, destChain) {
+    getChainPairSet(sourceChain, destChain) {
         if (this.chainPairValidators.size > 0) {
             // Try both orderings of the chain pair
             let key1 = sourceChain + '-' + destChain;
@@ -731,7 +731,7 @@ class CrossChainEngine extends EventEmitter {
 
     _getLeader(seq, sourceChain, destChain) {
         let set = (sourceChain && destChain)
-            ? this._getChainPairSet(sourceChain, destChain)
+            ? this.getChainPairSet(sourceChain, destChain)
             : this.validatorSet;
         if (set.length === 0) return null;
         return set[seq % set.length];
@@ -769,7 +769,7 @@ class CrossChainEngine extends EventEmitter {
     _getQuorum(sourceChain, destChain) {
         let N;
         if (sourceChain && destChain) {
-            let set = this._getChainPairSet(sourceChain, destChain);
+            let set = this.getChainPairSet(sourceChain, destChain);
             N = set.length;
         } else {
             N = this.validatorSet.length;

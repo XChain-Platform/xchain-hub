@@ -462,7 +462,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         // async: an offered row can declare a different snapshot, which has to be
         // re-resolved before its proof is measured), so drive the handler directly and
         // let its completion be the verdict.
-        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: signers[0].pubkey,
+        await victim.consensus.handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: signers[0].pubkey,
             data: { matchId: mid, row, view: 0, signatures: signers.map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(proofCanon) })) } });
 
         expect(victim.finalized.length, 'the straggler caught up').to.equal(1);
@@ -660,13 +660,13 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
         let pending = victim.consensus.pending.get(mid);
         let threeOfFour = new Set(bus.nodes.slice(0, 3).map(nd => nd.pubkey));
-        expect(victim.consensus._meetsQuorum(pending, threeOfFour),
+        expect(victim.consensus.meetsQuorum(pending, threeOfFour),
             'three of the four-member set is a quorum there').to.be.true;
 
         await drivePropose(bus, victim, mid, Object.assign({}, row, { snapshot_block: 101 }));
 
         pending = victim.consensus.pending.get(mid);
-        expect(victim.consensus._meetsQuorum(pending, threeOfFour),
+        expect(victim.consensus.meetsQuorum(pending, threeOfFour),
             'the same three do not carry the seven-member set the row declares').to.be.false;
     });
 
@@ -726,7 +726,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         // Three real signatures: a quorum of the four-member set the round holds, and
         // short of the seven-member set the offered row declares.
         let signatures = bus.nodes.slice(0, 3).map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(canon) }));
-        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
+        await victim.consensus.handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
             data: { matchId: mid, view: 0, row: syncRow, signatures } });
 
         expect(victim.finalized.length, 'an under-quorum proof must not finalize the round').to.equal(0);
@@ -748,7 +748,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         for (let i = 0; i < 3; i++) extraIds.push(new ValidatorIdentity(String(50 + i).repeat(32).slice(0, 64)));
         let signatures = bus.nodes.slice(0, 2).map(nd => ({ pubkey: nd.pubkey, sig: nd.identity.sign(canon) }))
             .concat(extraIds.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canon) })));
-        await victim.consensus._handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
+        await victim.consensus.handleFinalSync({ type: 'XDEX_MATCH_FINAL_SYNC', sender: bus.nodes[1].pubkey,
             data: { matchId: mid, view: 0, row: syncRow, signatures } });
 
         expect(victim.finalized.length, 'a real quorum of the declared set still rescues the round').to.equal(1);

@@ -127,7 +127,7 @@ describe('SwapTracker', function () {
             // Second call: updateSwapStatus
             hub.db.doQuery.onSecondCall().resolves();
 
-            await st._onAttestationFinalized({
+            await st.onAttestationFinalized({
                 sourceChain: 'BTC',
                 sourceActionIndex: 42,
                 attestationId: 'BTC:42:LTC'
@@ -141,7 +141,7 @@ describe('SwapTracker', function () {
 
         it('does nothing when no matching swap', async function () {
             hub.db.doQuery.resolves([]); // no swap found
-            await st._onAttestationFinalized({
+            await st.onAttestationFinalized({
                 sourceChain: 'BTC', sourceActionIndex: 42
             });
             expect(hub.db.doQuery.callCount).to.equal(1); // only the getSwap query
@@ -152,7 +152,7 @@ describe('SwapTracker', function () {
                 source_chain: 'BTC', source_action_index: 42, status: 'attested'
             }]);
 
-            await st._onAttestationFinalized({
+            await st.onAttestationFinalized({
                 sourceChain: 'BTC', sourceActionIndex: 42
             });
 
@@ -160,12 +160,12 @@ describe('SwapTracker', function () {
         });
 
         it('handles null attestation gracefully', async function () {
-            await st._onAttestationFinalized(null);
+            await st.onAttestationFinalized(null);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('handles attestation with missing fields', async function () {
-            await st._onAttestationFinalized({ sourceChain: null, sourceActionIndex: null });
+            await st.onAttestationFinalized({ sourceChain: null, sourceActionIndex: null });
             expect(hub.db.doQuery.called).to.be.false;
         });
     });

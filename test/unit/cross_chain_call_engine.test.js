@@ -238,10 +238,10 @@ describe('CrossChainCallEngine', function () {
         it('proposes a dispatch row only once the request is at confirmation depth', async function () {
             const { engine } = makeEngine();
             // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-            await engine._maybeDispatch('BTC', 'regtest', 104, pendingCall());
+            await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
             expect(engine.consensus.propose.called).to.equal(false);
             // latest 105 = depth 6 → dispatch.
-            await engine._maybeDispatch('BTC', 'regtest', 105, pendingCall());
+            await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
             expect(engine.consensus.propose.calledOnce).to.equal(true);
             const [roundId, ctx] = engine.consensus.propose.firstCall.args;
             expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
@@ -253,15 +253,15 @@ describe('CrossChainCallEngine', function () {
 
         it('never dispatches an expired request or a same-chain target', async function () {
             const { engine } = makeEngine();
-            await engine._maybeDispatch('BTC', 'regtest', 500, pendingCall({ deadline_block: 400 }));
-            await engine._maybeDispatch('BTC', 'regtest', 500, pendingCall({ target_chain: 'BTC' }));
+            await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({ deadline_block: 400 }));
+            await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({ target_chain: 'BTC' }));
             expect(engine.consensus.propose.called).to.equal(false);
         });
 
         it('dedupes against an already-finalized dispatch row', async function () {
             const { engine, db } = makeEngine();
             db.rows.push({ call_id: CALL_ID, phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 41 });
-            await engine._maybeDispatch('BTC', 'regtest', 500, pendingCall());
+            await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
             expect(engine.consensus.propose.called).to.equal(false);
         });
     });
@@ -677,7 +677,7 @@ describe('CrossChainCallEngine', function () {
             // The persisted-row COUNT is the money-path precondition signal, so the
             // stub has to answer with one; a bare resolve() now means "degraded set".
             const persist = sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
-            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await engine.writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
             expect(db.rows.length).to.equal(1);
             // EVERY hub (followers included) must persist the snapshot the
             // indexers verify against. Leader-only persistence left follower
@@ -712,7 +712,7 @@ describe('CrossChainCallEngine', function () {
             engine._inflight.add(row.round_id);
             sinon.stub(engine, '_persistCapabilitySnapshot').rejects(new Error('db down'));
 
-            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await engine.writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(db.rows.length, 'no unverifiable row may be committed').to.equal(0);
             expect(broadcaster.broadcastRow.called, 'nothing may be broadcast').to.equal(false);
@@ -729,7 +729,7 @@ describe('CrossChainCallEngine', function () {
             // throws nothing, and warns nothing; only the count exposes it.
             sinon.stub(engine, '_persistCapabilitySnapshot').resolves(0);
 
-            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await engine.writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(db.rows.length).to.equal(0);
             expect(broadcaster.broadcastRow.called).to.equal(false);
@@ -753,7 +753,7 @@ describe('CrossChainCallEngine', function () {
                 return real(sql, params);
             });
 
-            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await engine.writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(db.rows.length, 'nothing was written').to.equal(0);
             expect(broadcaster.broadcastRow.called).to.equal(false);
@@ -775,7 +775,7 @@ describe('CrossChainCallEngine', function () {
                 return real(sql, params);
             });
 
-            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            await engine.writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
 
             expect(db.rows.length, 'the row is still durable').to.equal(1);
             expect(engine._inflight.has(row.round_id), 'a mirror failure must not wedge the round').to.equal(false);
@@ -808,13 +808,13 @@ describe('CrossChainCallEngine', function () {
             );
             const seen = [];
             sinon.stub(engine, '_maybeRelayResult').callsFake(async (coin, d) => { seen.push(d.call_id); });
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(seen).to.deep.equal([CALL_ID]);
 
             // A live (non-retracted) result row still suppresses re-discovery.
             db.rows[1].status = 'finalized';
             seen.length = 0;
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(seen).to.deep.equal([]);
         });
 
@@ -930,7 +930,7 @@ describe('CrossChainCallEngine', function () {
             let release;
             const parked = new Promise(resolve => { release = resolve; });
             sinon.stub(engine, '_persistCapabilitySnapshot').callsFake(async () => { await parked; return 3; });
-            const writing = engine._writeFinalizedRow({ row, signatures: [] });
+            const writing = engine.writeFinalizedRow({ row, signatures: [] });
             await engine.retractCallsForReorg('BTC', 40);
             expect(db.rows.length).to.equal(0);   // the retraction really had no row to flip
             release();
@@ -952,7 +952,7 @@ describe('CrossChainCallEngine', function () {
                 let release;
                 const parked = new Promise(resolve => { release = resolve; });
                 sinon.stub(engine, '_persistCapabilitySnapshot').callsFake(async () => { await parked; return 3; });
-                const writing = engine._writeFinalizedRow({ row, signatures: [] });
+                const writing = engine.writeFinalizedRow({ row, signatures: [] });
                 await engine.retractCallsForReorg(...args);
                 release();
                 await writing;
@@ -988,14 +988,14 @@ describe('CrossChainCallEngine', function () {
             sinon.stub(engine, '_indexerCall').resolves({ exists: false });
 
             // First poll: both are attempted and parked (result-less).
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
             expect(engine._resultBackoff.has('b'.repeat(64))).to.equal(true);
 
             // Second poll: both are inside their backoff window, so both are excluded
             // from the hot query. The window is free for whatever arrives next.
             const spy = sinon.spy(engine, '_maybeRelayResult');
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(spy.called).to.equal(false, 'parked rows must not be re-polled while backed off');
         });
 
@@ -1008,12 +1008,12 @@ describe('CrossChainCallEngine', function () {
             relay.onFirstCall().resolves(false);   // result absent -> park
             relay.onSecondCall().resolves(true);    // result arrived -> round proposed
 
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
 
             // Force the backoff window to have elapsed, then poll again.
             engine._resultBackoff.get('a'.repeat(64)).nextAt = Date.now() - 1;
-            await engine._pollTargetResults('DOGE');
+            await engine.pollTargetResults('DOGE');
             expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(false, 'a delivered result clears backoff');
         });
 
@@ -1021,12 +1021,12 @@ describe('CrossChainCallEngine', function () {
             const { engine } = makeEngine();
             const id = 'a'.repeat(64);
             const t0 = Date.now();
-            engine._parkResult(id);
+            engine.parkResult(id);
             const first = engine._resultBackoff.get(id).nextAt - t0;
-            engine._parkResult(id);
+            engine.parkResult(id);
             const second = engine._resultBackoff.get(id).nextAt - Date.now();
             expect(second).to.be.greaterThan(first - 5);       // second delay >= first (allow scheduling slack)
-            for (let i = 0; i < 40; i++) engine._parkResult(id);
+            for (let i = 0; i < 40; i++) engine.parkResult(id);
             expect(engine._resultBackoff.get(id).nextAt - Date.now()).to.be.at.most(60 * 60 * 1000 + 5);
         });
     });

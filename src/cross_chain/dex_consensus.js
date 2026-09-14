@@ -204,10 +204,10 @@ class CrossChainDexConsensus extends EventEmitter {
     // signature like the PROPOSE/PREPARE/COMMIT phases (NOT by envelope.sender,
     // which the transport sets to a validator address while our snapshot set is
     // pubkey-keyed). Binds tag+matchId+view so a vote can't be replayed elsewhere.
-    _controlPayload(tag, rid, view){ return tag + '|' + rid + '|' + view; }
-    _signControl(tag, rid, view){ return this.identity.sign(this._controlPayload(tag, rid, view)); }
-    _verifyControl(tag, rid, view, pubkey, sig){
-        return ValidatorIdentity.verify(this._controlPayload(tag, rid, view), String(sig || ''), String(pubkey || '').toLowerCase());
+    controlPayload(tag, rid, view){ return tag + '|' + rid + '|' + view; }
+    signControl(tag, rid, view){ return this.identity.sign(this.controlPayload(tag, rid, view)); }
+    verifyControl(tag, rid, view, pubkey, sig){
+        return ValidatorIdentity.verify(this.controlPayload(tag, rid, view), String(sig || ''), String(pubkey || '').toLowerCase());
     }
 
     // Phase-bound COMMIT vote payload (A-F6). The artifact signature
@@ -219,7 +219,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // commit_sig over this payload; a vote without it does not count. Prefixed
     // with the engine's COMMIT type so an XCALL relay commit can never be
     // replayed into an XDEX round (and vice versa).
-    _commitPayload(canonical){ return this.types.COMMIT + '|PHASEV1|' + canonical; }
+    commitPayload(canonical){ return this.types.COMMIT + '|PHASEV1|' + canonical; }
 
     // Sort the snapshot validators by pubkey so every node agrees on ordering,
     // then index by (matchIdInt + view) % N. Mirrors Consensus._getLeader.
@@ -332,20 +332,20 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
 
-        pending.timer = this._armTimer(rid);
+        pending.timer = this.armTimer(rid);
 
         // If we are the round leader, persist the capability snapshot (so indexers
         // can verify) and broadcast PROPOSE. Followers just wait (+ hold the timer).
         let leader = this._leaderFor(rid, pending.validators, pending.view);
         if(leader === myPubkey){
-            await this._broadcastPropose(pending);
+            await this.broadcastPropose(pending);
         }
 
         this.drainEarlyMessages(rid);
     }
 
-    _armTimer(rid){
-        let t = setTimeout(() => this._onRoundTimeout(rid), this.roundTimeoutMs);
+    armTimer(rid){
+        let t = setTimeout(() => this.onRoundTimeout(rid), this.roundTimeoutMs);
         if(t.unref) t.unref();                          // housekeeping timer; never pin process liveness
         return t;
     }
@@ -359,7 +359,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // round has passed, so the retry finalizes cleanly. Without this, such a round
     // leaks in `pending` forever (propose() no-ops on a still-pending id) and the
     // call/match wedges permanently until a process restart.
-    _onRoundTimeout(rid){
+    onRoundTimeout(rid){
         let p = this.pending.get(rid);
         if(!p || p.finalized) return;
         if((Date.now() - p.startedAt) > this.roundMaxLifetimeMs){
@@ -374,7 +374,7 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
-    async _broadcastPropose(pending){
+    async broadcastPropose(pending){
         try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
         catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
         let mySig = this.identity.sign(pending.canonical);
@@ -396,7 +396,7 @@ class CrossChainDexConsensus extends EventEmitter {
             case this.types.COMMIT:      this._handleCommit(envelope);     break;
             case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
             case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
-            case this.types.FINAL_SYNC:  this._handleFinalSync(envelope).catch(e => console.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
+            case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => console.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;
         }
     }
 
@@ -408,7 +408,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // unresolvable, empty, single-validator or truncated-weighted set cannot be measured
     // the way the indexer consumers measure it, and finalizing under the round's stale
     // set would publish a row those consumers retire.
-    async _rebindSnapshot(pending, row){
+    async rebindSnapshot(pending, row){
         let sameBlock   = String(row.snapshot_block) === String(pending.row.snapshot_block);
         let sameNetwork = String(row.network || '')  === String(pending.row.network || '');
         if(sameBlock && sameNetwork) return null;
@@ -460,7 +460,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // Every other answer is fail-closed, including the ones caused by our own side: a
     // scope that throws, a map we cannot read, a tip we cannot resolve. A follower that
     // adopted an unchecked height would be signing the proposer's own claim back to it.
-    async _admissionBoundHolds(row, rid){
+    async admissionBoundHolds(row, rid){
         if(typeof this.engine.admissionScope !== 'function') return true;
         let scope;
         try { scope = this.engine.admissionScope(row); }
@@ -534,7 +534,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // one binds every engine on the shared path, so neither can be removed by work on
         // the other. The cost is one getlatestblock per reading chain on a path that
         // already makes at least two indexer round trips per proposal.
-        if(!(await this._admissionBoundHolds(row, rid))) return;
+        if(!(await this.admissionBoundHolds(row, rid))) return;
 
         let adopted = false;
         if(canonical !== pending.canonical){
@@ -565,7 +565,7 @@ class CrossChainDexConsensus extends EventEmitter {
             // needs five for. Rebind before a single vote is counted, and fail CLOSED
             // (leave the round to its timer and view change) when the set cannot be
             // resolved, rather than counting votes under a set nobody will accept.
-            let rebound = await this._rebindSnapshot(pending, row);
+            let rebound = await this.rebindSnapshot(pending, row);
             if(rebound === false) return;
             // The resolve above is a real await, so re-check the round is still the one
             // we started on before mutating it.
@@ -636,7 +636,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
     // Quorum test for a collected vote set (prepares or commits). Stake-weighted
     // (source-deduped 3·Sigma>2·S) at/above activation; signer COUNT (>=2f+1) below it.
-    _meetsQuorum(pending, voteSet){
+    meetsQuorum(pending, voteSet){
         if(pending.weighted)
             return swq.meetsStakeThreshold(pending.validators, voteSet);
         return voteSet.size >= pending.quorum;
@@ -645,7 +645,7 @@ class CrossChainDexConsensus extends EventEmitter {
     checkPrepareQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized || pending._commitSent) return;
-        if(!this._meetsQuorum(pending, pending.prepares)) return;
+        if(!this.meetsQuorum(pending, pending.prepares)) return;
         pending._commitSent = true;
         pending.commits.add(pending.myPubkey);
         let mySig = pending.signatures.get(pending.myPubkey) || null;
@@ -653,7 +653,7 @@ class CrossChainDexConsensus extends EventEmitter {
             this.peerManager.broadcast(this.types.COMMIT, {
                 matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig,
                 // Phase-bound vote signature; see _commitPayload.
-                commit_sig: this.identity.sign(this._commitPayload(pending.canonical))
+                commit_sig: this.identity.sign(this.commitPayload(pending.canonical))
             });
         }
         this.checkCommitQuorum(rid);
@@ -683,7 +683,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // artifact sig either way (it is genuine and indexer-verifiable), but
         // only tally the commit with a verifying commit_sig.
         pending.signatures.set(senderPubkey, String(d.sig));
-        if(!d.commit_sig || !ValidatorIdentity.verify(this._commitPayload(pending.canonical), String(d.commit_sig), senderPubkey)){
+        if(!d.commit_sig || !ValidatorIdentity.verify(this.commitPayload(pending.canonical), String(d.commit_sig), senderPubkey)){
             console.warn('CrossChainDexConsensus: COMMIT without verifying phase-bound commit_sig from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (vote not counted; a peer running older code, or a replayed PREPARE)');
             return;
@@ -695,7 +695,7 @@ class CrossChainDexConsensus extends EventEmitter {
     checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
-        if(!this._meetsQuorum(pending, pending.commits)) return;
+        if(!this.meetsQuorum(pending, pending.commits)) return;
         this.finalize(rid);
     }
 
@@ -771,11 +771,11 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
         pending.viewChanges.get(view).add(pending.myPubkey);
         if(this.peerManager) this.peerManager.broadcast(this.types.VIEW_CHANGE, {
-            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl(this.controlTags.vc, rid, view)
+            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.vc, rid, view)
         });
         if(pending.timer) clearTimeout(pending.timer);
-        pending.timer = this._armTimer(rid);
-        this._maybeAssumeLeadership(rid, view);
+        pending.timer = this.armTimer(rid);
+        this.maybeAssumeLeadership(rid, view);
     }
 
     _handleViewChange(envelope){
@@ -801,19 +801,19 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!Number.isFinite(view)) return;
         let voter = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === voter)) return;     // not a validator
-        if(!this._verifyControl(this.controlTags.vc, rid, view, voter, d.sig)) return; // unauthenticated vote
+        if(!this.verifyControl(this.controlTags.vc, rid, view, voter, d.sig)) return; // unauthenticated vote
         if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
         pending.viewChanges.get(view).add(voter);
-        this._maybeAssumeLeadership(rid, view);
+        this.maybeAssumeLeadership(rid, view);
     }
 
     // On 2f+1 view-change votes for `view`, the rotated leader announces NEW_VIEW
     // and re-proposes so the round can make progress under a fresh leader.
-    _maybeAssumeLeadership(rid, view){
+    maybeAssumeLeadership(rid, view){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         let votes = pending.viewChanges.get(view);
-        if(!votes || !this._meetsQuorum(pending, votes)) return;
+        if(!votes || !this.meetsQuorum(pending, votes)) return;
         if(view > pending.view) pending.view = view;
         let newLeader = this._leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
@@ -834,9 +834,9 @@ class CrossChainDexConsensus extends EventEmitter {
                 pending._commitSent = false;
             }
             if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
-                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl(this.controlTags.nv, rid, view)
+                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.nv, rid, view)
             });
-            this._broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
+            this.broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
         }
     }
 
@@ -850,7 +850,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // a height). Here the row already carries 2f+1 signatures, so refusing it
     // finalizes nothing, it only strands THIS hub outside the federation until
     // an operator intervenes; there is no proposer left to bound.
-    async _handleFinalSync(envelope){
+    async handleFinalSync(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;
@@ -868,7 +868,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // the local round's threshold can sit under the threshold its own declared
         // snapshot sets. An unresolvable declared set refuses the sync outright and
         // leaves the round to its timer, rather than ratifying an unmeasurable proof.
-        let rebound = await this._rebindSnapshot(pending, row);
+        let rebound = await this.rebindSnapshot(pending, row);
         if(rebound === false) return;
         // A rebind is a real await, so re-check the round before measuring anything.
         if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return;
@@ -934,7 +934,7 @@ class CrossChainDexConsensus extends EventEmitter {
             console.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
             return;
         }
-        if(!this._verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
+        if(!this.verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
         // Quorum gate (A-F3): a valid leader signature over NEW_VIEW is NOT proof
         // that a real view-change quorum occurred. Without this, a Byzantine node
         // that is the deterministic leader for some future view can unilaterally
@@ -947,7 +947,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // the round's own timeout re-triggers view-change otherwise, so liveness
         // is preserved and bounded.
         let votes = pending.viewChanges.get(view);
-        if(!votes || !this._meetsQuorum(pending, votes)){
+        if(!votes || !this.meetsQuorum(pending, votes)){
             console.warn('CrossChainDexConsensus: deferring NEW_VIEW for view ' + view + ' (no local view-change quorum yet)');
             return;
         }
