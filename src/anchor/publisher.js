@@ -238,19 +238,13 @@ class StateAnchorPublisher {
                String(r.validator_pubkey).toLowerCase();
     }
 
-    async defaultBroadcast(payload, signer, opts){
-        signer = signer || this.resolveSigner();
-        if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
-        if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
-        if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
-        let allowUnconfirmed = this.allowUnconfirmedInputs || !!(opts && opts.allowUnconfirmed);
-        let utxos = await signer.encoder.getUtxos(this.dogeAddress);
-        if(!utxos || (Array.isArray(utxos) && utxos.length === 0)) throw new Error('no UTXOs available for ' + this.dogeAddress);
-        // Per-broadcast confirmed-input check, BEFORE anything is built or signed.
-        // The flush-level gate saw the wallet before this pass started spending;
-        // several anchors go out back-to-back from one wallet, and the last
-        // confirmed output can be gone by the second one. Typed so the caller can
-        // treat it as a deferral rather than a failed publish.
+    // Per-broadcast confirmed-input check, BEFORE anything is built or signed, and
+    // it records the reserve reading it took on the way past.
+    // The flush-level gate saw the wallet before this pass started spending;
+    // several anchors go out back-to-back from one wallet, and the last
+    // confirmed output can be gone by the second one. Typed so the caller can
+    // treat it as a deferral rather than a failed publish.
+    refuseWhenNoConfirmedInput(utxos, allowUnconfirmed){
         if(!allowUnconfirmed && Array.isArray(utxos)){
             let summary = summarizeUtxoConfirmations(utxos, 1);
             this.lastUtxoReserve = { total: summary.total, confirmed: summary.confirmed,
@@ -261,6 +255,17 @@ class StateAnchorPublisher {
                 throw e;
             }
         }
+    }
+
+    async defaultBroadcast(payload, signer, opts){
+        signer = signer || this.resolveSigner();
+        if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
+        if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
+        if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
+        let allowUnconfirmed = this.allowUnconfirmedInputs || !!(opts && opts.allowUnconfirmed);
+        let utxos = await signer.encoder.getUtxos(this.dogeAddress);
+        if(!utxos || (Array.isArray(utxos) && utxos.length === 0)) throw new Error('no UTXOs available for ' + this.dogeAddress);
+        this.refuseWhenNoConfirmedInput(utxos, allowUnconfirmed);
         // utxos forwarded only while inside the encoder's caller-facing
         // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects from
         // its own uncapped fetch of this same address (lib/encoder_utxo_forward.js).
