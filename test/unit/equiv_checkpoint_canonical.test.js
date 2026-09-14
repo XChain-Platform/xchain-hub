@@ -329,7 +329,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         it('above the EQUIV flag day: all three produce identical bytes (v1)', function () {
             const hub = hubCanonical(cpOn);
             expect(indexerCanonical(cpOn, 1)).to.equal(hub, 'indexer Anchor.canonical(FORMAT=1) drifted from hub _archiveCanonical');
-            expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery._wrapperCanonical drifted from hub _archiveCanonical');
+            expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery.wrapperCanonical drifted from hub _archiveCanonical');
             // Pinned literal so a THREE-sided edit (all copies changed together) still fails.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
         });

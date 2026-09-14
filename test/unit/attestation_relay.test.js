@@ -235,7 +235,7 @@ describe('AttestationRelay', function () {
                             request_id: REQ_ID, snapshot_block: snapshotBlock, network,
                             origin_chain: 'LTC', origin_action_index: 4242, provider_id: 'http_get',
                             request_payload: payload, redundancy: 3, deadline_blocks: 10,
-                        })).to.equal(ix._relayRequestCanonical({
+                        })).to.equal(ix.relayRequestCanonical({
                             requestId: REQ_ID, snapshotBlock, network,
                             originChain: 'LTC', originActionIndex: 4242, providerId: 'http_get',
                             requestPayload: payload, redundancy: 3, deadlineBlocks: 10,
@@ -245,7 +245,7 @@ describe('AttestationRelay', function () {
                             request_id: REQ_ID, snapshot_block: snapshotBlock, network,
                             origin_chain: 'DOGE', home_response_action_index: 777, provider_id: 'http_get',
                             response_hash: sha256(payload), status: 'ok', meta: '200',
-                        })).to.equal(ix._relayResponseCanonical({
+                        })).to.equal(ix.relayResponseCanonical({
                             requestId: REQ_ID, snapshotBlock, network,
                             originChain: 'DOGE', homeResponseActionIndex: 777, providerId: 'http_get',
                             responseHash: sha256(payload), status: 'ok', meta: '200',
@@ -289,7 +289,7 @@ describe('AttestationRelay', function () {
                                     expect(fields, 'derivation refused a relayable body').to.not.equal(null);
 
                                     // Exactly what xchain-indexer/src/actions/attest/index.js
-                                    // _parseRelayResponse does with the wire field.
+                                    // parseRelayResponse does with the wire field.
                                     const wireBytes = Buffer.from(fields.payloadB64, 'base64');
                                     const wireHash  = crypto.createHash('sha256').update(wireBytes).digest('hex');
                                     expect(wireHash, 'the hub signed a hash of bytes it did not send')
@@ -301,7 +301,7 @@ describe('AttestationRelay', function () {
                                         home_response_action_index: fields.homeResponseActionIndex,
                                         provider_id: fields.providerId, response_hash: fields.responseHash,
                                         status: fields.status, meta: fields.meta,
-                                    })).to.equal(ix._relayResponseCanonical({
+                                    })).to.equal(ix.relayResponseCanonical({
                                         requestId: REQ_ID, snapshotBlock, network,
                                         originChain,
                                         homeResponseActionIndex: fields.homeResponseActionIndex,
@@ -939,7 +939,7 @@ describe('AttestationRelay', function () {
 
             const parts = wire.split('|');
             // Mirrors xchain-indexer/src/actions/attest/index.js formats[3] and the
-            // params[N] offsets _parseRelayRequest reads.
+            // params[N] offsets parseRelayRequest reads.
             expect(parts[0]).to.equal('ATTEST');
             expect(parts[1]).to.equal('3');
             expect(parts[2]).to.equal(REQ_ID);
@@ -951,7 +951,7 @@ describe('AttestationRelay', function () {
             expect(parts[8]).to.equal('10');
             expect(parts[9]).to.equal('963000');
             // The indexer strips the leading 'ATTEST' before indexing, so its
-            // params[N] is wire index N+1: _parseRelaySigs(params, 9) reads the
+            // params[N] is wire index N+1: parseRelaySigs(params, 9) reads the
             // signature count from wire index 10.
             expect(parts[10]).to.equal('1');
             expect(parts[11]).to.equal(PUBKEY_A);
@@ -1001,7 +1001,7 @@ describe('AttestationRelay', function () {
             expect(parts[6]).to.equal('200');
             expect(parts[7]).to.equal('963000');
             // The indexer strips the leading 'ATTEST' before indexing, so its params[N]
-            // is wire index N+1: _parseRelaySigs(params, 7) reads the count at index 8.
+            // is wire index N+1: parseRelaySigs(params, 7) reads the count at index 8.
             expect(parts[8]).to.equal('1');
             expect(parts[9]).to.equal(PUBKEY_A);
             expect(parts[10]).to.equal(SIG_A);
@@ -1467,7 +1467,7 @@ describe('AttestationRelay', function () {
 
         it('keeps the threaded deadline out of the signed canonical and off the v4 wire', function () {
             // It is bookkeeping, not consensus. The canonical must keep byte-matching the
-            // indexer's _relayResponseCanonical, and the wire is parsed positionally.
+            // indexer's relayResponseCanonical, and the wire is parsed positionally.
             sinon.stub(eq, 'isEquivHeaderActive').returns(false);
             const relay = new AttestationRelay(makeHub());
             const base = {
