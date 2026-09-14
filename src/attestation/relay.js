@@ -1727,6 +1727,7 @@ class AttestationRelay {
     }
 }
 
-module.exports = AttestationRelay;
-module.exports.HOME_CHAIN    = HOME_CHAIN;
-module.exports.ORIGIN_CHAINS = ORIGIN_CHAINS;
+module.exports = Object.assign(AttestationRelay, {
+    HOME_CHAIN,
+    ORIGIN_CHAINS
+});

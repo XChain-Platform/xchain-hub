@@ -1253,10 +1253,11 @@ class AttestationResponseMirror {
     }
 }
 
-module.exports = AttestationResponseMirror;
-module.exports.MIRROR_COLUMNS = MIRROR_COLUMNS;
-module.exports.TERMINAL_STATUSES = TERMINAL_STATUSES;
-module.exports.ATTEST_RESULT = ATTEST_RESULT;
-module.exports.GOSSIP_COLUMNS = GOSSIP_COLUMNS;
-module.exports.PARK_MAX = PARK_MAX;
-module.exports.PARK_RETRY_MS = PARK_RETRY_MS;
+module.exports = Object.assign(AttestationResponseMirror, {
+    MIRROR_COLUMNS,
+    TERMINAL_STATUSES,
+    ATTEST_RESULT,
+    GOSSIP_COLUMNS,
+    PARK_MAX,
+    PARK_RETRY_MS
+});

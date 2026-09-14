@@ -55,8 +55,7 @@ const ah                = require('../lib/admission_height.js');
 const { resolveAttestResponseForwardS } = require('./attest_response_timing.js');
 // Body-size ceiling every proposed/signed response must clear, leader and
 // follower alike (spec §5.3, D40/D41, row 9). Applies in both canonical eras.
-const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } =
-    require('./attest_response_body_cap.js');
+const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } = require('./attest_response_body_cap.js');
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('../constants.js');
@@ -2242,7 +2241,8 @@ class AttestationConsensus extends EventEmitter {
     }
 }
 
-module.exports = AttestationConsensus;
-module.exports.ATTEST_PROPOSE = ATTEST_PROPOSE;
-module.exports.ATTEST_PREPARE = ATTEST_PREPARE;
-module.exports.ATTEST_COMMIT  = ATTEST_COMMIT;
+module.exports = Object.assign(AttestationConsensus, {
+    ATTEST_PROPOSE,
+    ATTEST_PREPARE,
+    ATTEST_COMMIT
+});

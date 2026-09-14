@@ -238,8 +238,9 @@ class SlashGovernance {
     }
 }
 
-module.exports = SlashGovernance;
-module.exports.parseSlashPenaltyParam = parseSlashPenaltyParam;
-module.exports.computeEvidenceHash    = computeEvidenceHash;
-module.exports.SLASH_PENALTY_PREFIX   = SLASH_PENALTY_PREFIX;
-module.exports.PENALTY_ACTIONS        = PENALTY_ACTIONS;
+module.exports = Object.assign(SlashGovernance, {
+    parseSlashPenaltyParam,
+    computeEvidenceHash,
+    SLASH_PENALTY_PREFIX,
+    PENALTY_ACTIONS
+});

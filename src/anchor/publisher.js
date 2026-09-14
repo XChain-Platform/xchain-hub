@@ -5704,14 +5704,15 @@ class StateAnchorPublisher {
     }
 }
 
-module.exports = StateAnchorPublisher;
-module.exports.XANC_SIGN_REQ  = XANC_SIGN_REQ;
-module.exports.XANC_SIGN      = XANC_SIGN;
-module.exports.XANC_FINALIZED = XANC_FINALIZED;
-module.exports.XANC_BUNDLE_DONE   = XANC_BUNDLE_DONE;
-module.exports.XANCPUB_SIGN_REQ = XANCPUB_SIGN_REQ;
-module.exports.XANCPUB_SIGN     = XANCPUB_SIGN;
-module.exports.XANCARCHPUB_SIGN_REQ = XANCARCHPUB_SIGN_REQ;
-module.exports.XANCARCHPUB_SIGN     = XANCARCHPUB_SIGN;
-module.exports.XANCREWARD           = XANCREWARD;
-module.exports.MATCH_KEYS     = MATCH_KEYS;
+module.exports = Object.assign(StateAnchorPublisher, {
+    XANC_SIGN_REQ,
+    XANC_SIGN,
+    XANC_FINALIZED,
+    XANC_BUNDLE_DONE,
+    XANCPUB_SIGN_REQ,
+    XANCPUB_SIGN,
+    XANCARCHPUB_SIGN_REQ,
+    XANCARCHPUB_SIGN,
+    XANCREWARD,
+    MATCH_KEYS
+});

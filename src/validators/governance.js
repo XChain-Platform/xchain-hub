@@ -1051,9 +1051,10 @@ class Governance extends EventEmitter {
     }
 }
 
-module.exports = Governance;
-// Exported for the unit suite. GOV-VOTE-REPLAY-1 lives entirely in these two
-// functions, and a test that rebuilt the signed bytes itself would keep passing
-// even if production drifted away from it, so the suite must use these.
-module.exports.voteSigningPayload = voteSigningPayload;
-module.exports.normalizeVoteSeq   = normalizeVoteSeq;
+module.exports = Object.assign(Governance, {
+    // Exported for the unit suite. GOV-VOTE-REPLAY-1 lives entirely in these two
+    // functions, and a test that rebuilt the signed bytes itself would keep passing
+    // even if production drifted away from it, so the suite must use these.
+    voteSigningPayload,
+    normalizeVoteSeq
+});

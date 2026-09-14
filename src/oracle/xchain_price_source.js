@@ -435,6 +435,7 @@ class XchainPriceSource {
     }
 }
 
-module.exports = XchainPriceSource;
-module.exports.XCHAIN_PAIR = XCHAIN_PAIR;
-module.exports.GAS_TICK    = GAS_TICK;
+module.exports = Object.assign(XchainPriceSource, {
+    XCHAIN_PAIR,
+    GAS_TICK
+});

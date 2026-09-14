@@ -3046,10 +3046,11 @@ class OracleConsensus extends EventEmitter {
     }
 }
 
-module.exports = OracleConsensus;
+module.exports = Object.assign(OracleConsensus, {
 
-// Named export so SlashDetector measures the clamp allowance from the SAME table this
-// module clamps with (item 5833). A second copy of MAX_CHANGE_PER_ROUND_BY_PAIR would
-// let a per-pair retune move the clamp and leave the slash gate on the old allowance,
-// which is the mismatch that finding is about. Default export shape is unchanged.
-module.exports.maxChangeForPair = maxChangeForPair;
+    // Named export so SlashDetector measures the clamp allowance from the SAME table this
+    // module clamps with (item 5833). A second copy of MAX_CHANGE_PER_ROUND_BY_PAIR would
+    // let a per-pair retune move the clamp and leave the slash gate on the old allowance,
+    // which is the mismatch that finding is about. Default export shape is unchanged.
+    maxChangeForPair
+});

@@ -1014,8 +1014,9 @@ class FullNodeChallengeRound {
     }
 }
 
-module.exports = FullNodeChallengeRound;
-module.exports.XNODE_ANSWER   = XNODE_ANSWER;
-module.exports.XNODE_SIGN_REQ = XNODE_SIGN_REQ;
-module.exports.XNODE_SIGN     = XNODE_SIGN;
-module.exports.XNODE_DONE     = XNODE_DONE;
+module.exports = Object.assign(FullNodeChallengeRound, {
+    XNODE_ANSWER,
+    XNODE_SIGN_REQ,
+    XNODE_SIGN,
+    XNODE_DONE
+});

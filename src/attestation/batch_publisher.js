@@ -1393,8 +1393,9 @@ class AttestationBatchPublisher {
     }
 }
 
-module.exports = AttestationBatchPublisher;
-module.exports.XATTESTB_SIGN_REQ = XATTESTB_SIGN_REQ;
-module.exports.XATTESTB_SIGN     = XATTESTB_SIGN;
-module.exports.MAX_CATCHUP_WINDOWS = MAX_CATCHUP_WINDOWS;
-module.exports.ANCHOR_MAX_LAG_BLOCKS = ANCHOR_MAX_LAG_BLOCKS;
+module.exports = Object.assign(AttestationBatchPublisher, {
+    XATTESTB_SIGN_REQ,
+    XATTESTB_SIGN,
+    MAX_CATCHUP_WINDOWS,
+    ANCHOR_MAX_LAG_BLOCKS
+});

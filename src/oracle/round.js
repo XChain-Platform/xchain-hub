@@ -1214,7 +1214,8 @@ class OracleRound {
     }
 }
 
-module.exports = OracleRound;
-// Exported for test only: the §10 step 6 audit line is a deliverable of this item,
-// so it is asserted rather than eyeballed in a log.
-module.exports.formatXchainPriceMeta = formatXchainPriceMeta;
+module.exports = Object.assign(OracleRound, {
+    // Exported for test only: the §10 step 6 audit line is a deliverable of this item,
+    // so it is asserted rather than eyeballed in a log.
+    formatXchainPriceMeta
+});

@@ -40,8 +40,7 @@
 
 const axios = require('axios');
 const coins = require('../coins');
-const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } =
-    require('../lib/stake_share_monitor.js');
+const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('../lib/stake_share_monitor.js');
 
 // Capabilities whose weighted gate can halt a user-visible rail. `price` is the
 // commit gate for oracle price rounds (a prior halt) and `oracle_publish`
@@ -311,7 +310,8 @@ class StakeShareWatcher {
     }
 }
 
-module.exports = StakeShareWatcher;
-module.exports.DEFAULT_CAPABILITIES = DEFAULT_CAPABILITIES;
-module.exports.DEFAULT_POLL_MS = DEFAULT_POLL_MS;
-module.exports.LEVELS = LEVELS;
+module.exports = Object.assign(StakeShareWatcher, {
+    DEFAULT_CAPABILITIES,
+    DEFAULT_POLL_MS,
+    LEVELS
+});

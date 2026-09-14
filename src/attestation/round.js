@@ -1088,5 +1088,6 @@ class AttestationRound {
     }
 }
 
-module.exports = AttestationRound;
-module.exports.ATTEST_PROPOSE = ATTEST_PROPOSE;
+module.exports = Object.assign(AttestationRound, {
+    ATTEST_PROPOSE
+});

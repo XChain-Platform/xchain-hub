@@ -1290,7 +1290,8 @@ class StateCheckpointEngine extends EventEmitter {
     }
 }
 
-module.exports = StateCheckpointEngine;
-module.exports.XCHK_SIGN_REQ  = XCHK_SIGN_REQ;
-module.exports.XCHK_SIGN      = XCHK_SIGN;
-module.exports.XCHK_FINALIZED = XCHK_FINALIZED;
+module.exports = Object.assign(StateCheckpointEngine, {
+    XCHK_SIGN_REQ,
+    XCHK_SIGN,
+    XCHK_FINALIZED
+});

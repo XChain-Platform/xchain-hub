@@ -535,7 +535,8 @@ class ProviderRegistry {
     }
 }
 
-module.exports = ProviderRegistry;
-module.exports.DEFAULTS = DEFAULTS;
-module.exports.parseAttestationProviderParam = parseAttestationProviderParam;
-module.exports.normalizeMinStakeXchain = normalizeMinStakeXchain;
+module.exports = Object.assign(ProviderRegistry, {
+    DEFAULTS,
+    parseAttestationProviderParam,
+    normalizeMinStakeXchain
+});

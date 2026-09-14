@@ -345,7 +345,8 @@ class CapabilityRegistry {
     }
 }
 
-module.exports = CapabilityRegistry;
-module.exports.KNOWN_CAPABILITIES = KNOWN_CAPABILITIES;
-module.exports.parseCapabilityMinStakeParam = parseCapabilityMinStakeParam;
-module.exports.MIN_STAKE_GOVERNANCE_DISABLED = MIN_STAKE_GOVERNANCE_DISABLED;
+module.exports = Object.assign(CapabilityRegistry, {
+    KNOWN_CAPABILITIES,
+    parseCapabilityMinStakeParam,
+    MIN_STAKE_GOVERNANCE_DISABLED
+});

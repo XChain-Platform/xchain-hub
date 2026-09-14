@@ -635,9 +635,10 @@ class OracleBatchSigner {
     }
 }
 
-module.exports = OracleBatchSigner;
+module.exports = Object.assign(OracleBatchSigner, {
 
-// Named exports so the publisher and the tests reference the wire type strings
-// from one place, exactly as StateAnchorPublisher exports XANCPUB_SIGN_REQ/SIGN.
-module.exports.XPRICEB_SIGN_REQ = XPRICEB_SIGN_REQ;
-module.exports.XPRICEB_SIGN     = XPRICEB_SIGN;
+    // Named exports so the publisher and the tests reference the wire type strings
+    // from one place, exactly as StateAnchorPublisher exports XANCPUB_SIGN_REQ/SIGN.
+    XPRICEB_SIGN_REQ,
+    XPRICEB_SIGN
+});

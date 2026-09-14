@@ -955,10 +955,11 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 }
 
-module.exports = CrossChainDexConsensus;
-module.exports.XDEX_MATCH_PROPOSE     = XDEX_MATCH_PROPOSE;
-module.exports.XDEX_MATCH_PREPARE     = XDEX_MATCH_PREPARE;
-module.exports.XDEX_MATCH_COMMIT      = XDEX_MATCH_COMMIT;
-module.exports.XDEX_MATCH_VIEW_CHANGE = XDEX_MATCH_VIEW_CHANGE;
-module.exports.XDEX_MATCH_NEW_VIEW    = XDEX_MATCH_NEW_VIEW;
-module.exports.XDEX_MATCH_FINAL_SYNC  = XDEX_MATCH_FINAL_SYNC;
+module.exports = Object.assign(CrossChainDexConsensus, {
+    XDEX_MATCH_PROPOSE,
+    XDEX_MATCH_PREPARE,
+    XDEX_MATCH_COMMIT,
+    XDEX_MATCH_VIEW_CHANGE,
+    XDEX_MATCH_NEW_VIEW,
+    XDEX_MATCH_FINAL_SYNC
+});

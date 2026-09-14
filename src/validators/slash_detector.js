@@ -551,10 +551,11 @@ class SlashDetector {
     }
 }
 
-module.exports = SlashDetector;
-// Exported so the published digest can be pinned against SlashGovernance's
-// per-row leg by test, and recomputed by any other hub-side consumer without a
-// second copy of the construction.
-module.exports.hashEvidence      = hashEvidence;
-module.exports.PROPOSAL_STATUSES = PROPOSAL_STATUSES;
-module.exports.MAX_PAGE          = MAX_PAGE;
+module.exports = Object.assign(SlashDetector, {
+    // Exported so the published digest can be pinned against SlashGovernance's
+    // per-row leg by test, and recomputed by any other hub-side consumer without a
+    // second copy of the construction.
+    hashEvidence,
+    PROPOSAL_STATUSES,
+    MAX_PAGE
+});
