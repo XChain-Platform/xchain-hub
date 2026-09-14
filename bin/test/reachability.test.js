@@ -133,7 +133,7 @@ describe('bin/reachability.js', function () {
             const targets = withFixture({
                 'src/db/index.js': [
                     "const mariadb = require('mariadb');",
-                    "const ark = require('../anchor_reward_key.js');",
+                    "const ark = require('../anchor/anchor_reward_key.js');",
                     "const MIXINS = [require('./anchor.js'), require('./configs.js')];",
                     'module.exports = MIXINS;',
                 ].join('\n'),
@@ -176,7 +176,7 @@ describe('bin/reachability.js', function () {
             const noMixins = withFixture({
                 'src/db/index.js': [
                     "const mariadb = require('mariadb');",
-                    "const ark = require('../anchor_reward_key.js');",
+                    "const ark = require('../anchor/anchor_reward_key.js');",
                     'module.exports = class Database {};',
                 ].join('\n'),
                 'src/anchor/anchor_reward_key.js': 'module.exports = {};\n',
