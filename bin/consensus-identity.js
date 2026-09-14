@@ -276,7 +276,12 @@ function main() {
     }
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+    // Caught here rather than left to Node's default uncaught-exception handler,
+    // which exits 1 with a raw stack. The indexer's copy of this tool already gives
+    // a caller the contract this one now matches: exit 2, one clean line on stderr.
+    try { main(); } catch (e) { console.error(`consensus-identity: ${e.message}`); process.exit(2); }
+}
 
 module.exports = {
     codeIdentity,
