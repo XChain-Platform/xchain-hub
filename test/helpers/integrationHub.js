@@ -34,7 +34,7 @@ const { bftQuorumOrSingle } = require('../../src/lib/bft_quorum.js');
 // Keep this list in step with what the fixture actually provides.
 const HUB_SURFACE = [
     'getPeerManager', 'getIdentity', 'getOracle', 'getConsensus', 'getCrossChain',
-    'applyConfig', '_resolveBtcNetwork', '_resolveBtcLatestBlock'
+    'applyConfig', 'resolveBtcNetwork', '_resolveBtcLatestBlock'
 ];
 
 // Shared p2pConfig floor. ORACLE_EPOCH_START is required (OracleRound's
@@ -134,7 +134,7 @@ function createIntegrationHub(db, validatorAddr, overrides = {}) {
         // no BTC indexer is configured); btcLatestBlock defaults to null, which is
         // the "no indexer reachable" answer and keeps single-node paths on their
         // round-number anchor.
-        _resolveBtcNetwork:     sinon.stub().resolves(overrides.btcNetwork || 'mainnet'),
+        resolveBtcNetwork:     sinon.stub().resolves(overrides.btcNetwork || 'mainnet'),
         _resolveBtcLatestBlock: sinon.stub().resolves(
             'btcLatestBlock' in overrides ? overrides.btcLatestBlock : null),
         _peerManager:   pm

@@ -704,7 +704,7 @@ class OracleRound {
         // Network is resolved via the hub helper so this works whether the
         // hub serves mainnet, testnet, or regtest BTC indexers.
         try {
-            let network = await this.hub._resolveBtcNetwork();
+            let network = await this.hub.resolveBtcNetwork();
             // Remembered for the derived-pair composition gate below, which needs the network
             // synchronously. Left UNSET when this resolve throws, so a hub that could
             // not determine its own network fails the gate closed rather than guessing.

@@ -236,7 +236,7 @@ class XChainHub {
         // MUST succeed before the P2P listener opens: a null registry makes
         // verifySignature accept any signed envelope from any sender. On a DB failure this
         // throws, so start() below is never reached.
-        await this._loadValidatorPubkeys();
+        await this.loadValidatorPubkeys();
 
         // Fail closed: refuse to open the P2P listener with a null registry. An empty
         // (non-null) registry is fine: it rejects every unknown sender, the correct
@@ -580,7 +580,7 @@ class XChainHub {
         let validators = await this._loadValidatorSet();
         this.crossChain.setValidatorSet(validators);
 
-        let chainPairMap = await this._loadChainPairValidators();
+        let chainPairMap = await this.loadChainPairValidators();
         this.crossChain.setChainPairValidators(chainPairMap);
 
         this.swapTracker = new SwapTracker(this);
@@ -865,7 +865,7 @@ class XChainHub {
             throw new Error('Validator addr is required');
 
         // Addr-keyed: each addr has exactly ONE active pubkey, so retire any other
-        // active row for this addr BEFORE the upsert. Without it _loadValidatorPubkeys'
+        // active row for this addr BEFORE the upsert. Without it loadValidatorPubkeys'
         // Map<addr, pubkey> resolves the collision by signing_pubkey sort order.
         await this.db.updateValidatorByAddr(addr, signingPubkey);
 
@@ -874,7 +874,7 @@ class XChainHub {
         // The new set must reach EVERY consensus engine, not just config-PBFT: a
         // runtime registration has to enter oracle leader rotation too, or hubs hold
         // divergent leader views and silently miss rounds.
-        await this._loadValidatorPubkeys();
+        await this.loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
         logger.info('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
@@ -898,7 +898,7 @@ class XChainHub {
         await this.db.updateValidatorByAddr(addr, newSigningPubkey);
         await this.db.setValidator(newSigningPubkey, addr, addr);
 
-        await this._loadValidatorPubkeys();
+        await this.loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
         logger.info('Validator rotated at ' + addr + ' → ' + newSigningPubkey.substring(0, 16) + '...');
@@ -920,7 +920,7 @@ class XChainHub {
         } else {
             res = await this.db.updateValidatorRemovedByAddr(addr);
         }
-        await this._loadValidatorPubkeys();
+        await this.loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
         let n = (res && res.affectedRows != null) ? res.affectedRows : '?';
@@ -937,14 +937,14 @@ class XChainHub {
         if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validators);
         if (this.crossChain) {
             this.crossChain.setValidatorSet(validators);
-            this.crossChain.setChainPairValidators(await this._loadChainPairValidators());
+            this.crossChain.setChainPairValidators(await this.loadChainPairValidators());
         }
         if (this.reorgHandler)    this.reorgHandler.setValidatorSet(validators);
         if (this.governance)      this.governance.setValidatorSet(validators);
         return validators;
     }
 
-    async _loadValidatorPubkeys(){
+    async loadValidatorPubkeys(){
         if(!this.peerManager) return;
         try {
             let rows = await this.db.findActiveValidators();
@@ -976,7 +976,7 @@ class XChainHub {
 
     // Per-chain-pair validator subsets for cross-chain quorum. A validator's
     // comma-separated 'chains' column filters it; NULL/empty means all chains.
-    async _loadChainPairValidators(){
+    async loadChainPairValidators(){
         let chainPairMap = new Map();
         try {
             // db.js verifyTables reconciles 'chains' onto the table at startup.
@@ -1144,7 +1144,7 @@ class XChainHub {
 
         // Reloads every subsystem, including reorg and governance, which otherwise
         // keep serving the boot-time set.
-        await this._loadValidatorPubkeys();
+        await this.loadValidatorPubkeys();
         await this.propagateValidatorSet();
 
         logger.info('Validators synced: ' + validators.length + ' entries');
@@ -1658,7 +1658,7 @@ class XChainHub {
         // A cross-network configs tree makes this throw. Degrade to the documented null
         // rather than crashing the scheduler tick that called it.
         let network;
-        try { network = await this._resolveBtcNetwork(); }
+        try { network = await this.resolveBtcNetwork(); }
         catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve BTC latest block:', err.message)); return null; }
         // Held past the block below: a rejected tip is still the only block_time the hub
         // has, and the direct path is dated against it.
@@ -1861,7 +1861,7 @@ class XChainHub {
 
     // Every admission tip a row's read set needs, read in parallel. A chain whose tip is
     // refused comes back null rather than missing, so the caller's refusal names it.
-    async _resolveAdmissionTips(chains){
+    async resolveAdmissionTips(chains){
         let out = {};
         let want = [];
         for(let raw of (chains || [])){
@@ -1887,7 +1887,7 @@ class XChainHub {
     // @returns {Promise<object|null>}
     async resolveAdmitBlocks(table, readSet){
         let tips;
-        try { tips = await this._resolveAdmissionTips(readSet); }
+        try { tips = await this.resolveAdmissionTips(readSet); }
         catch (err) {
             logger.error(nodeUtil.format('XChainHub: admission tip read failed for ' + String(table) + ':', err.message));
             return null;
@@ -1917,7 +1917,7 @@ class XChainHub {
     // BTC indexer truthfully reports coin=BTC. A hub with no declared network keeps the
     // regtest>testnet>mainnet order for dev loops, defaulting to mainnet when no configs
     // have loaded yet.
-    async _resolveBtcNetwork(){
+    async resolveBtcNetwork(){
         // A hub told which network it is never guesses: with no configs, its own is the answer.
         if(!this.db) return this.network || 'mainnet';
         let configs;

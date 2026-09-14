@@ -228,7 +228,7 @@ class SlashGovernance {
             // running PBFT engine, mirroring deregisterValidator. Without this
             // the suspended validator stays in every in-memory validatorSet
             // until restart and the penalty is a DB row, not an exclusion.
-            if (typeof this.hub._loadValidatorPubkeys === 'function') await this.hub._loadValidatorPubkeys();
+            if (typeof this.hub.loadValidatorPubkeys === 'function') await this.hub.loadValidatorPubkeys();
             if (typeof this.hub.propagateValidatorSet === 'function') await this.hub.propagateValidatorSet();
         }
 

@@ -118,7 +118,7 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
             _resolveBtcLatestBlock: async () => ERA_BLOCK
         };
         if (tips !== undefined) {
-            hub._resolveAdmissionTips = async (chains) => {
+            hub.resolveAdmissionTips = async (chains) => {
                 tipCalls.push(chains.slice());
                 let out = {};
                 for (const c of chains) out[c] = Object.prototype.hasOwnProperty.call(tips, c) ? tips[c] : null;
@@ -211,7 +211,7 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
     });
 
     it('REFUSES when this follower has no fresh tip of its own for a reading chain', async function () {
-        // The fresh-tip precondition on the FOLLOWER side. _resolveAdmissionTips answers null
+        // The fresh-tip precondition on the FOLLOWER side. resolveAdmissionTips answers null
         // for a dead indexer, an absent decoder_block or a decoder its stall window dated as
         // frozen, and every one of those is a refusal rather than a zero and never a pass.
         const engine = makeEngine({ BTC: OWN_BTC, DOGE: null });
@@ -346,7 +346,7 @@ describe('follower admission bound: the shared CrossChainDexConsensus PROPOSE ga
             }));
         }
         if (opts.tips !== undefined) {
-            engine.hub._resolveAdmissionTips = async (chains) => {
+            engine.hub.resolveAdmissionTips = async (chains) => {
                 let out = {};
                 for (const c of chains) out[c] = Object.prototype.hasOwnProperty.call(opts.tips, c) ? opts.tips[c] : null;
                 return out;

@@ -142,7 +142,7 @@ describe('Security Hardening', function () {
             let h = new XChainHub('h', 3306, 'db', 'u', 'p',
                 { P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true });
             // Skip start(); inject a db whose validator-load query rejects so
-            // _loadValidatorPubkeys throws before peerManager.start() can run.
+            // loadValidatorPubkeys throws before peerManager.start() can run.
             h.db = { doQuery: sinon.stub().rejects(new Error('DB down')) };
 
             let threw = false;

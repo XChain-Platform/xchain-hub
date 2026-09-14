@@ -35,7 +35,7 @@ describe('SlashGovernance', function () {
     beforeEach(function () {
         hub = createMockHub();
         hub.governance = { propose: sinon.stub().resolves({ proposalId: 'gov:x:1', status: 'voting' }) };
-        hub._loadValidatorPubkeys  = sinon.stub().resolves();
+        hub.loadValidatorPubkeys  = sinon.stub().resolves();
         hub.propagateValidatorSet = sinon.stub().resolves([]);
         sg = new SlashGovernance(hub);
     });
@@ -183,7 +183,7 @@ describe('SlashGovernance', function () {
             expect(suspendCall.args[0]).to.include("SET status = 'suspended'");
             expect(suspendCall.args[1]).to.deep.equal([PK]);
 
-            expect(hub._loadValidatorPubkeys.calledOnce).to.equal(true);
+            expect(hub.loadValidatorPubkeys.calledOnce).to.equal(true);
             expect(hub.propagateValidatorSet.calledOnce).to.equal(true);
         });
 
@@ -283,7 +283,7 @@ describe('SlashGovernance', function () {
 
             let ghub = createMockHub();
             ghub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
-            ghub._loadValidatorPubkeys  = sinon.stub().resolves();
+            ghub.loadValidatorPubkeys  = sinon.stub().resolves();
             ghub.propagateValidatorSet = sinon.stub().resolves([]);
 
             let gov = new Governance(ghub);

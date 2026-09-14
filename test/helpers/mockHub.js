@@ -102,7 +102,7 @@ function createMockHub(overrides = {}) {
         // OracleRound._executeRound resolves the BTC network via the hub before
         // reading the chain tip to anchor a round; default to mainnet. Tests that
         // exercise chain-tip-fallback behaviour can override this stub.
-        _resolveBtcNetwork:      sinon.stub().resolves('mainnet'),
+        resolveBtcNetwork:      sinon.stub().resolves('mainnet'),
         _resolveBtcLatestBlock:  sinon.stub().resolves(null)
     };
 

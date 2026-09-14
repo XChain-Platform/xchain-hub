@@ -75,7 +75,7 @@ describe('XChainHub direct-tip staleness gate', function () {
         const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: 'mainnet' });
         hub.db = mockDb;
         mockDb.getChainTip.resolves(tip);
-        hub._resolveBtcNetwork   = async () => 'mainnet';
+        hub.resolveBtcNetwork   = async () => 'mainnet';
         hub._resolveBtcIndexerUrl = async () => 'http://indexer.invalid/api';
         axiosStub.post.resolves({ data: { result: directResult } });
         return hub;

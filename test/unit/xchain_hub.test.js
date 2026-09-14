@@ -765,7 +765,7 @@ describe('XChainHub', function () {
         beforeEach(function () {
             hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
             hub.db = mockDb;
-            sinon.stub(hub, '_resolveBtcNetwork').resolves('regtest');
+            sinon.stub(hub, 'resolveBtcNetwork').resolves('regtest');
         });
 
         it('returns the pushed tip when its block_time is fresh', async function () {
@@ -867,24 +867,24 @@ describe('XChainHub', function () {
             hub.db = mockDb;
         });
 
-        it('_loadValidatorPubkeys is a no-op without a peer manager', async function () {
-            await hub._loadValidatorPubkeys(); // no peerManager → returns
+        it('loadValidatorPubkeys is a no-op without a peer manager', async function () {
+            await hub.loadValidatorPubkeys(); // no peerManager → returns
             expect(mockDb.doQuery.called).to.be.false;
         });
 
-        it('_loadValidatorPubkeys builds the addr→pubkey map on the peer manager', async function () {
+        it('loadValidatorPubkeys builds the addr→pubkey map on the peer manager', async function () {
             hub.peerManager = { setValidatorPubkeys: sinon.stub() };
             mockDb.doQuery.resolves([{ addr: 'ws://v:1', signing_pubkey: 'pk1' }]);
-            await hub._loadValidatorPubkeys();
+            await hub.loadValidatorPubkeys();
             let map = hub.peerManager.setValidatorPubkeys.getCall(0).args[0];
             expect(map.get('ws://v:1')).to.equal('pk1');
         });
 
-        it('_loadValidatorPubkeys propagates DB errors and leaves the registry unset (fail closed)', async function () {
+        it('loadValidatorPubkeys propagates DB errors and leaves the registry unset (fail closed)', async function () {
             hub.peerManager = { setValidatorPubkeys: sinon.stub() };
             mockDb.doQuery.rejects(new Error('db down'));
             let threw = false;
-            try { await hub._loadValidatorPubkeys(); } catch (e) { threw = true; }
+            try { await hub.loadValidatorPubkeys(); } catch (e) { threw = true; }
             // Must propagate so startP2P never opens the listener with a null
             // registry (a null registry makes verifySignature accept any
             // signed envelope; see PeerManager).
@@ -899,20 +899,20 @@ describe('XChainHub', function () {
             expect(await hub._loadValidatorSet()).to.deep.equal([]);
         });
 
-        it('_loadChainPairValidators filters validators by supported chains', async function () {
+        it('loadChainPairValidators filters validators by supported chains', async function () {
             mockDb.doQuery.resolves([
                 { signing_pubkey: 'pk1', addr: 'a1', chains: null },             // all chains
                 { signing_pubkey: 'pk2', addr: 'a2', chains: 'BTC,LTC' },        // BTC-LTC only
                 { signing_pubkey: 'pk3', addr: 'a3', chains: 'DOGE' }            // none of the pairs
             ]);
-            let map = await hub._loadChainPairValidators();
+            let map = await hub.loadChainPairValidators();
             expect(map.get('BTC-LTC').map(v => v.pubkey)).to.have.members(['pk1', 'pk2']);
             expect(map.get('BTC-DOGE').map(v => v.pubkey)).to.deep.equal(['pk1']);
         });
 
-        it('_loadChainPairValidators returns an empty map on DB error', async function () {
+        it('loadChainPairValidators returns an empty map on DB error', async function () {
             mockDb.doQuery.rejects(new Error('db down'));
-            let map = await hub._loadChainPairValidators();
+            let map = await hub.loadChainPairValidators();
             expect(map.size).to.equal(0);
         });
     });

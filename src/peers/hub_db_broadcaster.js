@@ -466,7 +466,7 @@ class HubDbBroadcaster {
     //
     // The broadcaster is constructed with (p2pConfig, db) and has no hub handle, so the
     // two things the watermark needs live behind this call: the per-chain admission tip
-    // (XChainHub._resolveAdmissionTips, the DECODER tip rather than the committed tip that
+    // (XChainHub.resolveAdmissionTips, the DECODER tip rather than the committed tip that
     // a barriered indexer freezes) and the anchor rail's deferred reward-attest queue.
     attachAdmissionSource(hub) {
         if (!hub) return false;
@@ -504,8 +504,8 @@ class HubDbBroadcaster {
             }
         }
 
-        if (typeof hub._resolveAdmissionTips === 'function') {
-            let tips = await hub._resolveAdmissionTips(w.federationChains);
+        if (typeof hub.resolveAdmissionTips === 'function') {
+            let tips = await hub.resolveAdmissionTips(w.federationChains);
             let at   = Date.now();
             for (let c of Object.keys(tips || {})) w.observeTip(c, tips[c], at);
         }

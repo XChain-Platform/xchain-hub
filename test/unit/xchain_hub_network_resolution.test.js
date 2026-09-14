@@ -93,11 +93,11 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         return hub;
     }
 
-    describe('_resolveBtcNetwork', function () {
+    describe('resolveBtcNetwork', function () {
 
         it('returns HUB_NETWORK, not the regtest leg, on a multi-network tree', async function () {
             const hub = validatorHub('mainnet', MULTI_NETWORK_CONFIGS);
-            expect(await hub._resolveBtcNetwork()).to.equal('mainnet');
+            expect(await hub.resolveBtcNetwork()).to.equal('mainnet');
         });
 
         it('returns HUB_NETWORK for a testnet validator whose tree also holds regtest', async function () {
@@ -107,7 +107,7 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
                     testnet: { 'xchain-indexer': { host: '10.0.0.8',  port: 3510 } }
                 }
             });
-            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+            expect(await hub.resolveBtcNetwork()).to.equal('testnet');
         });
 
         it('fails closed when the tree carries only OTHER networks', async function () {
@@ -115,7 +115,7 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
                 bitcoin: { regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } } }
             });
             let threw = null;
-            try { await hub._resolveBtcNetwork(); } catch (e) { threw = e; }
+            try { await hub.resolveBtcNetwork(); } catch (e) { threw = e; }
             expect(threw).to.not.equal(null);
             expect(threw.message).to.contain('HUB_NETWORK=mainnet');
         });
@@ -128,7 +128,7 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
             const hub = validatorHub('testnet', {
                 bitcoin: { testnet: { chain_tips: { block_height: '150200', block_time: '1787900000' } } }
             });
-            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+            expect(await hub.resolveBtcNetwork()).to.equal('testnet');
         });
 
         it('resolves our own network when the tree holds ours (tip only) beside another network', async function () {
@@ -138,7 +138,7 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
                     testnet: { chain_tips: { block_height: '150200', block_time: '1787900000' } }
                 }
             });
-            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+            expect(await hub.resolveBtcNetwork()).to.equal('testnet');
         });
 
         it('still fails closed when other networks are present and ours is absent entirely', async function () {
@@ -149,35 +149,35 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
                 }
             });
             let threw = null;
-            try { await hub._resolveBtcNetwork(); } catch (e) { threw = e; }
+            try { await hub.resolveBtcNetwork(); } catch (e) { threw = e; }
             expect(threw).to.not.equal(null);
             expect(threw.message).to.contain('HUB_NETWORK=testnet');
         });
 
         it('returns its own network (never mainnet) when nothing is configured', async function () {
-            expect(await validatorHub('regtest', {})._resolveBtcNetwork()).to.equal('regtest');
-            expect(await validatorHub('regtest', { bitcoin: {} })._resolveBtcNetwork()).to.equal('regtest');
+            expect(await validatorHub('regtest', {}).resolveBtcNetwork()).to.equal('regtest');
+            expect(await validatorHub('regtest', { bitcoin: {} }).resolveBtcNetwork()).to.equal('regtest');
         });
 
         it('returns its own network when the configs read fails', async function () {
             const hub = validatorHub('testnet', {});
             mockDb.getAllConfigs.rejects(new Error('db down'));
-            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+            expect(await hub.resolveBtcNetwork()).to.equal('testnet');
         });
 
         it('keeps the regtest>testnet>mainnet preference for a standalone hub', async function () {
-            expect(await standaloneHub(MULTI_NETWORK_CONFIGS)._resolveBtcNetwork()).to.equal('regtest');
+            expect(await standaloneHub(MULTI_NETWORK_CONFIGS).resolveBtcNetwork()).to.equal('regtest');
         });
 
         it('honours a DECLARED network on a standalone hub, not the preference order', async function () {
-            expect(await scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS)._resolveBtcNetwork())
+            expect(await scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS).resolveBtcNetwork())
                 .to.equal('mainnet');
         });
 
         it('fails closed on a standalone hub whose declared network is absent from the tree', async function () {
             const hub = scopedStandaloneHub('testnet', MULTI_NETWORK_CONFIGS);
             let threw = null;
-            try { await hub._resolveBtcNetwork(); } catch (e) { threw = e; }
+            try { await hub.resolveBtcNetwork(); } catch (e) { threw = e; }
             expect(threw).to.not.equal(null);
             expect(threw.message).to.contain('HUB_NETWORK=testnet');
         });

@@ -538,7 +538,7 @@ describe('admission height watermark: the frames that carry it', function () {
         };
         let hub = {
             network: 'regtest',
-            _resolveAdmissionTips: async (chains) => {
+            resolveAdmissionTips: async (chains) => {
                 let out = {};
                 for (let c of chains) out[c] = (c === 'BTC') ? 900000 : null;   // only BTC has a fresh tip
                 return out;

@@ -49,7 +49,7 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
         // with "nothing configured yet" so each phase reaches its real
         // peerManager.on('message', ...) registration instead of throwing first.
         mockDb = {
-            // Spread first: _loadValidatorPubkeys now calls db.findActiveValidators()
+            // Spread first: loadValidatorPubkeys now calls db.findActiveValidators()
             // instead of issuing SQL inline, and that (and every other named method
             // here) calls this.doQuery, which stays the own override declared below.
             ...DB_METHODS,

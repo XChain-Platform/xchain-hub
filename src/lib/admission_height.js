@@ -371,23 +371,23 @@ function checkAdmitBlocks(readSet, map, ownTips){
  * FAIL-CLOSED ON THE RESOLVER ITSELF. A hub that cannot resolve its own tips has no bound
  * to apply, so it refuses rather than signing a height it never checked. That is the same
  * direction as C4's producer half: a hub with no fresh tip refuses to open the round, and a
- * follower with no fresh tip refuses to co-sign it. `_resolveAdmissionTips` already answers
+ * follower with no fresh tip refuses to co-sign it. `resolveAdmissionTips` already answers
  * `null` per chain for every failure it knows about (no indexer URL, an RPC error, an
  * absent decoder_block, or a tip its per-chain freshness gate dated as frozen), and
  * checkAdmitBlocks turns each of those into a refusal that names the chain.
  *
- * @param {object} hub the hub, for _resolveAdmissionTips
+ * @param {object} hub the hub, for resolveAdmissionTips
  * @param {string[]} readSet the chains that read the row (admissionReadSet)
  * @param {object|null} map the proposed admit_blocks
  * @returns {Promise<{ok: boolean, chain: (string|null), reason: (string|null)}>}
  */
 async function checkAdmitBlocksAgainstHub(hub, readSet, map){
-    if(!hub || typeof hub._resolveAdmissionTips !== 'function')
+    if(!hub || typeof hub.resolveAdmissionTips !== 'function')
         return { ok: false, chain: null,
             reason: 'this hub cannot resolve its own admission tips, so it has no bound to hold the ' +
                     'proposed map against; refusing to sign rather than adopting the proposer\'s heights' };
     let ownTips;
-    try { ownTips = await hub._resolveAdmissionTips(readSet); }
+    try { ownTips = await hub.resolveAdmissionTips(readSet); }
     catch (err) {
         return { ok: false, chain: null, reason: 'own admission tip read failed: ' + (err && err.message) };
     }

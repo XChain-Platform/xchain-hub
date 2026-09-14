@@ -555,7 +555,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
             hub._resolveBtcLatestBlock = sinon.stub().resolves(ADMIT_AT);
             // The hub's admission seam, as XChainHub exposes it: this hub's own tips, and
             // the stamp built from them (tip + margin on every chain in the read set).
-            hub._resolveAdmissionTips = sinon.stub().callsFake(async (chains) => {
+            hub.resolveAdmissionTips = sinon.stub().callsFake(async (chains) => {
                 let out = {}; for (let c of chains) out[c] = (tips && tips[c] != null) ? tips[c] : null; return out;
             });
             hub.resolveAdmitBlocks = sinon.stub().callsFake(async (table, readSet) => {
@@ -652,7 +652,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
 
         it('the FOLLOWER refuses to co-sign when it cannot resolve its own tips (fail-closed, never adopts the leader\'s)', async function () {
             build(NETWORK, TIPS); asFollower();
-            delete hub._resolveAdmissionTips;
+            delete hub.resolveAdmissionTips;
             oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
             await oc._handlePropose(envelope(ADMIT_AT, MAP));
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
