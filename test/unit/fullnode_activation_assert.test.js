@@ -89,6 +89,18 @@ describe('fullnode_activation', function () {
                 .to.include('not a number');
         });
 
+        it('reports a non-numeric REWARD_SHARE as exactly one problem that names no deleted module', function () {
+            // Pins the outcome the message rides on (one problem, tier inert) so rewording the
+            // message's explanation can never change what the check returns.
+            for (const raw of ['a quarter', '', '   ']) {
+                let problems = activation.validateActivation({ REWARD_SHARE: raw });
+                expect(problems.length).to.equal(1);
+                expect(problems[0]).to.include('REWARD_SHARE is not a number: ' + JSON.stringify(raw));
+                expect(problems[0]).to.not.include('price.js');
+                expect(activation.isActive({ REWARD_SHARE: raw })).to.equal(false);
+            }
+        });
+
         it('rejects a malformed genesis verifier the runtime would silently drop', function () {
             let problems = activation.validateActivation(activatedCfg({ GENESIS_VERIFIERS: [PK1, 'nope'] }));
             expect(problems.join(' ')).to.include('not 64-hex');
