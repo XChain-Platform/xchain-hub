@@ -81,7 +81,7 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
     });
 
     it('finalizeRound skips the round when member submissions fall below minSubmissions', async function () {
-        let skipped = sinon.stub(oc, '_storeSkippedRound').resolves();
+        let skipped = sinon.stub(oc, 'storeSkippedRound').resolves();
         oracleRound.getSubmissions.returns(buildSubmissions([
             { sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] },
             // Two non-members padding the raw count past minSubmissions=2.

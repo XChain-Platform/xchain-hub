@@ -691,7 +691,7 @@ class OraclePublisher {
         // 2. Create an unsigned PSBT with the PRICE v0 payload
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
         // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
-        let selection = this._selectInputs(utxos);
+        let selection = this.selectInputs(utxos);
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while the set is inside the encoder's caller-facing
             // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
@@ -715,7 +715,7 @@ class OraclePublisher {
             // pass defers (see the NO_CONFIRMED_UTXO gate), which is the correct
             // outcome: a deferred window is recoverable, a chained package is not.
             // The one exception is our own change from this same pass, which
-            // _selectInputs hands over explicitly.
+            // selectInputs hands over explicitly.
             unconfirmed: selection.unconfirmed
         });
         if (!psbtResult || !psbtResult.psbt) {
@@ -768,7 +768,7 @@ class OraclePublisher {
     // fetches its own, which this filter cannot bound), the chain is at its depth
     // limit, or any output arrives without a readable confirmations field, since a
     // source that stops serving depth must never be read as "all unconfirmed".
-    _selectInputs(utxos) {
+    selectInputs(utxos) {
         let fallback = { utxos: utxos, unconfirmed: this.allowUnconfirmedInputs };
         if (this.allowUnconfirmedInputs)                        return fallback;
         if (!Array.isArray(utxos))                              return fallback;
@@ -1085,13 +1085,13 @@ class OraclePublisher {
         // because window leadership is decided at the window's anchor and that anchor is
         // not known when the window's first round finalizes. Leader election, the durable
         // queue and the broadcast happen at window assembly (_assembleWindow).
-        await this._bufferFinalizedRound(event);
+        await this.bufferFinalizedRound(event);
         this.noteWindowRound(event.round);
     }
 
     // Determine this node's rank in the sorted oracle_publish validator list, or null if not active
     // Sort order: signing_pubkey ascending (deterministic across all nodes that share the active set)
-    async _getMyRank(blockIndex) {
+    async getMyRank(blockIndex) {
         if (!this.identity) return null;
         let myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
@@ -1112,7 +1112,7 @@ class OraclePublisher {
     }
 
     // Get the count of active oracle_publish validators
-    async _getActiveOraclePublishCount(blockIndex) {
+    async getActiveOraclePublishCount(blockIndex) {
         let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
         return pubkeys.length;
     }
@@ -1322,7 +1322,7 @@ class OraclePublisher {
     // discipline the publish queue and the dead-letter file use. A write failure is
     // FATAL to the caller for the same reason _enqueue's is: an unwritable buffer
     // means this hub silently loses an hour of price data it is the only holder of.
-    async _bufferFinalizedRound(event) {
+    async bufferFinalizedRound(event) {
         let entry = this.bufferEntryFromEvent(event);
         if (!Number.isFinite(entry.round)) return;
 
@@ -1412,7 +1412,7 @@ class OraclePublisher {
     }
 
     // Replays the file in order and lets the LAST line for a round win. That is load
-    // bearing, not incidental: _bufferFinalizedRound appends a replacement line when a
+    // bearing, not incidental: bufferFinalizedRound appends a replacement line when a
     // round re-finalizes with different content, and a first-wins reload would restore
     // the stale copy the batch rail can no longer get co-signed.
     hydrateBuffer() {
@@ -1867,7 +1867,7 @@ class OraclePublisher {
         let key = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
         let result;
         try {
-            result = await this._indexerRpc(url, key, 'getpricebatches',
+            result = await this.indexerRpc(url, key, 'getpricebatches',
                 { first_round: first, last_round: last, limit: LANDED_BATCH_PAGE });
         } catch (e) {
             return this.chainReconcileFailed('getpricebatches on ' + url + ' failed: ' + (e && e.message));
@@ -1896,7 +1896,7 @@ class OraclePublisher {
     }
 
     // JSON-RPC to an indexer, separated so tests can stand in for the wire.
-    async _indexerRpc(url, key, method, params) {
+    async indexerRpc(url, key, method, params) {
         let headers = { 'Content-Type': 'application/json' };
         if (key) headers['x-api-key'] = key;
         let resp = await axios.post(url, { jsonrpc: '2.0', method: method, params: params || {}, id: 1 },
@@ -2115,10 +2115,10 @@ class OraclePublisher {
     // protected nothing and cost the fleet a backlog it could not walk.
     startBufferCatchupSweep() {
         if (this._catchupSweepTimer) return;
-        this._armCatchupSweep(this.batchCatchupIntervalMs);
+        this.armCatchupSweep(this.batchCatchupIntervalMs);
     }
 
-    _armCatchupSweep(delayMs) {
+    armCatchupSweep(delayMs) {
         this._catchupSweepTimer = setTimeout(() => {
             this._catchupSweepTimer = null;
             this.runCatchupSweepTick();
@@ -2140,7 +2140,7 @@ class OraclePublisher {
         }
         if (this._stopped) return;
         let backlog = this.pendingCatchupWindows().length;
-        this._armCatchupSweep(backlog > CATCHUP_WINDOWS_PER_SWEEP
+        this.armCatchupSweep(backlog > CATCHUP_WINDOWS_PER_SWEEP
             ? this.batchCatchupBacklogIntervalMs
             : this.batchCatchupIntervalMs);
     }

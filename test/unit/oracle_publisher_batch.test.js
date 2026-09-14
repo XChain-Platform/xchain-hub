@@ -1201,7 +1201,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));   // 2 closed windows
 
                 let armed = [];
-                sinon.stub(h.p, '_armCatchupSweep').callsFake((ms) => armed.push(ms));
+                sinon.stub(h.p, 'armCatchupSweep').callsFake((ms) => armed.push(ms));
                 await h.p.runCatchupSweepTick();
 
                 expect(h.broadcasts).to.have.length(2);
@@ -2011,7 +2011,7 @@ describe('OraclePublisher PRICE batch rail', function () {
         function hubWithIndexer(h, batches, opts) {
             opts = opts || {};
             h.hub._resolveIndexerUrl = sinon.stub().resolves(opts.url === undefined ? 'http://doge-indexer:3114' : opts.url);
-            let rpc = sinon.stub(h.p, '_indexerRpc');
+            let rpc = sinon.stub(h.p, 'indexerRpc');
             if (opts.reject) rpc.rejects(new Error(opts.reject));
             else rpc.resolves({ block_index: 67875698, batches: batches, truncated: !!opts.truncated });
             return rpc;

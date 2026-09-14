@@ -106,7 +106,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         oc = new OracleConsensus(hub, withGate(() => true));
         const queries = [];
         oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
-        await oc._storeSkippedRound(42, 900, 1700000000, 'no submissions');
+        await oc.storeSkippedRound(42, 900, 1700000000, 'no submissions');
         const insert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots'));
         expect(insert, 'a skipped-round INSERT was issued').to.exist;
         expect(insert.params).to.include(XCHAIN);
@@ -117,7 +117,7 @@ describe('OracleConsensus derived-pair drop markers (item 3521)', function () {
         oc = new OracleConsensus(hub, withGate(() => false));
         const queries = [];
         oc.db = { ...DB_METHODS, doQuery: async (sql, params) => { queries.push({ sql, params }); return []; } };
-        await oc._storeSkippedRound(42, 900, 1700000000, 'no submissions');
+        await oc.storeSkippedRound(42, 900, 1700000000, 'no submissions');
         const insert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots'));
         expect(insert).to.exist;
         expect(insert.params).to.not.include(XCHAIN);

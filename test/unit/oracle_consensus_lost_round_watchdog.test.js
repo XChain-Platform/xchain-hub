@@ -68,7 +68,7 @@ describe('OracleConsensus: a lost round is durably recorded on every hub', funct
         };
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
-        skipped = sinon.spy(oc, '_storeSkippedRound');
+        skipped = sinon.spy(oc, 'storeSkippedRound');
     }
 
     // Advance past every timer the round arms (leader timeout, fallback grace,

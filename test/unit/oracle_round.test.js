@@ -274,7 +274,7 @@ describe('OracleRound', function () {
         // item 4942: a local fetch failure is not a skipped ROUND. The round is still
         // scheduled for finalization and peers may salvage it, so the streak advances
         // only when consensus makes the skip durable - the same round set
-        // _hydrateFreshnessCounters counts back after a restart. Counting it here also
+        // hydrateFreshnessCounters counts back after a restart. Counting it here also
         // double-counted a round that went on to hit the chain-tip-fallback skip.
         it('does not advance the skip streak on fetch failure alone', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
@@ -443,7 +443,7 @@ describe('OracleRound', function () {
         beforeEach(function () {
             // We only exercise hydration here, not the scheduler: stub the timer
             // setup so start() leaves no real timers running after the test.
-            sinon.stub(or, '_startRoundTimer');
+            sinon.stub(or, 'startRoundTimer');
         });
 
         it('rehydrates skip streak and last-success time from pre-existing rounds', async function () {
@@ -502,10 +502,10 @@ describe('OracleRound', function () {
             expect(or.getSubmissions(next).has('ws://peer-9:10001')).to.be.true;
         });
 
-        it('_startRoundTimer schedules an aligned execution plus a steady interval', function () {
+        it('startRoundTimer schedules an aligned execution plus a steady interval', function () {
             let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 }); // 1s into a round
             let exec = sinon.stub(or, '_executeRound').resolves();
-            or._startRoundTimer();
+            or.startRoundTimer();
 
             clock.tick(5001);                       // initial-delay timer (1000+5000 < window)
             expect(exec.callCount).to.be.greaterThan(0);

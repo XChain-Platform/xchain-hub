@@ -148,7 +148,7 @@ class OracleRound {
         // Retention window (in rounds) for the oracle_submissions audit table.
         // oracle_submissions is a purely diagnostic per-validator trail: the
         // finalized value lives durably in price_snapshots and dropped rows are
-        // explicitly tolerated (Promise.allSettled in _persistSubmissions). Without
+        // explicitly tolerated (Promise.allSettled in persistSubmissions). Without
         // a bound the table appends validators x coin_pairs rows every round for the
         // life of the deployment. Keep the most recent N rounds; 0 disables pruning.
         // Default ~90 days at the 10-minute round default, mirroring telemetry_pings.
@@ -222,7 +222,7 @@ class OracleRound {
         this.lastSubmissionPersistFailureCount = 0;
 
         // Same shape for the durable retention sweep, which is fired and not awaited
-        // (see _executeRoundInner) so its rejection has nowhere else to land: without
+        // (see executeRoundInner) so its rejection has nowhere else to land: without
         // these the oracle_submissions audit table grows for the process lifetime and
         // the first operator signal is DB pressure. _submissionsPruneDark is an edge
         // latch, not a counter: the sweep runs every round, so an unlatched warn would
@@ -282,7 +282,7 @@ class OracleRound {
 
         // Rehydrate freshness counters from the durable record before the timer
         // begins, so a restart reflects the real feed state instead of a clean slate.
-        await this._hydrateFreshnessCounters();
+        await this.hydrateFreshnessCounters();
 
         // Subscribe to gossip messages
         this._messageHandler = (envelope) => this._handleMessage(envelope);
@@ -293,7 +293,7 @@ class OracleRound {
         // During a consensus/quorum stall the local price fetch keeps succeeding, so
         // stamping freshness on submission would hide the stall from the dashboard's
         // early-stall gauge. Finalization is the real success signal, and it matches
-        // the semantic _hydrateFreshnessCounters rebuilds from the durable record.
+        // the semantic hydrateFreshnessCounters rebuilds from the durable record.
         if (this.oracleConsensus && typeof this.oracleConsensus.on === 'function') {
             this._finalizedHandler = () => this.markRoundFinalized();
             this.oracleConsensus.on('round:finalized', this._finalizedHandler);
@@ -305,7 +305,7 @@ class OracleRound {
         }
 
         // Start the round timer; it handles both the first run and the aligned cadence
-        this._startRoundTimer();
+        this.startRoundTimer();
 
         logger.info('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
     }
@@ -317,7 +317,7 @@ class OracleRound {
     // though the durable record shows otherwise, masking the gap from /health and
     // the diagnostics RPC. price_snapshots is durable, so this is purely an
     // observability rehydrate, never a recompute of price data.
-    async _hydrateFreshnessCounters() {
+    async hydrateFreshnessCounters() {
         try {
             // (a) Most recent finalized round and its wall-clock time. created_at is
             // a TIMESTAMP; convert to epoch ms to match the live value, which is set
@@ -381,8 +381,8 @@ class OracleRound {
             await Promise.allSettled(inFlight.map(round => {
                 noteRoundLost({ phase: 'shutdown', round, cause: 'stopped_before_finalization' });
                 logger.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
-                if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return null;
-                return this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                if (!this.oracleConsensus || typeof this.oracleConsensus.storeSkippedRound !== 'function') return null;
+                return this.oracleConsensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                     'hub stopped before finalization').catch(err =>
                     logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ' at stop:',
                         err && err.message ? err.message : err)));
@@ -400,7 +400,7 @@ class OracleRound {
     // 'round:finalized' event in start()). consecutiveSkippedRounds is the trailing
     // streak of non-finalized rounds; lastSuccessfulRoundTime is the wall-clock time
     // of the last round this hub saw finalized (as leader or follower), which is the
-    // exact semantic _hydrateFreshnessCounters rebuilds from the durable record.
+    // exact semantic hydrateFreshnessCounters rebuilds from the durable record.
     markRoundFinalized() {
         this.consecutiveSkippedRounds = 0;
         this.lastSuccessfulRoundTime  = Date.now();
@@ -410,7 +410,7 @@ class OracleRound {
     // Sole authoritative writer of the increment (wired to the consensus
     // 'round:skipped' event in start()), because that event fires once per round from
     // markLocallySkipped's idempotent guard, which is precisely the round set
-    // _hydrateFreshnessCounters counts. The three local increments this replaced did
+    // hydrateFreshnessCounters counts. The three local increments this replaced did
     // not partition the round space the same way: a failed fetch that later also hit
     // the chain-tip-fallback branch counted one round twice, and a round the local
     // fetch survived but consensus stored as skipped counted zero, so /health read a
@@ -618,7 +618,7 @@ class OracleRound {
     // window is still open, run the current round immediately after a short
     // delay to let peer connections settle; otherwise wait until the next
     // boundary.
-    _startRoundTimer() {
+    startRoundTimer() {
         let elapsedInRound  = (Date.now() - this.epochStart) % this.roundInterval;
         let timeToNextRound = this.roundInterval - elapsedInRound;
 
@@ -676,13 +676,13 @@ class OracleRound {
         }
         this._roundInFlight = true;
         try {
-            return await this._executeRoundInner();
+            return await this.executeRoundInner();
         } finally {
             this._roundInFlight = false;
         }
     }
 
-    async _executeRoundInner() {
+    async executeRoundInner() {
         // Compute the round number from wall-clock time so every hub in the
         // federation agrees on the round number for the same point in time
         // (and so a restarted hub resumes at the correct number instead of 1).
@@ -874,7 +874,7 @@ class OracleRound {
 
         // Persist to DB; await so a persistence failure is counted and observable
         // (surfaced via getDiagnostics), not silently dropped. Does not throw.
-        await this._persistSubmissions(this.currentRound, myAddr, prices);
+        await this.persistSubmissions(this.currentRound, myAddr, prices);
 
         // The stall gauges (consecutiveSkippedRounds / lastSuccessfulRoundTime) are
         // deliberately NOT stamped here: a successful local submission is not a
@@ -897,11 +897,11 @@ class OracleRound {
         logger.warn('Oracle: scheduler stepped from round ' + (from - 1) + ' to ' + (to + 1) +
             ', burning ' + count + ' round number(s) ' + from + '..' + to +
             ' (forward clock step or a tick more than a round late); recording them as skipped');
-        if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return;
+        if (!this.oracleConsensus || typeof this.oracleConsensus.storeSkippedRound !== 'function') return;
         let upto = Math.min(to, from + ROUND_GAP_SKIP_ROW_CAP - 1);
         for (let r = from; r <= upto; r++) {
             let nominalStart = Math.floor((this.epochStart + r * this.roundInterval) / 1000);
-            this.oracleConsensus._storeSkippedRound(r, null, nominalStart,
+            this.oracleConsensus.storeSkippedRound(r, null, nominalStart,
                 'round number skipped by the scheduler (clock step or late tick)').catch(err =>
                 logger.error(nodeUtil.format('Oracle: Failed to store scheduler-skipped round ' + r + ':',
                     err && err.message ? err.message : err)));
@@ -929,11 +929,11 @@ class OracleRound {
                         logger.error('Oracle: Skipping finalization for round ' + round +
                             '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
                             's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
-                        // _storeSkippedRound emits 'round:skipped' once the row is
+                        // storeSkippedRound emits 'round:skipped' once the row is
                         // durable, which is what advances the streak (item 4942); a
                         // local increment here would double-count a round whose fetch
                         // had already failed.
-                        this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                        this.oracleConsensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                             'chain-tip fallback active, anchor unreliable').catch(err => {
                             logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
                             noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
@@ -960,7 +960,7 @@ class OracleRound {
     // A submission counts only if the chain-effective signer set or the local
     // registry attributes its PROVEN signing key. Shared definition (and the full
     // security argument) in lib/chain_signer_admission.js.
-    _isRegisteredSender(envelope) {
+    isRegisteredSender(envelope) {
         return isAdmissibleSigner(this.peerManager, envelope);
     }
 
@@ -978,7 +978,7 @@ class OracleRound {
         // trimmed-median aggregate and the ORACLE_MIN_SUBMISSIONS diversity floor
         // from one node. The dedup below closes that off for good by keying on the
         // proven key rather than on the self-asserted sender.
-        if (!this._isRegisteredSender(envelope)) return;
+        if (!this.isRegisteredSender(envelope)) return;
 
         // Only accept submissions for current or next round
         if (round < this.currentRound - 1 || round > this.currentRound + 1) return;
@@ -1093,9 +1093,9 @@ class OracleRound {
             return;
         }
         // Remote peer submission: _handleMessage is a synchronous message handler, so this
-        // stays fire-and-forget, but _persistSubmissions now counts its own failures
+        // stays fire-and-forget, but persistSubmissions now counts its own failures
         // internally (via allSettled) and never rejects, so the drop is still observable.
-        this._persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
+        this.persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
     }
 
     // Audit-row fallback for a sender the registry does not know. Qualifying stake at
@@ -1111,7 +1111,7 @@ class OracleRound {
         try {
             if (senderPubkey && feed && typeof feed.isQualified === 'function' &&
                 await feed.isQualified('price', this.currentBtcBlockHeight, senderPubkey)) {
-                await this._persistSubmissions(round, envelope.sender, prices, senderPubkey);
+                await this.persistSubmissions(round, envelope.sender, prices, senderPubkey);
                 return;
             }
         } catch (e) {
@@ -1123,7 +1123,7 @@ class OracleRound {
     }
 
     // Persist price submissions to the database
-    async _persistSubmissions(round, sender, prices, validatorPubkey) {
+    async persistSubmissions(round, sender, prices, validatorPubkey) {
         // Resolve pubkey for self
         if (!validatorPubkey && this.identity) {
             validatorPubkey = this.identity.getPubkeyHex();

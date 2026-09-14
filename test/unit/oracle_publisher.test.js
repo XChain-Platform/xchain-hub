@@ -411,14 +411,14 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _getMyRank ────────────────────────────────────────────────────────────
+    // ── getMyRank ────────────────────────────────────────────────────────────
 
-    describe('_getMyRank()', function () {
+    describe('getMyRank()', function () {
         it('returns null when no identity', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             pub.identity = null;
-            let rank = await pub._getMyRank(100);
+            let rank = await pub.getMyRank(100);
             expect(rank).to.be.null;
         });
 
@@ -432,7 +432,7 @@ describe('OraclePublisher', function () {
             let hub = makeHub({ capabilitySnapshot: capSS });
             hub.getIdentity = sinon.stub().returns(makeIdentity(myPk));
             let pub = new OraclePublisher(hub);
-            let rank = await pub._getMyRank(100);
+            let rank = await pub.getMyRank(100);
             expect(rank).to.equal(1); // sorted: aa...=0, bb...=1
         });
 
@@ -445,7 +445,7 @@ describe('OraclePublisher', function () {
             let hub = makeHub({ capabilitySnapshot: capSS });
             hub.getIdentity = sinon.stub().returns(makeIdentity('dd'.repeat(32)));
             let pub = new OraclePublisher(hub);
-            let rank = await pub._getMyRank(100);
+            let rank = await pub.getMyRank(100);
             expect(rank).to.be.null;
         });
     });
@@ -801,10 +801,10 @@ describe('OraclePublisher', function () {
     // ── onRoundFinalized ──────────────────────────────────────────────────────
 
     describe('onRoundFinalized()', function () {
-        it('returns early when _getMyRank returns null (not a publisher)', async function () {
+        it('returns early when getMyRank returns null (not a publisher)', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            sinon.stub(pub, '_getMyRank').resolves(null);
+            sinon.stub(pub, 'getMyRank').resolves(null);
             let enqueueSpy = sinon.spy(pub, '_enqueue');
             await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, prices: [], signatures: [] });
             expect(enqueueSpy.called).to.be.false;
@@ -813,8 +813,8 @@ describe('OraclePublisher', function () {
         it('returns early when publisherCount is 0', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            sinon.stub(pub, '_getMyRank').resolves(0);
-            sinon.stub(pub, '_getActiveOraclePublishCount').resolves(0);
+            sinon.stub(pub, 'getMyRank').resolves(0);
+            sinon.stub(pub, 'getActiveOraclePublishCount').resolves(0);
             let enqueueSpy = sinon.spy(pub, '_enqueue');
             await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, prices: [] });
             expect(enqueueSpy.called).to.be.false;
@@ -824,8 +824,8 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             // rank=1, count=3, round=0: leaderRank=0%3=0 ≠ rank=1
-            sinon.stub(pub, '_getMyRank').resolves(1);
-            sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
+            sinon.stub(pub, 'getMyRank').resolves(1);
+            sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
             let enqueueSpy = sinon.spy(pub, '_enqueue');
             await pub.onRoundFinalized({ round: 0, btcBlockHeight: 100, prices: [] });
             expect(enqueueSpy.called).to.be.false;
@@ -839,11 +839,11 @@ describe('OraclePublisher', function () {
             // first round finalizes.
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            sinon.stub(pub, '_getMyRank').resolves(0);
-            sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
+            sinon.stub(pub, 'getMyRank').resolves(0);
+            sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
             let enqueueStub  = sinon.stub(pub, '_enqueue').resolves();
             let processStub  = sinon.stub(pub, '_processQueue').resolves();
-            let bufferStub   = sinon.stub(pub, '_bufferFinalizedRound').resolves();
+            let bufferStub   = sinon.stub(pub, 'bufferFinalizedRound').resolves();
             await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0, prices: [], signatures: [{ pubkey: 'pk', sig: 'sig' }] });
             expect(bufferStub.calledOnce).to.be.true;
             expect(enqueueStub.called).to.be.false;
@@ -1254,10 +1254,10 @@ describe('OraclePublisher', function () {
             // the v0 emit path: a round this oversized must still never enqueue a wire.
             sinon.stub(console, 'error');
             let pub = new OraclePublisher(makeHub());
-            sinon.stub(pub, '_getMyRank').resolves(0);
-            sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
+            sinon.stub(pub, 'getMyRank').resolves(0);
+            sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
             let enqueueSpy = sinon.spy(pub, '_enqueue');
-            sinon.stub(pub, '_bufferFinalizedRound').resolves();
+            sinon.stub(pub, 'bufferFinalizedRound').resolves();
             await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0,
                 prices: bigPrices(), signatures: [{ pubkey: 'pk', sig: 'sig' }] });
             expect(enqueueSpy.called).to.be.false;

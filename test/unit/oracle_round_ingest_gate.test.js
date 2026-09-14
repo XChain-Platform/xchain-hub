@@ -111,7 +111,7 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
         await or._executeRound();
         let round = or.currentRound;
         pm.validatorPubkeys = new Map([['ws://peer:10001', 'bb'.repeat(32)]]);
-        let persist = sinon.spy(or, '_persistSubmissions');
+        let persist = sinon.spy(or, 'persistSubmissions');
         submit('ws://peer:10001', [
             { coinPair: 'BTC/USD', price: '100junk' },
             { coinPair: 'LTC/USD', price: '90' }

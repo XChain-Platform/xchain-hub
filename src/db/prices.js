@@ -302,7 +302,7 @@ module.exports = {
     },
 
     // Writes a 'skipped' marker row for each of a round's pairs, in ONE multi-row INSERT.
-    // Moved here from src/oracle/consensus.js:2469 (_storeSkippedRound), and also serving the
+    // Moved here from src/oracle/consensus.js:2469 (storeSkippedRound), and also serving the
     // per-pair skip markers at src/oracle/consensus.js:2302, which issued the same statement
     // with only its indentation differing.
     //

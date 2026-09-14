@@ -77,14 +77,14 @@ const DEFAULT_ROUND_ABANDON_GRACE_MS = 15000;
 const DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS = 144;
 // How many times the watchdog defers to a still-live pending round before writing
 // the skipped record anyway. Each deferral is one more finalization window, so a
-// round stuck behind the _armFinalizeRetry DB-outage self-heal gets a bounded
+// round stuck behind the armFinalizeRetry DB-outage self-heal gets a bounded
 // chance to land its snapshot first. Bounded, because the point of the watchdog is
 // that SOMETHING durable is written: an unbounded deferral is the silence it exists
 // to end (a later quorum still upgrades the skipped rows to finalized).
 const ROUND_ABANDON_MAX_REARMS = 3;
 
 // Backoff for the self-heal re-drive of a committed round whose snapshot store keeps
-// failing (item 4281, see _armFinalizeRetry). Starts fast because most DB stalls are
+// failing (item 4281, see armFinalizeRetry). Starts fast because most DB stalls are
 // brief, caps low enough that a recovered DB is picked up within half a minute.
 const FINALIZE_RETRY_BASE_MS = 1000;
 const FINALIZE_RETRY_MAX_MS  = 30000;
@@ -427,7 +427,7 @@ class OracleConsensus extends EventEmitter {
         }
         if (inFlight.length) {
             await Promise.allSettled(inFlight.map(([round, w]) =>
-                this._storeSkippedRound(round, w && w.btcBlockHeight, w && w.btcBlockTime,
+                this.storeSkippedRound(round, w && w.btcBlockHeight, w && w.btcBlockTime,
                     'hub stopped with round in flight').catch(err =>
                     logger.error(nodeUtil.format('Oracle: Error storing in-flight round ' + round + ' at stop:',
                         err && err.message ? err.message : err)))));
@@ -536,7 +536,7 @@ class OracleConsensus extends EventEmitter {
         // Announce the durable skip, mirroring 'round:finalized'. This is the only
         // place a round becomes a non-finalized row in price_snapshots, and the guard
         // above makes it exactly-once per round, so it is the event that carries the
-        // same semantic _hydrateFreshnessCounters rebuilds from the durable record
+        // same semantic hydrateFreshnessCounters rebuilds from the durable record
         // (item 4942). Emitted after the state change so a listener observing back
         // through getSubmissionsInfo sees the round already marked.
         this.emit('round:skipped', { round: round });
@@ -584,14 +584,14 @@ class OracleConsensus extends EventEmitter {
 
         let submissions = this.oracleRound.getSubmissions(round);
         if (!submissions || submissions.size === 0) {
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'no submissions');
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'no submissions');
             return;
         }
 
         if (submissions.size < this.minSubmissions) {
             logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
                 ' submission(s); minimum is ' + this.minSubmissions + ', skipping');
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'below minimum submissions threshold');
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'below minimum submissions threshold');
             return;
         }
 
@@ -667,7 +667,7 @@ class OracleConsensus extends EventEmitter {
                 logger.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
                     'unavailable while federated; skipping rather than downgrading to a count quorum ' +
                     'this hub\'s peers are not using.');
-                await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                     'weighted quorum active but weight snapshot unavailable');
                 return;
             }
@@ -696,7 +696,7 @@ class OracleConsensus extends EventEmitter {
             logger.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
                 'hub\'s live validator set, which peers do not share.');
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                 'no deterministic capability snapshot');
             return;
         }
@@ -711,7 +711,7 @@ class OracleConsensus extends EventEmitter {
             logger.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
                 btcBlockHeight + ' while this hub is federated; skipping rather than self-finalizing a ' +
                 'single-signature round the indexer stake gate would reject.');
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'empty qualifying validator snapshot');
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'empty qualifying validator snapshot');
             return;
         }
 
@@ -725,14 +725,14 @@ class OracleConsensus extends EventEmitter {
         let memberPubkeys = this.memberPubkeySet(snapshot);
         submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
         if (!submissions || submissions.size === 0) {
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                 'no submissions from snapshot members');
             return;
         }
         if (submissions.size < this.minSubmissions) {
             logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
                 ' snapshot-member submission(s); minimum is ' + this.minSubmissions + ', skipping');
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+            await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                 'below minimum member submissions threshold');
             return;
         }
@@ -762,7 +762,7 @@ class OracleConsensus extends EventEmitter {
             // stall gauges and round:finalized still emits an empty-pair PRICE v0
             // on-chain. Store a durable skipped-round row and stop instead.
             if (aggregated.length === 0) {
-                await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices');
+                await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices');
                 return;
             }
             // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
@@ -917,7 +917,7 @@ class OracleConsensus extends EventEmitter {
     async proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
-            this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
+            this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
                 logger.error(nodeUtil.format('Oracle: Error storing skipped round ' + round + ':', err.message)));
             return;
         }
@@ -985,7 +985,7 @@ class OracleConsensus extends EventEmitter {
                 // the eviction left no countable trace, so a leader repeatedly stuck
                 // below commit quorum was invisible to the dashboard's oracle stall
                 // ladder until lastSuccessAge aged past its warn band. Deliberately
-                // NOT a _storeSkippedRound: that marks the round finalized locally
+                // NOT a storeSkippedRound: that marks the round finalized locally
                 // and would refuse a late-arriving quorum, unlike the follower path.
                 this._roundTimeouts = (this._roundTimeouts || 0) + 1;
                 logger.warn('Oracle: Finalization timeout for round ' + round + ' ('
@@ -1945,7 +1945,7 @@ class OracleConsensus extends EventEmitter {
         let stillPending = this.pendingRounds.get(round);
         if (!stillPending) return;
         stillPending.finalized = false;
-        this._armFinalizeRetry(round, stillPending);
+        this.armFinalizeRetry(round, stillPending);
     }
 
     // Re-drive a stalled finalize on our OWN timer, so a quorum-signed round self-heals when
@@ -1958,7 +1958,7 @@ class OracleConsensus extends EventEmitter {
     //
     // Reuses the pending.timer slot so stop() and a later checkCommitQuorum both tear this
     // down, and clears first so a round can never hold two outstanding retries.
-    _armFinalizeRetry(round, pending) {
+    armFinalizeRetry(round, pending) {
         let delay = Math.min((pending._finalizeRetryMs || 0) * 2 || FINALIZE_RETRY_BASE_MS,
                              FINALIZE_RETRY_MAX_MS);
         pending._finalizeRetryMs = delay;
@@ -2273,7 +2273,7 @@ class OracleConsensus extends EventEmitter {
         // returns null, or the leader simply didn't propose it); before this,
         // that pair got neither a 'finalized' nor a 'skipped' row, so consumers
         // silently fell back to the previous round with no observable signal.
-        // Write a 'skipped' row (same shape as _storeSkippedRound) for every
+        // Write a 'skipped' row (same shape as storeSkippedRound) for every
         // configured pair absent from the finalized set, so the drop is durable,
         // countable, and visible to getSubmissionsInfo/dashboard health. This is
         // derived from the finalized proposal + local pair config, so every hub
@@ -2436,7 +2436,7 @@ class OracleConsensus extends EventEmitter {
     // reason: short string describing why the round was skipped ('no submissions',
     // 'below minimum submissions threshold', etc.); surfaced in the skip log so
     // operators can tell a full outage apart from a quorum shortfall.
-    async _storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason) {
+    async storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         let coinPairs = this.markerPairs(round);
@@ -2859,7 +2859,7 @@ class OracleConsensus extends EventEmitter {
             this.roundWatchdogs.delete(round);
             return;
         }
-        // Still in flight (a late PROPOSE re-opened it, or _armFinalizeRetry is
+        // Still in flight (a late PROPOSE re-opened it, or armFinalizeRetry is
         // re-driving a quorum-signed round behind a DB stall). Give it another
         // finalization window, bounded, then record regardless.
         let pending = this.pendingRounds.get(round);
@@ -2883,7 +2883,7 @@ class OracleConsensus extends EventEmitter {
         });
         // NOT markFinalized: the skip is local and reprocessable, so a late
         // federation quorum still upgrades these rows to 'finalized' (#7).
-        this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
+        this.storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
             'round abandoned before finalization').catch(err =>
                 logger.error(nodeUtil.format('Oracle: Error storing abandoned round ' + round + ':',
                     err && err.message ? err.message : err)));

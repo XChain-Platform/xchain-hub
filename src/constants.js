@@ -107,7 +107,7 @@ const MAX_MEMO_LENGTH = 250;
 // source lands (spec step 2) this constant is purely permissive and inert.
 //
 // It is also deliberately NOT added to the skipped-row sites
-// (OracleConsensus._storeSkippedRound and the missing-pair marker), which answer
+// (OracleConsensus.storeSkippedRound and the missing-pair marker), which answer
 // "which pairs did this hub expect to produce and fail to". A pair with no producer
 // yet is unbuilt, not dropped; writing a skipped row for it every round would make
 // the dashboard health signal permanently red for a pair nothing is trying to

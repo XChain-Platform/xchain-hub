@@ -39,7 +39,7 @@ const CHAIN_KEYED = [
     { name: 'Consensus',        cls: require('../../src/consensus/pbft'),        method: '_isKnownSender' },
     { name: 'OracleConsensus',  cls: require('../../src/oracle/consensus'),  method: '_isKnownSender' },
     { name: 'CrossChainEngine', cls: require('../../src/cross_chain/engine'), method: '_isKnownSender' },
-    { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: '_isRegisteredSender' },
+    { name: 'OracleRound',      cls: require('../../src/oracle/round'),      method: 'isRegisteredSender' },
 ];
 
 // Governance and ReorgHandler deliberately do NOT appear above. Both derive their

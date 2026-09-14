@@ -522,7 +522,7 @@ class PriceAggregator extends EventEmitter {
 
         // Dedupe: if a NON-SKIPPED row exists for this round_number, this is a
         // duplicate of an already-finalized round. 'skipped' placeholder rows
-        // (written by OracleConsensus._storeSkippedRound when this hub had no
+        // (written by OracleConsensus.storeSkippedRound when this hub had no
         // local submissions) must NOT count as a duplicate. A real validated
         // round for the same round_number can still arrive from a peer chain that
         // did reach quorum, and it must be allowed to overwrite the placeholders
@@ -682,7 +682,7 @@ class PriceAggregator extends EventEmitter {
         let createdAt = new Date();
         let insertedRows = [];
         // Upsert (not a plain INSERT): a 'skipped' placeholder row may already occupy
-        // this (round_number, coin_pair) unique key from _storeSkippedRound. Overwrite
+        // this (round_number, coin_pair) unique key from storeSkippedRound. Overwrite
         // it with the real finalized data rather than colliding on the key. For an
         // already-finalized row this is an idempotent no-op of identical data (failover
         // double-publish safe). created_at is intentionally NOT overwritten so it

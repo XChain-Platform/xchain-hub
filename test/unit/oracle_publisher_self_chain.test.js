@@ -76,12 +76,12 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
         tmpDirs = [];
     });
 
-    describe('_selectInputs', function () {
+    describe('selectInputs', function () {
 
         it('refuses every unconfirmed input while this pass has broadcast nothing', function () {
             const { p } = makePublisher();
             const set = [utxo('c1'.repeat(32), 6), utxo('u1'.repeat(32), 0)];
-            const sel = p._selectInputs(set);
+            const sel = p.selectInputs(set);
             expect(sel.unconfirmed, 'the confirmed-inputs-only rule still holds').to.equal(false);
             expect(sel.utxos).to.equal(set);   // forwarded untouched
         });
@@ -91,7 +91,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             const mine = 'ab'.repeat(32);
             p._passSelfChange.add(mine);
             p._passChainDepth = 1;
-            const sel = p._selectInputs([utxo('c1'.repeat(32), 6, DUST), utxo(mine, 0)]);
+            const sel = p.selectInputs([utxo('c1'.repeat(32), 6, DUST), utxo(mine, 0)]);
             expect(sel.unconfirmed).to.equal(true);
             expect(sel.utxos.map(u => u.txid)).to.deep.equal(['c1'.repeat(32), mine]);
         });
@@ -102,7 +102,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             const theirs = 'ff'.repeat(32);
             p._passSelfChange.add(mine);
             p._passChainDepth = 1;
-            const sel = p._selectInputs([utxo('c1'.repeat(32), 6, DUST), utxo(mine, 0), utxo(theirs, 0)]);
+            const sel = p.selectInputs([utxo('c1'.repeat(32), 6, DUST), utxo(mine, 0), utxo(theirs, 0)]);
             expect(sel.unconfirmed).to.equal(true);
             // The forwarded array IS the encoder's candidate set, so an omitted
             // output cannot be selected however the encoder ranks inputs.
@@ -115,7 +115,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             const mine = 'ab'.repeat(32);
             p._passSelfChange.add(mine);
             p._passChainDepth = p.selfChainMaxDepth;
-            const sel = p._selectInputs([utxo('c1'.repeat(32), 6), utxo(mine, 0)]);
+            const sel = p.selectInputs([utxo('c1'.repeat(32), 6), utxo(mine, 0)]);
             expect(sel.unconfirmed).to.equal(false);
         });
 
@@ -125,7 +125,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             const mine = 'ab'.repeat(32);
             p._passSelfChange.add(mine);
             p._passChainDepth = 1;
-            expect(p._selectInputs([utxo(mine, 0)]).unconfirmed).to.equal(false);
+            expect(p.selectInputs([utxo(mine, 0)]).unconfirmed).to.equal(false);
         });
 
         it('disables the filter when any output arrives without a readable depth', function () {
@@ -134,7 +134,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             p._passSelfChange.add(mine);
             p._passChainDepth = 1;
             const set = [utxo('c1'.repeat(32), null), utxo(mine, 0)];
-            const sel = p._selectInputs(set);
+            const sel = p.selectInputs(set);
             expect(sel.unconfirmed, 'unknown depth must not read as unconfirmed').to.equal(false);
             expect(sel.utxos).to.equal(set);
         });
@@ -143,7 +143,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             const { p } = makePublisher({ cfg: { ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: 'true' } });
             expect(p.allowUnconfirmedInputs).to.equal(true);
             const set = [utxo('c1'.repeat(32), 0)];
-            const sel = p._selectInputs(set);
+            const sel = p.selectInputs(set);
             expect(sel.unconfirmed).to.equal(true);
             expect(sel.utxos).to.equal(set);
         });
@@ -156,7 +156,7 @@ describe('OraclePublisher: spending its own change inside one pass', function ()
             let big = [];
             for (let i = 0; i < 501; i++) big.push(utxo(String(i).padStart(64, '0'), 6, DUST));
             big.push(utxo(mine, 0));
-            const sel = p._selectInputs(big);
+            const sel = p.selectInputs(big);
             // Past the cap the caller's forwardableUtxos drops the param and the
             // encoder selects from its own fetch, which this filter cannot bound,
             // so the exception must not be claimed there.

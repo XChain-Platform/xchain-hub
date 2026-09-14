@@ -578,7 +578,7 @@ class PriceFetcher {
         return bcmath.bcformat(String(sorted[mid]), 8);
     }
 
-    // Expose the supported pair list (used by OracleConsensus._storeSkippedRound and tests)
+    // Expose the supported pair list (used by OracleConsensus.storeSkippedRound and tests)
     static getCoinPairs() {
         return COIN_PAIRS.slice();
     }

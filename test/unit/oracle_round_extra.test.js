@@ -17,7 +17,7 @@
 //     max submissions, invalid prices, known validator pubkey → DB persist path
 //   - scheduleFinalization: fallback-suppression branch
 //   - pruneSubmissions: old round eviction
-//   - _persistSubmissions: null pubkey fallback
+//   - persistSubmissions: null pubkey fallback
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
@@ -58,8 +58,8 @@ describe('OracleRound (extra coverage)', function () {
 
     describe('stop()', function () {
         it('removes the message listener from peerManager', async function () {
-            sinon.stub(or, '_startRoundTimer');
-            sinon.stub(or, '_hydrateFreshnessCounters').resolves();
+            sinon.stub(or, 'startRoundTimer');
+            sinon.stub(or, 'hydrateFreshnessCounters').resolves();
             await or.start();
             expect(pm.listenerCount('message')).to.equal(1);
             await or.stop();
@@ -89,7 +89,7 @@ describe('OracleRound (extra coverage)', function () {
             let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 });
             try {
                 let ran = sinon.stub(or, '_executeRound').resolves();
-                or._startRoundTimer();
+                or.startRoundTimer();
                 // Boundary timer is now scheduled but not yet fired.
                 expect(or.boundaryTimer).to.not.be.null;
                 await or.stop();
@@ -109,8 +109,8 @@ describe('OracleRound (extra coverage)', function () {
 
     describe('start() idempotency', function () {
         it('does not install a second round loop when already running', async function () {
-            sinon.stub(or, '_hydrateFreshnessCounters').resolves();
-            let spy = sinon.spy(or, '_startRoundTimer');
+            sinon.stub(or, 'hydrateFreshnessCounters').resolves();
+            let spy = sinon.spy(or, 'startRoundTimer');
             await or.start();
             expect(spy.callCount).to.equal(1);
             // Second start() with no intervening stop() is a no-op.
@@ -344,7 +344,7 @@ describe('OracleRound (extra coverage)', function () {
             or.lastSuccessfulChainTipFetchAt = Date.now() - 10000; // 10s ago
             let finalizeStub = sinon.stub().resolves();
             let storeSkippedStub = sinon.stub().resolves();
-            or.oracleConsensus = { finalizeRound: finalizeStub, _storeSkippedRound: storeSkippedStub };
+            or.oracleConsensus = { finalizeRound: finalizeStub, storeSkippedRound: storeSkippedStub };
             or.consecutiveSkippedRounds = 0;
             or.scheduleFinalization(99);
             setTimeout(() => {
@@ -670,12 +670,12 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
-    // ── _persistSubmissions: pubkey fallbacks ────────────────────────────────
+    // ── persistSubmissions: pubkey fallbacks ────────────────────────────────
 
-    describe('_persistSubmissions(): pubkey fallbacks', function () {
+    describe('persistSubmissions(): pubkey fallbacks', function () {
         it('uses identity pubkey when validatorPubkey is null', function () {
             hub.db.doQuery = sinon.stub().resolves([]);
-            or._persistSubmissions(1, 'me', [{ coinPair: 'BTC/USD', price: '100', sources: 1 }], null);
+            or.persistSubmissions(1, 'me', [{ coinPair: 'BTC/USD', price: '100', sources: 1 }], null);
             // Called once for the one price pair
             expect(hub.db.doQuery.called).to.be.true;
             // Identity.getPubkeyHex should have been called
@@ -685,7 +685,7 @@ describe('OracleRound (extra coverage)', function () {
         it('uses zero-padded pubkey when both validatorPubkey and identity are null', function () {
             hub.db.doQuery = sinon.stub().resolves([]);
             or.identity = null;
-            or._persistSubmissions(1, 'me', [{ coinPair: 'BTC/USD', price: '100', sources: 1 }], null);
+            or.persistSubmissions(1, 'me', [{ coinPair: 'BTC/USD', price: '100', sources: 1 }], null);
             let vals = hub.db.doQuery.firstCall.args[1];
             expect(vals[2]).to.equal('0'.repeat(64));
         });

@@ -103,7 +103,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
             storeSkipped = sinon.stub().resolves();
             consensus = {
                 finalizeRound:      sinon.stub().resolves(),
-                _storeSkippedRound: storeSkipped,
+                storeSkippedRound: storeSkipped,
                 on: sinon.stub(), removeListener: sinon.stub()
             };
             or.oracleConsensus = consensus;
@@ -111,10 +111,10 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
         it('a forward clock step that burns round numbers records the run and writes their skipped rows', async function () {
             // The last tick ran round 9; the clock now reads round 13, so 10..12
-            // never had a tick. Before the fix _executeRoundInner moved straight on.
+            // never had a tick. Before the fix executeRoundInner moved straight on.
             or.lastExecutedRound = 9;
             clock.setSystemTime(TIME * 1000 + 3 * 60000);
-            sinon.stub(or, '_executeRoundInner').callsFake(async function () {
+            sinon.stub(or, 'executeRoundInner').callsFake(async function () {
                 // Only the number-gap prelude is under test; replay it verbatim.
                 let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
                 if (newRound === this.lastExecutedRound) return;
@@ -149,7 +149,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
         it('a fresh start does not read the distance from -1 as a loss', async function () {
             or.lastExecutedRound = -1;
-            sinon.stub(or, '_executeRoundInner').callsFake(async function () {
+            sinon.stub(or, 'executeRoundInner').callsFake(async function () {
                 let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
                 if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1)
                     this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
@@ -303,7 +303,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
         it('stop() with a round open records it with its seat and writes its skipped row', async function () {
             seat(VALIDATORS_3[2]);
-            const skipped = sinon.spy(oc, '_storeSkippedRound');
+            const skipped = sinon.spy(oc, 'storeSkippedRound');
             await oc.finalizeRound(ROUND, HEIGHT, TIME);
             expect(oc.roundWatchdogs.has(ROUND)).to.equal(true);
 

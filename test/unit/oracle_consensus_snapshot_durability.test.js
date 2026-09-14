@@ -148,7 +148,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
     it('CONTROL: without the re-arm the round stays stranded forever, unstored and unpublished', async function () {
         let clock = sinon.useFakeTimers();
         let store = sinon.stub(oc, '_storeSnapshot').rejects(new Error('db down'));
-        sinon.stub(oc, '_armFinalizeRetry');                // pre-fix behavior: retain only
+        sinon.stub(oc, 'armFinalizeRetry');                // pre-fix behavior: retain only
         oc.pendingRounds.set(ROUND, makePending());
         let events = [];
         oc.on('round:finalized', e => events.push(e));

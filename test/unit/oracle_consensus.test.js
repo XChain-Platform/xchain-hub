@@ -1554,7 +1554,7 @@ describe('OracleConsensus', function () {
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]));
-            let store = sinon.stub(oc, '_storeSkippedRound').resolves();
+            let store = sinon.stub(oc, 'storeSkippedRound').resolves();
             await oc.finalizeRound(5, 800000, 1700000000);
             expect(store.calledOnce).to.be.true;
             expect(store.getCall(0).args[3]).to.include('below minimum');
@@ -1574,7 +1574,7 @@ describe('OracleConsensus', function () {
         });
 
         it('proposeRound stores a skipped round when aggregation yields no prices', function () {
-            let store = sinon.stub(oc, '_storeSkippedRound').resolves();
+            let store = sinon.stub(oc, 'storeSkippedRound').resolves();
             oc.proposeRound(5, new Map(), false, 800000, 1700000000, null, 1);
             expect(store.calledOnce).to.be.true;
             expect(store.getCall(0).args[3]).to.include('aggregation');
@@ -1597,7 +1597,7 @@ describe('OracleConsensus', function () {
 
         it('leader-path finalization timeout counts in _roundTimeouts and skips no round (reviews 1468/1469)', function () {
             let clock = sinon.useFakeTimers();
-            let store = sinon.stub(oc, '_storeSkippedRound').resolves();
+            let store = sinon.stub(oc, 'storeSkippedRound').resolves();
             oc.finalizationTimeout = 1000;
             oc.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;

@@ -386,7 +386,7 @@ describe('Security Hardening', function () {
             let submissions = new Map();
             submissions.set('validator-1', { prices: SAMPLE_PRICES, sources: 2, timestamp: Date.now() });
             oracleRound.getSubmissions.returns(submissions);
-            let storeSkipped = sinon.stub(oc, '_storeSkippedRound').resolves();
+            let storeSkipped = sinon.stub(oc, 'storeSkippedRound').resolves();
 
             await oc.finalizeRound(1);
             expect(storeSkipped.calledOnce).to.be.true;
@@ -397,7 +397,7 @@ describe('Security Hardening', function () {
             let submissions = new Map();
             submissions.set('v1', { prices: SAMPLE_PRICES, sources: 2, timestamp: Date.now() });
             oracleRound.getSubmissions.returns(submissions);
-            let storeSkipped = sinon.stub(oc, '_storeSkippedRound');
+            let storeSkipped = sinon.stub(oc, 'storeSkippedRound');
             let storeSnapshot = sinon.stub(oc, '_storeSnapshot').resolves();
 
             await oc.finalizeRound(1);

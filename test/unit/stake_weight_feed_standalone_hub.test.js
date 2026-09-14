@@ -196,7 +196,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
 
     it('a hub with NO feed behaves exactly as today: no RPC, no snapshot, round skipped', async function () {
         hub.stakeWeightFeed = null;
-        let skipped = sinon.stub(oc, '_storeSkippedRound').resolves();
+        let skipped = sinon.stub(oc, 'storeSkippedRound').resolves();
 
         expect(await hub.capabilitySnapshot.getWeightSnapshot('price', BLOCK)).to.equal(null);
 
