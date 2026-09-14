@@ -64,12 +64,12 @@ function mkPub(indexerReply) {
     pub.spendGuard  = { isPaused: () => false, reserve: () => ({ id: 1 }), commit(){}, release(){},
                         noteBlocked: () => '' };
     // Durable-intent marker: exercised by its own suite; inert here.
-    pub._getLiveArchiveIntent  = async () => null;
+    pub.getLiveArchiveIntent  = async () => null;
     pub._recordArchiveIntent   = async () => {};
-    pub._markArchiveSent       = async () => {};
-    pub._withdrawArchiveIntent = async () => {};
-    pub._backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
-    pub._recordReward  = () => {};
+    pub.markArchiveSent       = async () => {};
+    pub.withdrawArchiveIntent = async () => {};
+    pub.backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
+    pub.recordReward  = () => {};
     pub.indexerCalls   = [];
     pub._indexerCall   = async (coin, method, params) => {
         pub.indexerCalls.push({ coin, method, params });
@@ -124,8 +124,8 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
 
     it('the guard exists and is threaded through the v1 head broadcast', () => {
         const { pub } = mkPub(() => ABSENT);
-        expect(typeof pub._findExistingArchiveAnchor, '_findExistingArchiveAnchor must exist').to.equal('function');
-        expect(typeof pub._findExistingArchiveChunk,  '_findExistingArchiveChunk must exist').to.equal('function');
+        expect(typeof pub.findExistingArchiveAnchor, '_findExistingArchiveAnchor must exist').to.equal('function');
+        expect(typeof pub.findExistingArchiveChunk,  '_findExistingArchiveChunk must exist').to.equal('function');
     });
 
     it('publishes the whole batch when the archive is definitively not on-chain', async () => {

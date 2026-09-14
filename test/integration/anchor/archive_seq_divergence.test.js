@@ -206,7 +206,7 @@ async function keyAt(nd){
     let rows = await nd.db.doQuery(
         "SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1",
         [NETWORK]);
-    return nd.pub._archiveElectionKey(nd.pub._cpFromRow(rows[0]), await nd.pub._getNextBatchSeq());
+    return nd.pub._archiveElectionKey(nd.pub.cpFromRow(rows[0]), await nd.pub._getNextBatchSeq());
 }
 async function orderAt(nd, bus){
     return StateAnchorPublisher.hashOrder(await keyAt(nd), bus.nodes.map(n => n.pubkey));

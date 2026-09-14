@@ -70,11 +70,11 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
         const { pub, me } = buildPub();
         let asked = [];
         pub._getActiveOraclePublishPubkeys = async (block) => { asked.push(block); return [me]; };
-        pub._getAnchorIntent               = async () => null;
-        pub._runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
+        pub.getAnchorIntent               = async () => null;
+        pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
         let skipped = { rows: 0 };
-        await pub._publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
+        await pub.publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
 
         expect(asked).to.deep.equal([OLD_BLOCK]);
     });
@@ -94,11 +94,11 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
 
         let reachedMarker = false;
         pub._getActiveOraclePublishPubkeys = async (block) => setAt[block] || [];
-        pub._getAnchorIntent               = async () => { reachedMarker = true; return null; };
-        pub._runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
+        pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
+        pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
         let skipped = { rows: 0 };
-        await pub._publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
+        await pub.publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
 
         // Not our election at this bundle's own height: nothing past the ladder runs.
         expect(reachedMarker).to.equal(false);
@@ -112,11 +112,11 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
         const { pub, me } = buildPub();
         let reachedMarker = false;
         pub._getActiveOraclePublishPubkeys = async () => [me];
-        pub._getAnchorIntent               = async () => { reachedMarker = true; return null; };
-        pub._runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
+        pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
+        pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
         let skipped = { rows: 0 };
-        await pub._publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
+        await pub.publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
 
         expect(reachedMarker).to.equal(true);
         expect(skipped.rows).to.equal(0);
@@ -126,10 +126,10 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
         const { pub, me } = buildPub();
         let reachedMarker = false;
         pub._getActiveOraclePublishPubkeys = async () => [];      // unresolved at this height
-        pub._getAnchorIntent               = async () => { reachedMarker = true; return null; };
+        pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
 
         let skipped = { rows: 0 };
-        await pub._publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
+        await pub.publishBundle(null, NETWORK, [SECTION], MAX_BLOCK, false, [], skipped);
 
         expect(reachedMarker).to.equal(false);
         expect(skipped.rows).to.equal(0);          // deferred, not counted as another hub's election

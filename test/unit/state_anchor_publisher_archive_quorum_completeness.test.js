@@ -144,13 +144,13 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
 
     it('accepts a COMPLETE archive (control)', async () => {
         let pub = verifier();
-        expect(await pub._verifyArchiveAgainstLocal(
+        expect(await pub.verifyArchiveAgainstLocal(
             { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK)).to.equal(true);
     });
 
     it('REFUSES an archive whose reward group was stripped, though every present group is honest', async () => {
         let pub = verifier();
-        expect(await pub._verifyArchiveAgainstLocal(
+        expect(await pub.verifyArchiveAgainstLocal(
             { matches: [], calls: [], rewards: [REWARD], capability_snapshots: [] }, BLOCK)).to.equal(false);
     });
 
@@ -159,7 +159,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // group (at a different block) is missing, so nothing in the per-group loop
         // ever visits it without the completeness derivation.
         let pub = verifier();
-        expect(await pub._verifyArchiveAgainstLocal(
+        expect(await pub.verifyArchiveAgainstLocal(
             { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK + 6)).to.equal(false);
     });
 
@@ -168,13 +168,13 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // produces no rows at all. Requiring presence outright would stall co-signing
         // on honest rounds; the completeness check compares sizes instead.
         let pub = verifier([]);
-        expect(await pub._verifyArchiveAgainstLocal(
+        expect(await pub.verifyArchiveAgainstLocal(
             { matches: [], calls: [], rewards: [], capability_snapshots: [] }, BLOCK)).to.equal(true);
     });
 
     it('REFUSES an archive demanding a group at a non-numeric block', async () => {
         let pub = verifier();
-        expect(await pub._verifyArchiveAgainstLocal(
+        expect(await pub.verifyArchiveAgainstLocal(
             { matches: [], calls: [],
               rewards: [Object.assign({}, REWARD, { block_index: 'not-a-block' })],
               capability_snapshots: GROUP }, BLOCK)).to.equal(false);
@@ -198,18 +198,18 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
         let asked   = [];
 
         pub._getActiveOraclePublishPubkeys = async () => [sender];
-        pub._isObservedArchiveLeader       = () => true;
-        pub._verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
-        pub._backfillBatch                 = async (...a) => { stamped.push(a); };
-        pub._recordReward                  = async () => {};     // reward rail is #4180-adjacent, not the subject
-        pub._verifyArchiveCheckpointOnChain = async (seq, tx, expect) => {
+        pub.isObservedArchiveLeader       = () => true;
+        pub.verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
+        pub.backfillBatch                 = async (...a) => { stamped.push(a); };
+        pub.recordReward                  = async () => {};     // reward rail is #4180-adjacent, not the subject
+        pub.verifyArchiveCheckpointOnChain = async (seq, tx, expect) => {
             asked.push({ seq: seq, txid: tx, expect: expect });
             return onChain === undefined ? 'verified' : onChain;
         };
 
         let d = { batch_seq: 7, txid: txid, matches: matches, calls: [], rewards: [],
                   snapshot_block: BLOCK, sig_pubkey: sender };
-        d.sig = leader.sign(pub._finalizedCanonical(7, txid, matches.length));
+        d.sig = leader.sign(pub.finalizedCanonical(7, txid, matches.length));
         return { pub, envelope: { data: d }, stamped, asked, sender };
     }
 
@@ -266,8 +266,8 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
         expect(stamped.length).to.equal(1);                       // sentinel only
 
         let onChain = 'verified';
-        pub._verifyArchiveCheckpointOnChain = async () => onChain;
-        await pub._drainDeferredFinalized();
+        pub.verifyArchiveCheckpointOnChain = async () => onChain;
+        await pub.drainDeferredFinalized();
         expect(stamped.length, 'the confirmed stamp lands from the drain').to.equal(2);
         expect(stamped[1][1][0].status).to.equal('settled');
         expect(stamped[1][2]).to.equal(TXID);
@@ -277,8 +277,8 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
     it('the drain drops a queued announcement the chain later REJECTS', async () => {
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
         await pub.handleFinalized(envelope);
-        pub._verifyArchiveCheckpointOnChain = async () => 'rejected:txid';
-        await pub._drainDeferredFinalized();
+        pub.verifyArchiveCheckpointOnChain = async () => 'rejected:txid';
+        await pub.drainDeferredFinalized();
         expect(stamped.length, 'no terminal stamp ever lands').to.equal(1);
         expect(pub._deferredFinalized.size).to.equal(0);
     });

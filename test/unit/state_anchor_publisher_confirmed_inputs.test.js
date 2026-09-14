@@ -130,14 +130,14 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             let walked = false;
             pub._publishPendingCheckpoints = async () => { walked = true; return []; };
             pub._startArchiveRound         = async () => { walked = true; return 'none'; };
-            expect(pub._wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
+            expect(pub.wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
             let res = await pub.flush();
             expect(res.skipped).to.equal('no_confirmed_utxo');
             expect(walked, 'no row is walked, no marker armed').to.equal(false);
             expect(pub.noConfirmedUtxoDeferrals).to.equal(1);
             expect(pub.lastNoConfirmedUtxoAt).to.be.a('number');
             expect(pub._leaderRetryDue).to.equal(true);
-            expect(pub._wakeFlushOpts(), 'the next wake is a NORMAL flush').to.deep.equal({ failoverOnly: false });
+            expect(pub.wakeFlushOpts(), 'the next wake is a NORMAL flush').to.deep.equal({ failoverOnly: false });
             let stats = pub.getAnchorStats();
             expect(stats).to.include({ leaderRetryDue: true, noConfirmedUtxoDeferrals: 1, confirmedUtxos: 0, unconfirmedUtxos: 1 });
         });
@@ -153,7 +153,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             let res = await pub.flush({ failoverOnly: false });
             expect(res.skipped).to.equal(undefined);
             expect(pub._leaderRetryDue).to.equal(false);
-            expect(pub._wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
+            expect(pub.wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
         });
         it('a mid-flush deferral (the last confirmed output spent by an earlier anchor) is a deferral, not a failed publish', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
@@ -163,14 +163,14 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             pub.hub.db.doQuery = async (sql) => sql.indexOf('FROM state_checkpoints') !== -1 ? [row] : [];
             let me = pub.identity.getPubkeyHex().toLowerCase();
             pub._getActiveOraclePublishPubkeys = async () => [me];       // sole member: rank 0, always unlocked
-            pub._recordAnchorIntent   = async () => {};
-            pub._withdrawAnchorIntent = async () => {};
-            pub._findExistingCheckpointAnchor = async () => null;
+            pub.recordAnchorIntent   = async () => {};
+            pub.withdrawAnchorIntent = async () => {};
+            pub.findExistingCheckpointAnchor = async () => null;
             // A MET attestation round. This case is about the UTXO deferral downstream of
             // the round; without this the round resolves its own capability set, comes back
             // degraded, and the bundle now defers there instead of reaching the wallet path
             // under test.
-            pub._runPublisherAttestationRound = async () => ({
+            pub.runPublisherAttestationRound = async () => ({
                 met: true, sigs: [{ pubkey: me, sig: 'bb'.repeat(64) }], publisher: me });
             let errors = [];
             let origErr = console.error;

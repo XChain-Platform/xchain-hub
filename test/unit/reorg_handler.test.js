@@ -134,17 +134,17 @@ describe('ReorgHandler', function () {
 
     describe('_hashesWellFormed()', function () {
         it('accepts two distinct 64-hex hashes', function () {
-            expect(rh._hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
+            expect(rh.hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
         });
 
         it('rejects identical hashes (not a reorg)', function () {
-            expect(rh._hashesWellFormed(OLD_HASH, OLD_HASH)).to.be.false;
+            expect(rh.hashesWellFormed(OLD_HASH, OLD_HASH)).to.be.false;
         });
 
         it('rejects non-hex / wrong-length / missing values', function () {
-            expect(rh._hashesWellFormed('xyz', NEW_HASH)).to.be.false;
-            expect(rh._hashesWellFormed(OLD_HASH, 'b'.repeat(63))).to.be.false;
-            expect(rh._hashesWellFormed(undefined, NEW_HASH)).to.be.false;
+            expect(rh.hashesWellFormed('xyz', NEW_HASH)).to.be.false;
+            expect(rh.hashesWellFormed(OLD_HASH, 'b'.repeat(63))).to.be.false;
+            expect(rh.hashesWellFormed(undefined, NEW_HASH)).to.be.false;
         });
     });
 

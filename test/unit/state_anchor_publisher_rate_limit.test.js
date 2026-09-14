@@ -53,7 +53,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls === 1) throw rateLimitErr(60);
             return { txid: 'tx-ok' };
         };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(res.txid).to.equal('tx-ok');
         expect(pub.waits).to.deep.equal([60000]);
     });
@@ -66,7 +66,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls === 1) throw rateLimitErr(1);
             return { txid: 'tx-ok' };
         };
-        await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(pub.waits).to.deep.equal([1000]);
     });
 
@@ -79,7 +79,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls === 1) throw rateLimitErr(3600);
             return { txid: 'tx-ok' };
         };
-        await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(pub.waits).to.deep.equal([60000]);
     });
 
@@ -92,7 +92,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls === 1) throw rateLimitErr(when);
             return { txid: 'tx-ok' };
         };
-        await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(pub.waits).to.have.lengthOf(1);
         expect(pub.waits[0]).to.be.within(25000, 30000);
     });
@@ -105,7 +105,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls === 1) throw rateLimitErr(undefined);
             return { txid: 'tx-ok' };
         };
-        await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(pub.waits).to.deep.equal([2500]);
     });
 
@@ -120,7 +120,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls <= 5) throw new Error('no UTXOs available for Dpub1');
             return { txid: 'tx-ok' };
         };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(res.txid).to.equal('tx-ok');
         expect(calls).to.equal(6);
         expect(pub.waits).to.deep.equal([60000, 2500, 2500, 2500, 2500]);
@@ -132,7 +132,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
         let calls = 0;
         const broadcaster = async () => { calls++; throw rateLimitErr(60); };
         let caught = null;
-        try { await pub._broadcastWithRetry(broadcaster, 'P', 5); }
+        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
         catch (e) { caught = e; }
         expect(caught).to.be.an('error');
         expect(caught.rpcCode).to.equal(-32029);
@@ -148,7 +148,7 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
             if (calls < 3) throw new Error('no UTXOs available for Dpub1');
             return { txid: 'tx-ok' };
         };
-        const res = await pub._broadcastWithRetry(broadcaster, 'P', 5);
+        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
         expect(res.txid).to.equal('tx-ok');
         expect(pub.waits).to.deep.equal([2500, 2500]);
     });
@@ -158,6 +158,6 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
         const e = new Error('Encoder RPC error: insufficient funds');
         e.rpcCode  = -32010;
         e.response = { status: 400, headers: { 'retry-after': '60' } };
-        expect(pub._rateLimitWaitMs(e)).to.equal(null);
+        expect(pub.rateLimitWaitMs(e)).to.equal(null);
     });
 });

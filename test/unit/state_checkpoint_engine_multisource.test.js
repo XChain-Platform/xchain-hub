@@ -226,13 +226,13 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
                 { snapshot_block: 970000, capability: 'oracle_publish', signing_pubkey: PK, amount: '100', source: 'srcB' }
             ]
         };
-        let ok = await pub._verifyArchiveAgainstLocal(archive);
+        let ok = await pub.verifyArchiveAgainstLocal(archive);
         expect(ok, 'multi-source archive snapshot group verifies').to.be.true;
 
         // Control: a genuinely divergent archived set (a source we did not resolve) is
         // still rejected, proving the widened key did not weaken the check.
         archive.capability_snapshots[1].source = 'srcWRONG';
-        let bad = await pub._verifyArchiveAgainstLocal(archive);
+        let bad = await pub.verifyArchiveAgainstLocal(archive);
         expect(bad, 'a mismatched source is still rejected').to.be.false;
     });
 

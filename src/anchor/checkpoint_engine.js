@@ -249,7 +249,7 @@ class StateCheckpointEngine extends EventEmitter {
     // the records that are. PeerManager announces the state once per set change.
     // Reads the gate defensively: a peer manager that predates it, or none at all,
     // leaves the old behaviour in place.
-    _observerHold(){
+    observerHold(){
         let pm = this.peerManager;
         let held = !!(pm && typeof pm.authoringHeld === 'function' && pm.authoringHeld());
         this._observerIdle = held;
@@ -263,7 +263,7 @@ class StateCheckpointEngine extends EventEmitter {
     // frozen height can arrive as 14671 on one tick and '14671' on the next. A
     // strict === there would restart the counter every tick and leave the meter
     // permanently at 1, which is precisely the silent failure it exists to catch.
-    _noteNotMySlot(btcBlock){
+    noteNotMySlot(btcBlock){
         let block = Number(btcBlock);
         if(this._notMySlotBlock === block){
             this._notMySlotTicks++;
@@ -274,7 +274,7 @@ class StateCheckpointEngine extends EventEmitter {
         return this._notMySlotTicks >= this._frozenTipTicks;
     }
 
-    _clearNotMySlot(){
+    clearNotMySlot(){
         this._notMySlotBlock = null;
         this._notMySlotTicks = 0;
     }
@@ -282,7 +282,7 @@ class StateCheckpointEngine extends EventEmitter {
     // Record (and throttle-log) a cadence round this hub could not lead. `block` is
     // the BTC snapshot block the round would have used, or null when we could not
     // even resolve one.
-    _noteCadenceStall(block, reason){
+    noteCadenceStall(block, reason){
         this._cadenceStalls++;
         this._cadenceStallReason = reason;
         this._cadenceStallBlock  = (block == null ? null : Number(block));
@@ -308,7 +308,7 @@ class StateCheckpointEngine extends EventEmitter {
 
     // A round we led (or a cadence that simply is not due yet) clears the stall, so
     // getcheckpointstats reports a live reason rather than a stale one.
-    _clearCadenceStall(){
+    clearCadenceStall(){
         this._cadenceStallReason   = null;
         this._cadenceStallBlock    = null;
         this._cadenceStallLoggedAt = 0;
@@ -437,15 +437,15 @@ class StateCheckpointEngine extends EventEmitter {
     async _tick(){
         if(this._ticking) return;
         // Before any indexer round trip: an observer's round cannot be signed.
-        if(this._observerHold()) return;
+        if(this.observerHold()) return;
         this._ticking = true;
         try {
             let btcBlock = await this._resolveSnapshotBlock();
-            if(btcBlock == null){ this._noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
+            if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
                 // On schedule: the cadence simply has not come round yet.
-                this._clearCadenceStall();
-                this._clearNotMySlot();
+                this.clearCadenceStall();
+                this.clearNotMySlot();
                 return;
             }
 
@@ -464,7 +464,7 @@ class StateCheckpointEngine extends EventEmitter {
             // against any capability snapshot. (Single-operator regtest seeds a
             // local validator via XDEX_SEED_LOCAL_VALIDATOR, so it still runs.)
             if(pubkeys.length === 0){
-                this._noteCadenceStall(btcBlock, 'no qualified oracle_publish validator set (capability self-test failing, ' +
+                this.noteCadenceStall(btcBlock, 'no qualified oracle_publish validator set (capability self-test failing, ' +
                                                  'not enabled, or no snapshot rows)');
                 return;
             }
@@ -473,11 +473,11 @@ class StateCheckpointEngine extends EventEmitter {
             // the sole oracle_publish validator sign an unverifiable checkpoint.
             // (Size-1 cadence is btcBlock % 1 === 0 === rank, so the sole
             // validator still checkpoints every cadence block.)
-            if(!this.identity){ this._noteCadenceStall(btcBlock, 'no validator identity (cannot sign checkpoints)'); return; }
+            if(!this.identity){ this.noteCadenceStall(btcBlock, 'no validator identity (cannot sign checkpoints)'); return; }
             let me = this.identity.getPubkeyHex().toLowerCase();
             let myRank = pubkeys.indexOf(me);
             if(myRank < 0){                                     // not an oracle_publish validator
-                this._noteCadenceStall(btcBlock, 'this hub is not in the oracle_publish validator set (' +
+                this.noteCadenceStall(btcBlock, 'this hub is not in the oracle_publish validator set (' +
                                                  pubkeys.length + ' member(s))');
                 return;
             }
@@ -488,19 +488,19 @@ class StateCheckpointEngine extends EventEmitter {
             // constant that is not our rank, forever), so K consecutive not-my-slot
             // ticks at the same btcBlock are metered as a stall.
             if(myRank !== (btcBlock % pubkeys.length)){
-                if(this._noteNotMySlot(btcBlock)){
-                    this._noteCadenceStall(btcBlock, 'BTC snapshot block frozen at ' + btcBlock + ' for ' +
+                if(this.noteNotMySlot(btcBlock)){
+                    this.noteCadenceStall(btcBlock, 'BTC snapshot block frozen at ' + btcBlock + ' for ' +
                         this._notMySlotTicks + ' consecutive ticks while cadence slot ' + (btcBlock % pubkeys.length) +
                         ' is not this hub\'s rank ' + myRank + ' of ' + pubkeys.length +
                         ' (leader election cannot rotate until the BTC tip advances)');
                 } else {
                     // A moving tip that merely rotated past us clears any earlier
                     // frozen-tip reason so getcheckpointstats stays live.
-                    if(this._notMySlotTicks === 1) this._clearCadenceStall();
+                    if(this._notMySlotTicks === 1) this.clearCadenceStall();
                 }
                 return;
             }
-            this._clearNotMySlot();
+            this.clearNotMySlot();
 
             // We are the cadence leader (or a single-node set): one round per chain.
             // Mirror the capability snapshot BEFORE the latch moves. This call sits
@@ -511,15 +511,15 @@ class StateCheckpointEngine extends EventEmitter {
             try {
                 await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
             } catch(e){
-                this._noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
+                this.noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
                 return;
             }
             // The latch advances even on per-chain failure; the next cadence retries.
-            this._clearCadenceStall();
+            this.clearCadenceStall();
             this._lastCheckpointBtcBlock = btcBlock;
             for(let chain of this.chains){
                 if(!this.indexers[chain].url) continue;
-                try { await this._runRound(chain, btcBlock, validators); }
+                try { await this.runRound(chain, btcBlock, validators); }
                 catch(e){ console.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message)); }
             }
         } finally {
@@ -527,7 +527,7 @@ class StateCheckpointEngine extends EventEmitter {
         }
     }
 
-    async _runRound(chain, snapshotBlock, validators){
+    async runRound(chain, snapshotBlock, validators){
         // Checkpoint the chain's tip minus a confirmation margin, so every peer's
         // indexer/replica has indexed the block and a shallow reorg can't race the round.
         let tip = await this._indexerCall(chain, 'getblockhashes', {});
@@ -577,10 +577,10 @@ class StateCheckpointEngine extends EventEmitter {
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
-        this._assertCheckpointNetwork(cp, 'propose');
+        this.assertCheckpointNetwork(cp, 'propose');
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
-        if(!this._claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical)) return;
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
@@ -645,7 +645,7 @@ class StateCheckpointEngine extends EventEmitter {
     // indexer before signing (never sign state we don't hold ourselves).
     async _handleSignReq(envelope){
         let d  = envelope.data;
-        let cp = this._normalizeCheckpoint(d.checkpoint);
+        let cp = this.normalizeCheckpoint(d.checkpoint);
         if(!cp || !this.identity) return;
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let sender   = String(d.sig_pubkey || '').toLowerCase();
@@ -661,7 +661,7 @@ class StateCheckpointEngine extends EventEmitter {
         // resolve and the validator resolve, like the persist path, so a cross-network
         // record costs no lookups. A throw is caught by the XCHK_SIGN_REQ .catch in
         // _handleMessage; an unscoped hub (this.network === '') is warned, not refused.
-        this._assertCheckpointNetwork(cp, 'co-sign');
+        this.assertCheckpointNetwork(cp, 'co-sign');
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
         // the validator set AND every flag-day gate below, but is a wire field the
@@ -692,7 +692,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
-        let maxSeq = await this._getMaxCheckpointSeq(cp.chain, cp.network);
+        let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
         if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
 
         // Independent confirmation from our own indexer/replica.
@@ -736,7 +736,7 @@ class StateCheckpointEngine extends EventEmitter {
         // two payloads at one sequence; every check above has already passed for BOTH of
         // them. Last thing before the co-signature leaves the hub, so a proposal this hub
         // would have declined anyway never claims the sequence.
-        if(!this._claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical)) return;
 
         this.peerManager.broadcast(XCHK_SIGN, {
             id: this._roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
@@ -777,7 +777,7 @@ class StateCheckpointEngine extends EventEmitter {
     // streams from each hub to ITS OWN indexer subscribers, so everyone writes).
     async handleFinalized(envelope){
         let d  = envelope.data;
-        let cp = this._normalizeCheckpoint(d.checkpoint);
+        let cp = this.normalizeCheckpoint(d.checkpoint);
         if(!cp || !Array.isArray(d.signatures)){
             this._malformedFinalized++;
             console.warn('StateCheckpointEngine: dropped malformed FINALIZED broadcast (missing checkpoint or signatures array)');
@@ -837,7 +837,7 @@ class StateCheckpointEngine extends EventEmitter {
         // under a different rule than the anchor publisher (and the sender) will. Checked
         // first so a cross-network checkpoint costs no validator resolution and cannot
         // slip past an earlier early-return.
-        this._assertCheckpointNetwork(cp, 'accept-finalized');
+        this.assertCheckpointNetwork(cp, 'accept-finalized');
         // EVERY hub persists the oracle_publish snapshot for the checkpoint's
         // snapshot_block, not just the cadence leader (_tick): ANCHOR verifiers
         // check the checkpoint's signatures against capability_snapshots in
@@ -885,8 +885,8 @@ class StateCheckpointEngine extends EventEmitter {
         // through it is rootless on one side only and would read every ordinary
         // post-flag-day re-delivery as a conflict. The roots are themselves derived from
         // the block, so the four chained hashes plus block_index settle identity.
-        let seated = await this._seatedCheckpointAtSeq(cp);
-        if(seated && StateCheckpointEngine._checkpointRowDiffers(seated, cp)){
+        let seated = await this.seatedCheckpointAtSeq(cp);
+        if(seated && StateCheckpointEngine.checkpointRowDiffers(seated, cp)){
             this._seqConflicts++;
             console.error('StateCheckpointEngine: CONFLICTING checkpoint at ' + cp.chain + '/' + cp.network +
                           ' seq ' + cp.checkpoint_seq + ': we hold block ' + Number(seated.block_index) +
@@ -928,7 +928,7 @@ class StateCheckpointEngine extends EventEmitter {
     // RAW (ungated) v0 checkpoint canonical: the bare pipe-join. The v1 archive
     // (StateAnchorPublisher._archiveCanonical) nests THIS, not the gated form, so the
     // EQUIV header is applied exactly once around the whole archive content.
-    static _rawCanonicalCheckpoint(cp){
+    static rawCanonicalCheckpoint(cp){
         // The bare v0 checkpoint canonical, WITHOUT the SPV roots: the v1 archive
         // (_archiveCanonical) nests THIS and must stay byte-identical to its pre-SPV
         // shape, so the root-append lives in canonicalCheckpoint (checkpoint family
@@ -941,7 +941,7 @@ class StateCheckpointEngine extends EventEmitter {
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
     // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
     // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
-    static _checkpointRootSuffix(cp){
+    static checkpointRootSuffix(cp){
         if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
         // refuses to sign a checkpoint that lacks them (_runRound throws), so for every
@@ -962,7 +962,7 @@ class StateCheckpointEngine extends EventEmitter {
         // Checkpoint family (v0/v3): the bare canonical PLUS the SPV root suffix
         // (post-flag-day), appended to the RAW string BEFORE the EQUIV wrap. The v1
         // archive uses _archiveCanonical (rootless) instead, so archives are untouched.
-        let raw = StateCheckpointEngine._rawCanonicalCheckpoint(cp) + StateCheckpointEngine._checkpointRootSuffix(cp);
+        let raw = StateCheckpointEngine.rawCanonicalCheckpoint(cp) + StateCheckpointEngine.checkpointRootSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
@@ -983,7 +983,7 @@ class StateCheckpointEngine extends EventEmitter {
     // peer, and the signatures already collected on the first payload can still be
     // assembled by anyone. The cost is that one round; the cadence latch has already
     // advanced, so the next snapshot_block checkpoints normally.
-    _claimSeqSignature(cp, canonical){
+    claimSeqSignature(cp, canonical){
         let key  = cp.chain + '|' + cp.network + '|' + Number(cp.checkpoint_seq);
         let held = this._signedAtSeq.get(key);
         if(held !== undefined && held !== canonical){
@@ -1003,7 +1003,7 @@ class StateCheckpointEngine extends EventEmitter {
         return true;
     }
 
-    _normalizeCheckpoint(raw){
+    normalizeCheckpoint(raw){
         if(!raw || !raw.chain || !raw.network || raw.block_index == null) return null;
         let chain = String(raw.chain).toUpperCase();
         if(!ALLOWED_CHAINS.includes(chain)) return null;
@@ -1079,7 +1079,7 @@ class StateCheckpointEngine extends EventEmitter {
     // rail. It is warned about loudly here but NOT refused, because refusing would take
     // every unscoped deployment offline at once, which is a far larger behavioural
     // change than this finding asks for and is not what it is about.
-    _assertCheckpointNetwork(cp, context){
+    assertCheckpointNetwork(cp, context){
         let recordNet = (cp && cp.network != null) ? String(cp.network) : '';
         if(recordNet === '') return;
         if(this.network === ''){
@@ -1106,7 +1106,7 @@ class StateCheckpointEngine extends EventEmitter {
                 cp.state_root_version == null || cp.block_merkle_version == null);
     }
 
-    async _getMaxCheckpointSeq(chain, network){
+    async getMaxCheckpointSeq(chain, network){
         let r = await this.db.getStateCheckpointsMaxCheckpointSeq(chain, network);
         return (r.length > 0 && r[0].max_seq != null) ? Number(r[0].max_seq) : null;
     }
@@ -1120,7 +1120,7 @@ class StateCheckpointEngine extends EventEmitter {
     // refusal to persist quorum-signed checkpoints, which is strictly worse than the
     // divergence it is watching for (StateCheckpointEngine.broadcast-gap pins that a DB
     // fault on this table must still leave the commit, the latch and the emit intact).
-    async _seatedCheckpointAtSeq(cp){
+    async seatedCheckpointAtSeq(cp){
         let r;
         try {
             r = await this.db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(cp.chain, cp.network, Number(cp.checkpoint_seq));
@@ -1138,7 +1138,7 @@ class StateCheckpointEngine extends EventEmitter {
     // roots are derived from that same block and are deliberately left out, so a NULL/''
     // normalization difference can never read a re-delivery as an equivocation. Hashes
     // compare case-insensitively (the driver's serialization need not match ours).
-    static _checkpointRowDiffers(row, cp){
+    static checkpointRowDiffers(row, cp){
         // Not comparable is not a conflict. Every identity column is NOT NULL in
         // state_checkpoints, so a row missing one did not come from the table and reading
         // its absence as an equivocation would refuse a legitimate checkpoint.

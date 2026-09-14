@@ -121,16 +121,16 @@ describe('StateAnchorPublisher archive publication guard', () => {
         ]);
         pub.peerManager  = { broadcast(){} };
         pub.roundTimeoutMs = 60000;                 // the timer must not be what settles these
-        const cp = pub._cpFromRow(CP_ROW);
+        const cp = pub.cpFromRow(CP_ROW);
 
         // Record the displaced round's outcome rather than awaiting it: the whole point
         // is that before the fix it never arrives, so nothing may block on it.
         let firstOutcome = null;
-        const first = pub._runArchiveAttestationRound(cp, 11, me)
+        const first = pub.runArchiveAttestationRound(cp, 11, me)
             .then((v) => { firstOutcome = v; });
         // Let the first round install itself before the second displaces it.
         await new Promise((r) => setImmediate(r));
-        const second = pub._runArchiveAttestationRound(cp, 12, me);
+        const second = pub.runArchiveAttestationRound(cp, 12, me);
 
         await waitUntil(() => firstOutcome, { timeoutMs: 1000, label: 'the displaced round to settle' });
         expect(firstOutcome).to.deep.equal({ met: false, sigs: [] });

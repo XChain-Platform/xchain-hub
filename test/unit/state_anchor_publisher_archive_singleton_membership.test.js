@@ -144,15 +144,15 @@ describe('StateAnchorPublisher #7578 the on-chain-validity gate has no singleton
         pub.dogeAddress = 'Dpub1';
         pub.spendGuard  = { isPaused: () => false, reserve: () => ({ id: 1 }), commit(){}, release(){},
                             noteBlocked: () => '' };
-        pub._getLiveArchiveIntent  = async () => null;
+        pub.getLiveArchiveIntent  = async () => null;
         pub._recordArchiveIntent   = async () => {};
-        pub._markArchiveSent       = async () => {};
-        pub._withdrawArchiveIntent = async () => {};
-        pub._settleArchiveIntent   = async () => {};
-        pub._findExistingArchiveAnchor = async () => null;
-        pub._findExistingArchiveChunk  = async () => null;
-        pub._backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
-        pub._recordReward  = () => {};
+        pub.markArchiveSent       = async () => {};
+        pub.withdrawArchiveIntent = async () => {};
+        pub.settleArchiveIntent   = async () => {};
+        pub.findExistingArchiveAnchor = async () => null;
+        pub.findExistingArchiveChunk  = async () => null;
+        pub.backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
+        pub.recordReward  = () => {};
         return { pub, sent, backfills };
     }
 

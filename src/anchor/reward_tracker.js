@@ -118,8 +118,8 @@ class RewardTracker {
     // second caller reads the first's row and the deterministic collapse fires.
     async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
-        return this._withAnchorLock(String(rewardType) + '|' + Number(roundNumber),
-            () => this._recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork));
+        return this.withAnchorLock(String(rewardType) + '|' + Number(roundNumber),
+            () => this.recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork));
     }
 
     // Serialize `fn` against every other call sharing `key` by chaining onto the
@@ -131,7 +131,7 @@ class RewardTracker {
     // cannot grow without bound on a long-lived hub. Scope note: this is an
     // IN-PROCESS lock, correct because each hub owns its own DB; a shared-DB
     // topology would need DB-level serialization instead.
-    async _withAnchorLock(key, fn) {
+    async withAnchorLock(key, fn) {
         if (!this._anchorLocks) this._anchorLocks = new Map();
         let prev   = this._anchorLocks.get(key) || Promise.resolve();
         let result = prev.then(fn, fn);
@@ -141,7 +141,7 @@ class RewardTracker {
         finally { if (this._anchorLocks.get(key) === tail) this._anchorLocks.delete(key); }
     }
 
-    async _recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
+    async recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         let lcPubkey = pubkey.toLowerCase();
 
         // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
@@ -234,7 +234,7 @@ class RewardTracker {
     // consensus co-sign decision, so an env-only resolution here made two hubs with
     // identical DB config disagree on archive contents. Falls back to the
     // constructor-captured env value if the hub/resolver is unavailable.
-    async _getBtcIndexerUrl() {
+    async getBtcIndexerUrl() {
         if (this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function') {
             try {
                 let url = await this.hub._resolveBtcIndexerUrl();
@@ -247,7 +247,7 @@ class RewardTracker {
     }
 
     async resolveSourceByPubkey(pubkey, blockIndex) {
-        let indexerUrl = await this._getBtcIndexerUrl();
+        let indexerUrl = await this.getBtcIndexerUrl();
         if (!indexerUrl) return null;
         let body = {
             jsonrpc: '2.0',

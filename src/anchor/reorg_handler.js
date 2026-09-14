@@ -127,7 +127,7 @@ class ReorgHandler extends EventEmitter {
     // The canonical reorgId for an observation. Honest reporters build it from these exact
     // fields (see reportReorg), so an inbound ALERT/PREPARE whose wire reorgId differs is
     // either malformed or an attempt to mint many distinct rounds from one observation.
-    _canonicalReorgId(chain, reorgHeight, timestamp) {
+    canonicalReorgId(chain, reorgHeight, timestamp) {
         return chain + ':' + reorgHeight + ':' + timestamp;
     }
 
@@ -137,7 +137,7 @@ class ReorgHandler extends EventEmitter {
     // slightly across hubs, but the window is far wider than any clock skew and real
     // reorg timestamps are minutes old, so honest hubs never disagree at the boundary;
     // a Byzantine timestamp near the edge only fails to reach quorum (fail-safe).
-    _timestampInBounds(timestamp) {
+    timestampInBounds(timestamp) {
         let t = parseInt(timestamp);
         if (!Number.isFinite(t) || t < 0) return false;
         let now = Date.now();
@@ -156,14 +156,14 @@ class ReorgHandler extends EventEmitter {
     // indexer without block_time) passes: legacy timestamp-bound behavior applies.
     // The opposite direction (timestamp AFTER block_time) is always legitimate:
     // detection lags the reorg by up to the lookback window.
-    _timestampConsistentWithBlockTime(timestamp, blockTimeMs) {
+    timestampConsistentWithBlockTime(timestamp, blockTimeMs) {
         if (!Number.isFinite(blockTimeMs)) return true;
         return parseInt(timestamp) >= blockTimeMs - this.timestampSkewToleranceMs;
     }
 
     // Both hashes must be 64-hex and DIFFERENT: a "reorg" whose old and new hashes
     // match is by definition not a reorg. Callers pass lowercased values.
-    _hashesWellFormed(oldHash, newHash) {
+    hashesWellFormed(oldHash, newHash) {
         return typeof oldHash === 'string' && typeof newHash === 'string'
             && BLOCK_HASH_RE.test(oldHash) && BLOCK_HASH_RE.test(newHash)
             && oldHash !== newHash;
@@ -243,11 +243,11 @@ class ReorgHandler extends EventEmitter {
         // Validate the observed hash pair
         oldHash = String(oldHash || '').toLowerCase();
         newHash = String(newHash || '').toLowerCase();
-        if (!this._hashesWellFormed(oldHash, newHash))
+        if (!this.hashesWellFormed(oldHash, newHash))
             throw new Error('oldHash and newHash must be distinct 64-hex block hashes ' +
                 '(the hash observed at reorgHeight before the reorg, and the one served now)');
 
-        let reorgId = this._canonicalReorgId(chain, reorgHeight, timestamp);
+        let reorgId = this.canonicalReorgId(chain, reorgHeight, timestamp);
 
         // Already handled: this call is a no-op, so answer it BEFORE the rate limiter.
         // Re-reporting a reorg we have already rolled back is idempotent by design and
@@ -274,7 +274,7 @@ class ReorgHandler extends EventEmitter {
             throw new Error('own indexer does not confirm this reorg ' +
                 '(node must serve newHash at reorgHeight, within depth bounds, on the federation network)');
         let observedBlockTimeMs = (verified && Number.isFinite(verified.blockTimeMs)) ? verified.blockTimeMs : null;
-        if (!this._timestampConsistentWithBlockTime(t, observedBlockTimeMs))
+        if (!this.timestampConsistentWithBlockTime(t, observedBlockTimeMs))
             throw new Error('timestamp predates the reorged block\'s own block_time at reorgHeight ' +
                 '(a reorg cannot be observed before the block existed)');
 
@@ -354,7 +354,7 @@ class ReorgHandler extends EventEmitter {
         // validator could re-broadcast the same real (height,newHash) under endless reorgId
         // strings, each creating a fresh round + PREPARE fan-out. Honest reporters always send
         // this exact form (reportReorg), so legitimate ALERTs are unaffected.
-        if (reorgId !== this._canonicalReorgId(chain, reorgHeight, timestamp)) return;
+        if (reorgId !== this.canonicalReorgId(chain, reorgHeight, timestamp)) return;
         if (this.processed.has(reorgId)) return;
         if (this.pendingReorgs.has(reorgId)) return;
         // Abstain when already at the concurrent-round cap (a later ALERT retries).
@@ -363,11 +363,11 @@ class ReorgHandler extends EventEmitter {
         // Refuse to even start consensus on an out-of-window reorg. An honest majority
         // applying this bound denies a Byzantine reporter the quorum to drive a rollback
         // that reaches back arbitrarily far (blast-radius bound).
-        if (!this._timestampInBounds(timestamp)) return;
+        if (!this.timestampInBounds(timestamp)) return;
 
         oldHash = String(oldHash || '').toLowerCase();
         newHash = String(newHash || '').toLowerCase();
-        if (!this._hashesWellFormed(oldHash, newHash)) return;
+        if (!this.hashesWellFormed(oldHash, newHash)) return;
 
         // Independent observation: co-sign only what our own indexer confirms.
         let verified = await this._verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
@@ -375,7 +375,7 @@ class ReorgHandler extends EventEmitter {
         let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
         // Abstain from a round whose timestamp predates the reorged block itself
         // (over-rollback attempt); an honest majority abstaining denies it quorum.
-        if (!this._timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
+        if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
 
         // Reentrancy (the await above yields): another ALERT/PREPARE for the same
         // reorg may have created the round meanwhile.
@@ -456,16 +456,16 @@ class ReorgHandler extends EventEmitter {
         // creation path here cannot be driven with attacker-minted reorgId strings
         // (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
         if (!chain || !reorgHeight || !timestamp) return;
-        if (reorgId !== this._canonicalReorgId(chain, reorgHeight, timestamp)) return;
+        if (reorgId !== this.canonicalReorgId(chain, reorgHeight, timestamp)) return;
 
         // A follower must not co-sign a reorg it would not itself accept: apply the same
         // blast-radius bound as _handleAlert so a Byzantine leader can't gather quorum
         // from followers that skipped the ALERT. PREPARE carries the timestamp.
-        if (!this._timestampInBounds(timestamp)) return;
+        if (!this.timestampInBounds(timestamp)) return;
 
         oldHash = String(oldHash || '').toLowerCase();
         newHash = String(newHash || '').toLowerCase();
-        if (!this._hashesWellFormed(oldHash, newHash)) return;
+        if (!this.hashesWellFormed(oldHash, newHash)) return;
 
         // The digest is fully derivable from the PREPARE's own fields, so never
         // trust the wire value: a mismatch is either corruption or an attempt to
@@ -488,7 +488,7 @@ class ReorgHandler extends EventEmitter {
             let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
             // Same over-rollback abstain as _handleAlert: never co-sign a round
             // whose timestamp predates the reorged block's own block_time.
-            if (!this._timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
+            if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
             if (this.pendingReorgs.has(reorgId)) {
                 // Round appeared while we were verifying; fall through to record.
             } else {
@@ -701,7 +701,7 @@ class ReorgHandler extends EventEmitter {
         // otherwise. Liveness holds: an indexer that serves newHash at that
         // height necessarily processed the reorg, so its decoder recorded the
         // orphaned hashes in the same pass.
-        if (!(await this._confirmOldHashOrphaned(chain, reorgHeight, oldHash))) return false;
+        if (!(await this.confirmOldHashOrphaned(chain, reorgHeight, oldHash))) return false;
 
         // block_time (unix seconds) of OUR OWN node's block at reorgHeight: the
         // consensus-uniform rollback anchor (every hub reads its own copy of the
@@ -718,7 +718,7 @@ class ReorgHandler extends EventEmitter {
     // a block there, while a recorded-but-different hash is refused. Any error
     // shape (RPC error, indexer predating getreorghistory, malformed response)
     // is an abstain, never a throw.
-    async _confirmOldHashOrphaned(chain, reorgHeight, oldHash) {
+    async confirmOldHashOrphaned(chain, reorgHeight, oldHash) {
         let hist;
         try {
             hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });

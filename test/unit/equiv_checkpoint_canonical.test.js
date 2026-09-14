@@ -104,7 +104,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON);
         });
         it('_rawCanonicalCheckpoint is always the bare bytes (used nested by the v1 archive)', function () {
-            expect(SCE._rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
+            expect(SCE.rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
         });
     });
 
@@ -299,7 +299,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         const ARCHIVE = { batch_seq: 3, count: 10, crc: 'cc', total_chunks: 2 };
 
         function hubCanonical(cp) {
-            return SAP.prototype._archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
+            return SAP.prototype.archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
                 ARCHIVE.count, ARCHIVE.crc, ARCHIVE.total_chunks);
         }
         function indexerCanonical(cp, format) {

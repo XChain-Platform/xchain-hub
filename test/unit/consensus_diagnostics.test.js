@@ -274,7 +274,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         engine._cadenceStallLogMs = 600000;
         engine.chains = ['BTC', 'LTC', 'DOGE'];
 
-        for (let i = 0; i < 5; i++) engine._noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
+        for (let i = 0; i < 5; i++) engine.noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
 
         const records = sink.lines.filter((l) => l.includes('CHECKPOINT_STALLED'));
         expect(records).to.have.lengthOf(5);
@@ -290,7 +290,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         engine._cadenceStallLoggedAt = Date.now();
         engine._cadenceStallLogMs = 600000;
 
-        engine._noteCadenceStall(null, 'no snapshot rows');
+        engine.noteCadenceStall(null, 'no snapshot rows');
         const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
         expect(rec).to.include('reason="no snapshot rows"');
         expect(rec).to.not.include('block=');
@@ -307,7 +307,7 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         engine._cadenceStallLogMs = 600000;
         engine.chains = ['LTC', 'DOGE'];
 
-        engine._noteCadenceStall(4855000, 'no validator identity (cannot sign checkpoints)');
+        engine.noteCadenceStall(4855000, 'no validator identity (cannot sign checkpoints)');
 
         const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
         expect(rec).to.include('chains=LTC/DOGE');

@@ -79,7 +79,7 @@ function buildPub() {
 // hashOrder and pinning nothing.
 function archiveRound(wantLeader) {
     let { pub, me } = buildPub();
-    let key = pub._archiveElectionKey(pub._cpFromRow(CP_ROW), BATCH_SEQ);
+    let key = pub._archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
     let peer = null;
     for (let i = 0; i < 256 && peer === null; i++) {
         let candidate = String(20 + (i % 80)).repeat(32).slice(0, 64);
@@ -171,7 +171,7 @@ describe('StateAnchorPublisher: failover wake', function () {
             // The control: the same unlocked backup is only ever asked at all
             // because something re-ran flush. Rank is evaluated nowhere else.
             let { pub, me, peer } = archiveRound(false);
-            let key   = pub._archiveElectionKey(pub._cpFromRow(CP_ROW), BATCH_SEQ);
+            let key   = pub._archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
             let order = StateAnchorPublisher.hashOrder(key, [me, peer]);
             expect(order.indexOf(me), 'this hub is the backup').to.equal(1);
             expect(pub._rankUnlocked(order, me, 0), 'locked at the anchor point').to.equal(false);

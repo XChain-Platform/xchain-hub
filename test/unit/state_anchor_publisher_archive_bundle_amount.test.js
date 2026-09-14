@@ -73,7 +73,7 @@ const verify = async (pub, reward) => {
     let set   = await pub._resolveCapabilitySet('oracle_publish', BLOCK, NETWORK);
     let snaps = set.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
-    return pub._verifyArchiveAgainstLocal({
+    return pub.verifyArchiveAgainstLocal({
         network: NETWORK, matches: [], calls: [], rewards: [reward], capability_snapshots: snaps
     });
 };
