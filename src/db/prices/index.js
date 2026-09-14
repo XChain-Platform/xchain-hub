@@ -16,7 +16,7 @@
  *
  * Owns src/sql/price_snapshots.sql, the finalized price snapshots, and exports the
  * whole price family: the src/sql/price_ingest_watermarks.sql queries live in
- * prices/price_ingest_watermarks.js and are spread into the exported mixin below.
+ * price_ingest_watermarks.js beside this file and are spread into the mixin below.
  * src/db/index.js installs that one object on Database.prototype, so callers keep
  * writing db.<method>() and never see which file the query lives in.
  *
@@ -26,13 +26,13 @@
  *
  ********************************************************************/
 
-const priceIngestWatermarks = require('./prices/price_ingest_watermarks.js');
+const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so
 // this module still exports ONE price-family mixin: src/db/index.js installs it
 // unchanged, and both db_prototype_install.test.js and the test/helpers/mockHub
-// scanner, which read the exported object of each <family>.js beside index.js, still
-// see every price method this family owns.
+// scanner, which read the exported object of each <family>.js and <family>/index.js
+// under src/db, still see every price method this family owns.
 module.exports = Object.assign({}, priceIngestWatermarks, {
 
     // Reads rows from price_snapshots.

@@ -33,8 +33,11 @@ const Database     = require('../../src/db');
  */
 const DB_METHODS = {};
 const DB_DIR = path.join(__dirname, '..', '..', 'src', 'db');
-for (const f of fs.readdirSync(DB_DIR)) {
-    if (f === 'index.js' || !f.endsWith('.js')) continue;
+// A family that grew into a directory is read through its index.js; a directory
+// without one (schema/) is the class's own plumbing and stays out of the double.
+for (const e of fs.readdirSync(DB_DIR, { withFileTypes: true })) {
+    const f = e.isDirectory() ? path.join(e.name, 'index.js') : e.name;
+    if (f === 'index.js' || !f.endsWith('.js') || !fs.existsSync(path.join(DB_DIR, f))) continue;
     Object.assign(DB_METHODS, require(path.join(DB_DIR, f)));
 }
 delete DB_METHODS.doQuery;

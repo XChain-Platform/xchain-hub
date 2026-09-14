@@ -37,10 +37,14 @@ const Database = require('../../src/db');
 
 const DB_DIR = path.join(__dirname, '..', '..', 'src', 'db');
 
-// Every mixin file beside index.js, as { file: <name>.js, methods: [...] }.
+// Every mixin family under src/db, as { file, methods: [...] }: each <name>.js
+// beside index.js, and <name>/index.js for a family that grew into a directory.
+// A directory with no index.js (schema/) holds the class's own plumbing, not a
+// family, so it is left out.
 function readMixins(){
-    return fs.readdirSync(DB_DIR)
-        .filter(f => f.endsWith('.js') && f !== 'index.js')
+    return fs.readdirSync(DB_DIR, { withFileTypes: true })
+        .map(e => e.isDirectory() ? path.join(e.name, 'index.js') : e.name)
+        .filter(f => f.endsWith('.js') && f !== 'index.js' && fs.existsSync(path.join(DB_DIR, f)))
         .sort()
         .map(file => ({ file, methods: Object.keys(require(path.join(DB_DIR, file))) }));
 }

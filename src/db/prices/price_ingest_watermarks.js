@@ -17,7 +17,7 @@
  * Owns src/sql/price_ingest_watermarks.sql: the per-(network, source-chain) high
  * water mark that decides whether an incoming price push is a stale replay of a
  * rolled-back action. The price SNAPSHOT queries are the other half of the price
- * rail and stay in src/db/prices.js, which spreads these two methods into the
+ * rail and stay in prices/index.js, which spreads these two methods into the
  * mixin it exports, so src/db/index.js installs them on Database.prototype in one
  * family exactly as before and every caller keeps writing db.<method>().
  *

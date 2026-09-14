@@ -74,7 +74,7 @@ const governanceMixin          = require('./governance.js');
 const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
 const policySnapshotsMixin     = require('./policy_snapshots.js');
-const pricesMixin              = require('./prices.js');
+const pricesMixin              = require('./prices/index.js');
 const reorgAttestationsMixin   = require('./reorg_attestations.js');
 const slashProposalsMixin      = require('./slash_proposals.js');
 const stateCheckpointsMixin    = require('./state_checkpoints.js');
@@ -84,10 +84,10 @@ const validatorsMixin          = require('./validators.js');
 // The class's own plumbing, split out of this file by behaviour and installed the
 // same way, non-enumerably, by the same installMixins() below. These are NOT table
 // families: they are bring-up, the two migration-helper families and the step list
-// runMigrations() walks, so they live under schema/ rather than beside the family
-// files, where db_prototype_install.test.js and the test/helpers/mockHub scanner
-// both read a bare `<family>.js` and would otherwise take a plumbing method for a
-// query. Bootstrap reads the driver, fs and the SQL directory off Database.io below
+// runMigrations() walks, so they live under schema/, which has no index.js, rather
+// than beside the families: db_prototype_install.test.js and the mockHub scanner
+// read every `<family>.js` and `<family>/index.js` and would take a plumbing method
+// for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
 // rather than requiring them, because it is the only one that reaches outside the
 // process and a require there would escape the unit suite's proxyquire stubs.
 const bootstrapMixin        = require('./schema/bootstrap.js');

@@ -28,7 +28,7 @@
  * module that was proxyquired, so a require in this file would hand these methods
  * the REAL driver and the REAL filesystem inside a suite that believes it stubbed
  * both. Reading them off the class keeps one binding per load of src/db/index.js,
- * whatever that load was given, which is the same reason db/prices.js reaches its
+ * whatever that load was given, which is the same reason db/prices/index.js reaches its
  * fence normalizer through this.constructor.
  *
  ********************************************************************/
