@@ -5262,7 +5262,7 @@ class StateAnchorPublisher {
     // double-spend regardless of whether it is deep enough to 'verify' yet.
     //
     // getanchoraction does NOT serve checkpoint anchors only. Its
-    // CHECKPOINT_VERSIONS set (indexer anchor-action-query.js: [0,1])
+    // CHECKPOINT_VERSIONS set (indexer anchor_action_query.js: [0,1])
     // carries the v1 ARCHIVE HEADS as well, and an archive head wraps a
     // checkpoint under the SAME (chain, network, block_index, checkpoint_seq)
     // identity it is keyed on, so an UNFILTERED lookup answers with whichever

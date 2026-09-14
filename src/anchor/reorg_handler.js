@@ -735,7 +735,7 @@ class ReorgHandler extends EventEmitter {
                 if (!b || Number(b.block_index) !== Number(reorgHeight)) continue;
                 // An unrecorded hash is NOT a confirmation. The indexer sets
                 // block_hash null deliberately so a caller can tell "no hash recorded"
-                // apart from "hash did not match" (reorg-history-query.js parseReorgEvent);
+                // apart from "hash did not match" (reorg_history_query.js parseReorgEvent);
                 // treating them alike fails OPEN and accepts ANY claimed oldHash at this
                 // height, which reduces the orphaned-hash check to "some reorg happened here" and
                 // re-opens the divergent-digest mode. Keep scanning: another event
