@@ -57,21 +57,21 @@ describe('PeerManager rate-limit keying (stress-sweep 2026-07-08)', function () 
         expect(pm.peerMsgCounts.get('203.0.113.9').count).to.equal(5);
     });
 
-    it('_checkMsgRate enforces the ceiling within a window', function () {
+    it('checkMsgRate enforces the ceiling within a window', function () {
         let pm = makePm();
-        expect(pm._checkMsgRate('peerA', 3)).to.equal(true);  // 1
-        expect(pm._checkMsgRate('peerA', 3)).to.equal(true);  // 2
-        expect(pm._checkMsgRate('peerA', 3)).to.equal(true);  // 3
-        expect(pm._checkMsgRate('peerA', 3)).to.equal(false); // 4 > 3
+        expect(pm.checkMsgRate('peerA', 3)).to.equal(true);  // 1
+        expect(pm.checkMsgRate('peerA', 3)).to.equal(true);  // 2
+        expect(pm.checkMsgRate('peerA', 3)).to.equal(true);  // 3
+        expect(pm.checkMsgRate('peerA', 3)).to.equal(false); // 4 > 3
     });
 
-    it('_checkMsgRate evicts the oldest bucket at the size cap (bounded growth)', function () {
+    it('checkMsgRate evicts the oldest bucket at the size cap (bounded growth)', function () {
         let pm = makePm();
         pm.dedupCacheMax = 3;
-        pm._checkMsgRate('a', 100);
-        pm._checkMsgRate('b', 100);
-        pm._checkMsgRate('c', 100);
-        pm._checkMsgRate('d', 100); // full -> evict oldest ('a')
+        pm.checkMsgRate('a', 100);
+        pm.checkMsgRate('b', 100);
+        pm.checkMsgRate('c', 100);
+        pm.checkMsgRate('d', 100); // full -> evict oldest ('a')
         expect(pm.peerMsgCounts.size).to.equal(3);
         expect(pm.peerMsgCounts.has('a')).to.equal(false);
         expect(pm.peerMsgCounts.has('d')).to.equal(true);

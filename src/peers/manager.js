@@ -417,7 +417,7 @@ class PeerManager extends EventEmitter {
             }
         }
         for (let addr of seeds) {
-            this._connectToPeer(addr);
+            this.connectToPeer(addr);
             // Record seed in DB (fire and forget). validator_id is the peer's own addr,
             // not ours; we are recording the peer, not ourselves.
             this.recordPeer(addr, addr, true);
@@ -556,14 +556,14 @@ class PeerManager extends EventEmitter {
         return status;
     }
 
-    _makeId() {
+    makeId() {
         return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }
 
     buildEnvelope(type, data) {
         let envelope = {
             type:      type,
-            id:        this._makeId(),
+            id:        this.makeId(),
             sender:    this.validatorAddr,
             timestamp: Date.now(),
             data:      data || {}
@@ -744,7 +744,7 @@ class PeerManager extends EventEmitter {
         // through a single bucket.
         let ratePeer = knownAddr || ws._peerAddr || ws._remoteIp || envelope.sender;
         let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
-        if (!this._checkMsgRate(ratePeer, rateCeil)) {
+        if (!this.checkMsgRate(ratePeer, rateCeil)) {
             logger.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
             notePeerReject({ peer: ratePeer, reason: 'rate_limit' });
             return;
@@ -888,7 +888,7 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    _connectToPeer(addr) {
+    connectToPeer(addr) {
         // Validate peer address format: optional ws:// or wss:// prefix, then host:port
         if (!/^(wss?:\/\/)?[\w.\-]+:\d+$/.test(addr)) {
             logger.warn('P2P: Invalid peer address format: ' + addr);
@@ -980,7 +980,7 @@ class PeerManager extends EventEmitter {
 
         peer.reconnectTimer = setTimeout(() => {
             peer.reconnectTimer = null;
-            this._connectToPeer(addr);
+            this.connectToPeer(addr);
         }, totalDelay);
 
         // Two ceilings, and the second is why this hub stops shouting. A peer that
@@ -1168,7 +1168,7 @@ class PeerManager extends EventEmitter {
         this.seenIds.set(id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
     }
 
-    _checkMsgRate(addr, limit) {
+    checkMsgRate(addr, limit) {
         let max = (limit != null) ? limit : this.msgRateLimit;
         let now = Date.now();
         let entry = this.peerMsgCounts.get(addr);

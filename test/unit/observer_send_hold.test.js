@@ -170,7 +170,7 @@ describe('observer hub does not author into rounds it cannot sign', function () 
         // Freeze the two fields that are fresh per envelope, so the comparison is
         // over the whole frame rather than a field-by-field paraphrase of it.
         sinon.stub(Date, 'now').returns(1757700000000);
-        sinon.stub(pm, '_makeId').returns('xc2418-fixed-id');
+        sinon.stub(pm, 'makeId').returns('xc2418-fixed-id');
 
         let expected = JSON.stringify(pm.buildEnvelope('ORACLE_PROPOSE', { round: 7, price: '1.25' }));
         let envelope = pm.broadcast('ORACLE_PROPOSE', { round: 7, price: '1.25' });

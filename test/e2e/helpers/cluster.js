@@ -396,7 +396,7 @@ function createCluster(nodeCount, overrides) {
                     if (!pm) continue;
                     for (let j = 0; j < nodeCount; j++) {
                         if (i === j) continue;
-                        pm._connectToPeer('127.0.0.1:' + nodes[j].p2pPort);
+                        pm.connectToPeer('127.0.0.1:' + nodes[j].p2pPort);
                     }
                 }
                 // Wait for connections to establish: poll actual peer

@@ -275,7 +275,7 @@ describe('Boundary: P2P Layer', function () {
         it('message IDs are unique', function () {
             let ids = new Set();
             for (let i = 0; i < 100; i++) {
-                ids.add(pm._makeId());
+                ids.add(pm.makeId());
             }
             expect(ids.size).to.equal(100);
         });

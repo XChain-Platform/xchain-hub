@@ -181,13 +181,13 @@ describe('Security Hardening', function () {
 
         it('rejects peer addresses without port', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
-            pm._connectToPeer('not-a-valid-addr');
+            pm.connectToPeer('not-a-valid-addr');
             expect(pm.peers.has('not-a-valid-addr')).to.be.false;
         });
 
         it('accepts peer addresses with ws:// scheme prefix', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
-            pm._connectToPeer('ws://peer.example.com:10001');
+            pm.connectToPeer('ws://peer.example.com:10001');
             expect(pm.peers.has('ws://peer.example.com:10001')).to.be.true;
             // Clean up the connecting peer entry
             let peer = pm.peers.get('ws://peer.example.com:10001');
@@ -197,7 +197,7 @@ describe('Security Hardening', function () {
 
         it('rejects empty string', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
-            pm._connectToPeer('');
+            pm.connectToPeer('');
             expect(pm.peers.has('')).to.be.false;
         });
     });
@@ -212,25 +212,25 @@ describe('Security Hardening', function () {
         it('allows messages within rate limit', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_MSG_RATE_LIMIT: '10' }, null);
             for (let i = 0; i < 10; i++) {
-                expect(pm._checkMsgRate('peer-1')).to.be.true;
+                expect(pm.checkMsgRate('peer-1')).to.be.true;
             }
         });
 
         it('rejects messages exceeding rate limit', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_MSG_RATE_LIMIT: '5' }, null);
             for (let i = 0; i < 5; i++) {
-                pm._checkMsgRate('peer-1');
+                pm.checkMsgRate('peer-1');
             }
-            expect(pm._checkMsgRate('peer-1')).to.be.false;
+            expect(pm.checkMsgRate('peer-1')).to.be.false;
         });
 
         it('rate limits are per-peer (independent)', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', P2P_MSG_RATE_LIMIT: '2' }, null);
-            pm._checkMsgRate('peer-1');
-            pm._checkMsgRate('peer-1');
-            expect(pm._checkMsgRate('peer-1')).to.be.false;
+            pm.checkMsgRate('peer-1');
+            pm.checkMsgRate('peer-1');
+            expect(pm.checkMsgRate('peer-1')).to.be.false;
             // peer-2 should still be allowed
-            expect(pm._checkMsgRate('peer-2')).to.be.true;
+            expect(pm.checkMsgRate('peer-2')).to.be.true;
         });
     });
 

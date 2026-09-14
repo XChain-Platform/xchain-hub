@@ -588,7 +588,7 @@ describe('PeerManager', function () {
             // ws._peerAddr=null) sets envelope.sender to a known peer's address.
             // The CEILING decision must use only transport-verified identifiers; the
             // spoofed envelope.sender must be excluded. We verify this by checking
-            // the ceiling argument _checkMsgRate is called with: it must be
+            // the ceiling argument checkMsgRate is called with: it must be
             // msgRateLimit (tight), never knownMsgRateLimit (wide).
             pm.msgRateLimit      = 5;
             pm.knownMsgRateLimit = 100;
@@ -597,8 +597,8 @@ describe('PeerManager', function () {
             pm.peers.set('ws://known-peer:10001', { lastSeen: Date.now() });
 
             let ceilingSeen = null;
-            let origCheck = pm._checkMsgRate.bind(pm);
-            sinon.stub(pm, '_checkMsgRate').callsFake(function (peer, ceil) {
+            let origCheck = pm.checkMsgRate.bind(pm);
+            sinon.stub(pm, 'checkMsgRate').callsFake(function (peer, ceil) {
                 ceilingSeen = ceil;
                 return origCheck(peer, ceil);
             });
@@ -715,18 +715,18 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _connectToPeer() / scheduleReconnect() (no real sockets)
+    // connectToPeer() / scheduleReconnect() (no real sockets)
     // -----------------------------------------------------------------
 
-    describe('_connectToPeer() / scheduleReconnect()', function () {
-        it('_connectToPeer rejects an invalid address format', function () {
-            pm._connectToPeer('not-an-addr');
+    describe('connectToPeer() / scheduleReconnect()', function () {
+        it('connectToPeer rejects an invalid address format', function () {
+            pm.connectToPeer('not-an-addr');
             expect(pm.peers.has('not-an-addr')).to.be.false;
         });
 
-        it('_connectToPeer is a no-op when already connected/connecting', function () {
+        it('connectToPeer is a no-op when already connected/connecting', function () {
             pm.peers.set('ws://p:1', { state: 'open' });
-            pm._connectToPeer('ws://p:1');
+            pm.connectToPeer('ws://p:1');
             expect(pm.peers.get('ws://p:1').state).to.equal('open'); // untouched
         });
 
@@ -747,7 +747,7 @@ describe('PeerManager', function () {
         it('scheduleReconnect arms a timer, doubles the backoff, and reconnects', function () {
             let clock = sinon.useFakeTimers();
             pm.running = true;
-            let connect = sinon.stub(pm, '_connectToPeer');
+            let connect = sinon.stub(pm, 'connectToPeer');
             pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 2000 });
             pm.scheduleReconnect('ws://p:1');
             expect(pm.peers.get('ws://p:1').reconnectDelay).to.equal(4000); // doubled
@@ -771,7 +771,7 @@ describe('PeerManager', function () {
             let clock = sinon.useFakeTimers();
             sinon.stub(console, 'warn');
             pm.running = true;
-            sinon.stub(pm, '_connectToPeer');
+            sinon.stub(pm, 'connectToPeer');
             // At the fast ceiling already, but only one failure deep.
             pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 0 });
             pm.scheduleReconnect('ws://p:1');
@@ -784,7 +784,7 @@ describe('PeerManager', function () {
             let clock = sinon.useFakeTimers();
             sinon.stub(console, 'warn');
             pm.running = true;
-            sinon.stub(pm, '_connectToPeer');
+            sinon.stub(pm, 'connectToPeer');
             // One short of the escalation threshold; this call crosses it.
             pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 4 });
             pm.scheduleReconnect('ws://p:1');
@@ -801,7 +801,7 @@ describe('PeerManager', function () {
 
             // Every dial is refused: the socket errors, then closes, and close is
             // where scheduleReconnect is called from.
-            sinon.stub(pm, '_connectToPeer').callsFake(function (addr) {
+            sinon.stub(pm, 'connectToPeer').callsFake(function (addr) {
                 pm.peers.get(addr).lastError = 'connect ECONNREFUSED 10.0.0.1:10001';
                 pm.scheduleReconnect(addr);
             });
@@ -834,7 +834,7 @@ describe('PeerManager', function () {
 
             // Loopback discard port: nothing listens, so the connect is refused.
             let addr = '127.0.0.1:9';
-            pm._connectToPeer(addr);
+            pm.connectToPeer(addr);
             // The refusal arrives on the socket's error event, so poll for the stashed
             // error rather than sleeping a fixed span long enough to cover a loaded box.
             await waitUntil(() => (pm.peers.get(addr) || {}).lastError,
@@ -864,7 +864,7 @@ describe('PeerManager', function () {
                 lastError: 'connect ECONNREFUSED'
             });
 
-            pm._connectToPeer(addr);
+            pm.connectToPeer(addr);
             await new Promise((res) => pm.once('peer:connect', res));
 
             let peer = pm.peers.get(addr);
@@ -942,7 +942,7 @@ describe('PeerManager', function () {
     // dedup cache bound / rate window / DB recording
     // -----------------------------------------------------------------
 
-    describe('addToDedup() / _checkMsgRate() / recordPeer()', function () {
+    describe('addToDedup() / checkMsgRate() / recordPeer()', function () {
         it('addToDedup evicts the oldest id at the cache cap', function () {
             pm.dedupCacheMax = 2;
             pm.addToDedup('a');
@@ -952,24 +952,24 @@ describe('PeerManager', function () {
             expect(pm.seenIds.size).to.equal(2);
         });
 
-        it('_checkMsgRate allows up to the limit, blocks past it, and resets after the window', function () {
+        it('checkMsgRate allows up to the limit, blocks past it, and resets after the window', function () {
             let clock = sinon.useFakeTimers();
             pm.msgRateLimit = 2;
-            expect(pm._checkMsgRate('a')).to.be.true;  // 1
-            expect(pm._checkMsgRate('a')).to.be.true;  // 2
-            expect(pm._checkMsgRate('a')).to.be.false; // 3 > 2
+            expect(pm.checkMsgRate('a')).to.be.true;  // 1
+            expect(pm.checkMsgRate('a')).to.be.true;  // 2
+            expect(pm.checkMsgRate('a')).to.be.false; // 3 > 2
             clock.tick(60001);
-            expect(pm._checkMsgRate('a')).to.be.true;  // window reset
+            expect(pm.checkMsgRate('a')).to.be.true;  // window reset
             clock.restore();
         });
 
-        it('_checkMsgRate honors an explicit per-call limit (the known-peer ceiling)', function () {
+        it('checkMsgRate honors an explicit per-call limit (the known-peer ceiling)', function () {
             let clock = sinon.useFakeTimers();
             pm.msgRateLimit = 1;                              // default would block at 2
-            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 1
-            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 2
-            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 3
-            expect(pm._checkMsgRate('kp', 3)).to.be.false;   // 4 > 3
+            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 1
+            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 2
+            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 3
+            expect(pm.checkMsgRate('kp', 3)).to.be.false;   // 4 > 3
             clock.restore();
         });
 

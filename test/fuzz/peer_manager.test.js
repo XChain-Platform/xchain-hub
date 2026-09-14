@@ -17,7 +17,7 @@ const EventEmitter = require('events');
 const gen          = require('./helpers/generators');
 
 // PeerManager is constructed directly, so we need to mock its dependencies
-// but call handleInbound, buildEnvelope, _makeId directly.
+// but call handleInbound, buildEnvelope, makeId directly.
 const PeerManager = require('../../src/peers/manager');
 
 const SELF_ADDR = 'ws://self-validator:10001';
@@ -252,14 +252,14 @@ describe('Fuzz: PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _makeId()
+    // makeId()
     // -----------------------------------------------------------------
 
-    describe('_makeId()', function () {
+    describe('makeId()', function () {
 
         it('generated IDs are globally unique across rapid successive calls', function () {
             fc.assert(fc.property(fc.integer({ min: 2, max: 100 }), function (count) {
-                let ids = Array.from({ length: count }, function () { return pm._makeId(); });
+                let ids = Array.from({ length: count }, function () { return pm.makeId(); });
                 expect(new Set(ids).size).to.equal(ids.length);
             }), { numRuns: 50 });
         });
