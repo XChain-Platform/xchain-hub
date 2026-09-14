@@ -16,7 +16,7 @@
  **********************************************************************
  *
  * Operator tool: prune capability_snapshots rows left behind by a chain reset.
- * See src/lib/capability_snapshot_prune.js for why stale rows are dangerous
+ * See src/validators/capability_snapshot_prune.js for why stale rows are dangerous
  * rather than merely untidy.
  *
  * Connection settings come from the hub's own env (HUB_DB_HOST / HUB_DB_PORT /
@@ -34,7 +34,7 @@
  ********************************************************************/
 
 const Database = require('../src/db');
-const prune    = require('../src/lib/capability_snapshot_prune.js');
+const prune    = require('../src/validators/capability_snapshot_prune.js');
 const { resolveSecretEnv } = require('../src/secret_env.js');
 
 function parseArgs(argv){

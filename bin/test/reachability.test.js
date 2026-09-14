@@ -209,7 +209,7 @@ describe('bin/reachability.js', function () {
     describe('the verdict', () => {
         it('keeps a module whose only caller is a bin/ script, and names the caller', () => {
             const report = reach.analyse({ siblings: false });
-            const held = report.files['src/lib/capability_snapshot_prune.js'];
+            const held = report.files['src/validators/capability_snapshot_prune.js'];
             assert.ok(held, 'the module must be in the verdict');
             assert.strictEqual(held.reachableFromHubRuntime, false,
                 'no runtime path reaches it, which is what makes it a candidate');
