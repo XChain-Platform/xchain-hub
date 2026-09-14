@@ -30,12 +30,12 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-// The hub keeps its vendored copies flat in src/, while the indexer sorted its
-// own tree into feature directories, so the twin's path is no longer the hub's
-// path. Each entry is [hub basename, twin path relative to the indexer's src/].
+// The hub keeps its vendored copies flat in src/, while the indexer sorted its own tree into feature
+// directories, so the twin's path is no longer the hub's path. Each entry is [hub basename, twin path
+// relative to the indexer's src/, then the camelCase path an indexer origin from before its snake_case rename has].
 const VENDORED = [
-    ['xchainPrice.js',           'consensus/xchainPrice.js'],
-    ['xchainPriceQuery.js',      'consensus/xchainPriceQuery.js'],
+    ['xchainPrice.js',           'consensus/xchain_price.js',       'consensus/xchainPrice.js'],
+    ['xchainPriceQuery.js',      'consensus/xchain_price_query.js', 'consensus/xchainPriceQuery.js'],
     ['price_pair_activation.js', 'price_pair_activation.js'],
 ];
 
@@ -55,7 +55,7 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
 
     VENDORED.forEach(function (entry) {
         const file    = entry[0];
-        const twinRel = entry[1];
+        const twinRel = entry.slice(1).find((rel) => fs.existsSync(path.join(INDEXER_DIR, 'src', rel))) || entry[1];
         it(file + ' is byte-identical to the indexer twin', function () {
             const twinPath = path.join(INDEXER_DIR, 'src', twinRel);
             // Skip per FILE, not just per sibling-repo. A sibling checkout can exist
