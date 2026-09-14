@@ -87,7 +87,7 @@ const MISSING_PAIR_WARN_INTERVAL_MS = 60_000;
 // `cross_chain` is written by engines whose _persistCapabilitySnapshot takes a third
 // `network` argument, and that argument is NOT a per-row scope this pass cannot supply.
 // capability_snapshots has no network column (lib/capability_snapshot_write.js COLUMNS)
-// and every reader keys on (capability, snapshot_block) alone (xchain-indexer db.js
+// and every reader keys on (capability, snapshot_block) alone (xchain-indexer db/index.js
 // getCapabilitySnapshotWeights / getCapabilitySnapshotValidators / getCapabilitySnapshotCount
 // / isPubkeyInCapabilitySnapshot). The argument feeds exactly two things: the
 // STAKE_WEIGHTED_QUORUM activation key, whose map is keyed mainnet/testnet/regtest, and
@@ -1601,7 +1601,7 @@ class PriceAggregator extends EventEmitter {
      * (an indexer whose only price source is the on-chain batch, pointed at its own
      * standalone hub) mirrored an empty capability_snapshots and recorded EVERY landed
      * batch `invalid: insufficient signer stake`: off BTC the indexer resolves the price
-     * set from the hub-mirrored table alone (xchain-indexer db.js usesCapabilitySnapshot),
+     * set from the hub-mirrored table alone (xchain-indexer db/index.js usesCapabilitySnapshot),
      * so the qualified set was empty, S summed to zero and the strict bar could not be
      * met by signatures that all verify. Measured on the real testnet chain-only node
      * 2026-09-09: 60 batches parsed, 60 refusals, capability_snapshots empty in all three

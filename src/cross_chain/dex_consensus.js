@@ -560,7 +560,7 @@ class CrossChainDexConsensus extends EventEmitter {
             // window of the local tip, so the adopted row can declare a different
             // snapshot than the one this round opened over. Every consumer re-derives
             // the set at the row's DECLARED snapshot_block and measures the signatures
-            // against THAT (xchain-indexer actions/xcall.js, recovery.js), so tallying
+            // against THAT (xchain-indexer actions/xcall/index.js, recovery.js), so tallying
             // against the pre-adoption set can clear a threshold the declared snapshot
             // never authorised: across a stake activation or a membership change, four
             // signatures out of the old set finalize a row the new seven-member set

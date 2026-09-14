@@ -944,7 +944,7 @@ class AttestationRound {
     // All three are behaviorally identical (hash-order sort, source===null keep
     // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)
     // normalization). A FOURTH copy exists for the reorg recompute of missed_count:
-    // xchain-indexer/src/rollback.js responsibleSet, which mirrors attest.js.
+    // xchain-indexer/src/rollback.js responsibleSet, which mirrors attest/index.js.
     // Any silent change to one copy is a fork surface; always update all four together.
     //
     // All four now run the SAME canonical vectors

@@ -317,7 +317,7 @@ class RollcallRound {
         return knownGateKeys().join(',');
     }
 
-    // CONSENSUS-CRITICAL: must byte-match what xchain-indexer's actions/rollcall.js
+    // CONSENSUS-CRITICAL: must byte-match what xchain-indexer's actions/rollcall/index.js
     // rebuilds from the carried fields and what the BTC close rebuilds from its own
     // ledger_hash. Frozen by xchain-documentation/protocol/test-vectors/rollcall_canonical.json.
     //

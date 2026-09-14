@@ -66,7 +66,7 @@ const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 //
 // The literal now comes from the shared, byte-vendored
 // snapshot_reorg_buffer.js rather than living here, because the three verifier
-// families outside this repo (indexer attest.js, indexer recovery.js, sdk
+// families outside this repo (indexer attest/index.js, indexer recovery.js, sdk
 // light.js) must bury by the SAME depth the signer buried by. A hub-local 6 and
 // a verifier-local 6 that drift apart resolve different validator sets for the
 // same declared height with nothing logged.

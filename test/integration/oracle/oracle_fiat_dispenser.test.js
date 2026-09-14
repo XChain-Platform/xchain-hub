@@ -57,7 +57,7 @@ function indexerMatcher() { return Object.create(IndexerUtility.prototype); }
 // Matches the indexer's FIAT_DISPENSER_PRICE_WINDOW default (config.js:154).
 const FIAT_DISPENSER_PRICE_WINDOW = 86400;
 
-// Thin price-DB shim mirroring the indexer's getPricesInTimeRange (db.js:10093)
+// Thin price-DB shim mirroring the indexer's getPricesInTimeRange (db/index.js)
 // verbatim, reading the SAME finalized price_snapshots the round just wrote.
 function makePriceDb(hubDb) {
     return {

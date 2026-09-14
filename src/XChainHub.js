@@ -241,8 +241,11 @@ class XChainHub {
 
         await this.peerManager.start();
 
-        // Option A transport auth: best-effort immediate refresh plus a periodic poll,
-        // inert on a hub with no chain validator set. Rationale at refreshTransportSignerSet.
+        // Option A transport auth: follow the on-chain effective signer set so transport
+        // auth tracks validator key rotation without manual registry edits. Best-effort
+        // immediate refresh plus a periodic poll, and inert where there is no chain
+        // validator set, an empty snapshot leaving the registry as the auth floor.
+        // Rationale at refreshTransportSignerSet.
         let refreshMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_REFRESH_MS) || 30000;
         this.refreshTransportSignerSet().catch(e => logger.error(nodeUtil.format('Initial transport signer-set refresh failed:', e)));
         this._transportSetTimer = setInterval(() => {
@@ -459,9 +462,14 @@ class XChainHub {
             applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks, 'DOGE');
         }
 
-        // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
-        // broadcasts on BTC and takes the publisher's signer; its v4 response leg
-        // broadcasts on the ORIGIN chain, so it is wired separately per chain.
+        // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1 and a no-op otherwise,
+        // so merely deploying it changes nothing. Its v3 request leg broadcasts on BTC and
+        // so takes the SAME operator signer the publisher uses; its v4 response leg
+        // broadcasts on the ORIGIN chain and is wired separately, by <COIN>_ENCODER_URL plus
+        // <COIN>_ADDRESS or by an explicit setChainBroadcastHook. An operator broadcast hook
+        // builds and sends on the one chain it was configured for, so it must never be
+        // handed a foreign-chain leg.
+        //
         // Wired on DOGE, unchanged: the relay owns its own per-chain rails
         // (setChainWalletSignHook) and its file is owned elsewhere right now, so its
         // home-leg chain declaration is deliberately left to that owner.
@@ -507,9 +515,12 @@ class XChainHub {
 
         logger.info('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
 
-        // Full-node challenge round (verified-validator tier). Without a broadcast hook
-        // the elected leader assembles verdicts it cannot post, so it stays observe-only.
-        // A hub running this tier without startOracle still needs a SlashDetector.
+        // Full-node challenge round (verified-validator tier). It shares the operator signer
+        // wiring the attestation and oracle publishers use; without a broadcast hook, or an
+        // encoder plus wallet-sign, the elected leader assembles verdicts it cannot post, so
+        // the engine stays observe-only. The slash detector is otherwise created by
+        // startOracle, and a hub running this tier without the price-oracle subsystem still
+        // needs one to record failed-challenge slash proposals.
         if(!this.slashDetector) this.slashDetector = new SlashDetector(this);
         this.fullNodeChallenge = new FullNodeChallengeRound(this);
         // NODEPROOF verdicts settle on BTC. A DOGE-only operator module (every module
@@ -917,9 +928,11 @@ class XChainHub {
             this.peerManager.setValidatorPubkeys(pubkeyMap);
         } catch(e){
             logger.error(nodeUtil.format('Error loading validator pubkeys:', e));
-            // Fail closed: propagate so startP2P never opens the listener with a null
-            // registry, which would make verifySignature accept any signed message.
-            // Reload callers already hold a non-null registry, so they just see an error.
+            // Fail closed: propagate so the startup path never opens the P2P listener with a
+            // null registry. Swallowing here leaves validatorPubkeys null on a TRANSIENT DB
+            // failure, and a null registry makes verifySignature accept any signed message.
+            // Reload callers already hold a non-null registry, so a failed reload there surfaces
+            // as an error without reopening the null-registry window.
             throw e;
         }
     }
@@ -1145,9 +1158,11 @@ class XChainHub {
         // The hub's own network, so a testnet or regtest hub reads its own config rows.
         let network = this.network || 'mainnet';
 
-        // Values come from the canonical per-chain bundle, never an inline literal and
-        // never a config row, so a quote cannot diverge from what the indexer meters.
-        // The prior inline copy had already drifted.
+        // Values come from the canonical per-chain bundle, never an inline literal and never
+        // a config row, so a coordinated schedule or price repin cannot silently diverge from
+        // what the indexer meters off the same bundle. The prior inline copy had already
+        // drifted, omitting VM_XCALL_REQUEST, VM_XCALL_CALLBACK and VM_GUARD_GAS_CEILING, so
+        // those actions quoted as 'unknown action'.
         let gasSchedule = {};
         let gasPrice    = '0.00001';
         try {
@@ -1269,15 +1284,20 @@ class XChainHub {
     }
 
     // Assert operator MIN_STAKE thresholds against the canonical coins registry
-    // (src/coins/BTC.js STAKING.CAPABILITIES). This is the qualifying floor every
-    // CapabilitySnapshot sends the indexer, so a divergent capabilities.json forks the
-    // qualified set and quorum N. mainnet/testnet throw MIN_STAKE_MISMATCH and boot
-    // halts; regtest/standalone warn. A missing MIN_STAKE key counts as a mismatch.
+    // (src/coins/BTC.js STAKING.CAPABILITIES, byte-identity-gated across the fleet).
+    // This is the qualifying floor every CapabilitySnapshot sends the indexer, so a hub
+    // whose capabilities.json diverges computes a DIFFERENT qualified set and quorum N
+    // than its peers: a consensus fork, not a local preference. mainnet and testnet
+    // throw MIN_STAKE_MISMATCH and startCapabilities rethrows, so boot halts fail-closed;
+    // regtest and standalone warn only, so a test venue can run a deliberately low floor.
+    // XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 is a loud one-off bypass. A capability with no
+    // MIN_STAKE key seeds a genesis floor of '0', so a missing key counts as a mismatch
+    // and never as a pass.
     //
     // A canonical capability ABSENT from the file entirely is a different, worse class
-    // and is refused on EVERY network (CAPABILITY_UNCONFIGURED, #1988). A low floor is
+    // and is refused on EVERY network (CAPABILITY_UNCONFIGURED). A low floor is
     // something a test venue chooses deliberately, which is why the mismatch above is
-    // non-strict off mainnet/testnet; a hole is never chosen, and its blast radius is
+    // non-strict off mainnet and testnet; a hole is never chosen, and its blast radius is
     // total: CapabilitySnapshot fails closed on every round for that capability
     // (min_stake_unconfigured) because omitting min_stake would let each indexer apply
     // its OWN threshold and fork the qualified set. Warning once at boot and then
@@ -1583,11 +1603,13 @@ class XChainHub {
         await this.refreshOwnQualification(result.amount, result.block_index);
     }
 
-    // Resolve the latest BTC block index: first hub.db.getChainTip (populated by the
-    // indexer's pushChainTip on the network _resolveBtcIndexerUrl picks), then a direct
-    // getlatestblock call for stacks with no tip push. Null when both paths fail, and
-    // null when the direct path only re-serves a height btcDirectTipAcceptable dates
-    // as frozen.
+    // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
+    // indexer's pushChainTip only when that indexer is configured with HUB_API_URL, on
+    // the network _resolveBtcIndexerUrl picks so the tip matches. Then a direct
+    // getlatestblock call, which covers stacks where the tip push is not wired, local
+    // regtest development among them, so block-boundary snapshotting still works. Null
+    // when both paths fail, and null when the direct path only re-serves a height
+    // btcDirectTipAcceptable dates as frozen.
     async _resolveBtcLatestBlock(){
         // A cross-network configs tree makes this throw. Degrade to the documented null
         // rather than crashing the scheduler tick that called it.
@@ -1845,8 +1867,11 @@ class XChainHub {
     // and a standalone hub whose operator set HUB_NETWORK) the answer is this.network and
     // nothing else; the configs table only confirms that network has an indexer, and a
     // tree carrying only OTHER networks throws. The old first-found order let a mainnet
-    // validator anchor to the REGTEST tip. A hub with no declared network keeps the
-    // regtest>testnet>mainnet order for dev loops.
+    // validator anchor its oracle round to the REGTEST tip while every consensus gate
+    // still read mainnet, and _indexerCoinMismatch cannot see that, because a regtest
+    // BTC indexer truthfully reports coin=BTC. A hub with no declared network keeps the
+    // regtest>testnet>mainnet order for dev loops, defaulting to mainnet when no configs
+    // have loaded yet.
     async _resolveBtcNetwork(){
         // A hub told which network it is never guesses: with no configs, its own is the answer.
         if(!this.db) return this.network || 'mainnet';
@@ -1892,10 +1917,17 @@ class XChainHub {
         return headers;
     }
 
-    // Resolution order is _resolveIndexerUrl's, below; the BTC_INDEXER_URL alias matters
-    // most here, since a hub setting only that name falls back to seed-local snapshots and
-    // self-signs at quorum 0. The URL is then VERIFIED to be a BTC indexer, because on a
-    // venue with no BTC leg the lookup returns the DOGE indexer's foreign heights and stake.
+    // Resolution order is _resolveIndexerUrl's, below: the explicit BTC_INDEXER_API_URL
+    // override, then the BTC_INDEXER_URL alias, then the hub's own configs table, and
+    // null when none yields a usable URL. The alias matters most here, since a hub
+    // setting only that name falls back to seed-local snapshots and self-signs at
+    // quorum 0. The URL is then VERIFIED to be a BTC indexer, because capability
+    // staking is BTC-only and on a venue with no BTC leg the lookup returns the DOGE
+    // indexer's foreign heights and stake: the hub elects publishers off a set that
+    // does not exist and snapshots at a height where the stake is not active, without
+    // one error line. A POSITIVE identification of a non-BTC indexer fails loud and
+    // closed; an unreachable or silent one keeps the legacy behaviour, because
+    // "cannot verify" is not evidence of a misconfiguration.
     async _resolveBtcIndexerUrl(){
         let url = await this._resolveIndexerUrl('BTC');
         if(!url) return null;
@@ -1991,10 +2023,11 @@ class XChainHub {
             let minStake = this.capabilityRegistry.getMinStake(cap, blockIndex);
             let qualified;
             if(minStake === null || minStake === undefined){
-                // Fail CLOSED. Defaulting to '0' would qualify an unstaked node for
-                // everything and diverge from the indexer's authoritative threshold,
-                // which is a frozen configs/<COIN>.js constant, not a governance value.
-                // A capability with no configured threshold stays inactive.
+                // Fail CLOSED. Defaulting the threshold to '0' would qualify an unstaked node for
+                // everything and diverge from the indexer's authoritative threshold, which is a
+                // frozen configs/<COIN>.js consensus constant and not a governance value. The hub's
+                // genesis MIN_STAKE, from HUB_CAPABILITY_CONFIG, must EQUAL that constant. A
+                // capability with no configured threshold stays inactive until one is supplied.
                 qualified = false;
                 if(!this._warnedMissingMinStake) this._warnedMissingMinStake = new Set();
                 if(!this._warnedMissingMinStake.has(cap)){
@@ -2018,14 +2051,19 @@ class XChainHub {
         if(!ev || !ev.parameter || !this.capabilityRegistry) return;
         let parsed = this.parseCapabilityParameter(ev.parameter);
         if(!parsed) return;
-        // Block-anchored apply: append the new threshold keyed by the proposer-declared
-        // activation_block instead of overwriting a live scalar, so hubs that finalize at
+        // Block-anchored apply: append the new threshold to the capability's history keyed
+        // by the proposer-declared activation_block instead of overwriting a live scalar.
+        // The change does not take effect until the chain reaches activation_block, and
+        // getMinStake(cap, N) resolves the value effective at N, so hubs that finalize at
         // different wall-clock moments still agree on the threshold for every block. A
         // finalized MIN_STAKE proposal with no activation_block is ignored, not applied.
         if(parsed.parameterKey === 'MIN_STAKE'){
-            // Pre-launch pin. Even if a MIN_STAKE proposal:finalized fires, do NOT move
-            // the threshold: the indexer accepts against a frozen constant, so a hub-side
-            // move forks the federation. Lift with MIN_STAKE_GOVERNANCE_DISABLED.
+            // Pre-launch pin, and a final safety net rather than the primary guard: even if a
+            // MIN_STAKE proposal:finalized somehow fires, say in a mixed-version rollout where
+            // an un-pinned hub passed one, do NOT move the threshold. The indexer accepts
+            // against a frozen configs/<COIN>.js constant, so any hub-side move forks the
+            // federation from the chain, and getMinStake stays pinned to the genesis value.
+            // Lift with MIN_STAKE_GOVERNANCE_DISABLED when the indexer flag-day ships.
             if(CapabilityRegistry.MIN_STAKE_GOVERNANCE_DISABLED){
                 logger.warn('Governance MIN_STAKE change for ' + parsed.capability +
                     ' ignored: hub governance MIN_STAKE changes are disabled pre-launch (#4352)');
@@ -2138,10 +2176,13 @@ class XChainHub {
         if(envelope.type === 'CAPABILITY_SELF_TEST'){
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, !!data.ok, data.reason || null);
         } else if(envelope.type === 'CAPABILITY_ACTIVATED'){
-            // The self-test is a local-readiness claim, accepted as-is. The qualification
-            // claim is stake-backed, so verify it against the indexer's snapshot at the
-            // claimed block; a peer must not advertise a capability it is not staked for.
-            // When the indexer cannot be consulted, accept for liveness (slashing backstops).
+            // The self-test is a local-readiness claim and only matters alongside
+            // qualification, so it is accepted as-is. The qualification claim is stake-backed,
+            // so verify it against the indexer's authoritative snapshot at the claimed block;
+            // a peer must not be able to advertise a capability it is not actually staked for.
+            // When the indexer cannot be consulted, meaning no block in the message or an
+            // unreachable indexer, accept the claim to preserve liveness; slashing-for-failure
+            // stays the backstop.
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, true, null);
             let qualified = true;
             try {

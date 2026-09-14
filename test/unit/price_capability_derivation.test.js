@@ -102,7 +102,7 @@ function makeFakeDb() {
     };
 }
 
-// xchain-indexer db.js getCapabilitySnapshotWeights, verbatim in behaviour: off BTC
+// xchain-indexer db/index.js getCapabilitySnapshotWeights, verbatim in behaviour: off BTC
 // this IS how a node resolves the price set, and it matches snapshot_block EXACTLY.
 function indexerReadsWeights(db, capability, snapshotBlock) {
     let rows = [...db.store.values()]
@@ -121,7 +121,7 @@ function indexerReadsWeights(db, capability, snapshotBlock) {
 // the indexer's own arithmetic, not a re-implementation of it.
 //
 // `capability` selects which rail's verdict is being asked for: actions/price.js reads
-// the `price` set, actions/attest.js (via getStakeWeightsByCapability('attestation',
+// the `price` set, actions/attest/index.js (via getStakeWeightsByCapability('attestation',
 // anchor)) reads the `attestation` set, and the cross-chain verifiers read `cross_chain`.
 // The predicate is the same in all three; only the rows differ.
 function indexerVerdict(db, anchor, signers, capability) {

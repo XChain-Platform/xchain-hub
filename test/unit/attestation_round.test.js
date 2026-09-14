@@ -349,7 +349,7 @@ describe('AttestationRound', function () {
 
     // ── responsible-set cross-service conformance ────────────────────────────
     // CONSENSUS-CRITICAL: _computeResponsibleSet is implemented independently
-    // here and in xchain-indexer (actions/attest.js). They must produce
+    // here and in xchain-indexer (actions/attest/index.js). They must produce
     // identical ordered output or attestation quorum evaluation forks. This
     // guard runs the canonical vectors from xchain-documentation against the
     // hub copy; the indexer ships its own mirror guard over the SAME vector

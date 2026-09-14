@@ -21,6 +21,11 @@
  * AND self_test_ok    = true   (per-capability selfTest() passed)
  * AND enabled         = true   (operator has not opted out via config)
  *
+ * All three must hold, and the AND is what makes the rule safe to weaken later:
+ * an operator can only ever take a validator OUT of a capability, never put one
+ * in, so a misconfigured hub shrinks its own qualified set rather than the
+ * federation's.
+ *
  ********************************************************************/
 
 const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];

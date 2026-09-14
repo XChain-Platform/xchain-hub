@@ -124,7 +124,7 @@ const RELAY_CANONICAL_INT_FIELDS = {
 };
 
 // The chain attestation staking lives on, and therefore the only chain a
-// responsible set can be keyed on. Must equal HOME_CHAIN in the indexer's attest.js.
+// responsible set can be keyed on. Must equal HOME_CHAIN in the indexer's attest/index.js.
 const HOME_CHAIN    = 'BTC';
 const ORIGIN_CHAINS = coins.ALLOWED_COINS.filter(c => c !== HOME_CHAIN);
 
@@ -138,7 +138,7 @@ const MAX_PAGES       = 20;    // bounds any one sweep at 10k rows
 // indexer enforces the same list, so anything else is refused there anyway.
 const RELAYABLE_STATUSES = ['ok', 'expired'];
 
-// The request lifecycle value the indexer stamps on a REFUSED relay row (attest.js
+// The request lifecycle value the indexer stamps on a REFUSED relay row (attest/index.js
 // writes REQUEST_STATUS='rejected' whenever a v3 carries an error verdict). Every
 // other value it can hold, 'pending' / 'fulfilled' / 'errored' / 'expired', belongs
 // to a request that really was materialized on the home chain.

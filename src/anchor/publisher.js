@@ -172,7 +172,7 @@ const ANCHOR_MARKER_RETENTION_TTL_SAFETY = 8;
 // `id` (the hub-assigned mirror cursor) is archived for per-hub provenance
 // only; settlement order is (snapshot_block, match_id), never `id`, because a
 // per-hub AUTO_INCREMENT must not order consensus state (xchain-indexer
-// db.js getEffectiveUnsettledMatches). Recovery rebuilds the row under its
+// db/index.js getEffectiveUnsettledMatches). Recovery rebuilds the row under its
 // original id to preserve archive byte-parity, not to fix a settlement order
 // (xchain-indexer recovery.js). Archives published before this field exist
 // without it; recovery tolerates both shapes.

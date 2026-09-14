@@ -389,7 +389,7 @@ class AttestationPublisher {
         let requestBlock = (event.request && event.request.block_index != null) ? Number(event.request.block_index) : null;
         // Normalize redundancy with the SAME rule the other two copies of the
         // responsible-set derivation use (AttestationRound._computeResponsibleSet,
-        // the indexer's attest.js): Math.max(1, Number(redundancy) || 1). The prior
+        // the indexer's attest/index.js): Math.max(1, Number(redundancy) || 1). The prior
         // event.signatures.length fallback produced a responsible list of a
         // different LENGTH than consensus and the indexer derived whenever the
         // request carried no redundancy, so _myRank and the failover step-in
@@ -1001,7 +1001,7 @@ class AttestationPublisher {
     // cannot occupy multiple responsible slots (mirrors AttestationRound._computeResponsibleSet).
     // CONSENSUS-CRITICAL: this is the THIRD copy of the responsible-set rule;
     // it must stay byte-for-byte in sync with
-    // AttestationRound._computeResponsibleSet and the indexer's attest.js,
+    // AttestationRound._computeResponsibleSet and the indexer's attest/index.js,
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
     //
