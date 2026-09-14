@@ -44,7 +44,14 @@ const GOLDEN = require('../fixtures/anchor_canonical_vectors.json');
 let sdkCheckpoint = null, sdkLight = null, Anchor = null, AnchorRecovery = null;
 let sdkErr = null, lightErr = null, anchorErr = null, recoveryErr = null;
 try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
-try { sdkLight = require('../../../xchain-sdk/src/protocol/light_client.js'); } catch (e) { lightErr = e; }
+// Two spellings, post-move first. The SDK's layout pass moved src/light.js to
+// src/protocol/light_client.js, and a sibling checkout can sit on either side of
+// that move, so a single post-move spelling turns this gate RED against an sdk
+// that has not landed the move yet instead of just following it.
+for (const spelling of ['../../../xchain-sdk/src/protocol/light_client.js',
+                        '../../../xchain-sdk/src/light.js']) {
+    try { sdkLight = require(spelling); lightErr = null; break; } catch (e) { lightErr = lightErr || e; }
+}
 try { Anchor = require('../../../xchain-indexer/src/actions/anchor/index.js'); } catch (e) { anchorErr = e; }
 try { AnchorRecovery = require('../../../xchain-indexer/bin/recovery.js'); } catch (e) { recoveryErr = e; }
 const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
