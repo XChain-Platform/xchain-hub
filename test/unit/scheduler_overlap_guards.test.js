@@ -69,7 +69,7 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
     }
 
     // A crossing SWAP pair: one match per pass, so a duplicated pass is visible as a
-    // second _finalizeMatch on the SAME offers.
+    // second finalizeMatch on the SAME offers.
     function book(coin) {
         const base = {
             home_network: 'mainnet', give_tick: 'XCH', get_tick: 'XCH',
@@ -88,12 +88,12 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
     it('a pass firing while the books are still loading proposes nothing', async function () {
         const eng = makeEngine();
-        const finalize = sinon.stub(eng, '_finalizeMatch').resolves();
+        const finalize = sinon.stub(eng, 'finalizeMatch').resolves();
         const { gate, release } = makeGate();
 
         // A slow indexer: the first pass is still awaiting its books when the poll fires again.
         let first = true;
-        eng._fetchOpenOffers = async (coin) => {
+        eng.fetchOpenOffers = async (coin) => {
             if (first) { first = false; await gate; }
             return book(coin);
         };
@@ -116,11 +116,11 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
     it('a rejected book fetch does not wedge matching forever', async function () {
         const eng = makeEngine();
-        const finalize = sinon.stub(eng, '_finalizeMatch').resolves();
-        // resolveSnapshotBlock is awaited inside _finalizeMatch; the throw we want comes
-        // from _findMatches, which runs after the books land and is not caught per-coin.
-        eng._fetchOpenOffers = async (coin) => book(coin);
-        const boom = sinon.stub(eng, '_findMatches').throws(new Error('matcher blew up'));
+        const finalize = sinon.stub(eng, 'finalizeMatch').resolves();
+        // resolveSnapshotBlock is awaited inside finalizeMatch; the throw we want comes
+        // from findMatches, which runs after the books land and is not caught per-coin.
+        eng.fetchOpenOffers = async (coin) => book(coin);
+        const boom = sinon.stub(eng, 'findMatches').throws(new Error('matcher blew up'));
 
         let threw = false;
         try { await eng._discoverAndMatch(); } catch (e) { threw = true; }

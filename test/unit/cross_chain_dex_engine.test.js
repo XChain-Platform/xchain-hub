@@ -205,7 +205,7 @@ describe('CrossChainDexEngine', function () {
             hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('gone'), { errno: 1205 }));
             let eng = new CrossChainDexEngine(hub);
             eng.indexers.BTC.url = 'http://btc';        // without this the fetch is unreachable anyway
-            let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
+            let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
             await eng.rebuildCommitted();
 
             await eng._discoverAndMatch();
@@ -221,7 +221,7 @@ describe('CrossChainDexEngine', function () {
             hub.db.doQuery = q;
             let eng = new CrossChainDexEngine(hub);
             eng.indexers.BTC.url = 'http://btc';        // same reachability guard as above
-            let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
+            let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
 
             await eng.rebuildCommitted();
             expect(eng._committedReady).to.equal(false);
@@ -258,15 +258,15 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _findMatches (SWAP path, Phase A behaviour preserved) ─────────────────
+    // ── findMatches (SWAP path, Phase A behaviour preserved) ─────────────────
 
-    describe('_findMatches(): SWAP', function () {
+    describe('findMatches(): SWAP', function () {
         let eng;
         before(function () { loadModule(); eng = new CrossChainDexEngine(makeDexHub()); });
 
         it('finds a valid exact pair', function () {
             let { a, b } = makePair();
-            let m = eng._findMatches({ BTC: [a], LTC: [b], DOGE: [] });
+            let m = eng.findMatches({ BTC: [a], LTC: [b], DOGE: [] });
             expect(m).to.have.length(1);
             expect(m[0].loKind).to.equal('swap');
         });
@@ -274,29 +274,29 @@ describe('CrossChainDexEngine', function () {
         it('returns empty when no matching pairs exist', function () {
             let a = makeOffer({ give_amount: '100', get_amount: '500' });
             let b = makeOffer({ home_coin: 'LTC', give_amount: '999', get_amount: '1' });
-            expect(eng._findMatches({ BTC: [a], LTC: [b], DOGE: [] })).to.have.length(0);
+            expect(eng.findMatches({ BTC: [a], LTC: [b], DOGE: [] })).to.have.length(0);
         });
 
         it('does not match the same offer twice in a round', function () {
             let { a, b } = makePair();
-            expect(eng._findMatches({ BTC: [a, a], LTC: [b, b], DOGE: [] }).length).to.be.at.most(1);
+            expect(eng.findMatches({ BTC: [a, a], LTC: [b, b], DOGE: [] }).length).to.be.at.most(1);
         });
 
         it('orders the pair canonically (lo.home_coin <= hi.home_coin)', function () {
             let { a, b } = makePair();
-            let m = eng._findMatches({ BTC: [a], LTC: [b], DOGE: [] });
+            let m = eng.findMatches({ BTC: [a], LTC: [b], DOGE: [] });
             expect(m[0].lo.home_coin <= m[0].hi.home_coin).to.be.true;
         });
 
         it('skips a swap already fully committed', function () {
             let { a, b } = makePair();
             eng.committed.set('BTC:1', { give: '100', get: '500' });  // a fully matched
-            expect(eng._findMatches({ BTC: [a], LTC: [b], DOGE: [] })).to.have.length(0);
+            expect(eng.findMatches({ BTC: [a], LTC: [b], DOGE: [] })).to.have.length(0);
             eng.committed.clear();
         });
     });
 
-    // ── _findMatches / tryOrderMatch (ORDER path, partial fills) ─────────────
+    // ── findMatches / tryOrderMatch (ORDER path, partial fills) ─────────────
 
     describe('tryOrderMatch(): partial fills', function () {
         let eng;
@@ -319,7 +319,7 @@ describe('CrossChainDexEngine', function () {
             let { a, b } = makeOrderPair();
             let d1 = eng.tryMatch(a, b);
             // simulate finalize: commit d1's fill to the ledger
-            eng._applyCommit({ a_chain: d1.lo.home_coin, a_action_index: d1.lo.action_index, a_amount: d1.loFill,
+            eng.applyCommit({ a_chain: d1.lo.home_coin, a_action_index: d1.lo.action_index, a_amount: d1.loFill,
                                b_chain: d1.hi.home_coin, b_action_index: d1.hi.action_index, b_amount: d1.hiFill }, +1);
             // a second DOGE order fills more of A
             let c = Object.assign({}, b, { action_index: 9, block_index: 21, get_address: 'Daddr2' });
@@ -520,7 +520,7 @@ describe('CrossChainDexEngine', function () {
     // ── validateProposedMatch ─────────────────────────────────────────────────
 
     describe('validateProposedMatch()', function () {
-        // Build the row _finalizeMatch would produce for an ORDER pair.
+        // Build the row finalizeMatch would produce for an ORDER pair.
         function orderRow(eng, a, b, block) {
             let d = eng.tryMatch(a, b);
             return {
@@ -660,7 +660,7 @@ describe('CrossChainDexEngine', function () {
             }
         });
 
-        it('_finalizeMatch stamps a forward margin sized to the slower leg, never the bare clock second', async function () {
+        it('finalizeMatch stamps a forward margin sized to the slower leg, never the bare clock second', async function () {
             let hub = makeDexHub();
             hub._resolveBtcLatestBlock = sinon.stub().resolves(100);
             hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
@@ -674,7 +674,7 @@ describe('CrossChainDexEngine', function () {
             let { a, b } = makeOrderPair();
             const now = eng._nowSeconds();
             let desc = eng.tryMatch(a, b);
-            await eng._finalizeMatch(desc);
+            await eng.finalizeMatch(desc);
             expect(proposed, 'no row was proposed').to.not.equal(null);
             // 4 blocks of the SLOWER leg: both chains must hold the mirrored row before
             // either reaches its eligible block.
@@ -768,7 +768,7 @@ describe('CrossChainDexEngine', function () {
             ]);
             hub.db.doQuery.resolves([]);
             let eng = new CrossChainDexEngine(hub);
-            eng._applyCommit({ a_chain: 'DOGE', a_action_index: 7, a_amount: '20', b_chain: 'LTC', b_action_index: 1, b_amount: '40' }, +1);
+            eng.applyCommit({ a_chain: 'DOGE', a_action_index: 7, a_amount: '20', b_chain: 'LTC', b_action_index: 1, b_amount: '40' }, +1);
             await eng.retractMatchesForReorg('DOGE', 7);
             expect(eng.committed.get('LTC:1')).to.deep.equal({ give: '0', get: '0' });
             expect(eng.committed.get('DOGE:7')).to.deep.equal({ give: '0', get: '0' });
@@ -842,7 +842,7 @@ describe('CrossChainDexEngine', function () {
 
         // a supplied-but-malformed bound must ABORT before the SELECT. Fail-open
         // here widened a fenced rollback into an open-ended retraction that also restored
-        // capacity via _applyCommit(-1) and broadcast the widened event to peers.
+        // capacity via applyCommit(-1) and broadcast the widened event to peers.
         it('aborts on a supplied-but-malformed bound instead of widening the retraction', async function () {
             for (const args of [['BTC', 'abc'], ['BTC', 5, 'abc'], ['BTC', 5, 75, 'abc'], ['BTC', 5, 1]]) {
                 let broadcaster = { broadcastDeletion: sinon.stub(), broadcastRow: sinon.stub() };
@@ -1021,7 +1021,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             sinon.stub(eng, '_persistCapabilitySnapshot').rejects(new Error('db down'));
             let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
-            let commit  = sinon.stub(eng, '_applyCommit');
+            let commit  = sinon.stub(eng, 'applyCommit');
             let forget  = sinon.stub(eng.consensus, 'forgetFinalized');
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
@@ -1041,7 +1041,7 @@ describe('CrossChainDexEngine', function () {
             // Degraded/null snapshot => zero validators resolved => zero rows persisted.
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(0);
             let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
-            let commit  = sinon.stub(eng, '_applyCommit');
+            let commit  = sinon.stub(eng, 'applyCommit');
             let forget  = sinon.stub(eng.consensus, 'forgetFinalized');
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
@@ -1060,7 +1060,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
             let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
-            let commit  = sinon.stub(eng, '_applyCommit');
+            let commit  = sinon.stub(eng, 'applyCommit');
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
@@ -1072,7 +1072,7 @@ describe('CrossChainDexEngine', function () {
 
         // The durable fill must be accounted BEFORE any fallible delivery step. A mirror
         // living inside _insertMatchRow, between the INSERT and its return, lets a failed
-        // re-read throw past `if(inserted) this._applyCommit(row, +1)` and leaves the DB
+        // re-read throw past `if(inserted) this.applyCommit(row, +1)` and leaves the DB
         // holding a finalized fill the in-memory reservation ledger does not know about.
         it('credits the ledger and releases the round even when the mirror read fails', async function () {
             let broadcaster = { broadcastRow: sinon.stub(), dropAllForResync: sinon.stub() };
@@ -1084,7 +1084,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng.broadcaster = broadcaster;
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
-            let commit = sinon.stub(eng, '_applyCommit');
+            let commit = sinon.stub(eng, 'applyCommit');
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
 
@@ -1105,7 +1105,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng.broadcaster = broadcaster;
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
-            sinon.stub(eng, '_applyCommit');
+            sinon.stub(eng, 'applyCommit');
 
             await eng.writeFinalizedMatch({ row: finalizeRow(), signatures: [] });
 
@@ -1122,7 +1122,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
             sinon.stub(eng, '_insertMatchRow').rejects(new Error('deadlock'));
-            let commit = sinon.stub(eng, '_applyCommit');
+            let commit = sinon.stub(eng, 'applyCommit');
             let forget = sinon.stub(eng.consensus, 'forgetFinalized');
             let row = finalizeRow();
             eng._inflight.add(row.match_id);
@@ -1148,7 +1148,7 @@ describe('CrossChainDexEngine', function () {
                 orders: [ { action_index: 1, block_index: 11 }, { action_index: 2, block_index: 19 } ]
             });
             let captured;
-            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            sinon.stub(eng, 'findMatches').callsFake((obc) => { captured = obc; return []; });
             await eng._discoverAndMatch();
             let seen = (captured.BTC || []).map(o => o.action_index);
             expect(seen).to.include(1);
@@ -1164,7 +1164,7 @@ describe('CrossChainDexEngine', function () {
                 orders: [ { action_index: 1, block_index: 20 }, { action_index: 2, block_index: 11 } ]
             });
             let captured;
-            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            sinon.stub(eng, 'findMatches').callsFake((obc) => { captured = obc; return []; });
             await eng._discoverAndMatch();
             expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
         });
@@ -1173,7 +1173,7 @@ describe('CrossChainDexEngine', function () {
     // ── XCC-2: the discovery path must page the whole open book via the keyset cursor,
     // not a one-shot limit:500, or a chain with >500 open cross-chain offers silently
     // drops the newest (never discovered, never matched). ──
-    describe('_fetchOpenOffers(): keyset cursor paging (XCC-2)', function () {
+    describe('fetchOpenOffers(): keyset cursor paging (XCC-2)', function () {
         it('follows next_cursor across truncated pages and accumulates the full book', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             let call = sinon.stub(eng, '_indexerCall');
@@ -1184,7 +1184,7 @@ describe('CrossChainDexEngine', function () {
                                       orders: [{ action_index: 3, block_index: 1 }, { action_index: 4, block_index: 1 }] });
             call.onCall(2).resolves({ network: 'regtest', latest_block_index: 102, truncated: false, next_cursor: 5,
                                       orders: [{ action_index: 5, block_index: 1 }] });
-            let res = await eng._fetchOpenOffers('BTC', { limit: 2 });
+            let res = await eng.fetchOpenOffers('BTC', { limit: 2 });
             expect(res.orders.map(o => o.action_index)).to.deep.equal([1, 2, 3, 4, 5]);
             // network + latest pinned to the FIRST page for a consistent confirmation-depth tip.
             expect(res.network).to.equal('regtest');
@@ -1201,7 +1201,7 @@ describe('CrossChainDexEngine', function () {
                 network: 'regtest', latest_block_index: 20,
                 orders: [{ action_index: 1, block_index: 11 }]   // no `truncated` field = pre-XCC-2 indexer
             });
-            let res = await eng._fetchOpenOffers('BTC', { limit: 500 });
+            let res = await eng.fetchOpenOffers('BTC', { limit: 500 });
             expect(call.callCount).to.equal(1);
             expect(res.orders.map(o => o.action_index)).to.deep.equal([1]);
         });
@@ -1213,7 +1213,7 @@ describe('CrossChainDexEngine', function () {
                                       orders: [{ action_index: 3, block_index: 1 }, { action_index: 8, block_index: 1 }] });
             call.onCall(1).resolves({ network: 'regtest', latest_block_index: 9, truncated: false,
                                       orders: [{ action_index: 12, block_index: 1 }] });
-            let res = await eng._fetchOpenOffers('BTC', { limit: 2 });
+            let res = await eng.fetchOpenOffers('BTC', { limit: 2 });
             expect(res.orders.map(o => o.action_index)).to.deep.equal([3, 8, 12]);
             expect(call.getCall(1).args[2]).to.deep.equal({ limit: 2, after_action_index: 8 });
         });
@@ -1225,7 +1225,7 @@ describe('CrossChainDexEngine', function () {
                 network: 'regtest', latest_block_index: 5, truncated: true, next_cursor: 4,
                 orders: [{ action_index: 4, block_index: 1 }]
             });
-            let res = await eng._fetchOpenOffers('BTC', { limit: 1 });
+            let res = await eng.fetchOpenOffers('BTC', { limit: 1 });
             // page 0 sets after=4; page 1 returns next_cursor 4 (<= 4) → break. Two calls, no spin.
             expect(call.callCount).to.equal(2);
             expect(res.orders.length).to.be.greaterThan(0);
@@ -1241,7 +1241,7 @@ describe('CrossChainDexEngine', function () {
             call.onCall(1).resolves({ network: 'regtest', latest_block_index: 55, truncated: false, next_cursor: 2,
                                       orders: [{ action_index: 2, block_index: 10 }] });
             let captured;
-            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            sinon.stub(eng, 'findMatches').callsFake((obc) => { captured = obc; return []; });
             await eng._discoverAndMatch();
             // Both pages' offers reach the matcher; the confirmation-depth tip is the first page's.
             expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
@@ -1411,7 +1411,7 @@ describe('CrossChainDexEngine', function () {
 
             let emitted = false;
             eng.on('match:finalized', () => { emitted = true; });
-            await eng._finalizeMatch(desc);
+            await eng.finalizeMatch(desc);
             await new Promise(r => setImmediate(r));
             expect(emitted).to.be.true;
         });

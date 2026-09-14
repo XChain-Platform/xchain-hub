@@ -417,7 +417,7 @@ class CrossChainCallEngine extends EventEmitter {
         // result row, an unfiltered join would see r.id IS NOT NULL, exclude the
         // dispatch, and never re-relay the result (the call could then only deliver
         // the deterministic 'expired' callback). Filtering retracted result rows
-        // back out re-opens re-discovery; _maybeRelayResult re-relay is idempotent
+        // back out re-opens re-discovery; maybeRelayResult re-relay is idempotent
         // (synthetic TX_HASH dedup) so re-relay after re-discovery is safe.
         // Exclude call_ids still inside their backoff window so a permanently
         // result-less dispatch cannot pin the ORDER BY id ASC window (M-14). Bounded
@@ -433,10 +433,10 @@ class CrossChainCallEngine extends EventEmitter {
         for(let d of pending){
             let callId = String(d.call_id).toLowerCase();
             try {
-                // _maybeRelayResult returns false when the result is not yet available
+                // maybeRelayResult returns false when the result is not yet available
                 // (missing / below depth): park it so it leaves the hot window. Any
                 // other outcome (round proposed, or already in flight) clears backoff.
-                let relayed = await this._maybeRelayResult(coin, d);
+                let relayed = await this.maybeRelayResult(coin, d);
                 if(relayed === false) this.parkResult(callId);
                 else this._resultBackoff.delete(callId);
             } catch(e){
@@ -466,7 +466,7 @@ class CrossChainCallEngine extends EventEmitter {
     // Returns true when the result exists and a relay round was proposed (or is
     // already in flight); false when the result is not yet available (missing on the
     // target indexer, or not yet at confirmation depth) so the caller can park it (M-14).
-    async _maybeRelayResult(coin, dispatch){
+    async maybeRelayResult(coin, dispatch){
         let callId = String(dispatch.call_id).toLowerCase();
         let roundId = this._roundId('result', callId);
         if(this._inflight.has(roundId)) return true;   // round already progressing; don't park

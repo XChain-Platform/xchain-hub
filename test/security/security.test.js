@@ -599,7 +599,7 @@ describe('Security Hardening', function () {
             // indexer before co-signing (anti-forgery hardening). That path has its own
             // coverage; here we stub it true to exercise the format-acceptance branch this
             // test targets, mirroring the '_handlePropose rejects invalid format' twin above.
-            sinon.stub(engine, '_verifySourceAction').resolves(true);
+            sinon.stub(engine, 'verifySourceAction').resolves(true);
             // A follower also refuses to PREPARE over a 0 quorum (empty cross_chain
             // snapshot / bootstrap fail-closed, R2-3). The mock has no chain-pair set
             // or peers, so _resolveQuorum would return 0; stub a real federation

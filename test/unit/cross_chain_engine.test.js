@@ -48,7 +48,7 @@ describe('CrossChainEngine', function () {
         // consensus machinery, not that guard, so verification passes by
         // default; the dedicated 'source-action verification' suite restores
         // the real method.
-        sinon.stub(engine, '_verifySourceAction').resolves(true);
+        sinon.stub(engine, 'verifySourceAction').resolves(true);
     });
 
     afterEach(function () {
@@ -729,7 +729,7 @@ describe('CrossChainEngine', function () {
         it('gates the COMMIT tally on membership too, not just PREPARE', async function () {
             let digest = await openRound();
             let pending = engine.pendingAttestations.get(attestationId);
-            let stored = sinon.stub(engine, '_storeWithRetry').resolves();
+            let stored = sinon.stub(engine, 'storeWithRetry').resolves();
 
             // Four COMMIT envelopes, but one is the outsider and one is an alt addr of a key
             // that already committed: two distinct MEMBERS, below the quorum of 3.
@@ -876,7 +876,7 @@ describe('CrossChainEngine', function () {
     describe('source-action verification', function () {
 
         beforeEach(function () {
-            engine._verifySourceAction.restore(); // exercise the real guard
+            engine.verifySourceAction.restore(); // exercise the real guard
             engine.setValidatorSet(VALIDATORS_4);
             wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = VALIDATORS_4[0].addr;

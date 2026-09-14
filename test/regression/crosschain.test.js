@@ -71,7 +71,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 // guard). Both guards have their own coverage (unit/
                 // CrossChainEngine, security suite); satisfy them so this test
                 // stays about the PBFT flow.
-                sinon.stub(engine, '_verifySourceAction').resolves(true);
+                sinon.stub(engine, 'verifySourceAction').resolves(true);
                 hub.capabilitySnapshot = {
                     getSnapshot: async () => ({ validators: VALIDATORS_4.slice() }),
                     getQuorum:   () => 3

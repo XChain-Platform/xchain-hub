@@ -44,7 +44,7 @@ const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 // lower-hashpower chains to approach BTC-comparable settlement assurance.
 // Enforced in _handlePropose(): a follower verifies the proposed source action
 // against its OWN indexer for that chain and refuses to co-sign below the
-// threshold (see _verifySourceAction).
+// threshold (see verifySourceAction).
 const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
 
 // Allowed chain names
@@ -456,7 +456,7 @@ class CrossChainEngine extends EventEmitter {
         // the source chain, at sufficient depth, against this hub's OWN
         // indexer before co-signing. Fails closed (drop, don't sign) when the
         // action is missing, under-confirmed, or unverifiable.
-        if (!(await this._verifySourceAction(sourceChain, sourceActionIndex))) {
+        if (!(await this.verifySourceAction(sourceChain, sourceActionIndex))) {
             logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
                 ': source action not verified against local indexer');
             return;
@@ -567,7 +567,7 @@ class CrossChainEngine extends EventEmitter {
     // found, or depth below threshold all return false; the caller must then
     // refuse to co-sign. Availability is deliberately traded away here: a hub
     // that cannot see the source chain has no business attesting actions on it.
-    async _verifySourceAction(sourceChain, sourceActionIndex) {
+    async verifySourceAction(sourceChain, sourceActionIndex) {
         let idx = parseInt(sourceActionIndex, 10);
         if (!Number.isInteger(idx) || idx <= 0) return false;
 
@@ -652,7 +652,7 @@ class CrossChainEngine extends EventEmitter {
                 consensusProof:    JSON.stringify([...pending.commits])
             };
 
-            this._storeWithRetry(attestation)
+            this.storeWithRetry(attestation)
                 .then(() => {
                     if (pending.timer) clearTimeout(pending.timer);
                     this.markFinalized(attestationId);
@@ -687,7 +687,7 @@ class CrossChainEngine extends EventEmitter {
     // Persist a quorum-finalized attestation, retrying a transient DB failure
     // with exponential backoff before giving up. Safe to re-run:
     // storeAttestation upserts on attestation_id.
-    async _storeWithRetry(attestation) {
+    async storeWithRetry(attestation) {
         let delay = this.storeRetryBaseMs;
         for (let attempt = 1; ; attempt++) {
             try {

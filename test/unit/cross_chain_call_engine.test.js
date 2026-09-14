@@ -807,7 +807,7 @@ describe('CrossChainCallEngine', function () {
                   source_chain: 'BTC', source_action_index: 41 }
             );
             const seen = [];
-            sinon.stub(engine, '_maybeRelayResult').callsFake(async (coin, d) => { seen.push(d.call_id); });
+            sinon.stub(engine, 'maybeRelayResult').callsFake(async (coin, d) => { seen.push(d.call_id); });
             await engine.pollTargetResults('DOGE');
             expect(seen).to.deep.equal([CALL_ID]);
 
@@ -984,7 +984,7 @@ describe('CrossChainCallEngine', function () {
                 { id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 1 },
                 { id: 2, call_id: 'b'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 2 }
             );
-            // No result exists on the target for either call: _maybeRelayResult returns false.
+            // No result exists on the target for either call: maybeRelayResult returns false.
             sinon.stub(engine, '_indexerCall').resolves({ exists: false });
 
             // First poll: both are attempted and parked (result-less).
@@ -994,7 +994,7 @@ describe('CrossChainCallEngine', function () {
 
             // Second poll: both are inside their backoff window, so both are excluded
             // from the hot query. The window is free for whatever arrives next.
-            const spy = sinon.spy(engine, '_maybeRelayResult');
+            const spy = sinon.spy(engine, 'maybeRelayResult');
             await engine.pollTargetResults('DOGE');
             expect(spy.called).to.equal(false, 'parked rows must not be re-polled while backed off');
         });
@@ -1004,7 +1004,7 @@ describe('CrossChainCallEngine', function () {
             db.rows.push(
                 { id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 1 }
             );
-            const relay = sinon.stub(engine, '_maybeRelayResult');
+            const relay = sinon.stub(engine, 'maybeRelayResult');
             relay.onFirstCall().resolves(false);   // result absent -> park
             relay.onSecondCall().resolves(true);    // result arrived -> round proposed
 

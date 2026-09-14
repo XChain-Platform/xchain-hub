@@ -242,7 +242,7 @@ class CrossChainDexEngine extends EventEmitter {
         let next = new Map();
         try {
             let rows = await this.db.findCrossChainMatchesByStatus();
-            for(let r of rows) this._applyCommit(r, +1, next);
+            for(let r of rows) this.applyCommit(r, +1, next);
         } catch(e){
             if(!isMissingTableError(e)){
                 this._committedReady = false;
@@ -265,7 +265,7 @@ class CrossChainDexEngine extends EventEmitter {
     // Apply (sign=+1) or reverse (sign=-1) a match row's fills against both legs' ledgers.
     // `target` lets rebuildCommitted accumulate into an off-to-the-side map it only
     // installs on success; every other caller mutates the live ledger.
-    _applyCommit(r, sign, target){
+    applyCommit(r, sign, target){
         let ledger = target || this.committed;
         let kA = this.offerKey(r.a_chain, r.a_action_index);
         let kB = this.offerKey(r.b_chain, r.b_action_index);
@@ -309,11 +309,11 @@ class CrossChainDexEngine extends EventEmitter {
         // passes read the SAME order books and the same this.committed ledger (which only
         // advances in writeFinalizedMatch, after consensus), so both derive the same fills;
         // the _inflight matchId reservation does not stop them, because the has() test in
-        // _finalizeMatch sits two awaits before the matching add(), and a snapshot block
+        // finalizeMatch sits two awaits before the matching add(), and a snapshot block
         // that moved between the passes gives the second one a DIFFERENT matchId for the
         // same offers anyway. Result: the same offer proposed into two PBFT rounds and
         // double-committed against a single escrow. The finally is load-bearing: a rejected
-        // _fetchOpenOffers or resolveSnapshotBlock must not wedge matching forever.
+        // fetchOpenOffers or resolveSnapshotBlock must not wedge matching forever.
         if(this._matching) return;
         this._matching = true;
         try {
@@ -336,10 +336,10 @@ class CrossChainDexEngine extends EventEmitter {
                     // Page the full open book via the keyset cursor rather than a one-shot
                     // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
                     // offers would otherwise silently drop the newest, which are never discovered
-                    // or matched. _fetchOpenOffers loops until the indexer reports the book is no
+                    // or matched. fetchOpenOffers loops until the indexer reports the book is no
                     // longer truncated (bounded by a hard page cap so a misbehaving indexer that
                     // keeps flagging truncated can't spin forever).
-                    let res = await this._fetchOpenOffers(coin, { limit: 500 });
+                    let res = await this.fetchOpenOffers(coin, { limit: 500 });
                     // Tag every offer with its home indexer's network (authoritative). An offer
                     // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
                     // the whole coin's book rather than risk a network-agnostic match.
@@ -362,9 +362,9 @@ class CrossChainDexEngine extends EventEmitter {
                     offersByCoin[coin] = [];
                 }
             }));
-            for(let desc of this._findMatches(offersByCoin)){
+            for(let desc of this.findMatches(offersByCoin)){
                 try {
-                    await this._finalizeMatch(desc);
+                    await this.finalizeMatch(desc);
                 } catch(e){
                     logger.error(nodeUtil.format('CrossChainDex: finalizeMatch error:', e && e.message));
                 }
@@ -379,7 +379,7 @@ class CrossChainDexEngine extends EventEmitter {
     // → skipped (carry-forward). Returns an array of match descriptors, each already
     // canonical-ordered (lo = home_coin-lower side). One fill per offer per round (`used`);
     // the poll loop drains deeper book crossings over subsequent rounds as committed grows.
-    _findMatches(offersByCoin){
+    findMatches(offersByCoin){
         let all = [];
         for(let coin of ALLOWED_CHAINS) all = all.concat(offersByCoin[coin] || []);
         let matches = [], used = new Set();
@@ -612,7 +612,7 @@ class CrossChainDexEngine extends EventEmitter {
         return this.normalizeAmount(x) === this.normalizeAmount(y);
     }
 
-    async _finalizeMatch(desc){
+    async finalizeMatch(desc){
         let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
@@ -766,7 +766,7 @@ class CrossChainDexEngine extends EventEmitter {
             this.deferFinalize(row);
             return;
         }
-        if(inserted) this._applyCommit(row, +1);
+        if(inserted) this.applyCommit(row, +1);
         this._inflight.delete(row.match_id);
         await this.mirrorMatchRow(row);
         logger.info('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
@@ -870,7 +870,7 @@ class CrossChainDexEngine extends EventEmitter {
         let res;
         // Page the full book (XCC-2): a one-shot limit:500 silently fails to re-confirm any
         // offer whose action_index sits past the cap, which would wrongly reject a valid match.
-        try { res = await this._fetchOpenOffers(coin, { limit: 500 }); }
+        try { res = await this.fetchOpenOffers(coin, { limit: 500 }); }
         catch(e){ return null; }
         if(!res || !Array.isArray(res.orders) || !res.network) return null;
         let latest = Number(res.latest_block_index);
@@ -958,7 +958,7 @@ class CrossChainDexEngine extends EventEmitter {
             if(revive && Number(revive.affectedRows) > 0) inserted = true;
         }
         // The indexer mirror deliberately does NOT happen here. A throw between the durable
-        // write and this return skips the caller's `if(inserted) this._applyCommit(row, +1)`
+        // write and this return skips the caller's `if(inserted) this.applyCommit(row, +1)`
         // and leaves a finalized fill in the DB with no reservation in the in-memory ledger;
         // the next poll then re-offers the same escrow, and since the ledger only rebuilds at
         // start(), that divergence survives until a restart. writeFinalizedMatch credits the
@@ -1106,7 +1106,7 @@ class CrossChainDexEngine extends EventEmitter {
         let rows = await this.db.findFinalizedCrossChainMatchesForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){
             await this.db.updateCrossChainMatchRetracted(r.match_id);
-            this._applyCommit(r, -1);                   // restore both legs' remaining capacity
+            this.applyCommit(r, -1);                   // restore both legs' remaining capacity
             this._inflight.delete(r.match_id);
             // Clear the consensus finalized-ring entry (M-13): the match_id is the
             // round id, and without this a match re-formed after this reorg can never
@@ -1135,7 +1135,7 @@ class CrossChainDexEngine extends EventEmitter {
     // by requiring the cursor to strictly advance each page. Older indexers that don't return a
     // next_cursor fall back to the max action_index in the batch; ones that never set truncated
     // (pre-XCC-2) resolve in a single page, unchanged.
-    async _fetchOpenOffers(coin, opts){
+    async fetchOpenOffers(coin, opts){
         const MAX_PAGES = 40;                 // >= 20k offers at limit 500; a hard anti-spin bound
         let limit   = (opts && Number.isFinite(Number(opts.limit))) ? Number(opts.limit) : 500;
         let orders  = [];
