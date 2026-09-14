@@ -23,71 +23,33 @@
  * Phase 3A: Submission collection only.
  * Phase 3B will add aggregation, consensus, and finalization.
  *
+ * The round's behaviours live one per file under round/ and are installed on
+ * this prototype at load time (see installParts), so every call site keeps
+ * writing oracleRound.<method>() and no caller knows which file it is in.
+ * What stays HERE is construction and the round's own identity: the two
+ * collaborators tests stub through this module (PriceFetcher and
+ * XchainPriceSource), the cadence constants, and the derived-pair gate.
+ *
  ********************************************************************/
 
 const PriceFetcher = require('./price_fetcher.js');
 const XchainPriceSource = require('./xchain_price_source.js');
 const { isXchainPriceActive, roundStartSeconds } = require('../xchain_price_activation.js');
-const { isAdmissibleSigner, provenPubkey } = require('../lib/chain_signer_admission.js');
-const { roundBand, describeImplausibleRound } = require('./oracle_round_band.js');
-const { canonicalPrice } = require('./canonical_price.js');
-const { noteRoundLost } = require('../consensus/diagnostics');
-const nodeUtil = require('node:util');
-const { getLogger } = require('../observability');
-const logger = getLogger();
-
-// Burned round numbers per scheduler gap that also get a skipped row; a wider gap
-// is an outage, recorded once by range rather than as a flood of rows on return.
-const ROUND_GAP_SKIP_ROW_CAP = 12;
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('../constants.js');
+const { formatXchainPriceMeta } = require('./round/xchain_price_meta.js');
 
-const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
+// One part per behaviour, installed on the prototype below. Spelled out rather
+// than read off the directory so a missing or extra part is a visible diff.
+const lifecyclePart       = require('./round/lifecycle.js');
+const submissionsInfoPart = require('./round/submissions_info.js');
+const executePart         = require('./round/execute.js');
+const finalizationPart    = require('./round/finalization.js');
+const messagesPart        = require('./round/messages.js');
+const persistencePart     = require('./round/persistence.js');
 
-// Render the XCHAIN/USD derivation metadata for the round log (§10 step 6).
-//
-// §5 claims manipulation of this pair is "visible". That claim is only true if the
-// inputs behind a print are recorded somewhere an operator can read after the fact,
-// so this line is part of the design rather than debug chatter. It carries the
-// window height range, the fill counts (used, clamped, excluded), both volumes, the
-// winsorization reference, and - critically - the RAW pre-winsorize VWAP beside the
-// published rate. A round where those two differ is a round where the defence fired,
-// and nothing else in the system would say so.
-//
-// Deliberately one line and human-readable: it lands in the same log a hub operator
-// already tails for `Oracle: Round`, and a structured sink can be added later without
-// changing what the derivation computes.
-function formatXchainPriceMeta(meta) {
-    if (!meta) return '(no metadata)';
-    let w = meta.window || {};
-    // Rendered with the bound semantics visible, because they are load-bearing: the
-    // low bound is EXCLUSIVE and the high bound INCLUSIVE, which is what makes
-    // consecutive rounds tile without double-counting a block's fills.
-    let parts = ['window (' + (w.fromBlockExclusive != null ? w.fromBlockExclusive : '?') +
-                 ', ' + (w.toBlockInclusive != null ? w.toBlockInclusive : '?') + ']'];
-
-    if (meta.derived) {
-        parts.push(meta.usedFills + ' fills');
-        parts.push(meta.clampedFills + ' clamped');
-        parts.push(meta.droppedFills + ' excluded');
-        parts.push('vol ' + meta.btcVolume + ' BTC / ' + meta.totalXchain + ' XCHAIN');
-        parts.push('raw ' + meta.rawXchainBtc + ' -> published ' + meta.xchainBtc + ' BTC');
-        parts.push('ref ' + meta.refRate);
-    } else {
-        parts.push('carry-forward from ' + meta.carriedFrom);
-        parts.push(meta.fillCount + ' fills in window');
-        if (meta.reason) parts.push(meta.reason);
-        // Present only when the volume gate was what held the price back, and it is
-        // the field that distinguishes "the market was quiet" from "the market traded
-        // and we chose not to follow it yet".
-        if (meta.btcVolume !== undefined)
-            parts.push('vol ' + meta.btcVolume + ' BTC vs threshold ' +
-                       (meta.minBtcVolume === null ? 'DISABLED' : meta.minBtcVolume));
-        if (meta.wouldHaveBeen !== undefined)
-            parts.push('would have been ' + meta.wouldHaveBeen + ' BTC');
-    }
-    return '(' + parts.join(', ') + ')';
-}
+const PARTS = [lifecyclePart, submissionsInfoPart, executePart, finalizationPart,
+               messagesPart, persistencePart];
 
 class OracleRound {
 
@@ -101,62 +63,8 @@ class OracleRound {
         // Price fetcher
         this.priceFetcher = new PriceFetcher(this.config);
 
-        // Round state
-        this.currentRound      = 0;
-        this.lastExecutedRound = -1;   // idempotency guard for time-anchored scheduling
-        this.roundStartTime    = 0;
-        this.roundTimer        = null;
-        this.initialRoundTimer = null;
-        // Boundary-alignment setTimeout handle. Tracked so stop() can cancel it
-        // during the (up to a full roundInterval) window before it fires and
-        // installs roundTimer; an untracked handle leaks an interval across
-        // stop()/recreate and orphans the fresh roundTimer on stop()->start().
-        this.boundaryTimer     = null;
-        this._roundInFlight    = false;   // round self-overlap guard, see _executeRound()
-
-        // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
-        this.submissions = new Map();
-
-        // Oracle consensus engine (set via setConsensus after creation)
-        this.oracleConsensus = null;
-
-        // Per-round finalization timers, keyed by round. A single shared timer let a
-        // second round scheduled within one submission window clear the earlier round's
-        // timer before it fired, dropping that round's finalization entirely (no
-        // price_snapshots row, not even a skipped one). Keying by round mirrors
-        // OracleConsensus.leaderTimers.
-        this.finalizationTimers = new Map();
-
-        // Message handler reference
-        this._messageHandler = null;
-
-        // Config
-        // Defaults shared with api.js/XChainHub.js via constants.js (#2653): a hub
-        // constructed without a populated p2pConfig must land on the same cadence
-        // as its peers, since the interval anchors round numbering federation-wide.
-        this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
-        this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS;
-        // Per-round cap on collected peer submissions. api.js passes the env value
-        // through unparsed, so the parse and the default live here only. Unlike the
-        // retention window below, 0 is NOT a "disable" setting: maxSubmissionsPerRound
-        // gates ingest at line ~677, so 0 (or a negative) would drop every peer
-        // submission and stall the round silently. Both fall back to the default.
-        this.maxSubmissionsPerRound = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND);
-        if (!Number.isFinite(this.maxSubmissionsPerRound) || this.maxSubmissionsPerRound <= 0) {
-            this.maxSubmissionsPerRound = 200;
-        }
-        // Retention window (in rounds) for the oracle_submissions audit table.
-        // oracle_submissions is a purely diagnostic per-validator trail: the
-        // finalized value lives durably in price_snapshots and dropped rows are
-        // explicitly tolerated (Promise.allSettled in persistSubmissions). Without
-        // a bound the table appends validators x coin_pairs rows every round for the
-        // life of the deployment. Keep the most recent N rounds; 0 disables pruning.
-        // Default ~90 days at the 10-minute round default, mirroring telemetry_pings.
-        this.submissionsRetentionRounds = parseInt(this.config.ORACLE_SUBMISSIONS_RETENTION_ROUNDS);
-        if (!Number.isFinite(this.submissionsRetentionRounds) || this.submissionsRetentionRounds < 0) {
-            this.submissionsRetentionRounds = 12960;
-        }
-        this.priceMax               = PRICE_MAX;
+        initRoundState.call(this);
+        initConfigKnobs.call(this);
 
         // Canonical coin-pair whitelist. Submitted prices for any pair outside this
         // fixed set are dropped on ingest, so a peer cannot inject a fabricated pair
@@ -177,64 +85,8 @@ class OracleRound {
         // the pair, which is a supported state, not a misconfiguration to fail on.
         this.xchainPriceSource = new XchainPriceSource(this.config, hub && hub.db);
 
-        // Chain-tip health tracking
-        this.lastSuccessfulChainTipFetchAt = null;
-        this.chainTipFetchFailures         = 0;
-        this.chainTipFallbackActive        = false;
-        this._startTime                    = Date.now();
-
-        // Block-age of the anchor tip itself (seconds, Unix), set ONLY when the anchor
-        // came from a real pushed chain tip. The indexer suppresses chain-tip pushes
-        // during a long catch-up, so getChainTip can keep returning a frozen row that
-        // resets every fetch-freshness counter while the tip's own block time ages out.
-        // chainTipStalenessMs measures read time, not the tip's age, so it stays small
-        // and hides the freeze. null when the anchor is the wall-clock-stamped direct
-        // height or round-number fallback (block-age monitoring does not apply there).
-        this.anchorTipBlockTime = null;
-        // Tip is flagged stale once its block time is older than this (seconds). Default
-        // 2x the round interval; a genuine BTC tip advances roughly every 10 min, so this
-        // only trips on a multi-block freeze, and it is a monitoring flag (it never
-        // suppresses finalization, which the chainTipFallbackActive ladder still governs).
-        this.chainTipStalenessThresholdS = parseInt(this.config.CHAIN_TIP_STALENESS_THRESHOLD_S)
-            || Math.floor((2 * this.roundInterval) / 1000);
-
-        // BTC network for this hub, resolved once per round from the configs table and
-        // read by the derived-pair composition gate. Undefined until the first successful
-        // resolve, which the gate treats as "do not compose the pair".
-        this.currentBtcNetwork = undefined;
-
-        // Skipped-round tracking
-        this.consecutiveSkippedRounds = 0;
-        this.lastSuccessfulRoundTime  = null;
-
-        // Cumulative count of rounds where the price fetch threw. Unlike
-        // consecutiveSkippedRounds (a gauge that resets on the next success),
-        // this only ever grows, giving operators a real-time miss-rate signal.
-        this.fetchFailures = 0;
-
-        // Count of oracle_submissions INSERTs that failed to persist (monotonic, like
-        // fetchFailures) plus the last round in which one failed and how many failed in
-        // it. A dropped submission narrows the durable audit trail / per-pair source
-        // count vs. the in-memory quorum view without ever over-reporting quorum, so this
-        // is surfaced as an operator signal rather than aborting the money-bearing round.
-        this.failedSubmissionPersists = 0;
-        this.lastSubmissionPersistFailureRound = null;
-        this.lastSubmissionPersistFailureCount = 0;
-
-        // Same shape for the durable retention sweep, which is fired and not awaited
-        // (see executeRoundInner) so its rejection has nowhere else to land: without
-        // these the oracle_submissions audit table grows for the process lifetime and
-        // the first operator signal is DB pressure. _submissionsPruneDark is an edge
-        // latch, not a counter: the sweep runs every round, so an unlatched warn would
-        // reprint the same fault forever (same posture as OraclePublisher.logSnapshotDark).
-        this.submissionsPruneFailures = 0;
-        this.lastSubmissionsPruneFailureRound = null;
-        this._submissionsPruneDark = false;
-
-        // Edge latch for the out-of-band round warning. Holds the highest
-        // round already announced, so a standing sentinel is named once rather than
-        // on every diagnostics poll; see getSubmissionsInfo.
-        this._lastImplausibleRoundWarned = null;
+        initChainTipHealth.call(this);
+        initRoundCounters.call(this);
 
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
@@ -269,125 +121,6 @@ class OracleRound {
         let t = roundStartSeconds(round, this.epochStart, this.roundInterval);
         if (t === null) return false;
         return isXchainPriceActive(t, this.currentBtcNetwork);
-    }
-
-    // Start the oracle round system
-    async start() {
-        // Idempotent: a second start() without an intervening stop() would install
-        // a duplicate round loop (and leak the first). If any scheduling timer is
-        // already live, this instance is running; do nothing.
-        if (this.initialRoundTimer || this.boundaryTimer || this.roundTimer) {
-            return;
-        }
-
-        // Rehydrate freshness counters from the durable record before the timer
-        // begins, so a restart reflects the real feed state instead of a clean slate.
-        await this.hydrateFreshnessCounters();
-
-        // Subscribe to gossip messages
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
-        this.peerManager.on('message', this._messageHandler);
-
-        // Reset the stall gauges only when a round actually finalizes (reaches
-        // commit quorum), not merely when this hub broadcast its own submission.
-        // During a consensus/quorum stall the local price fetch keeps succeeding, so
-        // stamping freshness on submission would hide the stall from the dashboard's
-        // early-stall gauge. Finalization is the real success signal, and it matches
-        // the semantic hydrateFreshnessCounters rebuilds from the durable record.
-        if (this.oracleConsensus && typeof this.oracleConsensus.on === 'function') {
-            this._finalizedHandler = () => this.markRoundFinalized();
-            this.oracleConsensus.on('round:finalized', this._finalizedHandler);
-            // Symmetric wiring for the increment: the streak advances on the same
-            // durable event the reset does, so the live gauge and the hydrated value
-            // share one semantic (item 4942).
-            this._skippedHandler = () => this.noteRoundSkipped();
-            this.oracleConsensus.on('round:skipped', this._skippedHandler);
-        }
-
-        // Start the round timer; it handles both the first run and the aligned cadence
-        this.startRoundTimer();
-
-        logger.info('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
-    }
-
-    // Rehydrate consecutiveSkippedRounds and lastSuccessfulRoundTime from
-    // price_snapshots so they survive a restart. The constructor initialises both
-    // to a clean-slate value (0 / null); without this step a hub that restarts
-    // mid-outage would present zero skipped rounds and no last-success time even
-    // though the durable record shows otherwise, masking the gap from /health and
-    // the diagnostics RPC. price_snapshots is durable, so this is purely an
-    // observability rehydrate, never a recompute of price data.
-    async hydrateFreshnessCounters() {
-        try {
-            // (a) Most recent finalized round and its wall-clock time. created_at is
-            // a TIMESTAMP; convert to epoch ms to match the live value, which is set
-            // from Date.now() on each successful round.
-            let lastRows = await this.db.getPriceSnapshotByStatus();
-
-            let lastFinalizedRound = -1;
-            if (lastRows && lastRows.length) {
-                lastFinalizedRound           = Number(lastRows[0].round_number);
-                this.lastSuccessfulRoundTime = Number(lastRows[0].ms);
-            }
-
-            // (b) Distinct rounds recorded after the last finalized round that did
-            // NOT finalize: the consecutive trailing skip streak. With no finalized
-            // round at all (lastFinalizedRound = -1) this counts every recorded
-            // non-finalized round.
-            let skipRows = await this.db.getPriceSnapshotsCountUnfinalizedAfterRound(lastFinalizedRound);
-            this.consecutiveSkippedRounds = (skipRows && skipRows.length) ? Number(skipRows[0].skipped) : 0;
-        } catch (err) {
-            // Non-fatal: a hydration failure must not block oracle startup. Leave the
-            // constructor defaults (0 / null) in place and continue.
-            logger.warn(nodeUtil.format('Oracle: failed to hydrate freshness counters on start:', err));
-        }
-    }
-
-    // Stop the oracle round system
-    async stop() {
-        if (this._messageHandler) {
-            this.peerManager.removeListener('message', this._messageHandler);
-            this._messageHandler = null;
-        }
-        if (this._finalizedHandler && this.oracleConsensus && typeof this.oracleConsensus.removeListener === 'function') {
-            this.oracleConsensus.removeListener('round:finalized', this._finalizedHandler);
-            this._finalizedHandler = null;
-        }
-        if (this._skippedHandler && this.oracleConsensus && typeof this.oracleConsensus.removeListener === 'function') {
-            this.oracleConsensus.removeListener('round:skipped', this._skippedHandler);
-            this._skippedHandler = null;
-        }
-        if (this.initialRoundTimer) {
-            clearTimeout(this.initialRoundTimer);
-            this.initialRoundTimer = null;
-        }
-        if (this.boundaryTimer) {
-            clearTimeout(this.boundaryTimer);
-            this.boundaryTimer = null;
-        }
-        if (this.roundTimer) {
-            clearInterval(this.roundTimer);
-            this.roundTimer = null;
-        }
-        // An armed finalization timer is a submitted round nothing rehydrates after a
-        // restart (the round number is wall-clock derived, so a restarted hub resumes
-        // at the current one): record each and write its upgradable skipped row.
-        let inFlight = [...this.finalizationTimers.keys()];
-        for (let t of this.finalizationTimers.values()) clearTimeout(t);
-        this.finalizationTimers.clear();
-        if (inFlight.length) {
-            let btcBlockHeight = this.currentBtcBlockHeight;
-            let btcBlockTime   = this.currentBtcBlockTime;
-            await Promise.allSettled(inFlight.map(round => {
-                noteRoundLost({ phase: 'shutdown', round, cause: 'stopped_before_finalization' });
-                logger.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
-                if (!this.oracleConsensus || typeof this.oracleConsensus.storeSkippedRound !== 'function') return null;
-                return this.oracleConsensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
-                    'hub stopped before finalization').catch(err =>
-                    logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ' at stop:',
-                        err && err.message ? err.message : err)));
-            }));
-        }
     }
 
     // Get the current round number
@@ -425,797 +158,158 @@ class OracleRound {
         return this.submissions.get(round || this.currentRound);
     }
 
-    // Get all submissions as a serializable object (for JSON-RPC diagnostics)
-    async getSubmissionsInfo() {
-        let info = {};
-        for (let [round, subs] of this.submissions) {
-            info[round] = {};
-            for (let [sender, data] of subs) {
-                info[round][sender] = data;
-            }
-        }
+}
 
-        // Surface recently skipped rounds so operators can detect feed-outage gaps
-        // straight from the diagnostics RPC. In-memory submission maps only retain
-        // the current and previous round (see pruneSubmissions), so a missed round
-        // is otherwise invisible; the durable record lives in price_snapshots
-        // (status='skipped', written when a round produces no usable prices).
-        // skippedRounds keeps its whole-round semantic (no pair finalized): the
-        // per-pair skip markers _storeSnapshot writes for partially-dropped rounds
-        // (item #180) must not inflate the feed-outage count. Those partial drops
-        // surface separately as droppedPairs.
-        // Each diagnostic read carries its own *ReadError marker (item 5548):
-        // without one a failed read serves the same empty array as a clean
-        // round, and a consumer keying warn on droppedPairCount > 0 reads the
-        // failure as healthy. Additive booleans, always emitted, false on success.
-        let skippedRounds = [];
-        let droppedPairs = [];
-        let skippedRoundsReadError = false;
-        let droppedPairsReadError = false;
-        try {
-            let rows = await this.db.findPriceSnapshotRoundsSkippedWithNoFinalized();
-            skippedRounds = rows.map(r => Number(r.round_number));
-        } catch (err) {
-            // Non-fatal: diagnostics still return the in-memory state if the read fails
-            skippedRoundsReadError = true;
-            logger.warn(nodeUtil.format('Oracle: failed to read skipped rounds for diagnostics:', err));
-        }
-        try {
-            // Per-pair drops (item #180): pairs skipped inside a round that
-            // otherwise finalized (aggregation clamp / deviation gate / trim, or
-            // absent from the leader's proposal), so a single pair silently
-            // ceasing to publish is observable while the round looks healthy.
-            let rows = await this.db.findPriceSnapshotsSkippedWithFinalizedRound();
-            droppedPairs = rows.map(r => ({ round: Number(r.round_number), coinPair: r.coin_pair }));
-        } catch (err) {
-            droppedPairsReadError = true;
-            logger.warn(nodeUtil.format('Oracle: failed to read per-pair drops for diagnostics:', err));
-        }
+// The round's own live state: which round is running, the timers that drive it,
+// and the maps the gossip and finalization paths write into.
+function initRoundState() {
+    // Round state
+    this.currentRound      = 0;
+    this.lastExecutedRound = -1;   // idempotency guard for time-anchored scheduling
+    this.roundStartTime    = 0;
+    this.roundTimer        = null;
+    this.initialRoundTimer = null;
+    // Boundary-alignment setTimeout handle. Tracked so stop() can cancel it
+    // during the (up to a full roundInterval) window before it fires and
+    // installs roundTimer; an untracked handle leaks an interval across
+    // stop()/recreate and orphans the fresh roundTimer on stop()->start().
+    this.boundaryTimer     = null;
+    this._roundInFlight    = false;   // round self-overlap guard, see _executeRound()
 
-        // Rounds ALREADY STORED outside the plausible band.
-        //
-        // PriceAggregator refuses an out-of-band round at write time, but that
-        // cannot retract what is already in the table: a regtest venue's e2e price
-        // sentinels (round 888100012 and its family, written straight into the DB by
-        // the price-seed fixtures), a row from before this check existed, or a
-        // hand-seeded probe. The lost-round detector walks the round range
-        // in this table looking for holes, so ONE such row either swallows the whole
-        // scan or invents a hundred-million-round gap. Naming them here lets a
-        // detector drop them and still scan the real range.
-        //
-        // Reported, never deleted: this is a diagnostics read, and a row an operator
-        // has not seen is not a row the hub should quietly destroy.
-        let band = roundBand({ epochStartMs: this.epochStart, roundIntervalMs: this.roundInterval });
-        let implausibleRounds = [];
-        let implausibleRoundsReadError = false;
-        if (band) {
-            try {
-                let rows = await this.db.findPriceSnapshotRoundsAfter(band.max);
-                implausibleRounds = rows.map(r => Number(r.round_number));
-            } catch (err) {
-                // Same additive-marker contract as the two reads above: without it a
-                // failed read serves the same empty array as a clean table.
-                implausibleRoundsReadError = true;
-                logger.warn(nodeUtil.format('Oracle: failed to read out-of-band rounds for diagnostics:', err));
-            }
-            // EDGE-LATCHED on the highest out-of-band round, same posture as
-            // _submissionsPruneDark: diagnostics are polled, so an unlatched warn
-            // would reprint the same standing fault into every log tail forever.
-            // A NEW out-of-band round (a higher one) re-announces itself.
-            if (implausibleRounds.length && implausibleRounds[0] !== this._lastImplausibleRoundWarned) {
-                this._lastImplausibleRoundWarned = implausibleRounds[0];
-                logger.warn('Oracle: price_snapshots carries ' + implausibleRounds.length +
-                             ' round(s) past the plausible band: ' +
-                             describeImplausibleRound(implausibleRounds[0], band));
-            }
-        }
+    // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
+    this.submissions = new Map();
 
-        return {
-            currentRound:             this.currentRound,
-            roundStartTime:           this.roundStartTime,
-            roundInterval:            this.roundInterval,
-            submissionWindow:         this.submissionWindow,
-            submissions:              info,
-            skippedRounds:            skippedRounds,
-            skippedCount:             skippedRounds.length,
-            skippedRoundsReadError:   skippedRoundsReadError,
-            droppedPairs:             droppedPairs,
-            droppedPairCount:         droppedPairs.length,
-            droppedPairsReadError:    droppedPairsReadError,
-            // The band this hub judges round numbers against, and any row
-            // already stored outside it. `roundBand` is null when the local schedule
-            // is unresolvable, which a consumer must read as "not checked" rather
-            // than as "clean" - hence the band rides beside the list.
-            roundBand:                    band,
-            implausibleRounds:            implausibleRounds,
-            implausibleRoundCount:        implausibleRounds.length,
-            implausibleRoundsReadError:   implausibleRoundsReadError,
-            // Write-time refusals by the ingest paths, so a peer pushing out-of-band
-            // rounds is visible even when nothing was ever stored.
-            implausibleRoundRejections:   this.hub && this.hub.priceAggregator
-                ? (this.hub.priceAggregator.implausibleRoundRejections || 0)
-                : 0,
-            failedSubmissionPersists:      this.failedSubmissionPersists,
-            lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
-            lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
-            // Retention-sweep failures. Additive and count-only: the log carries the
-            // driver message, this payload is the public read tier (see
-            // onSubmissionsPruneFailure). Without these a stalled sweep is visible
-            // only to whoever is tailing the hub log.
-            submissionsPruneFailures:          this.submissionsPruneFailures,
-            lastSubmissionsPruneFailureRound:  this.lastSubmissionsPruneFailureRound,
-            consecutiveSkippedRounds: this.consecutiveSkippedRounds,
-            // PBFT finalization-timeout evictions (leader and follower seats),
-            // mirroring StateCheckpointEngine getStats().round_timeouts so the
-            // dashboard can alert on quorum-loss frequency (reviews 1468/1469).
-            round_timeouts:           this.oracleConsensus
-                ? (this.oracleConsensus._roundTimeouts || 0)
-                : 0,
-            // Rounds that opened on this hub and were recorded as abandoned before
-            // finalizing. Broader than round_timeouts, which only sees the
-            // two PBFT seats that held a pending round: the follower seat waiting on
-            // a PROPOSE that never came moved no counter at all, which is how a lost
-            // round left four of five validators with nothing to show for it.
-            abandoned_rounds:         this.oracleConsensus
-                ? (this.oracleConsensus._abandonedRounds || 0)
-                : 0,
-            lastAbandonedRound:       this.oracleConsensus
-                ? (this.oracleConsensus._lastAbandonedRound != null
-                    ? this.oracleConsensus._lastAbandonedRound : null)
-                : null,
-            // Rounds finalized with only one uncorrelated upstream behind a
-            // normally-multi-source pair. A different failure from round_timeouts above:
-            // the round reached quorum and was signed normally, so nothing else in this
-            // payload moves, while PRICE v0 was published with no outlier rejection
-            // behind it. Monotonic for the process, same as its sibling.
-            single_source_rounds:     this.oracleConsensus
-                ? (this.oracleConsensus._singleSourceRounds || 0)
-                : 0,
-            lastSingleSourceRound:    this.oracleConsensus
-                ? (this.oracleConsensus._lastSingleSourceRound != null
-                    ? this.oracleConsensus._lastSingleSourceRound : null)
-                : null,
-            oracle_fetch_failures:    this.fetchFailures,
-            lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
-            // Server-computed age of the last successful round. The dashboard
-            // prefers this over diffing lastSuccessfulRoundTime against its own
-            // clock (which folds host/hub skew into the stall thresholds).
-            // Mirrors the chainTipStalenessMs pattern below.
-            lastSuccessAgeMs:         this.lastSuccessfulRoundTime
-                ? (Date.now() - this.lastSuccessfulRoundTime)
-                : null,
-            btcBlockHeight:           this.currentBtcBlockHeight != null ? this.currentBtcBlockHeight : null,
-            usingFallback:            this.chainTipFallbackActive,
-            chainTipFetchFailures:    this.chainTipFetchFailures,
-            lastChainTipFetchAt:      this.lastSuccessfulChainTipFetchAt
-                ? new Date(this.lastSuccessfulChainTipFetchAt).toISOString()
-                : null,
-            // Server-computed age of the last good chain-tip read. Monitors can
-            // threshold this directly instead of diffing lastChainTipFetchAt
-            // against their own clock (which would fold in client skew).
-            chainTipStalenessMs:      this.lastSuccessfulChainTipFetchAt
-                ? (Date.now() - this.lastSuccessfulChainTipFetchAt)
-                : null,
-            // Age of the ANCHOR TIP ITSELF (now - its block time), the signal
-            // chainTipStalenessMs misses: a frozen-but-present pushed tip resets the
-            // fetch counters every round yet its block time keeps aging. null when the
-            // anchor is a wall-clock-stamped direct height or round-number fallback,
-            // where block age is meaningless. chainTipBlockStale flags it past the
-            // threshold so a frozen tip during indexer catch-up is visible to monitors.
-            chainTipBlockAgeMs:       this.anchorTipBlockTime != null
-                ? (Date.now() - this.anchorTipBlockTime * 1000)
-                : null,
-            chainTipBlockStale:       this.anchorTipBlockTime != null
-                ? ((Date.now() - this.anchorTipBlockTime * 1000) > this.chainTipStalenessThresholdS * 1000)
-                : null
-        };
+    // Oracle consensus engine (set via setConsensus after creation)
+    this.oracleConsensus = null;
+
+    // Per-round finalization timers, keyed by round. A single shared timer let a
+    // second round scheduled within one submission window clear the earlier round's
+    // timer before it fired, dropping that round's finalization entirely (no
+    // price_snapshots row, not even a skipped one). Keying by round mirrors
+    // OracleConsensus.leaderTimers.
+    this.finalizationTimers = new Map();
+
+    // Message handler reference
+    this._messageHandler = null;
+}
+
+// The cadence and the ingest bounds, every one of them read off p2pConfig here
+// and nowhere else on the round path.
+function initConfigKnobs() {
+    // Config
+    // Defaults shared with api.js/XChainHub.js via constants.js (#2653): a hub
+    // constructed without a populated p2pConfig must land on the same cadence
+    // as its peers, since the interval anchors round numbering federation-wide.
+    this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
+    this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS;
+    // Per-round cap on collected peer submissions. api.js passes the env value
+    // through unparsed, so the parse and the default live here only. Unlike the
+    // retention window below, 0 is NOT a "disable" setting: maxSubmissionsPerRound
+    // gates ingest in _handleMessage, so 0 (or a negative) would drop every peer
+    // submission and stall the round silently. Both fall back to the default.
+    this.maxSubmissionsPerRound = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND);
+    if (!Number.isFinite(this.maxSubmissionsPerRound) || this.maxSubmissionsPerRound <= 0) {
+        this.maxSubmissionsPerRound = 200;
     }
-
-    // --- Private methods ---
-
-    // Start the periodic round timer, aligned to wall-clock round boundaries
-    // anchored at this.epochStart. If we start mid-round and the submission
-    // window is still open, run the current round immediately after a short
-    // delay to let peer connections settle; otherwise wait until the next
-    // boundary.
-    startRoundTimer() {
-        let elapsedInRound  = (Date.now() - this.epochStart) % this.roundInterval;
-        let timeToNextRound = this.roundInterval - elapsedInRound;
-
-        // A rejection out of a bare timer callback is an unhandled rejection
-        // (process exit), so every timer-driven round execution catches here.
-        const runRound = () => {
-            this._executeRound().catch(err =>
-                logger.error(nodeUtil.format('OracleRound: round execution error:', err && err.message ? err.message : err)));
-        };
-
-        let initialDelay = 5000;
-        if (elapsedInRound + initialDelay < this.submissionWindow) {
-            this.initialRoundTimer = setTimeout(() => {
-                this.initialRoundTimer = null;
-                runRound();
-            }, initialDelay);
-        }
-
-        // Align to the next round boundary, then run on a steady interval.
-        // Capture the handle so stop() can cancel it before it fires; null it
-        // inside the callback so the idempotency guard in start() sees a clean
-        // slate once the interval has taken over.
-        this.boundaryTimer = setTimeout(() => {
-            this.boundaryTimer = null;
-            runRound();
-            this.roundTimer = setInterval(runRound, this.roundInterval);
-        }, timeToNextRound);
+    // Retention window (in rounds) for the oracle_submissions audit table.
+    // oracle_submissions is a purely diagnostic per-validator trail: the
+    // finalized value lives durably in price_snapshots and dropped rows are
+    // explicitly tolerated (Promise.allSettled in persistSubmissions). Without
+    // a bound the table appends validators x coin_pairs rows every round for the
+    // life of the deployment. Keep the most recent N rounds; 0 disables pruning.
+    // Default ~90 days at the 10-minute round default, mirroring telemetry_pings.
+    this.submissionsRetentionRounds = parseInt(this.config.ORACLE_SUBMISSIONS_RETENTION_ROUNDS);
+    if (!Number.isFinite(this.submissionsRetentionRounds) || this.submissionsRetentionRounds < 0) {
+        this.submissionsRetentionRounds = 12960;
     }
+    this.priceMax               = PRICE_MAX;
+}
 
-    // Execute a single round: fetch prices, broadcast submission.
-    //
-    // Round self-overlap guard (house convention:
-    // FullNodeChallengeRound._tick). The round-number test below looks like a guard but
-    // is not one: it fences a REPEAT of the same round, and the next interval fires with
-    // a NEW round number, so it passes. Everything after it reads and writes
-    // this.currentRound across several awaits (network resolve, chain-tip read, the
-    // external price fetch, the XCHAIN/USD derive, the submission persist), so a round
-    // that outruns roundInterval has its currentRound reassigned underneath it by the
-    // round that fired on top: the slow round then broadcasts ITS prices stamped with the
-    // NEW round number, records them over the newer round's own entry in the submission
-    // map, and persists the audit row under that number. Peers keep only the first
-    // submission per sender per round (_handleMessage), so the federation aggregates one
-    // price set while this hub's own map, DB row and finalization see the other: it
-    // disagrees with the quorum about what it submitted. The reassignment also clobbers
-    // currentBtcBlockHeight, so both rounds anchor to a height neither of them read.
-    // Skipping the overlapping round drops one round's submission, which is recoverable
-    // (round numbers are wall-clock derived and resync on the next tick); interleaving
-    // corrupts the round already in flight. The guard is a wrapper rather than inline so
-    // the finally cannot be skipped by any of the body's early returns; a rejected fetch
-    // must not wedge the oracle for the process lifetime.
-    async _executeRound() {
-        if (this._roundInFlight) {
-            logger.warn('Oracle: previous round still in flight; skipping this round tick');
-            return;
+// Freshness of the BTC anchor this hub prices against, and the network the
+// derived-pair gate reads.
+function initChainTipHealth() {
+    // Chain-tip health tracking
+    this.lastSuccessfulChainTipFetchAt = null;
+    this.chainTipFetchFailures         = 0;
+    this.chainTipFallbackActive        = false;
+    this._startTime                    = Date.now();
+
+    // Block-age of the anchor tip itself (seconds, Unix), set ONLY when the anchor
+    // came from a real pushed chain tip. The indexer suppresses chain-tip pushes
+    // during a long catch-up, so getChainTip can keep returning a frozen row that
+    // resets every fetch-freshness counter while the tip's own block time ages out.
+    // chainTipStalenessMs measures read time, not the tip's age, so it stays small
+    // and hides the freeze. null when the anchor is the wall-clock-stamped direct
+    // height or round-number fallback (block-age monitoring does not apply there).
+    this.anchorTipBlockTime = null;
+    // Tip is flagged stale once its block time is older than this (seconds). Default
+    // 2x the round interval; a genuine BTC tip advances roughly every 10 min, so this
+    // only trips on a multi-block freeze, and it is a monitoring flag (it never
+    // suppresses finalization, which the chainTipFallbackActive ladder still governs).
+    this.chainTipStalenessThresholdS = parseInt(this.config.CHAIN_TIP_STALENESS_THRESHOLD_S)
+        || Math.floor((2 * this.roundInterval) / 1000);
+
+    // BTC network for this hub, resolved once per round from the configs table and
+    // read by the derived-pair composition gate. Undefined until the first successful
+    // resolve, which the gate treats as "do not compose the pair".
+    this.currentBtcNetwork = undefined;
+}
+
+// The round-outcome gauges getSubmissionsInfo reports: what stalled, what failed
+// to persist, and what the retention sweep could not do.
+function initRoundCounters() {
+    // Skipped-round tracking
+    this.consecutiveSkippedRounds = 0;
+    this.lastSuccessfulRoundTime  = null;
+
+    // Cumulative count of rounds where the price fetch threw. Unlike
+    // consecutiveSkippedRounds (a gauge that resets on the next success),
+    // this only ever grows, giving operators a real-time miss-rate signal.
+    this.fetchFailures = 0;
+
+    // Count of oracle_submissions INSERTs that failed to persist (monotonic, like
+    // fetchFailures) plus the last round in which one failed and how many failed in
+    // it. A dropped submission narrows the durable audit trail / per-pair source
+    // count vs. the in-memory quorum view without ever over-reporting quorum, so this
+    // is surfaced as an operator signal rather than aborting the money-bearing round.
+    this.failedSubmissionPersists = 0;
+    this.lastSubmissionPersistFailureRound = null;
+    this.lastSubmissionPersistFailureCount = 0;
+
+    // Same shape for the durable retention sweep, which is fired and not awaited
+    // (see executeRoundInner) so its rejection has nowhere else to land: without
+    // these the oracle_submissions audit table grows for the process lifetime and
+    // the first operator signal is DB pressure. _submissionsPruneDark is an edge
+    // latch, not a counter: the sweep runs every round, so an unlatched warn would
+    // reprint the same fault forever (same posture as OraclePublisher.logSnapshotDark).
+    this.submissionsPruneFailures = 0;
+    this.lastSubmissionsPruneFailureRound = null;
+    this._submissionsPruneDark = false;
+
+    // Edge latch for the out-of-band round warning. Holds the highest
+    // round already announced, so a standing sentinel is named once rather than
+    // on every diagnostics poll; see getSubmissionsInfo.
+    this._lastImplausibleRoundWarned = null;
+}
+
+// Install each part's methods on the prototype, non-enumerably, as src/db/index.js
+// installMixins does for the database families: enumerable false keeps a moved method
+// indistinguishable from one declared in the class body, writable and configurable true
+// keep it stubbable, and a name already on the prototype throws rather than overriding.
+function installParts(target, parts) {
+    for (const part of parts) {
+        const descriptors = {};
+        for (const name of Object.keys(part)) {
+            if (Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate method: ' + name + ' is already defined on ' +
+                    target.constructor.name + '.prototype');
+            descriptors[name] = { value: part[name], enumerable: false, writable: true, configurable: true };
         }
-        this._roundInFlight = true;
-        try {
-            return await this.executeRoundInner();
-        } finally {
-            this._roundInFlight = false;
-        }
-    }
-
-    async executeRoundInner() {
-        // Compute the round number from wall-clock time so every hub in the
-        // federation agrees on the round number for the same point in time
-        // (and so a restarted hub resumes at the correct number instead of 1).
-        let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
-        if (newRound === this.lastExecutedRound) return;
-        // A forward clock step, a suspended process or a late tick burns every number
-        // in between with no tick, no submission and no row: record the run first.
-        // A fresh start (-1) is not a gap.
-        if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1) {
-            this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
-        }
-        this.lastExecutedRound = newRound;
-
-        this.currentRound   = newRound;
-        this.roundStartTime = Date.now();
-
-        // Capture the BTC chain tip at the start of this round
-        // This is the deterministic anchor for cross-node price agreement.
-        // Network is resolved via the hub helper so this works whether the
-        // hub serves mainnet, testnet, or regtest BTC indexers.
-        try {
-            let network = await this.hub.resolveBtcNetwork();
-            // Remembered for the derived-pair composition gate below, which needs the network
-            // synchronously. Left UNSET when this resolve throws, so a hub that could
-            // not determine its own network fails the gate closed rather than guessing.
-            this.currentBtcNetwork = network;
-            let btcTip = await this.db.getChainTip('BTC', network);
-            if (btcTip) {
-                this.currentBtcBlockHeight         = btcTip.blockHeight;
-                this.currentBtcBlockTime           = btcTip.blockTime;
-                this.lastSuccessfulChainTipFetchAt = Date.now();
-                this.chainTipFetchFailures         = 0;
-                this.chainTipFallbackActive        = false;
-                // Record the pushed tip's own block time so diagnostics can age it. A
-                // present-but-frozen row (indexer catch-up suppressing pushes) clears
-                // every fetch counter above but leaves this block time stale.
-                this.anchorTipBlockTime = (typeof btcTip.blockTime === 'number' && btcTip.blockTime > 0)
-                    ? btcTip.blockTime : null;
-            } else {
-                // No pushed chain tip in the hub DB. The indexer→hub `pushchaintip`
-                // path only populates getChainTip when an indexer is co-located with
-                // (and configured to push to) this hub, which a master/standalone hub
-                // box running the oracle may not have. Before degrading to the round
-                // number, try the hub's direct indexer resolver (getlatestblock via
-                // BTC_INDEXER_API_URL or the configs table). It returns only a height,
-                // so anchor the timestamp to the wall clock. A real height is a real
-                // anchor, so clear the fallback flag: finalization must NOT be
-                // suppressed when we have an authoritative block height.
-                let directHeight = null;
-                try { directHeight = await this.hub._resolveBtcLatestBlock(); }
-                catch (_) { /* resolver failed; fall through to round-number anchor */ }
-
-                if (directHeight) {
-                    this.currentBtcBlockHeight         = directHeight;
-                    this.currentBtcBlockTime           = Math.floor(Date.now() / 1000);
-                    this.lastSuccessfulChainTipFetchAt = Date.now();
-                    this.chainTipFetchFailures         = 0;
-                    this.chainTipFallbackActive        = false;
-                    // Direct-resolver height carries no block time; the anchor is wall
-                    // clock, so block-age monitoring does not apply.
-                    this.anchorTipBlockTime = null;
-                } else {
-                    // No BTC tip available at all; fall back to round number
-                    this.chainTipFetchFailures++;
-                    if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
-                    if (this.chainTipFetchFailures > 1) {
-                        logger.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor');
-                    } else {
-                        logger.warn('Oracle: BTC chain tip unavailable; using round number as fallback anchor');
-                    }
-                    this.currentBtcBlockHeight = this.currentRound;
-                    this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
-                    this.anchorTipBlockTime    = null;
-                }
-            }
-        } catch (err) {
-            this.chainTipFetchFailures++;
-            if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
-            if (this.chainTipFetchFailures > 1) {
-                logger.error(nodeUtil.format('Oracle: Failed to read BTC chain tip (failure ' + this.chainTipFetchFailures + '):', err));
-            } else {
-                logger.warn(nodeUtil.format('Oracle: Failed to read BTC chain tip:', err));
-            }
-            this.currentBtcBlockHeight = this.currentRound;
-            this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
-            this.anchorTipBlockTime    = null;
-        }
-
-        // Prune old submissions (keep current and previous round only)
-        this.pruneSubmissions();
-        // Best-effort DB retention for the oracle_submissions audit table. Fire-and-
-        // forget: a retention failure must never stall or crash a money-bearing
-        // consensus round (same posture as the tolerated audit-row insert failures).
-        // Not awaiting is the requirement; DISCARDING the rejection was not, and it
-        // made this the only error path in the round loop with no log and no counter.
-        // The round number is captured HERE rather than read inside the handler: the
-        // sweep settles asynchronously and this.currentRound may already have advanced.
-        this.pruneSubmissionsDb().catch(err => this.onSubmissionsPruneFailure(err, this.currentRound));
-
-        // Initialize submission map for this round
-        if (!this.submissions.has(this.currentRound)) {
-            this.submissions.set(this.currentRound, new Map());
-        }
-
-        // Fetch prices from external sources
-        let prices;
-        try {
-            prices = await this.priceFetcher.fetchPrices();
-        } catch (err) {
-            this.fetchFailures++;
-            logger.error(nodeUtil.format('Oracle: Price fetch failed for round ' + this.currentRound + ':', err));
-            // Still schedule finalization so the round leaves a durable record.
-            // If peers gossiped submissions the round can be salvaged; if nobody
-            // has prices, OracleConsensus writes a 'skipped' price_snapshots row
-            // instead of the round vanishing without a trace. The skip streak is
-            // advanced by that durable write's 'round:skipped' event, not here: a
-            // local fetch failure the federation then salvages is not a skipped
-            // round, and counting it here also double-counted a round that went on
-            // to hit the chain-tip-fallback skip below (item 4942).
-            this.scheduleFinalization(this.currentRound);
-            return;
-        }
-
-        if (!prices || prices.length === 0) {
-            logger.warn('Oracle: No prices available for round ' + this.currentRound);
-            // Same rationale as the fetch-failure path above: record the gap, and
-            // let the durable skip write advance the streak.
-            this.scheduleFinalization(this.currentRound);
-            return;
-        }
-
-        // Append the derived XCHAIN/USD pair, if the activation gate has
-        // opened on this network for this round. Deliberately OUTSIDE fetchPrices():
-        // it is not fetched, it is computed from this validator's own BTC indexer
-        // rows, and it must not be able to disturb the 36 API pairs. The source never
-        // throws and returns null to abstain, so a hub without indexer access - or one
-        // whose chain-tip anchor is unreliable - simply omits the pair while the rest
-        // of the round proceeds untouched (§6 local-failure taxonomy).
-        //
-        // The gate is checked HERE rather than inside the source because it is not a
-        // property of this hub's ability to derive: a hub that could compute the pair
-        // perfectly well must still not submit it before the federation-wide instant
-        // (§8 deploy order), regardless of local config.
-        //
-        // Fed this round's own BTC/USD from the fetch above, because the published
-        // value is on-chain XCHAIN/BTC x the validator's own BTC/USD (§6).
-        if (this.xchainPriceSource && this.xchainPriceGateOpen()) {
-            let btcUsd = prices.find(p => p.coinPair === 'BTC/USD');
-            let entry  = await this.xchainPriceSource.derive({
-                round:            this.currentRound,
-                referenceHeight:  this.currentBtcBlockHeight,
-                btcUsdPrice:      btcUsd ? btcUsd.price : null,
-                chainTipReliable: !this.chainTipFallbackActive,
-            });
-            if (entry) {
-                // meta is local observability only (§10 step 6) and is NOT part of the
-                // signed payload; strip it so the gossiped entry is shaped exactly like
-                // every other pair and the canonical payload stays byte-identical.
-                let { meta, ...wire } = entry;
-                prices.push(wire);
-                logger.info('Oracle: derived ' + wire.coinPair + '=' + wire.price +
-                    ' ' + formatXchainPriceMeta(meta));
-            }
-        }
-
-        // Count total sources across all pairs
-        let totalSources = prices.reduce((sum, p) => sum + p.sources, 0);
-
-        logger.info('Oracle: Round ' + this.currentRound + ' - fetched ' + prices.length +
-            ' pairs from ' + totalSources + ' source queries');
-
-        // Broadcast our submission via gossip
-        this.peerManager.broadcast(ORACLE_PRICE_SUBMIT, {
-            round:   this.currentRound,
-            prices:  prices,
-            sources: totalSources
-        });
-
-        // Record our own submission
-        let myAddr = this.peerManager.validatorAddr;
-        this.submissions.get(this.currentRound).set(myAddr, {
-            prices:    prices,
-            sources:   totalSources,
-            timestamp: Date.now(),
-            // Own verified identity, matching the pubkey stamped on peer
-            // submissions so the snapshot membership filter treats self the same.
-            pubkey:    this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null
-        });
-
-        // Persist to DB; await so a persistence failure is counted and observable
-        // (surfaced via getDiagnostics), not silently dropped. Does not throw.
-        await this.persistSubmissions(this.currentRound, myAddr, prices);
-
-        // The stall gauges (consecutiveSkippedRounds / lastSuccessfulRoundTime) are
-        // deliberately NOT stamped here: a successful local submission is not a
-        // finalized round. They are updated by markRoundFinalized() on the consensus
-        // 'round:finalized' event, so a commit-quorum stall (where the fetch keeps
-        // succeeding but no round finalizes) ages the gauge instead of masking it.
-        this.scheduleFinalization(this.currentRound);
-    }
-
-    // Record a run of round numbers the scheduler stepped over: one line for the run,
-    // a skipped row for the first ROUND_GAP_SKIP_ROW_CAP, anchored at each round's
-    // nominal wall-clock start so every hub that stepped over it writes the same row.
-    noteRoundNumbersSkipped(from, to) {
-        let count = to - from + 1;
-        noteRoundLost({
-            phase: 'schedule', round: from, cause: 'round_numbers_skipped',
-            from: from, to: to, count: count,
-            last_executed: from - 1, resumed_at: to + 1
-        });
-        logger.warn('Oracle: scheduler stepped from round ' + (from - 1) + ' to ' + (to + 1) +
-            ', burning ' + count + ' round number(s) ' + from + '..' + to +
-            ' (forward clock step or a tick more than a round late); recording them as skipped');
-        if (!this.oracleConsensus || typeof this.oracleConsensus.storeSkippedRound !== 'function') return;
-        let upto = Math.min(to, from + ROUND_GAP_SKIP_ROW_CAP - 1);
-        for (let r = from; r <= upto; r++) {
-            let nominalStart = Math.floor((this.epochStart + r * this.roundInterval) / 1000);
-            this.oracleConsensus.storeSkippedRound(r, null, nominalStart,
-                'round number skipped by the scheduler (clock step or late tick)').catch(err =>
-                logger.error(nodeUtil.format('Oracle: Failed to store scheduler-skipped round ' + r + ':',
-                    err && err.message ? err.message : err)));
-        }
-    }
-
-    // Schedule finalization for a round after the submission window
-    scheduleFinalization(round) {
-        // Capture the BTC chain tip values for this round at scheduling time
-        let btcBlockHeight = this.currentBtcBlockHeight;
-        let btcBlockTime   = this.currentBtcBlockTime;
-        let prior = this.finalizationTimers.get(round);
-        if (prior) clearTimeout(prior);
-        // Every exit below that is neither a finalizeRound call nor a skipped row
-        // leaves a round_lost record; the prose lines stay for a reader.
-        let timer = setTimeout(() => {
-            this.finalizationTimers.delete(round);
-            try {
-                // No consensus engine is a standalone hub, not a lost round: nothing
-                // was ever going to finalize here, so there is nothing to record.
-                if (!this.oracleConsensus) return;
-                if (this.chainTipFallbackActive) {
-                    let lastGoodTip = this.lastSuccessfulChainTipFetchAt ?? this._startTime;
-                    if ((Date.now() - lastGoodTip) > this.roundInterval) {
-                        logger.error('Oracle: Skipping finalization for round ' + round +
-                            '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
-                            's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
-                        // storeSkippedRound emits 'round:skipped' once the row is
-                        // durable, which is what advances the streak (item 4942); a
-                        // local increment here would double-count a round whose fetch
-                        // had already failed.
-                        this.oracleConsensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
-                            'chain-tip fallback active, anchor unreliable').catch(err => {
-                            logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
-                            noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
-                                err: err && err.message ? err.message : String(err) });
-                        });
-                        return;
-                    }
-                }
-                this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
-                    logger.error(nodeUtil.format('Oracle: Finalization error for round ' + round + ':', err.message));
-                    noteRoundLost({ phase: 'finalize', round, cause: 'finalize_rejected',
-                        err: err && err.message ? err.message : String(err) });
-                });
-            } catch (err) {
-                logger.error(nodeUtil.format('Oracle: Finalization threw for round ' + round + ':', err && err.message ? err.message : err));
-                noteRoundLost({ phase: 'finalize', round, cause: 'finalize_threw',
-                    err: err && err.message ? err.message : String(err) });
-            }
-        }, this.submissionWindow);
-        this.finalizationTimers.set(round, timer);
-    }
-
-    // Handle incoming gossip messages
-    // A submission counts only if the chain-effective signer set or the local
-    // registry attributes its PROVEN signing key. Shared definition (and the full
-    // security argument) in lib/chain_signer_admission.js.
-    isRegisteredSender(envelope) {
-        return isAdmissibleSigner(this.peerManager, envelope);
-    }
-
-    _handleMessage(envelope) {
-        if (envelope.type !== ORACLE_PRICE_SUBMIT) return;
-
-        let { round, prices, sources } = envelope.data;
-        // Round 0 is a real, valid round (first interval after ORACLE_EPOCH_START); guard
-        // on integer/non-negative, not falsiness, or a genesis round-0 submission is dropped.
-        if (!Number.isInteger(round) || round < 0 || !prices || !Array.isArray(prices)) return;
-
-        // Drop submissions whose signing key neither the chain nor the registry
-        // attributes. Without this gate a single authorized key can broadcast many
-        // submissions, each naming a distinct fake `sender`, Sybil-stuffing the
-        // trimmed-median aggregate and the ORACLE_MIN_SUBMISSIONS diversity floor
-        // from one node. The dedup below closes that off for good by keying on the
-        // proven key rather than on the self-asserted sender.
-        if (!this.isRegisteredSender(envelope)) return;
-
-        // Only accept submissions for current or next round
-        if (round < this.currentRound - 1 || round > this.currentRound + 1) return;
-
-        // Check if we're still within the submission window
-        let elapsed = Date.now() - this.roundStartTime;
-        if (round === this.currentRound && elapsed > this.submissionWindow) {
-            // Late submission: still record it but log
-            logger.info('Oracle: Late submission from ' + envelope.sender + ' for round ' + round);
-        }
-
-        // Initialize submission map for this round if needed
-        if (!this.submissions.has(round)) {
-            this.submissions.set(round, new Map());
-        }
-
-        // Record the submission (first submission per sender per round wins)
-        let roundSubs = this.submissions.get(round);
-        if (roundSubs.has(envelope.sender)) return; // Already have a submission from this sender
-
-        // The PROVEN signing key of this envelope, which the gate above has already
-        // established the chain or the registry attributes. Taken from the envelope
-        // rather than looked up by addr in the registry: a chain-attributed
-        // validator has no registry row, so the old lookup returned null for it and
-        // its submission was dropped downstream as unresolvable. Dedup on this key:
-        // one key may present under several addrs, so a sender-keyed first-wins
-        // alone lets a single signing key submit once per addr, multiplying its
-        // weight in the trimmed median and the ORACLE_MIN_SUBMISSIONS floor.
-        let senderPubkey = provenPubkey(envelope);
-        if (senderPubkey) {
-            for (let sub of roundSubs.values()) {
-                if (sub && sub.pubkey === senderPubkey) {
-                    logger.warn('Oracle: dropping duplicate submission for round ' + round +
-                        ' from ' + envelope.sender + ': pubkey ' + senderPubkey.substring(0, 16) +
-                        '... already submitted under another sender');
-                    return;
-                }
-            }
-        }
-
-        // Enforce max submissions per round
-        if (roundSubs.size >= this.maxSubmissionsPerRound) {
-            logger.warn('Oracle: Max submissions per round reached for round ' + round + '; dropping from ' + envelope.sender);
-            return;
-        }
-
-        // Validate individual prices: filter to positive finite values within bounds
-        // AND to the canonical pair whitelist (reject fabricated/novel coin pairs).
-        //
-        // The spelling is checked before the bounds, and the CANONICAL spelling is
-        // what the entry carries onward. parseFloat alone is prefix-tolerant, so a
-        // peer's '100junk' admitted as 100 and was then kept verbatim: it reached
-        // the round's submission map, the trimmed median, and the oracle_submissions
-        // audit row, where bcmath reads it as 0 (bcnum coerces a non-numeric). Same
-        // value, two readings. lib/canonical_price.js carries the full argument.
-        let validPrices = [];
-        for (let p of prices) {
-            if (!p || !this.canonicalPairs.has(p.coinPair)) continue;
-            let canon = canonicalPrice(p.price);
-            if (canon === null) continue;
-            let val = parseFloat(canon);
-            if (!(Number.isFinite(val) && val > 0 && val < this.priceMax)) continue;
-            // Rebuild only when the spelling actually differed, so an honest
-            // submission's entry stays the object every other field came from.
-            validPrices.push(canon === p.price ? p : Object.assign({}, p, { price: canon }));
-        }
-        // Surface both drop paths (item ce5a2d5d): the sibling drops at lines 531/545
-        // already log, this filter was the one silent gap. A partial drop masks a peer
-        // degrading pair coverage; a zero-valid drop masks the true cause of a
-        // below-minimum-submissions round skip.
-        if (validPrices.length < prices.length)
-            logger.warn('Oracle: dropped ' + (prices.length - validPrices.length) + ' invalid/non-canonical pair(s) from '
-                + envelope.sender + ' for round ' + round);
-        if (validPrices.length === 0) {
-            logger.warn('Oracle: submission from ' + envelope.sender + ' for round ' + round
-                + ' had zero valid pairs (of ' + prices.length + '); discarding entire submission');
-            return;
-        }
-
-        roundSubs.set(envelope.sender, {
-            prices:    validPrices,
-            sources:   sources || 0,
-            timestamp: envelope.timestamp,
-            // Proven signing key (lowercase hex), or null only on a pre-bootstrap
-            // envelope that carried none. OracleConsensus keys its snapshot
-            // membership filter on this.
-            pubkey:    senderPubkey
-        });
-
-        logger.info('Oracle: Received submission from ' + envelope.sender +
-            ' for round ' + round + ' (' + roundSubs.size + ' total)');
-
-        // Resolve sender's validator pubkey. Drop the DB persist if unresolved:
-        // keeps the in-memory submission for aggregation but avoids placeholder rows.
-        let validatorPubkey = null;
-        if (this.peerManager.validatorPubkeys) {
-            let pk = this.peerManager.validatorPubkeys.get(envelope.sender);
-            if (pk) validatorPubkey = pk;
-        }
-        if (!validatorPubkey) {
-            // The registry is a hand-maintained addr->key table, so a hub that holds no
-            // federation identity of its own has no reason to carry a row for every peer
-            // whose frames it merely receives: it dropped the audit row for the WHOLE
-            // federation and its database showed no view of the network at all. The
-            // envelope already carries a signature-proven key, and the stake-weight feed
-            // can say whether that key holds qualifying stake at the round's block, which
-            // is a stronger attribution than a typed row and is the same set the round's
-            // own aggregation filters submissions down to. Registering the peers is NOT
-            // the alternative: it puts a key in a local table without telling this hub
-            // anything about the stake behind it.
-            this.persistFromStakeWeight(round, envelope, validPrices, senderPubkey);
-            return;
-        }
-        // Remote peer submission: _handleMessage is a synchronous message handler, so this
-        // stays fire-and-forget, but persistSubmissions now counts its own failures
-        // internally (via allSettled) and never rejects, so the drop is still observable.
-        this.persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
-    }
-
-    // Audit-row fallback for a sender the registry does not know. Qualifying stake at
-    // the round's block boundary stands in for the missing registry row; anything the
-    // feed cannot place there keeps the original refusal, so an unknown key still
-    // writes no placeholder row and still names its remedy.
-    //
-    // Async and self-catching because _handleMessage is a synchronous handler: this is
-    // fire-and-forget exactly like the registered-sender persist beside it, and an
-    // indexer fault must cost an audit row rather than the round.
-    async persistFromStakeWeight(round, envelope, prices, senderPubkey) {
-        let feed = this.hub && this.hub.stakeWeightFeed;
-        try {
-            if (senderPubkey && feed && typeof feed.isQualified === 'function' &&
-                await feed.isQualified('price', this.currentBtcBlockHeight, senderPubkey)) {
-                await this.persistSubmissions(round, envelope.sender, prices, senderPubkey);
-                return;
-            }
-        } catch (e) {
-            logger.warn('Oracle: stake-weight lookup failed for sender ' + envelope.sender +
-                ' on round ' + round + ': ' + ((e && e.message) ? e.message : e));
-        }
-        logger.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
-            ' (call syncvalidators to register the peer)');
-    }
-
-    // Persist price submissions to the database
-    async persistSubmissions(round, sender, prices, validatorPubkey) {
-        // Resolve pubkey for self
-        if (!validatorPubkey && this.identity) {
-            validatorPubkey = this.identity.getPubkeyHex();
-        }
-        if (!validatorPubkey) {
-            validatorPubkey = '0000000000000000000000000000000000000000000000000000000000000000';
-        }
-
-        let inserts = [];
-        for (let p of prices) {
-            // createOracleSubmission is an INSERT IGNORE: a concurrent write from
-            // another hub collapses silently rather than rejecting this one.
-            inserts.push(this.db.createOracleSubmission(round, p.coinPair, validatorPubkey, p.price, p.sources));
-        }
-
-        // Settle every insert before the round proceeds so a persistence failure is
-        // observable instead of fire-and-forget. Deliberately Promise.allSettled, NOT
-        // Promise.all, and NOT re-thrown: a dropped audit row must never stall a
-        // money-bearing consensus round (that would trade a benign audit gap for a
-        // liveness bug). Failures are counted and surfaced via getDiagnostics().
-        let results = await Promise.allSettled(inserts);
-        let failed = 0;
-        for (let r of results) {
-            if (r.status === 'rejected') {
-                failed++;
-                logger.error(nodeUtil.format('Oracle: Error persisting submission:', r.reason));
-            }
-        }
-        if (failed > 0) {
-            this.failedSubmissionPersists += failed;
-            this.lastSubmissionPersistFailureRound = round;
-            this.lastSubmissionPersistFailureCount = failed;
-        }
-    }
-
-    // Prune old submission data (keep current and previous round only)
-    pruneSubmissions() {
-        for (let [round] of this.submissions) {
-            if (round < this.currentRound - 1) {
-                this.submissions.delete(round);
-            }
-        }
-    }
-
-    // Bound the durable oracle_submissions audit table to the retention window.
-    // The in-memory pruneSubmissions only trims the Map; without this the table
-    // grows monotonically. Keyed to round_number (indexed) so the DELETE is cheap
-    // and deterministic; keeps the most recent submissionsRetentionRounds rounds.
-    // oracle_submissions is diagnostic-only (finalized values live in
-    // price_snapshots), so dropping aged rows is safe and never consensus-visible.
-    async pruneSubmissionsDb() {
-        if (!this.submissionsRetentionRounds || this.submissionsRetentionRounds <= 0) return;
-        let cutoff = this.currentRound - this.submissionsRetentionRounds;
-        if (cutoff <= 0) return;
-        let result = await this.db.deleteOracleSubmission(cutoff);
-        let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
-        if (deleted > 0) {
-            logger.info('Oracle submissions retention: pruned ' + deleted +
-                ' rows older than round ' + cutoff + ' (keep ' +
-                this.submissionsRetentionRounds + ' rounds)');
-        }
-        // Latch clears only after a DELETE actually completed, never on the two
-        // early returns above: those mean the sweep did not run, which is not
-        // evidence that a dark DB is reachable again.
-        if (this._submissionsPruneDark) {
-            this._submissionsPruneDark = false;
-            logger.warn('Oracle submissions retention: prune recovered at round ' +
-                this.currentRound + ' (' + this.submissionsPruneFailures +
-                ' failure(s) since start)');
-        }
-    }
-
-    // The only trace a failed retention sweep leaves. Counters are monotonic (like
-    // failedSubmissionPersists) so a fault that has since recovered is still visible
-    // to getSubmissionsInfo; the warn fires once per dark spell, on the transition in.
-    //
-    // The error MESSAGE is logged and deliberately not put on the counters:
-    // getoraclesubmissions is in the hub's public read tier (only getallconfigs is a
-    // gated read), and a raw driver error can carry a DB user, host or schema detail.
-    // getSubmissionsInfo already draws this line for droppedPairsReadError, which
-    // exposes a boolean and logs the exception.
-    onSubmissionsPruneFailure(err, round) {
-        this.submissionsPruneFailures++;
-        this.lastSubmissionsPruneFailureRound = round != null ? round : this.currentRound;
-        if (this._submissionsPruneDark) return;
-        this._submissionsPruneDark = true;
-        logger.warn('Oracle submissions retention: prune FAILED at round ' +
-            this.lastSubmissionsPruneFailureRound +
-            '; the oracle_submissions audit table will grow until it recovers: ' +
-            ((err && err.message) ? err.message : err));
+        Object.defineProperties(target, descriptors);
     }
 }
+
+installParts(OracleRound.prototype, PARTS);
 
 module.exports = Object.assign(OracleRound, {
     // Exported for test only: the §10 step 6 audit line is a deliverable of this item,
