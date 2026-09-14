@@ -168,7 +168,7 @@ class AdmissionHeightWatermark {
      * the claim, so refreshing it on a frozen chain would let the watermark keep claiming
      * against a tip that has not moved.
      *
-     * An unusable reading is ignored rather than coerced: XChainHub._resolveAdmissionTip
+     * An unusable reading is ignored rather than coerced: XChainHub.resolveAdmissionTip
      * returns null for every failure it knows about (no indexer URL, an RPC error, an
      * absent decoder_block, a tip its freshness gate dated as frozen), and Number(null) is
      * 0, a finite non-negative integer that would register as height zero.

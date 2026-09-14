@@ -172,9 +172,9 @@ describe('CapabilityRegistry', function () {
         });
     });
 
-    // ── _applyGovernanceChange ───────────────────────────────────────────────
+    // ── applyGovernanceChange ───────────────────────────────────────────────
 
-    describe('_applyGovernanceChange()', function () {
+    describe('applyGovernanceChange()', function () {
         it('updates the in-memory MIN_STAKE for a known capability', function () {
             loadModule();
             let hub = makeHub({ p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: '1000' } } } });

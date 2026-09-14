@@ -387,7 +387,7 @@ describe('admission_height: the era gate, ARMED at a regtest height', () => {
     });
 });
 
-describe('XChainHub._resolveAdmissionTip: the DECODER tip, ungated by lag', () => {
+describe('XChainHub.resolveAdmissionTip: the DECODER tip, ungated by lag', () => {
     const http = require('http');
     const XChainHub = require('../../src/XChainHub.js');
 
@@ -455,7 +455,7 @@ describe('XChainHub._resolveAdmissionTip: the DECODER tip, ungated by lag', () =
     });
 });
 
-describe('XChainHub._admissionTipFresh: per chain, and a refusal is not a guess', () => {
+describe('XChainHub.admissionTipFresh: per chain, and a refusal is not a guess', () => {
     const XChainHub = require('../../src/XChainHub.js');
 
     function hubStub(){

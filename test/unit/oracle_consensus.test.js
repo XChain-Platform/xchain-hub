@@ -274,7 +274,7 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _clampToLastFinalized(): per-pair bounded-change clamp
+    // clampToLastFinalized(): per-pair bounded-change clamp
     // -----------------------------------------------------------------
 
     describe('_aggregate(): bounded-change clamp vs last finalized', function () {
@@ -681,10 +681,10 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _isEmptyFederationSnapshot()
+    // isEmptyFederationSnapshot()
     // -----------------------------------------------------------------
 
-    describe('_isEmptyFederationSnapshot()', function () {
+    describe('isEmptyFederationSnapshot()', function () {
 
         it('false for a null snapshot (indexer-unreachable degradation path)', function () {
             oc.setValidatorSet(VALIDATORS_3);
@@ -730,10 +730,10 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _quorumMet(): count vs STAKE_WEIGHTED_QUORUM
+    // quorumMet(): count vs STAKE_WEIGHTED_QUORUM
     // -----------------------------------------------------------------
 
-    describe('_quorumMet()', function () {
+    describe('quorumMet()', function () {
 
         it('count mode: vote-set size vs the round\'s locked quorum', function () {
             let pending = { weighted: false, quorum: 3, signatures: new Map() };
@@ -1181,7 +1181,7 @@ describe('OracleConsensus', function () {
             }
         });
 
-        it('_proposeRound attaches the sorted submission keys to PROPOSE', function () {
+        it('proposeRound attaches the sorted submission keys to PROPOSE', function () {
             oc.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[3].addr;
 
@@ -1573,14 +1573,14 @@ describe('OracleConsensus', function () {
             expect(com.calledOnce).to.be.true;
         });
 
-        it('_proposeRound stores a skipped round when aggregation yields no prices', function () {
+        it('proposeRound stores a skipped round when aggregation yields no prices', function () {
             let store = sinon.stub(oc, '_storeSkippedRound').resolves();
             oc.proposeRound(5, new Map(), false, 800000, 1700000000, null, 1);
             expect(store.calledOnce).to.be.true;
             expect(store.getCall(0).args[3]).to.include('aggregation');
         });
 
-        it('_proposeRound arms a finalization timeout that drops a stalled round', function () {
+        it('proposeRound arms a finalization timeout that drops a stalled round', function () {
             let clock = sinon.useFakeTimers();
             oc.finalizationTimeout = 1000;
             oc.setValidatorSet(VALIDATORS_4);
@@ -1666,7 +1666,7 @@ describe('OracleConsensus', function () {
             expect(oc._signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
         });
 
-        it('_verifyAndStoreSig rejects missing args / duplicate / round-less pending', function () {
+        it('verifyAndStoreSig rejects missing args / duplicate / round-less pending', function () {
             expect(oc.verifyAndStoreSig(null, 'pk', 'sig')).to.be.false;
             expect(oc.verifyAndStoreSig({ round: 1, signatures: new Map() }, null, 'sig')).to.be.false;
             expect(oc.verifyAndStoreSig({ round: 1, signatures: new Map() }, 'pk', null)).to.be.false;
@@ -1674,7 +1674,7 @@ describe('OracleConsensus', function () {
             expect(oc.verifyAndStoreSig({ signatures: new Map() }, 'pk', 'sig')).to.be.false; // no round
         });
 
-        it('_verifyAndStoreSig stores a valid signature and rejects an invalid one', function () {
+        it('verifyAndStoreSig stores a valid signature and rejects an invalid one', function () {
             let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
             // #4232: the height is part of the signed payload and the verify reconstruction
@@ -1690,7 +1690,7 @@ describe('OracleConsensus', function () {
             expect(oc.verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
         });
 
-        it('_verifyAndStoreSig keys the map on lowercase hex, so a mixed-case repeat dedupes (item 5334)', function () {
+        it('verifyAndStoreSig keys the map on lowercase hex, so a mixed-case repeat dedupes (item 5334)', function () {
             let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
             let payload = oc._buildPriceV0Payload(5, 1700000000, prices, 799000);
@@ -1712,7 +1712,7 @@ describe('OracleConsensus', function () {
     // -----------------------------------------------------------------
 
     describe('round-tracking utilities', function () {
-        it('_markRoundReady records a new round and evicts stale entries', function () {
+        it('markRoundReady records a new round and evicts stale entries', function () {
             oc.finalizationTimeout = 1000;
             oc.leaderTimeout = 1000; // ttl = 1000*2 + 1000 = 3000
             oc.roundReadyAt.set(99, Date.now() - 10000); // stale
@@ -1721,7 +1721,7 @@ describe('OracleConsensus', function () {
             expect(oc.roundReadyAt.has(5)).to.be.true;
         });
 
-        it('_clearRoundTracking drops the round-ready entry and clears any leader timer', function () {
+        it('clearRoundTracking drops the round-ready entry and clears any leader timer', function () {
             oc.roundReadyAt.set(5, Date.now());
             oc.leaderTimers.set(5, setTimeout(() => {}, 60000));
             oc.clearRoundTracking(5);
@@ -1731,9 +1731,9 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _markFinalized() bounded FIFO (L1)
+    // markFinalized() bounded FIFO (L1)
     // -----------------------------------------------------------------
-    describe('_markFinalized (bounded finalized set)', function () {
+    describe('markFinalized (bounded finalized set)', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest rounds first', function () {
             oc.finalizedMax = 4;

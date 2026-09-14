@@ -158,9 +158,9 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _rebuildCommitted / committed ledger ─────────────────────────────────
+    // ── rebuildCommitted / committed ledger ─────────────────────────────────
 
-    describe('_rebuildCommitted()', function () {
+    describe('rebuildCommitted()', function () {
         it('sums finalized-match fills into both legs', async function () {
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves([
@@ -233,7 +233,7 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    describe('_effectiveRemaining()', function () {
+    describe('effectiveRemaining()', function () {
         it('returns full amounts when nothing is committed', function () {
             let eng = new CrossChainDexEngine(makeDexHub());
             let { a } = makeOrderPair();
@@ -296,9 +296,9 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _findMatches / _tryOrderMatch (ORDER path, partial fills) ─────────────
+    // ── _findMatches / tryOrderMatch (ORDER path, partial fills) ─────────────
 
-    describe('_tryOrderMatch(): partial fills', function () {
+    describe('tryOrderMatch(): partial fills', function () {
         let eng;
         beforeEach(function () { eng = new CrossChainDexEngine(makeDexHub()); });
 
@@ -353,7 +353,7 @@ describe('CrossChainDexEngine', function () {
             let { a: order } = makeOrderPair();
             // A DOGE counterparty with terms that DO cross the order (identical to makeOrderPair's B,
             // which test 237 proves matches as order×order). CRITICAL: it must share the order's
-            // network (otherwise _tryMatch short-circuits on the network guard (line 245) and a null
+            // network (otherwise tryMatch short-circuits on the network guard (line 245) and a null
             // would be a FALSE proof (the carry-forward branch at line 258 never runs).
             let terms = { home_coin: 'DOGE', home_network: 'regtest', block_index: 20, action_index: 7,
                 give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '20',
@@ -477,9 +477,9 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _normalizeAmount / _amountsEqual / _isExactMatch (unchanged) ──────────
+    // ── normalizeAmount / amountsEqual / isExactMatch (unchanged) ──────────
 
-    describe('_normalizeAmount() / _amountsEqual()', function () {
+    describe('normalizeAmount() / amountsEqual()', function () {
         let eng;
         before(function () { loadModule(); eng = new CrossChainDexEngine(makeDexHub()); });
 
@@ -499,7 +499,7 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    describe('_isExactMatch()', function () {
+    describe('isExactMatch()', function () {
         let eng;
         before(function () { loadModule(); eng = new CrossChainDexEngine(makeDexHub()); });
 
@@ -934,11 +934,11 @@ describe('CrossChainDexEngine', function () {
             expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
         });
 
-        it('_writeFinalizedMatch persists the snapshot on EVERY hub, not just the leader', async function () {
+        it('writeFinalizedMatch persists the snapshot on EVERY hub, not just the leader', async function () {
             // Bug-C analog: indexers verify match signatures against
             // capability_snapshots in whichever hub DB they mirror, and a
             // follower's DB may be the only one they read (leader-only
-            // persistence (quorum-0 inline + _broadcastPropose) left follower
+            // persistence (quorum-0 inline + broadcastPropose) left follower
             // DBs without it.
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
@@ -972,7 +972,7 @@ describe('CrossChainDexEngine', function () {
         // off-BTC verifiers a partial stake denominator they read back as COMPLETE and
         // finalize against, while this hub's own meetsStakeThreshold rejects it. Persist
         // must fail closed instead: no rows, no mirror stream, and the 0 return that the
-        // _writeFinalizedMatch caller already treats as "defer this match".
+        // writeFinalizedMatch caller already treats as "defer this match".
         it('refuses to persist or mirror a TRUNCATED set', async function () {
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves([]);
@@ -1000,10 +1000,10 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── item 2385: _writeFinalizedMatch must fail closed on a snapshot-persist
+    // ── item 2385: writeFinalizedMatch must fail closed on a snapshot-persist
     // failure so no finalized/mirrored/ledger-applied match can outlive a snapshot
     // its signatures cannot be verified against. ────────────────────────────────
-    describe('_writeFinalizedMatch(): fail-closed snapshot persist', function () {
+    describe('writeFinalizedMatch(): fail-closed snapshot persist', function () {
         function finalizeRow() {
             return {
                 match_id: 'f'.repeat(64), snapshot_block: 150, network: 'regtest',

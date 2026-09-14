@@ -113,7 +113,7 @@ class XchainPriceSource {
         // change to constants.js, never an operator env var.
         //
         // Same rule and warning shape as the platform's other consensus-adjacent seams
-        // (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub._oracleMaxAgeSeconds,
+        // (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub.oracleMaxAgeSeconds,
         // coins/index.js resolveFeeDestination): honored on regtest, set-but-IGNORED and
         // warned everywhere else, with standalone mode (network '') failing closed to the
         // pin for the same reason those do. The per-operator INDEXER_DB_* keys above stay

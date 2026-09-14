@@ -933,7 +933,7 @@ async function startApi(){
             // (item #4479). ORACLE_ROUND_INTERVAL is an unbounded deployment
             // knob, so a health consumer deriving freshness from the cadence
             // alone (the dashboard's cadenceThresholds) can call a row 'ok'
-            // that getprice already rejects as stale. Reuse _oracleMaxAgeSeconds
+            // that getprice already rejects as stale. Reuse oracleMaxAgeSeconds
             // rather than a literal, so the exposed number can never diverge
             // from what getprice enforces; called without a pair it resolves to
             // the registry default, the correct representative scalar while all
@@ -963,7 +963,7 @@ async function startApi(){
                 // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
                 // bound the consumer clamps freshness to travelled only on
                 // getoraclesubmissions, so it was lost exactly when that rail was
-                // down; same _oracleMaxAgeSeconds source as there, never a literal.
+                // down; same oracleMaxAgeSeconds source as there, never a literal.
                 if (with_watermark) {
                     return {
                         watermark: Math.floor(Date.now() / 1000),
@@ -1766,7 +1766,7 @@ async function startApi(){
             if (chainErr) return chainErr;
             // strictInt, not parseInt, the same band every sibling write method enforces:
             // parseInt takes an integer PREFIX, so '850000junk' passed as 850000 and
-            // '8.5e5' as 8, and the coerced height is what _canonicalReorgId builds the
+            // '8.5e5' as 8, and the coerced height is what canonicalReorgId builds the
             // federation-wide round identity from. timestamp had no API guard at all, so
             // parseInt('abc') forwarded NaN into hub.reportReorg.
             let rh = strictInt(reorg_height);

@@ -425,7 +425,7 @@ describe('Database', function () {
     // which never touches keys: without this step a migrated hub carries `network` and
     // still collapses every network onto one row per chain, because the upsert keys on
     // the PRIMARY. The re-key IS the fix; the column alone is not.
-    describe('_migratePriceFencePrimaryKey()', function () {
+    describe('migratePriceFencePrimaryKey()', function () {
 
         let db;
         beforeEach(function () { db = new Database('h', 3306, 'db', 'u', 'p'); });

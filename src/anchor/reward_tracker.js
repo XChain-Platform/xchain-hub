@@ -108,7 +108,7 @@ class RewardTracker {
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
     //
     // The collapse above is a read-modify-write and MUST NOT interleave. Every
-    // caller (StateAnchorPublisher._recordReward) is fire-and-forget, so a hub can
+    // caller (StateAnchorPublisher.recordReward) is fire-and-forget, so a hub can
     // have its own publish and a peer's V0_DONE/FINALIZED mirror in flight for the
     // same (round_number, reward_type) with DIFFERENT pubkeys at once. Both awaited
     // the same empty SELECT, both fell through to the INSERT, and because the UNIQUE
@@ -228,7 +228,7 @@ class RewardTracker {
     // the same answer regardless of when it asks. Returns the address string or
     // null (unreachable indexer / unknown pubkey).
     // Resolve the BTC indexer endpoint through the hub's shared resolver (env alias
-    // -> configs table) at call time, mirroring XChainHub._pollOwnStake, so a
+    // -> configs table) at call time, mirroring XChainHub.pollOwnStake, so a
     // configs-table-provisioned hub (no BTC_INDEXER_API_URL exported) resolves the
     // same URL every other hub component does. resolveSourceByPubkey gates a
     // consensus co-sign decision, so an env-only resolution here made two hubs with

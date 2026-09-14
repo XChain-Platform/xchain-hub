@@ -59,10 +59,10 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // _getChainPairSet()
+    // getChainPairSet()
     // -----------------------------------------------------------------
 
-    describe('_getChainPairSet()', function () {
+    describe('getChainPairSet()', function () {
         it('returns chain-pair-specific validators when available', function () {
             let pairValidators = [makeValidator(1), makeValidator(2)];
             engine.chainPairValidators = new Map([['BTC-LTC', pairValidators]]);
@@ -945,9 +945,9 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // _markFinalized() bounded FIFO (R2-CCF4)
+    // markFinalized() bounded FIFO (R2-CCF4)
     // -----------------------------------------------------------------
-    describe('_markFinalized (bounded finalized set)', function () {
+    describe('markFinalized (bounded finalized set)', function () {
 
         it('caps the finalized set at finalizedMax, evicting oldest first', function () {
             engine.finalizedMax = 5;

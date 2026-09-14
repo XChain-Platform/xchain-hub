@@ -212,7 +212,7 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         expect(console.error.called).to.equal(true);
     });
 
-    it('_stampBatchLanding refuses a clock that is not a positive integer', async function () {
+    it('stampBatchLanding refuses a clock that is not a positive integer', async function () {
         let log = stubDb([]);
         expect(await agg.stampBatchLanding(FIRST_ROUND, 0)).to.equal(0);
         expect(await agg.stampBatchLanding(FIRST_ROUND, -1)).to.equal(0);

@@ -101,7 +101,7 @@ class CapabilitySnapshot {
         // tier as ORACLE_EPOCH_START). Override via HUB_SNAPSHOT_REORG_BUFFER
         // only as a coordinated fleet change; on mainnet/testnet a divergent
         // value now refuses boot rather than forking silently (#4167, see
-        // _resolveReorgBuffer). Default 6 = the BTC confirmation depth the
+        // resolveReorgBuffer). Default 6 = the BTC confirmation depth the
         // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this.resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
@@ -298,7 +298,7 @@ class CapabilitySnapshot {
             return snapshot;
         } catch (err) {
             // Indexer unreachable / down (or 401/403 auth mismatch): caller falls
-            // back to local validator set; _onFetchError surfaces an auth misconfig.
+            // back to local validator set; onFetchError surfaces an auth misconfig.
             return this.onFetchError('getcapabilityvalidators', err);
         }
     }
@@ -476,7 +476,7 @@ class CapabilitySnapshot {
         // and quorum stays consistent fleet-wide. Refusing would instead halt all
         // consensus the moment the validator set outgrows the limit, a worse
         // failure than a quorum over a deterministic cap. So raise a loud,
-        // throttled operator warning (same idiom as _onFetchError) telling the
+        // throttled operator warning (same idiom as onFetchError) telling the
         // operator to raise VALIDATOR_QUERY_LIMIT, and proceed. The warning is the
         // only safe lever here because the cap is invisible in N alone.
         if (snapshot.truncated === true) {

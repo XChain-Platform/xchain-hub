@@ -13,7 +13,7 @@
 // Review board #7579: a CONFIRMED reward attestation was discarded before its write
 // succeeded, and a committed-but-unstreamed row had no repair.
 //
-// The drain deleted its pending entry BEFORE awaiting _recordRewardAttestation, and that
+// The drain deleted its pending entry BEFORE awaiting recordRewardAttestation, and that
 // method swallowed both the INSERT and the read-back/broadcast in one try/catch and
 // returned normally. A transient INSERT error therefore forfeited a confirmed reward
 // permanently while the drain logged 'row written', and an INSERT that committed with a
@@ -25,7 +25,7 @@
 // the drain keeps the entry for its existing TTL-bounded retry (idempotent, INSERT IGNORE
 // on uq_reward_tuple). DELIVERY is non-fatal and repaired: a throwing or empty read-back
 // forces subscriber resync, exactly as StateCheckpointEngine._broadcastRowOrResync and
-// CrossChainCallEngine._mirrorCallRow already do for their own committed rows.
+// CrossChainCallEngine.mirrorCallRow already do for their own committed rows.
 
 const { expect }           = require('chai');
 const sinon                = require('sinon');

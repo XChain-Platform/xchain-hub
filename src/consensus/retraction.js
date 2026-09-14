@@ -368,8 +368,8 @@ class RetractionConsensus {
     // live subscriber always holds the set it needs (same contract as the
     // engines' _persistCapabilitySnapshot before a signed row insert).
     //
-    // FAIL CLOSED, in lockstep with CrossChainCallEngine._writeFinalizedRow and
-    // CrossChainDexEngine._writeFinalizedMatch: that persist is a PRECONDITION of the
+    // FAIL CLOSED, in lockstep with CrossChainCallEngine.writeFinalizedRow and
+    // CrossChainDexEngine.writeFinalizedMatch: that persist is a PRECONDITION of the
     // signed deletion, not a best-effort side-write. A swallowed DB throw, or a silent
     // ZERO-row persist (the validator set degrades to [] on an indexer RPC error /
     // 401-403, so the INSERT loop never runs, never throws, never warns, and the
@@ -380,7 +380,7 @@ class RetractionConsensus {
     // released, so the next delivery of the same retraction (a peer's XRETRACT_FINALIZED,
     // or our own indexer re-pushing the reorg through submitLocal) re-runs it cleanly.
     //
-    // _rememberFinalized still runs FIRST: it is the reentrancy guard that keeps a
+    // rememberFinalized still runs FIRST: it is the reentrancy guard that keeps a
     // duplicate FINALIZED arriving mid-await from streaming the same deletion twice.
     // forgetFinalized on the error paths is what makes that ordering safe.
     // Returns true when the signed deletion was actually streamed.
@@ -426,7 +426,7 @@ class RetractionConsensus {
     // (capability, block). A return of 0 means there was no DB mirror to write to,
     // the set degraded to empty (an indexer RPC error / auth mismatch surfaces as a
     // null snapshot, which _resolveCapabilityValidators normalizes to []), or the set
-    // was refused as truncated - so _finalize can fail closed rather than streaming a
+    // was refused as truncated - so finalize can fail closed rather than streaming a
     // signed deletion whose signatures no mirror can verify.
     async _persistCapabilitySnapshot(capability, block){
         if(!this.db) return 0;
@@ -438,7 +438,7 @@ class RetractionConsensus {
         // close: off-BTC verifiers read the capped rows back as COMPLETE
         // (getCapabilitySnapshotWeights sets no `truncated`) and clear 2/3 over an
         // under-counted denominator this class itself rejects at the `vset.truncated`
-        // check in _handleFinalized. Keep every writer's guard in lockstep.
+        // check in handleFinalized. Keep every writer's guard in lockstep.
         if(validators && validators.truncated === true){
             console.warn('RetractionConsensus: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +

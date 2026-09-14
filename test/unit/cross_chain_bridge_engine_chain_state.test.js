@@ -270,7 +270,7 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
 
         // No stubbed predicates here: this is the real require of the three activation
         // modules beside the engine, which is what a regtest stack actually boots with.
-        it('_gateActive is true for all three families at every regtest height', function(){
+        it('gateActive is true for all three families at every regtest height', function(){
             const { engine } = makeEngine({ network: 'regtest' });
             expect(typeof engine.activation.bridge).to.equal('function');
             expect(typeof engine.activation.token).to.equal('function');

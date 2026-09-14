@@ -165,7 +165,7 @@ class Consensus {
     // .env.example ships it commented out, so it defaults to 1 and a normally
     // configured multi-hub deployment silently takes the single-node path, the
     // exact path those guards exist to keep it off. The live active set is
-    // authoritative instead: XChainHub._propagateValidatorSet pushes in the
+    // authoritative instead: XChainHub.propagateValidatorSet pushes in the
     // rows of `validators` WHERE status='active', so length > 1 means real
     // peers to diverge from regardless of what the operator declared. Strictly
     // widening: every case minValidators > 1 caught is still caught.
@@ -186,15 +186,15 @@ class Consensus {
     }
 
     // True when a block-anchored snapshot was fetched but qualified ZERO
-    // validators in a federation (_isFederated). getQuorum(empty) = 0
+    // validators in a federation (isFederated). getQuorum(empty) = 0
     // collides with the genuine single-node bypass below; applying a config
     // change over an empty federation snapshot means every hub applies it with
     // NO quorum (a transient empty staker set is not a mandate). An empty
-    // snapshot passes _hasDeterministicSnapshot (it is a real, agreed-upon
+    // snapshot passes hasDeterministicSnapshot (it is a real, agreed-upon
     // empty set), so that gate alone does not catch this. Mirrors the
     // empty-snapshot guard already in CrossChainEngine / the DEX, and the
     // OracleConsensus fix. A null snapshot is a DIFFERENT case handled by
-    // _hasDeterministicSnapshot (fail closed for federations); this is only the
+    // hasDeterministicSnapshot (fail closed for federations); this is only the
     // present-but-empty case.
     isEmptyFederationSnapshot(snapshot) {
         return this.isFederated() && !!snapshot &&
@@ -250,7 +250,7 @@ class Consensus {
         // snapshot means each hub would fall back to its own LOCAL validatorSet,
         // so two hubs could finalize the same config-change round over different
         // sets. Refuse to propose rather than split. Genuine single-host hubs
-        // (not _isFederated) have no peer to diverge from, so they keep the
+        // (not isFederated) have no peer to diverge from, so they keep the
         // existing fallback/single-node path below.
         if (this.isFederated() && !this.hasDeterministicSnapshot(snapshot)) {
             throw new Error('Consensus: refusing to PROPOSE config change without a deterministic ' +
@@ -364,7 +364,7 @@ class Consensus {
                 // round was opened over rather than from the live peer set.
                 memberPubkeys:  memberPubkeys || null,
                 // Always allocated, in BOTH quorum modes. The count path tallies these
-                // keys (see _quorumMet): a sender addr is a self-asserted wire field, so
+                // keys (see quorumMet): a sender addr is a self-asserted wire field, so
                 // counting addrs let ONE authorized key forge a full quorum by naming N
                 // of them, and left a chain-attributed validator uncountable because it
                 // has no registry addr at all.
@@ -518,13 +518,13 @@ class Consensus {
             // OracleConsensus PROPOSE guard. The leader stamped the block
             // it locked its snapshot at into the PRE_PREPARE; if that height is
             // absent or not a positive integer (old peer mid rolling deploy, or a
-            // malformed/Byzantine envelope), _lockSnapshot would silently resolve
+            // malformed/Byzantine envelope), lockSnapshot would silently resolve
             // THIS follower's own BTC tip and lock a DIFFERENT validator/weight
             // set (and possibly a different STAKE_WEIGHTED_QUORUM activation
             // outcome) than the leader for the same seq. On a federated hub
-            // (_isFederated) decline to PREPARE rather than pin to a
+            // (isFederated) decline to PREPARE rather than pin to a
             // local-tip snapshot. A truthy garbage height is caught downstream by
-            // CapabilitySnapshot._blockEchoOk; only the null/omitted case reaches
+            // CapabilitySnapshot.blockEchoOk; only the null/omitted case reaches
             // the own-tip fallback, so this closes that specific hole. Genuine
             // single-node / regtest hubs keep the local-tip fallback.
             if (this.isFederated() && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
@@ -536,13 +536,13 @@ class Consensus {
             }
             // Freshness bound (fail closed), the missing half of the guard above.
             // The comment there says a truthy garbage height is caught downstream by
-            // CapabilitySnapshot._blockEchoOk, and that holds only for heights the
+            // CapabilitySnapshot.blockEchoOk, and that holds only for heights the
             // indexer REFUSES: _blockEchoOk rejects a mismatched echo, and the indexer
             // fail-closes only above its own tip, so an ancient but INDEXED height
             // echoes back clean and yields a perfectly valid snapshot. That lets a
             // Byzantine leader grind the height until it finds a block where the
             // active set was small (quorum N), where it is itself the
-            // (seq + view) % N leader that _leaderIdentityOk then validates against
+            // (seq + view) % N leader that leaderIdentityOk then validates against
             // its OWN choice, or where STAKE_WEIGHTED_QUORUM had not yet activated
             // (a silent downgrade to count quorum). Bound the raw wire height against
             // our own resolved tip before any of those three consume it, and decline
@@ -832,7 +832,7 @@ class Consensus {
     // every hub), then this hub's own identity. Null when unknown; the leader
     // is then only recognizable by pubkey, and a round whose leader no hub can
     // address times out into a view change that rotates to the next member.
-    // Mirrors OracleConsensus._addrForPubkey.
+    // Mirrors OracleConsensus.addrForPubkey.
     addrForPubkey(pubkey) {
         for (let v of this.validatorSet) {
             if (v && v.pubkey && String(v.pubkey).toLowerCase() === pubkey) return v.addr;
@@ -867,7 +867,7 @@ class Consensus {
     // True when `addr` (with verified pubkey `pubkey`, may be null) is the round
     // leader. Matches on addr OR verified pubkey so a snapshot-derived leader is
     // still recognized when this hub's addr binding for that key differs from
-    // the one _addrForPubkey picked. Mirrors OracleConsensus._isLeaderIdentity.
+    // the one addrForPubkey picked. Mirrors OracleConsensus.isLeaderIdentity.
     isLeaderIdentity(leader, addr, pubkey) {
         if (!leader) return false;
         if (leader.addr && leader.addr === addr) return true;
@@ -1032,18 +1032,18 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.applied || proposal._applying) return;
 
-        // Same quorum rule as _checkPrepareQuorum; see _quorumMet.
+        // Same quorum rule as checkPrepareQuorum; see quorumMet.
         if (this.quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
             // Synchronous in-flight guard, distinct from the durable `applied` marker.
-            // _applyConfig/_saveSeq are async, and `applied` is only set after they
+            // applyConfig/_saveSeq are async, and `applied` is only set after they
             // resolve (deliberately, so a _saveSeq failure leaves it false for retry).
             // Without this flag a second COMMIT that reaches quorum in a later event-loop
             // turn while the apply is still pending would pass the `!applied` gate and run
-            // _applyConfig a second time for one committed round. Harmless for today's
+            // applyConfig a second time for one committed round. Harmless for today's
             // idempotent config upsert, but a hazard for any future non-idempotent apply.
             // Cleared in the catch so a failed apply can still be retried.
             proposal._applying = true;
-            // proposal.applied is set AFTER both _applyConfig and _saveSeq succeed.
+            // proposal.applied is set AFTER both applyConfig and _saveSeq succeed.
             // Setting it early (before the awaits) would silence the stale-seq gate
             // on re-entry but leave applied=true after a _saveSeq failure, so the
             // config is durable but lastAppliedSeq is not advanced and the seq row
@@ -1128,7 +1128,7 @@ class Consensus {
         this.pendingViewChanges.get(view).add(envelope.sender);
 
         // Resolve the round-locked quorum CONTEXT (count vs stake), matching
-        // _checkPrepareQuorum/_checkCommitQuorum so view-change acceptance can't
+        // checkPrepareQuorum/checkCommitQuorum so view-change acceptance can't
         // diverge from the rest of the round under validator churn. Followers
         // still hold the proposal; the node that initiated the view change
         // recovers the context from viewChangeQuorums (its proposal was removed by
@@ -1176,7 +1176,7 @@ class Consensus {
             // in pendingViewChanges forever; under a flapping network those
             // stale entries accumulate without bound. Views are monotonic, so
             // anything strictly below the new view can never gather more votes.
-            // Mirrors the viewChangeQuorums prune in _initiateViewChange.
+            // Mirrors the viewChangeQuorums prune in initiateViewChange.
             for (let v of this.pendingViewChanges.keys()) {
                 if (v < this.view) this.pendingViewChanges.delete(v);
             }
@@ -1321,11 +1321,11 @@ class Consensus {
     // Calculate quorum size: legacy live-set computation, used as a
     // fallback when a federation snapshot can't be acquired (no BTC tip
     // available, indexer unreachable, etc.). The normal path is:
-    //   1. Leader calls _lockSnapshot() at PROPOSE -> snapshot at the BTC tip,
+    //   1. Leader calls lockSnapshot() at PROPOSE -> snapshot at the BTC tip,
     //      buried by HUB_SNAPSHOT_REORG_BUFFER inside CapabilitySnapshot.
     //   2. Leader stamps the REQUESTED tip (not the buried snapshot.blockIndex)
     //      into the PRE_PREPARE envelope.
-    //   3. Followers call _lockSnapshot(btcBlockHeight), which buries that tip
+    //   3. Followers call lockSnapshot(btcBlockHeight), which buries that tip
     //      once exactly as the leader did -> same block, same validator set,
     //      same quorum.
     //   4. PREPARE/COMMIT checks use proposal.quorum (cached), not this.
@@ -1376,7 +1376,7 @@ class Consensus {
             await this.db.setConsensusState('last_seq', String(seq), String(seq));
         } catch (e) {
             console.error('Error saving consensus sequence:', e);
-            throw e;   // surface so _checkCommitQuorum rejects rather than diverging
+            throw e;   // surface so checkCommitQuorum rejects rather than diverging
         }
     }
 }

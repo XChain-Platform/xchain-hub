@@ -33,7 +33,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
             prices:         [{ coinPair: 'BTC/USD', price: '100000' }],
             btcBlockHeight: 100,
             btcBlockTime:   1700000000,
-            finalized:      true                       // set by _checkCommitQuorum before store
+            finalized:      true                       // set by checkCommitQuorum before store
         };
     }
 
@@ -96,7 +96,7 @@ describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', 
         expect(oc.pendingRounds.get(ROUND).finalized).to.be.false;
         expect(events).to.have.length(0);
 
-        // DB recovers; a replayed COMMIT re-enters _checkCommitQuorum, which re-sets
+        // DB recovers; a replayed COMMIT re-enters checkCommitQuorum, which re-sets
         // finalized=true and re-drives the store. Emulate that re-entry directly.
         store.resolves();
         oc.pendingRounds.get(ROUND).finalized = true;

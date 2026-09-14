@@ -148,13 +148,13 @@ class PriceFetcher {
         // total-loss warn fires only when EVERY source dropped the pair and
         // blames the absence rather than the bound. Every sibling rejection site
         // in this pipeline already says it out loud (OracleRound._handleMessage,
-        // OracleConsensus._aggregate, XchainPriceSource._entry); this was the
+        // OracleConsensus._aggregate, XchainPriceSource.entry); this was the
         // last silent one.
-        // One entry per source that calls _reportBoundRejects. Coinbase was added to
+        // One entry per source that calls reportBoundRejects. Coinbase was added to
         // the dispatch after this counter and missed the list, so its first rejection
         // evaluated `undefined + n` and pinned the counter at NaN for the process
         // lifetime, on the source with the widest pair coverage. The accumulator
-        // self-initialises now (see _reportBoundRejects), so this list documents the
+        // self-initialises now (see reportBoundRejects), so this list documents the
         // reporting sources rather than gating them.
         this._boundRejects = { coingecko: 0, coinbase: 0, kraken: 0, coinmarketcap: 0 };
     }
@@ -438,7 +438,7 @@ class PriceFetcher {
     // second uncorrelated keyless upstream so every hub has 2 sources by default.
     // Only the pairs Kraken lists are requested (KRAKEN_PAIRS); the
     // others stay CoinGecko-only. Mirrors fetchFromCoinGecko's fetch+parse+normalize
-    // shape: jitter, _fetchWithRetry, then a { 'COIN/FIAT': number } map (or null).
+    // shape: jitter, fetchWithRetry, then a { 'COIN/FIAT': number } map (or null).
     // Returns: { 'BTC/USD': number, ... } for the listed pairs, or null on failure.
     async fetchFromKraken() {
         let pairCodes = Object.values(KRAKEN_PAIRS).join(',');

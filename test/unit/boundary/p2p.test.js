@@ -22,7 +22,7 @@ describe('Boundary: P2P Layer', function () {
 
     beforeEach(function () {
         db = {
-            // Spread first so _recordPeer's db.setP2pPeer(), which now carries the peer
+            // Spread first so recordPeer's db.setP2pPeer(), which now carries the peer
             // upsert instead of PeerManager issuing SQL inline, still routes through the
             // doQuery stub below.
             ...DB_METHODS,

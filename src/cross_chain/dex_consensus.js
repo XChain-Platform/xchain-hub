@@ -652,7 +652,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(this.peerManager){
             this.peerManager.broadcast(this.types.COMMIT, {
                 matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig,
-                // Phase-bound vote signature; see _commitPayload.
+                // Phase-bound vote signature; see commitPayload.
                 commit_sig: this.identity.sign(this.commitPayload(pending.canonical))
             });
         }
@@ -846,7 +846,7 @@ class CrossChainDexConsensus extends EventEmitter {
     // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
     //
     // Deliberately NOT bound by the admission map (that guard lives at
-    // _handlePropose via _admissionBoundHolds, refusing a PROPOSER that invents
+    // _handlePropose via admissionBoundHolds, refusing a PROPOSER that invents
     // a height). Here the row already carries 2f+1 signatures, so refusing it
     // finalizes nothing, it only strands THIS hub outside the federation until
     // an operator intervenes; there is no proposer left to bound.
@@ -904,12 +904,12 @@ class CrossChainDexConsensus extends EventEmitter {
             pending.quorum     = rebound.quorum;
             pending.weighted   = rebound.weighted;
         }
-        // Finalize under the view the proof VERIFIED at, never our local one. _finalize
-        // emits pending.view and _markFinalized caches it for the next straggler, so a
+        // Finalize under the view the proof VERIFIED at, never our local one. finalize
+        // emits pending.view and markFinalized caches it for the next straggler, so a
         // node that had already rotated would otherwise publish these signatures under a
         // view whose EQUIV canonical none of them cover (persisted as finalizing_view,
         // mirrored, and folded into the anchor archive). Lowering the view is safe and
-        // deliberate: _finalize sets pending.finalized, and _handleViewChange /
+        // deliberate: finalize sets pending.finalized, and _handleViewChange /
         // _handleNewView both short-circuit on a finalized round, so the monotonic-view
         // guard is never consulted for this round again. Taking the higher view is the bug.
         pending.view       = syncView;
@@ -941,9 +941,9 @@ class CrossChainDexConsensus extends EventEmitter {
         // drag every honest hub's `pending.view` forward with no 2f+1 VIEW_CHANGE
         // votes behind it (griefing / forced-failover). Require this hub to have
         // independently collected a view-change quorum for `view` (the same votes
-        // _maybeAssumeLeadership counts) before advancing. If the votes have not
+        // maybeAssumeLeadership counts) before advancing. If the votes have not
         // arrived yet we simply do not advance here; an honest advance still
-        // happens via _maybeAssumeLeadership as the VIEW_CHANGE votes land, and
+        // happens via maybeAssumeLeadership as the VIEW_CHANGE votes land, and
         // the round's own timeout re-triggers view-change otherwise, so liveness
         // is preserved and bounded.
         let votes = pending.viewChanges.get(view);

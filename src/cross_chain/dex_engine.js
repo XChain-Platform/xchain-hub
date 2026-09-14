@@ -59,7 +59,7 @@ const coins                  = require('../coins');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
 // settlement pass rebuilds them from the mirrored BIGINT row. The fill and
-// filled-before fields are bcmath DECIMAL strings compared through _amountsEqual,
+// filled-before fields are bcmath DECIMAL strings compared through amountsEqual,
 // and ticks / addresses / kinds / payout legs are string compares, so none of them
 // belong here.
 const DEX_CANONICAL_INT_FIELDS = ['snapshot_block', 'a_action_index', 'b_action_index',
@@ -134,7 +134,7 @@ class CrossChainDexEngine extends EventEmitter {
         // that has never rebuilt has no poll timer and no consensus subscription, so it
         // can neither propose nor co-sign, and starting out true keeps a construct-only
         // engine behaving exactly as before. While false, _discoverAndMatch proposes
-        // nothing and validateProposedMatch refuses to sign, because _effectiveRemaining
+        // nothing and validateProposedMatch refuses to sign, because effectiveRemaining
         // subtracts this ledger from the full offer amount and an under-counted ledger
         // re-offers escrow that finalized matches already reserved.
         this._committedReady = true;
@@ -259,7 +259,7 @@ class CrossChainDexEngine extends EventEmitter {
     offerKey(chain, actionIndex){ return chain + ':' + Number(actionIndex); }
 
     // Apply (sign=+1) or reverse (sign=-1) a match row's fills against both legs' ledgers.
-    // `target` lets _rebuildCommitted accumulate into an off-to-the-side map it only
+    // `target` lets rebuildCommitted accumulate into an off-to-the-side map it only
     // installs on success; every other caller mutates the live ledger.
     _applyCommit(r, sign, target){
         let ledger = target || this.committed;
@@ -303,7 +303,7 @@ class CrossChainDexEngine extends EventEmitter {
         // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
         // so a slow indexer lets the next interval fire on top of this one. Two overlapping
         // passes read the SAME order books and the same this.committed ledger (which only
-        // advances in _writeFinalizedMatch, after consensus), so both derive the same fills;
+        // advances in writeFinalizedMatch, after consensus), so both derive the same fills;
         // the _inflight matchId reservation does not stop them, because the has() test in
         // _finalizeMatch sits two awaits before the matching add(), and a snapshot block
         // that moved between the passes gives the second one a DIFFERENT matchId for the
@@ -313,7 +313,7 @@ class CrossChainDexEngine extends EventEmitter {
         if(this._matching) return;
         this._matching = true;
         try {
-            // Reservation-ledger gate. _effectiveRemaining below subtracts this.committed
+            // Reservation-ledger gate. effectiveRemaining below subtracts this.committed
             // from the full offer amount, so a tick that runs against a ledger which never
             // rebuilt re-offers escrow already locked into finalized matches. Retry the
             // rebuild on this tick rather than on a second timer, and propose nothing until
@@ -631,7 +631,7 @@ class CrossChainDexEngine extends EventEmitter {
         let row = {
             match_id:        matchId,
             snapshot_block:  Number(snapshotBlock),
-            network:         desc.network,             // lo.home_network == hi.home_network (enforced in _tryMatch)
+            network:         desc.network,             // lo.home_network == hi.home_network (enforced in tryMatch)
             a_chain:         lo.home_coin,
             a_action_index:  Number(lo.action_index),
             a_kind:          desc.loKind,
@@ -697,12 +697,12 @@ class CrossChainDexEngine extends EventEmitter {
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
 
         // Reserve this fill in-flight so a later poll doesn't re-propose it before the
-        // committed ledger is updated by _writeFinalizedMatch.
+        // committed ledger is updated by writeFinalizedMatch.
         this._inflight.add(matchId);
         try {
             // Run the PBFT round. quorum 0 (single operator) self-signs + finalizes inline;
             // a federation gathers 2f+1 independent signatures, then 'match:finalized' fires
-            // and _writeFinalizedMatch writes + mirrors the row.
+            // and writeFinalizedMatch writes + mirrors the row.
             await this.consensus.propose(matchId, { row: row, snapshot: { validators: validators, count: validators.length } });
         } catch(e){
             this._inflight.delete(matchId);            // round failed to start; allow a retry
@@ -776,7 +776,7 @@ class CrossChainDexEngine extends EventEmitter {
     // next poll can re-propose it. Both releases are needed: _inflight gates the poll
     // and the consensus finalized-ring refuses to re-run a match id it has retired. No
     // 'match:finalized' event is emitted, because nothing was written in this hub's DB.
-    // Named and shaped to match CrossChainCallEngine._deferFinalize; the two engines are
+    // Named and shaped to match CrossChainCallEngine.deferFinalize; the two engines are
     // kept in lockstep by design.
     deferFinalize(row){
         this._inflight.delete(row.match_id);
@@ -830,7 +830,7 @@ class CrossChainDexEngine extends EventEmitter {
         if((b.home_network || '') !== String(row.network || '')) return false;
         // Re-derive the WHOLE match (kind, fill amounts, filled-before offsets, match_id)
         // independently from our own view: offers + our committed ledger. The proposer's
-        // a/b are canonical (a_chain <= b_chain), so _tryMatch(a, b) keeps lo=a, hi=b.
+        // a/b are canonical (a_chain <= b_chain), so tryMatch(a, b) keeps lo=a, hi=b.
         let desc = this.tryMatch(a, b);
         if(!desc) return false;
         if(desc.loKind !== row.a_kind || desc.hiKind !== row.b_kind) return false;
@@ -957,8 +957,8 @@ class CrossChainDexEngine extends EventEmitter {
         // write and this return skips the caller's `if(inserted) this._applyCommit(row, +1)`
         // and leaves a finalized fill in the DB with no reservation in the in-memory ledger;
         // the next poll then re-offers the same escrow, and since the ledger only rebuilds at
-        // start(), that divergence survives until a restart. _writeFinalizedMatch credits the
-        // ledger first and mirrors afterwards through _mirrorMatchRow, which cannot throw.
+        // start(), that divergence survives until a restart. writeFinalizedMatch credits the
+        // ledger first and mirrors afterwards through mirrorMatchRow, which cannot throw.
         return inserted;
     }
 

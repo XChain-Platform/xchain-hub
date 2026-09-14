@@ -67,7 +67,7 @@ function envList(value) {
 class StakeShareWatcher {
 
     /**
-     * @param {object} hub   XChainHub (needs _resolveIndexerUrl, _btcIndexerHeaders;
+     * @param {object} hub   XChainHub (needs _resolveIndexerUrl, btcIndexerHeaders;
      *                       capabilityRegistry and capabilitySnapshot are used when present).
      * @param {object} [opts] test seams: env, now, log, axios, monitor, pollMs.
      */
@@ -248,7 +248,7 @@ class StakeShareWatcher {
         return this.monitor.record(chain, capability, evaluation);
     }
 
-    // One shared hub-to-indexer key covers every chain (_btcIndexerHeaders is the
+    // One shared hub-to-indexer key covers every chain (btcIndexerHeaders is the
     // hub's single header builder, despite the name). Tolerates a hub stub that
     // does not define it so a read never dies on a missing header.
     headers() {

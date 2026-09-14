@@ -93,7 +93,7 @@ function makeHub(overrides){
     return hub;
 }
 
-// A finalized payload shaped exactly like AttestationConsensus._checkCommitQuorum
+// A finalized payload shaped exactly like AttestationConsensus.checkCommitQuorum
 // emits: nested `request` and `signatures` are the round's own live objects, which
 // is what the copy-before-await case below exploits.
 function finalizedEvent(overrides){

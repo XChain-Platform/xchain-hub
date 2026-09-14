@@ -126,7 +126,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
     });
 
     // item 4940: the gate's bound must BE the clamp's bound, not an equal-threshold
-    // 18dp ratio. _clampToLastFinalized takes an 8dp ROUND_HALF_UP delta, so for a last
+    // 18dp ratio. clampToLastFinalized takes an 8dp ROUND_HALF_UP delta, so for a last
     // price whose quarter misses the 8dp grid the clamped hi sits a hair above
     // last*1.25 ('0.11111111' -> delta '0.02777778' -> hi '0.13888889' -> ratio
     // 0.2500000225). The ratio test rejected exactly that, so every honest follower

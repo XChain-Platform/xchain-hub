@@ -220,7 +220,7 @@ class ProviderRegistry {
             // written under several coins; two DIFFERENT definitions under the same
             // provider_id is an ambiguity, and picking one would make two hubs resolve
             // different provider limits from the same table. Refuse that pair instead,
-            // on the anchoring rationale in _applyProviderGovernanceChange.
+            // on the anchoring rationale in applyProviderGovernanceChange.
             let byProvider = new Map();
             for (let row of (rows || [])) {
                 let providerId = row && row.param_name;
@@ -279,7 +279,7 @@ class ProviderRegistry {
     // the static DEFAULTS constant (not the mutable this.providers loaded from configs).
     // This keeps the genesis entry restart-stable: even if the configs table is updated
     // between two hub restarts, block-0 always resolves to the original built-in value,
-    // matching how CapabilityRegistry._seedGenesisHistory seeds from p2pConfig.CAPABILITIES
+    // matching how CapabilityRegistry.seedGenesisHistory seeds from p2pConfig.CAPABILITIES
     // rather than from the mutable minStake table. Governance activation entries
     // (activation_block > 0) are what carry the real change.
     // Called from loadGovernanceHistory before layering governance changes. Preserves
@@ -332,7 +332,7 @@ class ProviderRegistry {
     // carries none. A consensus caller must treat null as fail-closed (refuse the
     // decision) rather than as an implicit floor of 0: substituting 0 would silently
     // widen the serving set, which is the same class of fork
-    // CapabilitySnapshot._resolveMinStake fails closed on for the capability threshold.
+    // CapabilitySnapshot.resolveMinStake fails closed on for the capability threshold.
     //
     // The fallback to the LIVE definition (used only when the history has nothing to
     // say) mirrors getAdditionalConfig: it keeps a fresh hub that never seeded genesis
@@ -372,7 +372,7 @@ class ProviderRegistry {
     // getMinStake and keeps a fresh hub (or one whose loadGovernanceHistory could not
     // read governance_proposals) serving instead of stalling. It is strictly no worse
     // than the pre-anchoring behaviour, which read live unconditionally, and it is
-    // unreachable for any provider in DEFAULTS because _seedProviderConfigGenesis
+    // unreachable for any provider in DEFAULTS because seedProviderConfigGenesis
     // always gives those a block-0 entry. A consensus caller still treats a null
     // result as fail-closed: a provider whose strategy no hub can anchor cannot be
     // served deterministically.
@@ -451,7 +451,7 @@ class ProviderRegistry {
                 // transparent and the previously-activated floor keeps resolving.
                 ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
                 // Same for the PBFT strategy. Must be read on BOTH write paths (this
-                // restart replay and XChainHub._applyProviderGovernanceChange, the live
+                // restart replay and XChainHub.applyProviderGovernanceChange, the live
                 // one) or a restarted hub and a long-running one resolve different state
                 // machines for the same block, which is the divergence anchoring removes.
                 cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;

@@ -186,7 +186,7 @@ describe('fullnode_activation', function () {
     });
 });
 
-describe('XChainHub._assertCanonicalFullnode', function () {
+describe('XChainHub.assertCanonicalFullnode', function () {
 
     let warnStub;
     beforeEach(function () { warnStub = sinon.stub(console, 'warn'); });
@@ -247,7 +247,7 @@ describe('XChainHub._assertCanonicalFullnode', function () {
     });
 });
 
-describe('XChainHub._seedCanonicalFullnode', function () {
+describe('XChainHub.seedCanonicalFullnode', function () {
 
     it('seeds at CONSTRUCTION, before startP2P builds FullNodeChallengeRound', function () {
         // The engine snapshots cfg.FULLNODE in its constructor, so a seed that only
@@ -307,7 +307,7 @@ describe('XChainHub._seedCanonicalFullnode', function () {
     });
 });
 
-describe('XChainHub._loadCapabilityConfigFile FULLNODE integration', function () {
+describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () {
 
     let tmpPath, warnStub, logStub;
     beforeEach(function () {

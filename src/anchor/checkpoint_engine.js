@@ -37,7 +37,7 @@
  *      state honest validators don't hold.
  *   3. At 2f+1 the leader broadcasts XCHK_FINALIZED with the full signature
  *      set; EVERY hub verifies the set and writes its own state_checkpoints
- *      row (mirroring _writeFinalizedMatch's everyone-writes pattern), then
+ *      row (mirroring writeFinalizedMatch's everyone-writes pattern), then
  *      streams it to its indexer subscribers and emits checkpoint:finalized.
  *
  * Canonical signing string (must stay byte-identical to the indexer's ANCHOR
@@ -396,7 +396,7 @@ class StateCheckpointEngine extends EventEmitter {
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
             // True means the cadence is deliberately idle rather than broken: this hub
-            // is outside the signer set, so it opens no round at all (see _observerHold).
+            // is outside the signer set, so it opens no round at all (see observerHold).
             observer_idle:           this._observerIdle,
             cadence_stalls:          this._cadenceStalls,
             cadence_stall_reason:    this._cadenceStallReason,
@@ -451,7 +451,7 @@ class StateCheckpointEngine extends EventEmitter {
 
             let validators = await this._resolveCapabilityValidators('oracle_publish', btcBlock);
             // Dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
-            // Set at _handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted
+            // Set at handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted
             // snapshot is one row per (source, pubkey), so a key delegated by two sources
             // appears twice; ranking over the raw list inflates pubkeys.length and lets
             // `btcBlock % pubkeys.length` land on a duplicate's slot where no hub is
@@ -582,7 +582,7 @@ class StateCheckpointEngine extends EventEmitter {
         // the signature so a refused proposal never produces one.
         if(!this.claimSeqSignature(cp, canonical)) return;
         let mySig    = this.identity.sign(canonical);
-        let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
+        let snapCount = validators.length;   // raw row count (matches handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum    = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
@@ -606,7 +606,7 @@ class StateCheckpointEngine extends EventEmitter {
         }
 
         // Re-map to the signer-verification shape, preserving the truncation flag so
-        // _checkQuorum's meetsStakeThreshold still fails closed on an over-cap snapshot
+        // checkQuorum's meetsStakeThreshold still fails closed on an over-cap snapshot
         // (the .map would otherwise drop it, same defect class as the resolver above).
         let pendingValidators = validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) }));
         if(validators.truncated === true) pendingValidators.truncated = true;
@@ -797,7 +797,7 @@ class StateCheckpointEngine extends EventEmitter {
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
         // Size the quorum from the RAW row count (item 2651), matching the propose
-        // path (_runRound) and the on-chain authority (anchor.js:336). The deduped
+        // path (runRound) and the on-chain authority (anchor.js:336). The deduped
         // pubkeys.size used before diverged whenever a key was multi-source. `quorum` only
         // gates the count path (weighted uses meetsStakeThreshold), and below SWQ
         // validators.length == pubkeys.size, so this is inert below SWQ.
@@ -848,8 +848,8 @@ class StateCheckpointEngine extends EventEmitter {
         // must therefore fail closed (throw) rather than log-and-continue, so the
         // checkpoint INSERT/broadcast/emit below are all skipped and no
         // quorum-signed, unverifiable row reaches a mirror or the anchor poller.
-        // Matches the leader _tick persist (unguarded) and _writeFinalizedMatch;
-        // callers (_tick .catch, _handleFinalized .catch, the leader accept .catch)
+        // Matches the leader _tick persist (unguarded) and writeFinalizedMatch;
+        // callers (_tick .catch, handleFinalized .catch, the leader accept .catch)
         // log the accept error, and the FINALIZED broadcast is re-deliverable.
         // Final backstop. Co-sign now refuses a rootless checkpoint, but this
         // path also accepts checkpoints that arrive already-finalized from a peer, so it
@@ -881,7 +881,7 @@ class StateCheckpointEngine extends EventEmitter {
         // diagnosable rather than invisible.
         //
         // Compared FIELD-WISE and not by rebuilding a canonical from the seated row:
-        // _cpFromRow deliberately carries no light-client roots, so a canonical rebuilt
+        // cpFromRow deliberately carries no light-client roots, so a canonical rebuilt
         // through it is rootless on one side only and would read every ordinary
         // post-flag-day re-delivery as a conflict. The roots are themselves derived from
         // the block, so the four chained hashes plus block_index settle identity.
@@ -926,11 +926,11 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     // RAW (ungated) v0 checkpoint canonical: the bare pipe-join. The v1 archive
-    // (StateAnchorPublisher._archiveCanonical) nests THIS, not the gated form, so the
+    // (StateAnchorPublisher.archiveCanonical) nests THIS, not the gated form, so the
     // EQUIV header is applied exactly once around the whole archive content.
     static rawCanonicalCheckpoint(cp){
         // The bare v0 checkpoint canonical, WITHOUT the SPV roots: the v1 archive
-        // (_archiveCanonical) nests THIS and must stay byte-identical to its pre-SPV
+        // (archiveCanonical) nests THIS and must stay byte-identical to its pre-SPV
         // shape, so the root-append lives in canonicalCheckpoint (checkpoint family
         // only), never here.
         return ['XCHECKPOINT', cp.chain, cp.network, String(cp.block_index), cp.block_hash,
@@ -944,7 +944,7 @@ class StateCheckpointEngine extends EventEmitter {
     static checkpointRootSuffix(cp){
         if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
-        // refuses to sign a checkpoint that lacks them (_runRound throws), so for every
+        // refuses to sign a checkpoint that lacks them (runRound throws), so for every
         // REAL post-flag-day checkpoint this is always true and the suffix is byte-
         // deterministic; the guard only keeps legacy/pre-Phase-1 rows (null roots) on
         // their original rootless canonical, so old signatures still verify.
@@ -961,7 +961,7 @@ class StateCheckpointEngine extends EventEmitter {
     static canonicalCheckpoint(cp){
         // Checkpoint family (v0/v3): the bare canonical PLUS the SPV root suffix
         // (post-flag-day), appended to the RAW string BEFORE the EQUIV wrap. The v1
-        // archive uses _archiveCanonical (rootless) instead, so archives are untouched.
+        // archive uses archiveCanonical (rootless) instead, so archives are untouched.
         let raw = StateCheckpointEngine.rawCanonicalCheckpoint(cp) + StateCheckpointEngine.checkpointRootSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
@@ -1241,7 +1241,7 @@ class StateCheckpointEngine extends EventEmitter {
     // mirror certifying completeness past a committed, quorum-signed checkpoint until the
     // socket happens to reconnect. A throw from the re-read and a zero-row result are the
     // same undeliverable row event, and dropAllForResync is the sanctioned repair (the
-    // OracleConsensus._finalize price-round path is the in-repo precedent).
+    // OracleConsensus.finalize price-round path is the in-repo precedent).
     //
     // Never throws to the caller: the row is committed, so the cadence-latch advance, the
     // log line and the checkpoint:finalized emit must still run. Only DELIVERY becomes

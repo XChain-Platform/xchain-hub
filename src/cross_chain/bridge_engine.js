@@ -184,7 +184,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         this._inflightSourceLegs  = new Set();
         this._inflightTransferLeg = new Map();  // transfer_id -> source leg key, for release
 
-        // Legs whose early return in _maybeFinalizeTransfer has already been logged, keyed
+        // Legs whose early return in maybeFinalizeTransfer has already been logged, keyed
         // `<leg>|<reason>`, so a 15 s poll reports a held or refused leg ONCE per process
         // instead of every tick. Bounded FIFO: a long-lived hub sees many legs.
         this._earlyReturnLogged = new Set();
@@ -337,7 +337,7 @@ class CrossChainBridgeEngine extends EventEmitter {
             // validator set, so every hub in the federation flips on one height. That block
             // is a BTC height, so it is judged against the BTC key: this is the federation's
             // "is the bridge live at all" test, and each chain's own flag day is then
-            // checked per leg in _maybeFinalizeTransfer against that chain's own height.
+            // checked per leg in maybeFinalizeTransfer against that chain's own height.
             if(!this.gateActive('bridge', snapshotBlock, 'BTC')) return;
             let pending = new Map();
             for(let coin of ALLOWED_CHAINS){
@@ -899,7 +899,7 @@ class CrossChainBridgeEngine extends EventEmitter {
 
         // Source-leg uniqueness, the follower's OWN refusal (section 7, D14's poll/sign/
         // insert/retract cycle assumes one record per source leg): a leader could bypass its
-        // own _maybeFinalizeTransfer guard (be Byzantine, or lag on a stale in-memory set
+        // own maybeFinalizeTransfer guard (be Byzantine, or lag on a stale in-memory set
         // after a restart) and propose a SECOND transfer for a leg this hub already holds a
         // persisted, non-retracted record for. Comparing ids rather than just existence lets
         // a re-validation of the SAME already-persisted round (an identical transfer_id,
@@ -932,7 +932,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         if(!Number.isFinite(depth) || depth < this._effectiveDepth(row.src_chain, leg.min_depth)) return false;
 
         // The SOURCE CHAIN's own flag day, at the height the leg was mined: the mirror of the
-        // proposer's gate in _maybeFinalizeTransfer, on the same (block, coin) pair, so a leg
+        // proposer's gate in maybeFinalizeTransfer, on the same (block, coin) pair, so a leg
         // from a chain that has not reached its own instant is refused by every follower
         // rather than admitted because BTC crossed first.
         if(!this.gateActive('bridge', Number(leg.block_index), row.src_chain)) return false;
@@ -1066,7 +1066,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // round leader: indexers verify a row's signatures against capability_snapshots in
     // whichever hub DB they mirror, and a follower's DB may be the only one they read.
     //
-    // FAIL CLOSED, the rule CrossChainDexEngine._writeFinalizedMatch spells out in full: the
+    // FAIL CLOSED, the rule CrossChainDexEngine.writeFinalizedMatch spells out in full: the
     // persist is a PRECONDITION of the row, not a best-effort side write. A swallowed throw,
     // or a silent zero-row persist (the sentinel snapshot degrades to [] on an indexer RPC
     // error or a 401, so the insert loop never runs and never warns), would leave a
@@ -1197,7 +1197,7 @@ class CrossChainBridgeEngine extends EventEmitter {
     // small surplus, never a deficit, which is the safe direction for an alarm.
     //
     // escrow and supply are CHAIN state and no hub table holds them, so the chain half comes
-    // from the indexers over `getbridgebalances` (_readBridgeBalances below). `chainStateReader`
+    // from the indexers over `getbridgebalances` (readBridgeBalances below). `chainStateReader`
     // stays as the injection point a test or an operator tool can substitute; its contract is
     // that of the default reader, async (coin, network, ticks) -> { tick: { supply, escrow } },
     // with `escrow` the map of ADDRESS.BRIDGE_<COIN> balances held ON `coin`. Whenever a read

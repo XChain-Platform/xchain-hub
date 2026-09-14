@@ -35,10 +35,10 @@ describe('Fuzz: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds(): normal parameters
+    // validateChangeBounds(): normal parameters
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds(): normal parameters', function () {
+    describe('validateChangeBounds(): normal parameters', function () {
 
         it('proposed within +50% of current always passes', function () {
             fc.assert(fc.property(
@@ -102,10 +102,10 @@ describe('Fuzz: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds(): slashing parameters
+    // validateChangeBounds(): slashing parameters
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds(): slashing parameters', function () {
+    describe('validateChangeBounds(): slashing parameters', function () {
 
         it('slash param within +24% always passes', function () {
             fc.assert(fc.property(
@@ -169,10 +169,10 @@ describe('Fuzz: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds(): skip conditions
+    // validateChangeBounds(): skip conditions
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds(): skip conditions', function () {
+    describe('validateChangeBounds(): skip conditions', function () {
 
         it('non-numeric string values always skip validation (no throw)', function () {
             fc.assert(fc.property(

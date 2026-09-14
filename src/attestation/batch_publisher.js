@@ -384,11 +384,11 @@ class AttestationBatchPublisher {
     // heads for hours it has no rows for, so it starts at the window in progress when it
     // booted. A hub that HAS markers floors on its OLDEST one: everything below that
     // predates its participation, and everything above is decided per window by
-    // _pendingWindows's own marker lookup. Null means no floor, which is what a direct
+    // pendingWindows's own marker lookup. Null means no floor, which is what a direct
     // sweep with no start() gets.
     //
     // THE FLOOR IS NOT A COMPLETION WATERMARK, and deriving it from the NEWEST marker
-    // made it one. sweep() walks on past a window _publishWindow could not do (a failed
+    // made it one. sweep() walks on past a window publishWindow could not do (a failed
     // anchor read, no signing quorum, the spend guard, or simply not this hub's rank
     // yet), so a newer window can carry a marker while an older one carries none. A floor
     // at newest+windowS then reads that newer marker as proof the older window resolved,
@@ -401,7 +401,7 @@ class AttestationBatchPublisher {
         let rows = await db.getAttestPublishedBatch(this.network);
         let oldest = (rows && rows.length) ? Number(rows[0].oldest) : NaN;
         let newest = (rows && rows.length) ? Number(rows[0].newest) : NaN;
-        // Read by _pendingWindows only to tell a routine catch-up from a coverage GAP: a
+        // Read by pendingWindows only to tell a routine catch-up from a coverage GAP: a
         // pending window BELOW a marker this hub already holds is one the sweep left
         // behind, and without this marker that condition is silent.
         this._newestMarkerWindow = (Number.isFinite(newest) && newest > 0) ? newest : null;

@@ -107,7 +107,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')[0].sql).to.contain('AND sent_at IS NULL');
         });
 
-        it('never throws out of _markAnchorSent: the fee is already spent and the intent still holds', async function () {
+        it('never throws out of markAnchorSent: the fee is already spent and the intent still holds', async function () {
             const pub = mkPub({ ...DB_METHODS, async doQuery(){ throw new Error('db down'); } });
             await pub.markAnchorSent(mkRow(), 'tx-1');   // resolves rather than rejecting
         });

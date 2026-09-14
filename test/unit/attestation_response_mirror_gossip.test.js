@@ -82,7 +82,7 @@ function canonicalFor(overrides){
     return raw;
 }
 
-// A wire payload as _gossipRow would build one. `signWith` selects which
+// A wire payload as gossipRow would build one. `signWith` selects which
 // identities co-sign; `signCanonical` lets a case sign the WRONG bytes.
 function gossipPayload(overrides){
     let o = Object.assign({

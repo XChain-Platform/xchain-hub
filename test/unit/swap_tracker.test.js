@@ -114,10 +114,10 @@ describe('SwapTracker', function () {
     });
 
     // -----------------------------------------------------------------
-    // _onAttestationFinalized()
+    // onAttestationFinalized()
     // -----------------------------------------------------------------
 
-    describe('_onAttestationFinalized()', function () {
+    describe('onAttestationFinalized()', function () {
 
         it('updates matching initiated swap to attested', async function () {
             // First call: getSwap returns initiated swap

@@ -192,7 +192,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
 
     // ---- GOV_RESULT evidence path ----------------------------------------
 
-    it('_ingestResultVotes skips evidence with no seq rather than defaulting it', async function () {
+    it('ingestResultVotes skips evidence with no seq rather than defaulting it', async function () {
         let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
         let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
         await gov.ingestResultVotes(PROPOSAL,
@@ -200,7 +200,7 @@ describe('Governance GOV-VOTE-REPLAY-1', function () {
         expect(upsertCalls().length, 'a leader cannot launder a seq-less vote back in').to.equal(0);
     });
 
-    it('_ingestResultVotes accepts seq-stamped evidence', async function () {
+    it('ingestResultVotes accepts seq-stamped evidence', async function () {
         let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
         let sig = idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 2000));
         await gov.ingestResultVotes(PROPOSAL,

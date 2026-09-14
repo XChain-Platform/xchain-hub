@@ -27,7 +27,7 @@
  * reason: coercing first is what hides the spelling under test. It is
  * fail-closed and needs no activation flag - an honest submission already
  * carries bcmath.bcformat(value, 8) output (PriceFetcher._median,
- * XchainPriceSource._entry), which this accepts unchanged, so an honest round
+ * XchainPriceSource.entry), which this accepts unchanged, so an honest round
  * never sees it fire.
  *
  * The predicate is the one PriceAggregator's two v0 ingest doors apply below

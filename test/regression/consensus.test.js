@@ -218,7 +218,7 @@ describe('Regression: Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('REG-CON-005: View change triggered on timeout', function () {
-        it('_initiateViewChange increments view and broadcasts VIEW_CHANGE @regression-p1', function () {
+        it('initiateViewChange increments view and broadcasts VIEW_CHANGE @regression-p1', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             consensus.view = 0;
@@ -236,13 +236,13 @@ describe('Regression: Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('REG-CON-006: Sequence number persistence', function () {
-        it('_loadSeq reads from DB @regression-p1', async function () {
+        it('loadSeq reads from DB @regression-p1', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
-        it('_loadSeq defaults to 0 on empty result @regression-p1', async function () {
+        it('loadSeq defaults to 0 on empty result @regression-p1', async function () {
             hub.db.doQuery.resolves([]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
@@ -376,7 +376,7 @@ describe('Regression: Consensus (PBFT)', function () {
             await promise.catch(() => {});
         });
 
-        it('_lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
+        it('lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
             hub.capabilitySnapshot = buryingSnapshotFake();
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let { snapshot, requestedBlockIndex } = await consensus.lockSnapshot();

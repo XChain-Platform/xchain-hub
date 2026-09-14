@@ -485,7 +485,7 @@ class AttestationRound {
     // ladder caps at MAX_LEADER_ROTATIONS and never wraps, so for a request at
     // block R the slot froze at 3 from R+9 onward. A frozen slot holding a member
     // that never sends a PROPOSE is terminal: with no leader proposal,
-    // AttestationConsensus._resolveRoundEffectiveTime falls back to each hub's own
+    // AttestationConsensus.resolveRoundEffectiveTime falls back to each hub's own
     // wall clock, the hubs stamp tens of seconds apart, no two PREPAREs share a
     // canonical, and the round times out on every retry for the rest of the
     // request's life (request 233: 28 consecutive rounds at leaderSlot=3 with
@@ -683,7 +683,7 @@ class AttestationRound {
         // broadcasts first moves. Falls back to slot 0 when the poll couldn't
         // resolve a tip height.
         //
-        // _resolveLeader layers the silent-slot skip (ledger P60) over that
+        // resolveLeader layers the silent-slot skip (ledger P60) over that
         // arithmetic: the ladder stopping ON a mute member, rather than stepping
         // over it, is what pinned request 233 at leaderSlot=3 forever. The skip is
         // gated on the request's own block (attest_leader_silence_skip_activation.js),

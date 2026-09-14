@@ -13,7 +13,7 @@
 // Crash-safety for the ARCHIVE publish path.
 //
 // _publishArchive broadcasts the v1 head and every v2 continuation chunk BEFORE
-// _backfillBatch records the batch, so a crash in that window leaves the rows pending
+// backfillBatch records the batch, so a crash in that window leaves the rows pending
 // and the next flush re-elects the identical matches and pays for the whole archive a
 // second time. The checkpoint path has guarded this since its own existence check
 // landed; the archive path had no on-chain guard at all, and could not reuse the
@@ -58,7 +58,7 @@ function mkPub(indexerReply) {
     pub.peerManager = null;      // skips the XANC_FINALIZED announce
     pub.dogeAddress = 'Dpub1';
     pub.indexers    = { DOGE: { url: 'http://indexer.invalid' } };
-    // Await-safe gate double: _broadcastWithRetry reserves once per call and settles
+    // Await-safe gate double: broadcastWithRetry reserves once per call and settles
     // that token on each exit, so the stub mirrors reserve()/commit()/release()
     // rather than the old allow()/record() pair.
     pub.spendGuard  = { isPaused: () => false, reserve: () => ({ id: 1 }), commit(){}, release(){},
@@ -79,7 +79,7 @@ function mkPub(indexerReply) {
 }
 
 // The sole member of this fixture's signing set, with a REAL key. _publishArchive's
-// on-chain-validity gate runs _quorumVerified over the round's own signatures with no
+// on-chain-validity gate runs quorumVerified over the round's own signatures with no
 // `validators.length === 1` short-circuit in front of it, so a placeholder signature
 // string fails the gate and stamps every row '__partial__' - which is a verdict about
 // quorum, not about the existence check these cases are actually pinning.
@@ -124,8 +124,8 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
 
     it('the guard exists and is threaded through the v1 head broadcast', () => {
         const { pub } = mkPub(() => ABSENT);
-        expect(typeof pub.findExistingArchiveAnchor, '_findExistingArchiveAnchor must exist').to.equal('function');
-        expect(typeof pub.findExistingArchiveChunk,  '_findExistingArchiveChunk must exist').to.equal('function');
+        expect(typeof pub.findExistingArchiveAnchor, 'findExistingArchiveAnchor must exist').to.equal('function');
+        expect(typeof pub.findExistingArchiveChunk,  'findExistingArchiveChunk must exist').to.equal('function');
     });
 
     it('publishes the whole batch when the archive is definitively not on-chain', async () => {

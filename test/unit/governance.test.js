@@ -37,10 +37,10 @@ describe('Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds()
+    // validateChangeBounds()
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds()', function () {
+    describe('validateChangeBounds()', function () {
 
         describe('normal parameters', function () {
             it('allows 50% increase', function () {
@@ -888,12 +888,12 @@ describe('Governance', function () {
     // -----------------------------------------------------------------
 
     describe('tally leadership', function () {
-        it('_getProposalLeader returns null for an empty validator set', function () {
+        it('getProposalLeader returns null for an empty validator set', function () {
             gov.setValidatorSet([]);
             expect(gov.getProposalLeader('gov:P:1')).to.be.null;
         });
 
-        it('_getProposalLeader is deterministic and drawn from the validator set', function () {
+        it('getProposalLeader is deterministic and drawn from the validator set', function () {
             gov.setValidatorSet(VALIDATORS_3);
             let l1 = gov.getProposalLeader('gov:P:1');
             let l2 = gov.getProposalLeader('gov:P:1');
@@ -901,18 +901,18 @@ describe('Governance', function () {
             expect(VALIDATORS_3).to.include(l1);
         });
 
-        it('_isTallyLeader is true in standalone mode (no validator set)', function () {
+        it('isTallyLeader is true in standalone mode (no validator set)', function () {
             gov.setValidatorSet([]);
             expect(gov.isTallyLeader('gov:P:1')).to.be.true;
         });
 
-        it('_isTallyLeader is true when this node is the designated leader', function () {
+        it('isTallyLeader is true when this node is the designated leader', function () {
             gov.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = gov.getProposalLeader('gov:P:1').addr;
             expect(gov.isTallyLeader('gov:P:1')).to.be.true;
         });
 
-        it('_isTallyLeader is false when another node is the leader', function () {
+        it('isTallyLeader is false when another node is the leader', function () {
             gov.setValidatorSet(VALIDATORS_3);
             let leader = gov.getProposalLeader('gov:P:1');
             let other = VALIDATORS_3.find(v => v.addr !== leader.addr);
@@ -976,7 +976,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     let hub, gov, kps, valset, snapshotJson;
 
     // Three real-keyed validators so votes carry verifiable ed25519 signatures
-    // and _getProposalLeader resolves to a known addr.
+    // and getProposalLeader resolves to a known addr.
     beforeEach(function () {
         hub = createMockHub();
         kps = [0, 1, 2].map(() => {
@@ -1007,13 +1007,13 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
 
     // ---- R2-M2 snapshot build/validate helpers ----
 
-    it('_buildValidatorSnapshot returns a pubkey-sorted {pubkey,addr} array', function () {
+    it('buildValidatorSnapshot returns a pubkey-sorted {pubkey,addr} array', function () {
         let snap = gov.buildValidatorSnapshot();
         expect(snap).to.have.length(3);
         expect(snap.map(e => e.pubkey)).to.deep.equal(valset.map(v => v.pubkey).sort());
     });
 
-    it('_parseSnapshot rejects malformed / oversized / duplicate-pubkey snapshots', function () {
+    it('parseSnapshot rejects malformed / oversized / duplicate-pubkey snapshots', function () {
         expect(gov.parseSnapshot(null)).to.equal(null);
         expect(gov.parseSnapshot('not json')).to.equal(null);
         expect(gov.parseSnapshot('[]')).to.equal(null);
@@ -1021,7 +1021,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         expect(gov.parseSnapshot(JSON.stringify([{ addr: 'x' }]))).to.equal(null); // no pubkey
     });
 
-    it('_snapshotMatchesLocalSet is exact-set: rejects a self-only shrink and a superset', function () {
+    it('snapshotMatchesLocalSet is exact-set: rejects a self-only shrink and a superset', function () {
         let full = gov.parseSnapshot(snapshotJson);
         expect(gov.snapshotMatchesLocalSet(full)).to.equal(true);
         let selfOnly = [{ pubkey: kps[0].pubkey, addr: 'x' }];
@@ -1032,7 +1032,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
 
     // ---- GOV-TALLY-DENOM-1: legacy tally re-filters the numerator by membership ----
 
-    it('_computeTally (legacy, null electorate) excludes votes from validators no longer in the set (GOV-TALLY-DENOM-1)', function () {
+    it('computeTally (legacy, null electorate) excludes votes from validators no longer in the set (GOV-TALLY-DENOM-1)', function () {
         // A vote from a current member (kps[0]) and one from a departed validator
         // (not in the live set) are both recorded. The legacy path must count only
         // the current member so the numerator matches the current-set denominator;
@@ -1150,7 +1150,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         expect(emitted, 'legit pass finalizes after evidence recovery').to.not.be.null;
     });
 
-    it('_ingestResultVotes skips a vote from a non-member and one with a bad signature', async function () {
+    it('ingestResultVotes skips a vote from a non-member and one with a bad signature', async function () {
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT INTO governance_votes/)).resolves();
         let outsider = ValidatorIdentity.generate();
         let outsiderPriv = new ValidatorIdentity(outsider.privkeyHex);
@@ -1204,7 +1204,7 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         expect(insert.getCall(0).args[1][8], 'validator_snapshot NULL (absent, gate off)').to.equal(null);
     });
 
-    it('_isSnapshotLockActive gates on network + observed BTC height', function () {
+    it('isSnapshotLockActive gates on network + observed BTC height', function () {
         expect(gov.isSnapshotLockActive(), 'no network -> off').to.equal(false);
         hub.network = 'regtest';
         hub._latestBlockIndex = 5;

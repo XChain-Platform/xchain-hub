@@ -417,7 +417,7 @@ function resolveMaxBudgetUsd() {
     if (Number.isFinite(MAX_BUDGET_USD_CONFIG) && MAX_BUDGET_USD_CONFIG > 0) return MAX_BUDGET_USD_CONFIG;
     // Sized so it cannot cut off legitimate work: one attestation call is a
     // single --print turn with tools disabled, bounded by fetchTimeoutMs (10s
-    // stock, 60s ceiling in _runLlm), which is orders of magnitude under $5. It
+    // stock, 60s ceiling in runLlm), which is orders of magnitude under $5. It
     // bounds the runaway shape instead, and env/governance can widen it.
     return DEFAULT_MAX_BUDGET_USD;
 }
@@ -678,7 +678,7 @@ exports.fetch = async (payload, options) => {
 
     // Enforce the caller's response-size cap the same way http_get does. Every
     // peer's PROPOSE/PREPARE gate silently drops a body over the provider def's
-    // max_response_bytes (AttestationConsensus._maxBodyB64Length), so an over-cap
+    // max_response_bytes (AttestationConsensus.maxBodyB64Length), so an over-cap
     // body fetched here would cost this validator's proposal (or quorum) with no
     // diagnostic attributable to the provider. Fail loudly at the point of fetch
     // instead. Do NOT truncate: a clipped LLM response is semantically invalid and
@@ -708,10 +708,10 @@ exports.fetch = async (payload, options) => {
 // "bytes differ").
 // Single source of truth for "can this OpenAI-vendor model carry the trusted
 // judge framing in a real system/developer turn". Early o-series ids
-// (o1-mini/o1-preview) reject a system-role message outright, so _runLlm
+// (o1-mini/o1-preview) reject a system-role message outright, so runLlm
 // falls back to concatenating it into the user turn, collapsing the
-// instruction-hierarchy boundary _buildJudgePrompt relies on. Mirrors the
-// isEarlyOSeries test in _runLlm; keep the two in lockstep.
+// instruction-hierarchy boundary buildJudgePrompt relies on. Mirrors the
+// isEarlyOSeries test in runLlm; keep the two in lockstep.
 function modelCarriesSystemRole(model){
     return !/^o1-(mini|preview)/.test(String(model));
 }
@@ -804,12 +804,12 @@ function canonicalMeta(proposals, idx, options){
 }
 
 // The judge transport, as a rebindable binding rather than a direct call. Always
-// _runLlm on a validator; nothing reads it off config or the environment, so it
+// runLlm on a validator; nothing reads it off config or the environment, so it
 // cannot be swapped anywhere but in-process.
 //
 // It exists because the OUTER budget below has to hold against a transport that
 // does not honour the timeout it was handed, and no real transport here has that
-// shape: both HTTP branches arm _armWallClockDeadline and the CLI branch arms a
+// shape: both HTTP branches arm armWallClockDeadline and the CLI branch arms a
 // SIGTERM kill, so a suite that mocks https or child_process only ever reproduces
 // the bound that already worked. Injecting the judge call is the only way to build
 // the failure the wall is for.
@@ -828,7 +828,7 @@ const _AGREE_BUDGET_SPENT = Symbol('agree budget spent');
 async function agreeJudged(proposals, options, judgeInfo) {
     // Kill switch: a single proposal is returned without any billed
     // judge call, so only gate the paths that would actually dial a vendor (the
-    // multi-proposal judge fan-out below). Guarded again just before _runLlm.
+    // multi-proposal judge fan-out below). Guarded again just before runLlm.
     let paused = !llmEnabled();
     if (!Array.isArray(proposals) || proposals.length === 0) {
         markInconclusive(options, 'no_proposals');
@@ -852,7 +852,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
     }
     // Same shape for a spent budget. The guard is hub-global (one SpendGuard for
     // every model and vendor), so once the window is exhausted every fallback in
-    // the chain below is refused at _runLlm's reserve gate too; walking it would
+    // the chain below is refused at runLlm's reserve gate too; walking it would
     // only write a futile intent+blocked settle pair per model and then record the
     // round as 'unreachable', the vendor-outage shape. allow() is a pure predicate
     // (no budget consumed); the in-loop budgetExhausted check below covers the
@@ -879,7 +879,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
     // different model. Leader-local: followers adopt the leader's winner and
     // never re-judge, so this needs no cross-hub determinism.
     // Only carry models that can receive the trusted judge framing in a real
-    // system/developer turn (see _modelCarriesSystemRole). A model that
+    // system/developer turn (see modelCarriesSystemRole). A model that
     // cannot is skipped rather than silently flattening the SECURITY
     // data-vs-instruction boundary into the same user turn as the
     // nonce-fenced untrusted candidates; if that drops the chain to empty,
@@ -1051,7 +1051,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
 // the last one, and above all a transport that does not honour the timeout it
 // was handed all sit outside it. The caller is an attestation round whose
 // effective_time and round timer are both sized against this number
-// (AttestationConsensus._maybeAdvanceFromProposals), so it needs a wall it can
+// (AttestationConsensus.maybeAdvanceFromProposals), so it needs a wall it can
 // reason about without auditing three transports: whatever the ladder is doing,
 // it gets an answer within options.timeoutMs of the call.
 //
@@ -1067,7 +1067,7 @@ async function agreeJudged(proposals, options, judgeInfo) {
 // process down.
 //
 // This is a wall against ASYNC overrun only. Synchronous work on this path (the
-// spend-audit fsync in _appendLine, JSON of a large candidate set) blocks the
+// spend-audit fsync in appendLine, JSON of a large candidate set) blocks the
 // event loop, and a timer cannot fire while it does.
 exports.agree = async (proposals, options) => {
     options = options || {};

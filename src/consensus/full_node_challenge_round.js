@@ -215,7 +215,7 @@ class FullNodeChallengeRound {
         // Shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and a
         // per-capability runtime pause so an operator can halt verdict BTC spend at
-        // runtime; gated at _maybeFinalize before the leader broadcasts. Config reads
+        // runtime; gated at maybeFinalize before the leader broadcasts. Config reads
         // env first (FULLNODE_* keys), then top-level p2pConfig, matching the sibling
         // publishers (the nested cfg.FULLNODE block stays the source for FullNode's own
         // knobs; the guard's knobs are the FULLNODE_*-prefixed ones).
@@ -502,7 +502,7 @@ class FullNodeChallengeRound {
         // R2-FN2: the wire carries a pubkey-bound digest, not the answer. A
         // 64-hex shape gate keeps junk out of the map; the digest itself is
         // validated against this hub's own recomputation at compare time
-        // (_closeCollection / _onSignReq), so a copied digest from ANOTHER
+        // (closeCollection / onSignReq), so a copied digest from ANOTHER
         // claimant can never match this sender's expected digest.
         let digest = String(d.answer_digest || '').toLowerCase();
         if(!/^[0-9a-f]{64}$/.test(digest)) return;
@@ -656,13 +656,13 @@ class FullNodeChallengeRound {
         let g = this.spendGuard.check();
         if(!g.ok){ console.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
 
-        // RESERVE on top of that check: _broadcastVerdict is AWAITED, and the pure
+        // RESERVE on top of that check: broadcastVerdict is AWAITED, and the pure
         // predicate pair check()/record() leaves a window in which every epoch that
         // crosses quorum inside it reads the same pre-send budget and all of them
         // spend. The reservation consumes the budget in this synchronous turn, and it
         // IS the recorded spend, so record() must never also run for it. check() stays
         // above because reserve() takes no balance argument, so dropping it would
-        // silently retire the wallet floor. Same shape RollcallRound._publishPairs and
+        // silently retire the wallet floor. Same shape RollcallRound.publishPairs and
         // lib/idempotent_broadcast.broadcastOnce use.
         let spendToken = this.spendGuard.reserve();
         if(!spendToken){
@@ -671,8 +671,8 @@ class FullNodeChallengeRound {
             return;
         }
 
-        // Optimistic finalize lock: _maybeFinalize runs on EVERY incoming XNODE_SIGN
-        // (and from _closeCollection), so without claiming the round BEFORE the async
+        // Optimistic finalize lock: maybeFinalize runs on EVERY incoming XNODE_SIGN
+        // (and from closeCollection), so without claiming the round BEFORE the async
         // broadcast, two sigs that cross quorum within the broadcast's await window both
         // pass the `finalized` guard above and the leader emits the NODEPROOF verdict tx
         // twice (wasted BTC fee; the second is a same-challenge replay). Claim the round
@@ -835,7 +835,7 @@ class FullNodeChallengeRound {
 
     // Returns the pubkey of the currently elected leader for `state`: the
     // verifier at the unlocked rank in the SHA256(challenge_id || pubkey) ordering.
-    // Used by _onSignReq to reject SIGN_REQ messages from non-leaders before
+    // Used by onSignReq to reject SIGN_REQ messages from non-leaders before
     // locking the passList.
     _electedLeader(state){
         if(!state.eligible || state.eligible.size === 0) return null;
@@ -868,13 +868,13 @@ class FullNodeChallengeRound {
     // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
     //
     // CONSENSUS-CRITICAL: the returned set is the domain of leader election
-    // (_electedLeader / _isLeader) and the 2/3+1 quorum denominator (_maybeFinalize).
+    // (_electedLeader / _isLeader) and the 2/3+1 quorum denominator (maybeFinalize).
     // On an UNRESOLVED set (any indexer RPC failure: 401 / timeout / transport) this
     // returns null so the caller ABSTAINS (skips the epoch), rather than degrading to
     // the genesis-only subset. A per-hub, reachability-dependent fallback would split
     // the federation's view of the member list across honest hubs (divergent leader /
     // quorum -> duplicate or stalled on-chain NODEPROOF verdicts). This fails CLOSED,
-    // matching _claimantSet in this file and the StateAnchorPublisher / CrossChainEngine
+    // matching claimantSet in this file and the StateAnchorPublisher / CrossChainEngine
     // siblings; it trades liveness on a prolonged indexer outage for cross-hub safety.
     // The legitimate genesis-only path (a genuinely genesis-only federation) is on the
     // SUCCESS branch, where the indexer returns an empty validators list; only the
@@ -934,7 +934,7 @@ class FullNodeChallengeRound {
     // universes (leader broadcasts no XNODE_SIGN_REQ / verifier rejects the
     // legitimate list as outsiders), the exact divergence this lock exists to
     // prevent. A legitimately empty snapshot is distinguished by a real validators
-    // array (_coerceValidators guarantees one on the SUCCESS branch) and still
+    // array (coerceValidators guarantees one on the SUCCESS branch) and still
     // yields a real, empty Set. This fails CLOSED, trading liveness on a prolonged
     // snapshot outage for cross-hub safety.
     async claimantSet(epoch){
@@ -942,7 +942,7 @@ class FullNodeChallengeRound {
         try {
             let snap = await this.capabilitySnapshot.getSnapshot('full_node', epoch);
             if(!snap || !Array.isArray(snap.validators)){
-                console.warn('FullNodeChallengeRound: _claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
+                console.warn('FullNodeChallengeRound: claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
                 return null;
             }
             for(let v of snap.validators){
@@ -952,9 +952,9 @@ class FullNodeChallengeRound {
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                console.warn('FullNodeChallengeRound: _claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
+                console.warn('FullNodeChallengeRound: claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
             else
-                console.warn('FullNodeChallengeRound: _claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
+                console.warn('FullNodeChallengeRound: claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
             return null;
         }
         return set;
@@ -962,7 +962,7 @@ class FullNodeChallengeRound {
 
     async broadcastVerdict(wire){
         // Second gate on the same fact, for every caller that does not come through
-        // _maybeFinalize. Refuse before the hook runs and before the encoder fetches a
+        // maybeFinalize. Refuse before the hook runs and before the encoder fetches a
         // UTXO, so a wrong-chain wiring costs nothing.
         let chainMismatch = this.signerChainMismatch();
         if(chainMismatch){

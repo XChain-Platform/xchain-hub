@@ -166,7 +166,7 @@ describe('ATTEST zero-conf flip: hub copy value-identity @regression', function 
     });
 
     // §3.2 a: the boot-time ordering assertion, on the CapabilitySnapshot
-    // _resolveReorgBuffer pattern. assertZeroConfOrdering requires the mirror and
+    // resolveReorgBuffer pattern. assertZeroConfOrdering requires the mirror and
     // widening modules LAZILY (inside the function, to break a require cycle), so a
     // module-object mutation made before the call is what a lazy re-require would see:
     // require() returns the SAME cached module object on every call in this process.

@@ -148,7 +148,7 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
                 id: roundId, sig_pubkey: follower.getPubkeyHex().toLowerCase(), sig: follower.sign(GOLDEN_CANONICAL)
             }});
         }
-        // allow the async _finalize to run
+        // allow the async finalize to run
         await new Promise(r => setImmediate(r));
         let dels = hub.hubDbBroadcaster.deletions;
         assert.strictEqual(dels.length, 1, 'quorum (3 of 4 sources) must finalize');

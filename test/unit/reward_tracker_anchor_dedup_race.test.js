@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // Review board #4182: recordAnchorReward's cross-pubkey dedup was a non-atomic
-// read-modify-write. StateAnchorPublisher._recordReward is fire-and-forget, so a
+// read-modify-write. StateAnchorPublisher.recordReward is fire-and-forget, so a
 // hub's own publish and a peer's V0_DONE/FINALIZED mirror can be in flight for one
 // (round_number, reward_type) with DIFFERENT pubkeys at once. Both observed the
 // empty SELECT and both inserted; the table's UNIQUE KEY carries validator_pubkey,

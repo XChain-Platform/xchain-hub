@@ -30,7 +30,7 @@ const { createMockHub } = require('../helpers/mockHub');
 // CrossChainDexEngine.test.js: the first mathjs load can exceed a 5s hook timeout).
 require('mathjs');
 
-// axios is stubbed: the engine-level assertions below drive _tryOrderMatch directly and
+// axios is stubbed: the engine-level assertions below drive tryOrderMatch directly and
 // must never reach an indexer.
 const CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: { post: sinon.stub() } });
 

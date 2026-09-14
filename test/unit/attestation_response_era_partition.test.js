@@ -75,7 +75,7 @@ function makeDb() {
     };
 }
 
-// Shaped like AttestationConsensus._checkCommitQuorum's payload: a terminal
+// Shaped like AttestationConsensus.checkCommitQuorum's payload: a terminal
 // 'ok' round with one signature and a signed effective_time, the one field the
 // mirror-era canonical adds. below-height events carry it too (harmlessly:
 // the publisher never reads it and the mirror's era gate returns before it

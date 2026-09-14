@@ -347,9 +347,9 @@ describe('AttestationSpotChecker', function () {
         });
     });
 
-    // ── _recordFailure ────────────────────────────────────────────────────────
+    // ── recordFailure ────────────────────────────────────────────────────────
 
-    describe('_recordFailure()', function () {
+    describe('recordFailure()', function () {
         it('ignores calls with empty pubkey', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
@@ -737,7 +737,7 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         { providerId: 'llm',      prompt: 'q2', expectedPattern: 'a2' }
     ];
 
-    it('_isTruthy accepts common truthy spellings only', function () {
+    it('isTruthy accepts common truthy spellings only', function () {
         const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
         ['1', 'true', 'TRUE', 'yes', 'on', true].forEach(v => expect(sc.isTruthy(v)).to.be.true);
         ['0', 'false', '', 'off', undefined, null].forEach(v => expect(sc.isTruthy(v)).to.be.false);
@@ -793,7 +793,7 @@ describe('AttestationSpotChecker: injection scheduler', function () {
         expect(sc._scheduler).to.equal(null);
     });
 
-    it('_schedulerTick injects via the injector and registers the returned request_id', async function () {
+    it('schedulerTick injects via the injector and registers the returned request_id', async function () {
         const injector = sinon.stub()
             .onFirstCall().resolves({ requestId: 'SYNTH1' })
             .onSecondCall().resolves('SYNTH2');   // bare-string return also accepted

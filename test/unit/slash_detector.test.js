@@ -258,7 +258,7 @@ describe('SlashDetector', function () {
                 { round: 2, timestamp: Date.now() - 500 }
             ]);
 
-            // Third deviation via _trackDeviation
+            // Third deviation via trackDeviation
             sd.trackDeviation(VALIDATORS_3[0].pubkey, 3);
 
             // Should have recorded a repeated_deviation proposal
@@ -611,10 +611,10 @@ describe('SlashDetector', function () {
     });
 
     // -----------------------------------------------------------------
-    // _recordSlashProposal() pubkey validation
+    // recordSlashProposal() pubkey validation
     // -----------------------------------------------------------------
 
-    describe('_recordSlashProposal()', function () {
+    describe('recordSlashProposal()', function () {
         it('skips a slash proposal when the pubkey is malformed', async function () {
             await sd.recordSlashProposal('not-a-valid-pubkey', 'price_deviation', 1, '{}');
             expect(hub.db.doQuery.called).to.be.false;

@@ -20,8 +20,8 @@
  * signatures verify only against that round's own canonical.
  *
  * Modeled on the XANCPUB publisher-attestation round in StateAnchorPublisher
- * (see :103-104 and _runPublisherAttestationRound / _handleAttestSignReq /
- * _handleAttestSign). The shape is deliberate and is what makes the batch
+ * (see :103-104 and runPublisherAttestationRound / handleAttestSignReq /
+ * handleAttestSign). The shape is deliberate and is what makes the batch
  * trustworthy: the leader assembles bytes, and every co-signer INDEPENDENTLY
  * re-derives those bytes from its own finalized state before signing. A leader
  * therefore cannot obtain signatures for fabricated or partial data; the worst
@@ -82,7 +82,7 @@ class OracleBatchSigner {
         // proposed batch. A co-signature is the last thing a leader is waiting on
         // before it broadcasts, so this is the only local evidence a FOLLOWER has that
         // a leader's DOGE tx may already be in flight and merely unmined.
-        // OraclePublisher._attemptTakeover reads it through coSignedAt() to defer a
+        // OraclePublisher.attemptTakeover reads it through coSignedAt() to defer a
         // takeover that would otherwise re-publish over a live transaction, the way
         // AttestationPublisher defers on its own ambiguous sends. Insertion-ordered
         // and bounded; oldest evicted first.
@@ -552,7 +552,7 @@ class OracleBatchSigner {
     // proof_head is the first characters of consensus_proof, which is the ONE field
     // that tells a batch-sourced row from a locally-finalized one: a v0 row's proof is
     // a bare signature ARRAY, a batch-sourced row's is the {"batch":...} object of D23
-    // (the same prefix test OraclePublisher._pruneObservedWindow and
+    // (the same prefix test OraclePublisher.pruneObservedWindow and
     // PriceAggregator.retractFromActionIndex use). It matters here because a
     // batch-sourced row's reference_block is the LANDING chain's height, not the
     // round's BTC anchor, so reading it as an anchor invents a number.

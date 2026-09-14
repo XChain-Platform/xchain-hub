@@ -227,9 +227,9 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _buildSignablePayload ────────────────────────────────────────────────
+    // ── buildSignablePayload ────────────────────────────────────────────────
 
-    describe('_buildSignablePayload()', function () {
+    describe('buildSignablePayload()', function () {
         it('produces a JSON string with sorted pairs', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
@@ -256,9 +256,9 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _buildLocalSigOnly ───────────────────────────────────────────────────
+    // ── buildLocalSigOnly ───────────────────────────────────────────────────
 
-    describe('_buildLocalSigOnly()', function () {
+    describe('buildLocalSigOnly()', function () {
         it('returns empty array when no identity', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
@@ -279,7 +279,7 @@ describe('OraclePublisher', function () {
             expect(sigs[0]).to.have.property('sig');
         });
 
-        it('returns empty array when _buildSignablePayload throws', function () {
+        it('returns empty array when buildSignablePayload throws', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             // Make identity.sign throw
@@ -289,9 +289,9 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _readQueue ────────────────────────────────────────────────────────────
+    // ── readQueue ────────────────────────────────────────────────────────────
 
-    describe('_readQueue()', function () {
+    describe('readQueue()', function () {
         it('returns empty array when queue file does not exist', function () {
             fsMock.readFileSync.throws(new Error('ENOENT'));
             let hub = makeHub();
@@ -327,9 +327,9 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── _rewriteQueue ─────────────────────────────────────────────────────────
+    // ── rewriteQueue ─────────────────────────────────────────────────────────
 
-    describe('_rewriteQueue()', function () {
+    describe('rewriteQueue()', function () {
         it('writes JSON lines for each entry', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
@@ -591,7 +591,7 @@ describe('OraclePublisher', function () {
     });
 
     // ── At-most-once under queue-rewrite failure ───────────────────────────────
-    // Regression for the swallowed _rewriteQueue failure that let an already-
+    // Regression for the swallowed rewriteQueue failure that let an already-
     // published round stay on the durable queue and be re-broadcast on the next
     // tick, spending real DOGE twice for the same PRICE v0 round.
     describe('_processQueue() at-most-once under rewrite failure', function () {

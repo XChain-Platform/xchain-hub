@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// _broadcastWithRetry's encoder rate-limit branch. The encoder sheds with 429 +
+// broadcastWithRetry's encoder rate-limit branch. The encoder sheds with 429 +
 // JSON-RPC -32029 from two places that want waits ~60x apart (the per-IP limiter's
 // 60s window and the concurrency gate's Retry-After: 1), so the publisher honours
 // the header instead of spending its whole 5-attempt budget on flat 2.5s waits

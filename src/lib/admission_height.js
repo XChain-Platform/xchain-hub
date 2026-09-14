@@ -248,7 +248,7 @@ function admissionReadSet(table, row, federationChains){
  * margin, which every live chain has already passed. That is the guessed height
  * this whole precondition exists to refuse, arrived at silently.
  *
- * `null` is what XChainHub._resolveAdmissionTip returns for every failure it
+ * `null` is what XChainHub.resolveAdmissionTip returns for every failure it
  * knows about: no indexer URL, an RPC error, a missing decoder_block, or a tip
  * its per-chain freshness gate dated as frozen.
  */

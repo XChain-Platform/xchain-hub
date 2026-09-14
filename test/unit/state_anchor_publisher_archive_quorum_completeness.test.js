@@ -19,14 +19,14 @@
 //         while the indexer + full-parse recovery refuse an empty-set anchor. The
 //         two sibling attestation rounds already abstained on snapCount === 0.
 //
-//   #4185 _verifyArchiveAgainstLocal derived its capability groups solely from the
+//   #4185 verifyArchiveAgainstLocal derived its capability groups solely from the
 //         ATTACKER-SUPPLIED archive.capability_snapshots and validated only the
 //         groups present. A Byzantine elected leader could drop a whole group; the
 //         match/call/reward checks resolve their sets locally so they still pass, the
 //         follower co-signs, and recovery (which rebuilds each set FROM the archived
 //         rows) then rejects the anchor for good.
 //
-//   #4180 _handleFinalized back-filled rows as archived with no on-chain check at
+//   #4180 handleFinalized back-filled rows as archived with no on-chain check at
 //         all, so an elected leader could announce real rows at their true terminal
 //         statuses and suppress them from every future archive round. Closed in two
 //         halves. NULL txid: an honest publish marks every row '__partial__' when the
@@ -132,7 +132,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         validator_pubkey: PK_A, source: srcOf(PK_A), round_number: 7,
         reward_type: 'anchor_BTC', amount: '10.00000000', block_index: BLOCK
     };
-    // The group an honest _buildArchive emits for that reward's earn block.
+    // The group an honest buildArchive emits for that reward's earn block.
     const GROUP = SET.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                   signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
 

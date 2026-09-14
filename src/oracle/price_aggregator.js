@@ -98,8 +98,8 @@ const DERIVED_CAPABILITIES = ['price', 'oracle_publish', 'cross_chain', 'attesta
 // so the derivation pass skips that capability and only that capability. The engines
 // are built by startOracle / startCrossChain / startAttestation, each of which gates
 // only on a peer manager, which is why engine presence alone cannot distinguish a
-// validator from a mesh-only hub and _runsConsensusFor pairs it with the signing
-// identity. See _runsConsensusFor.
+// validator from a mesh-only hub and runsConsensusFor pairs it with the signing
+// identity. See runsConsensusFor.
 const CAPABILITY_CONSENSUS_ENGINES = {
     price:          ['oracleConsensus'],
     oracle_publish: ['stateCheckpoints'],
@@ -137,10 +137,10 @@ class PriceAggregator extends EventEmitter {
         this.hub = hub;
         this.db  = hub.db;
         // Per-source-chain throttle state for the ingest-fence rejection
-        // warning ({ last: ms, suppressed: n }). See _warnIngestFenceRejection.
+        // warning ({ last: ms, suppressed: n }). See warnIngestFenceRejection.
         this._fenceWarnState = new Map();
         // Per-source-chain state for the ingest pair-coverage check
-        // ({ seen: Set, last: ms, suppressed: n, rounds: n }). See _checkIngestPairCoverage.
+        // ({ seen: Set, last: ms, suppressed: n, rounds: n }). See checkIngestPairCoverage.
         this._missingPairWarnState = new Map();
         // Out-of-band round rejections, surfaced through the oracle
         // diagnostics RPC. Monotonic for the process, same posture as the other
@@ -221,7 +221,7 @@ class PriceAggregator extends EventEmitter {
     // chain never finalized into a consensus-MIRRORED table, its id-ordered bootstrap read
     // and its row:inserted stream, letting two hubs mirror one round differently.
     //
-    // Warnings are throttled per source chain on the _warnIngestFenceRejection pattern: the
+    // Warnings are throttled per source chain on the warnIngestFenceRejection pattern: the
     // first short round prints immediately, then at most one line per window, carrying both
     // the count it stands for and the running total of short rounds so nothing is lost.
     checkIngestPairCoverage(sourceChain, round, pairs) {
@@ -1255,7 +1255,7 @@ class PriceAggregator extends EventEmitter {
             return null;
         }
         // typeof, not a coercing check: Number(null) and Number('') are both 0, so a coerced
-        // guard would read an ABSENT tip as height 0 and stamp 0 + margin. _resolveAdmissionTip
+        // guard would read an ABSENT tip as height 0 and stamp 0 + margin. resolveAdmissionTip
         // answers null for every failure it handles, and null is not tip zero.
         if (typeof tip !== 'number' || !Number.isSafeInteger(tip) || tip < 0) return null;
 
@@ -1666,7 +1666,7 @@ class PriceAggregator extends EventEmitter {
     // that holds one capability's writer and not another's derives only the missing one.
     // A spurious derive costs nothing if a slow boot has not yet built an engine: the
     // rows are byte-identical to the consensus writer's and INSERT IGNORE makes either
-    // order a no-op for the other (see _persistDerivedCapabilitySnapshot).
+    // order a no-op for the other (see persistDerivedCapabilitySnapshot).
     runsConsensusFor(capability) {
         if (!this.hub) return false;
         if (!this.hasSigningIdentity()) return false;
@@ -1705,7 +1705,7 @@ class PriceAggregator extends EventEmitter {
             PRICE_CAP_DERIVE_INTERVAL_S, 'HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S');
         // The FIRST pass waits a full interval rather than firing now: start() has not yet
         // been followed by startP2P/startOracle, so a pass at t=0 would run on a validator
-        // hub before the signals that identify it exist. See _runsOracleConsensus.
+        // hub before the signals that identify it exist. See runsOracleConsensus.
         this._priceCapDeriveTimer = setInterval(() => {
             this.runPriceCapabilityDerivation().catch(e => {
                 console.error('PriceAggregator: `price` capability derivation pass failed:',

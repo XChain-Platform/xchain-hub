@@ -80,7 +80,7 @@ describe('OracleConsensus: post-commit price broadcast gap (#4459)', function ()
         });
         broadcaster.dropAllForResync.throws(new Error('broadcaster gone'));
 
-        // Resolves rather than rejecting: _finalizeCommittedRound treats a throw here as a
+        // Resolves rather than rejecting: finalizeCommittedRound treats a throw here as a
         // store failure and would retain + retry an already-durable round.
         await oc._storeSnapshot(ROUND, PRICES, 3, '[]', 900001, 1700000000);
 

@@ -39,7 +39,7 @@
  *     a restart unable to double-publish.
  *   - StateAnchorPublisher: hashOrder election, the rank-unlock failover ladder,
  *     SpendGuard, the DOGE_LOW_BALANCE_THRESHOLD floor, and the borrowed DOGE
- *     signer (_resolveSigner).
+ *     signer (resolveSigner).
  *
  * FOUR PUBLISH ROLES, one job each:
  *   rank 0 (leader)  publishes EVERY rolled epoch; the publish reward attaches
@@ -184,7 +184,7 @@ class RollcallRound {
 
         // DOGE publish rail, identical to the anchor rail's: same address, same
         // encoder, same balance floor. Hooks left null here are borrowed from the
-        // price publisher at send time (_resolveSigner).
+        // price publisher at send time (resolveSigner).
         this.dogeAddress = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         let encoderUrl   = process.env.DOGE_ENCODER_URL || cfg.DOGE_ENCODER_URL || '';
         let encoderKey   = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
@@ -508,7 +508,7 @@ class RollcallRound {
 
         // Resolved ONCE per epoch and carried on the round state: the canonical this
         // hub signs, the canonical it verifies every peer's signature against
-        // (_onSign reads state.canonical) and the wire it publishes must all be the
+        // (onSign reads state.canonical) and the wire it publishes must all be the
         // same form, and re-deriving the form at each of those sites is how they
         // would come to disagree mid-epoch.
         let gates     = this.gatesFor(epoch);
@@ -808,7 +808,7 @@ class RollcallRound {
         // and walks straight past the per-window ceiling by N-1. Reservation consumes
         // the budget in the same synchronous turn, which is the shape spend_guard.js
         // documents for an awaited send and the one AttestationBatchPublisher
-        // ._broadcastWindow() already uses. check() STAYS: reserve() takes no balance
+        // .broadcastWindow() already uses. check() STAYS: reserve() takes no balance
         // argument, so dropping it would silently retire the ROLLCALL_MIN_BALANCE
         // wallet floor.
         let tokens = [];
@@ -852,7 +852,7 @@ class RollcallRound {
             // rebuilds only the undelivered tail rather than paying twice.
             if(this.spendGuard.isPaused()){
                 for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
-                // Phase 'failed', not a new 'paused' phase: _loadSpendLog decides
+                // Phase 'failed', not a new 'paused' phase: loadSpendLog decides
                 // after a restart from these phases, and only 'failed' un-commits an
                 // epoch whose chunks never went out. A phase the loader does not know
                 // leaves the bare 'intent' standing, which would quarantine the epoch

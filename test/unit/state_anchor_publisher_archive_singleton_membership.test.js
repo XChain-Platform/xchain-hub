@@ -20,7 +20,7 @@
 //   _startArchiveRound seeded the leader's own signature whenever `snapCount <= 1`,
 //   membership untested; the same `snapCount <= 1` took the immediate-publish fast
 //   path with no quorum check at all; and _publishArchive's on-chain-validity gate
-//   short-circuited on `round.validators.length === 1` before _quorumVerified ran.
+//   short-circuited on `round.validators.length === 1` before quorumVerified ran.
 //
 // The indexer reaches the opposite verdict on the same bytes: anchor.js filters signers
 // by snapshot membership and, with a one-member set, records the v1
@@ -29,7 +29,7 @@
 // never be reconstructed.
 //
 // Membership now gates the seed, the fast path requires the held signatures to satisfy
-// quorum, and _quorumVerified is the sole on-chain verdict. The genuine single-node
+// quorum, and quorumVerified is the sole on-chain verdict. The genuine single-node
 // federation is unaffected, which is what the control cases here pin.
 
 const { expect }           = require('chai');

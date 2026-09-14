@@ -84,7 +84,7 @@ function callRow(id, phase, status) {
     };
 }
 
-// XCALL phase canonicals (mirror of the publisher's _callCanonical).
+// XCALL phase canonicals (mirror of the publisher's callCanonical).
 function callCanonical(c) {
     let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
     let phase = (c.phase === 'result') ? 'result' : 'dispatch';
@@ -360,7 +360,7 @@ describe('StateAnchorPublisher', function () {
 
             let hub = {
                 db,
-                // DOGE_INDEXER_URL wired so _verifyAnchorOnChain runs its real gate;
+                // DOGE_INDEXER_URL wired so verifyAnchorOnChain runs its real gate;
                 // the _indexerCall stub below (installed per node) answers
                 // getanchoraction from the node's OWN checkpoint rows, i.e. the
                 // honest case (the on-chain anchor byte-matches the local checkpoint
@@ -586,7 +586,7 @@ describe('StateAnchorPublisher', function () {
             expect(nd.pub.getAnchorStats()).to.include({ anchorsPublished: 1, sectionsAnchored: 1, bundlesOversize: 0 });
         });
 
-        // _splitBundle sizes an ESTIMATED attestation tail before the round that fills it
+        // splitBundle sizes an ESTIMATED attestation tail before the round that fills it
         // has run, and after a split it estimates at the network-wide oracle_publish set
         // rather than the group's own block, so the estimate can come in low. An oversize
         // payload then reached the encoder as a RangeError, after the anchor intents were
@@ -594,7 +594,7 @@ describe('StateAnchorPublisher', function () {
         it('refuses a bundle whose BUILT payload overflows the budget, before any intent is recorded', async function () {
             let bus = buildMesh(1, { stakeWeighted: true });
             let nd  = bus.nodes[0];
-            // Only the final build carries a non-empty attestation tail (_v7Bytes always
+            // Only the final build carries a non-empty attestation tail (v7Bytes always
             // measures with an empty one), so inflating on that condition leaves the
             // splitter's estimate untouched: exactly the low-estimate shape.
             let realBuild = nd.pub._buildV7Payload.bind(nd.pub);
@@ -1418,7 +1418,7 @@ describe('StateAnchorPublisher', function () {
     it('follower re-derivation rejects forged reward type / pubkey / amount / source / conflicting local row', async function () {
         let pk0 = pkOf(0), pk1 = pkOf(1);
         let bus = buildMesh(2, { matches: [], rewards: [rewardRow(pk0)] });
-        // Since #4185 the verifier also REQUIRES the snapshot groups _buildArchive was
+        // Since #4185 the verifier also REQUIRES the snapshot groups buildArchive was
         // obliged to emit, so the fixture carries the oracle_publish group at the
         // reward's earn block instead of an empty list. The reward re-derivation
         // assertions below are unchanged.
@@ -1594,7 +1594,7 @@ describe('StateAnchorPublisher', function () {
         for (let nd of bus.nodes) expect(nd.db.checkpoints[0].anchor_txid).to.equal(null);
     });
 
-    it('_mayPublish fails closed on an empty election order', function () {
+    it('mayPublish fails closed on an empty election order', function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         expect(nd.pub.mayPublish([], 0)).to.equal(false);
@@ -1896,7 +1896,7 @@ describe('StateAnchorPublisher', function () {
         }
         const sigsFrom = (ids) => ids.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(CANON) }));
 
-        it('_quorumVerified: the three 10% holders meet 2f+1 COUNT but NOT 2/3 STAKE', function () {
+        it('quorumVerified: the three 10% holders meet 2f+1 COUNT but NOT 2/3 STAKE', function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
             let minority = sigsFrom(ids.slice(1));                    // 3×10% = 30 of 100
@@ -1906,14 +1906,14 @@ describe('StateAnchorPublisher', function () {
             expect(pub.quorumVerified(CANON, minority, set, true)).to.equal(false);
         });
 
-        it('_quorumVerified: adding the 70% holder clears the stake threshold', function () {
+        it('quorumVerified: adding the 70% holder clears the stake threshold', function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
             let majority = sigsFrom([ids[0], ids[1]]);               // 70 + 10 = 80 of 100
             expect(pub.quorumVerified(CANON, majority, set, true)).to.equal(true);    // 3·80 = 240 > 200
         });
 
-        it('_quorumVerified: a TRUNCATED weighted set fails CLOSED regardless of stake (XHUB-TRUNC-2)', function () {
+        it('quorumVerified: a TRUNCATED weighted set fails CLOSED regardless of stake (XHUB-TRUNC-2)', function () {
             // An over-cap snapshot under-counts S; a stake-evicted minority could otherwise
             // authenticate a fabricated archived match/call. Mirrors the DEX/Call consensus
             // refuse and meetsStakeThreshold's own fail-closed.
@@ -1927,7 +1927,7 @@ describe('StateAnchorPublisher', function () {
             expect(pub.quorumVerified(CANON, three, set, false)).to.equal(true);
         });
 
-        it('_quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig', function () {
+        it('quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig', function () {
             // seen-before-verify was an order-dependent under-count: the garbage
             // entry consumed the pubkey's seen slot and the real signature was
             // skipped, diverging from the indexer recovery twin (verify-first).
@@ -1938,7 +1938,7 @@ describe('StateAnchorPublisher', function () {
             expect(pub.quorumVerified(CANON, poisoned, set, true)).to.equal(true);
         });
 
-        it('_quorumVerified: a pubkey with ONLY invalid sigs is not counted and blocks nothing', function () {
+        it('quorumVerified: a pubkey with ONLY invalid sigs is not counted and blocks nothing', function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
             let garbageOnly = [{ pubkey: ids[0].getPubkeyHex().toLowerCase(), sig: '00'.repeat(64) },
@@ -2012,7 +2012,7 @@ describe('StateAnchorPublisher', function () {
         let txid = 'dogetx_partialtest', snap = 100;
         bus.anchorVersions.set(txid, 1);      // the announced head really is a v1 archive on-chain (#4180 gate)
 
-        // This test drives _handleFinalized directly (bypassing the SIGN_REQ round
+        // This test drives handleFinalized directly (bypassing the SIGN_REQ round
         // that normally binds the elected leader), so seed the observed-leader
         // binding AND the batch's checkpoint identity the same way _handleSignReq
         // would after validating the election. The checkpoint (CP_ROW, in the mesh
@@ -2032,7 +2032,7 @@ describe('StateAnchorPublisher', function () {
 
         // (2) CONTROL - a COMPLETE archive (no sentinel) DOES mirror the reward. Also proves the
         // envelope is well-formed enough to reach the reward gate (guards against a false pass
-        // where _backfillBatch silently failed for both cases).
+        // where backfillBatch silently failed for both cases).
         let cMatches = [matchRow('mc', 'finalized')];
         await follower.pub.handleFinalized({ data: {
             batch_seq: 1, txid: txid, snapshot_block: snap, matches: cMatches, calls: [], rewards: [],
@@ -2301,7 +2301,7 @@ describe('StateAnchorPublisher', function () {
             'no reward mirrored for an unresolvable snapshot_block').to.equal(false);
     });
 
-    it('_backfillBatch cannot re-stamp a fully archived row, but a __partial__ row re-stamps', async function () {
+    it('backfillBatch cannot re-stamp a fully archived row, but a __partial__ row re-stamps', async function () {
         // Guard = the pending selectors' archive-eligibility predicate: a settled
         // row (batch_seq set AND archived_status = status) is immutable to a
         // replayed/forged FINALIZED; a __partial__ sentinel row must still take
@@ -2347,7 +2347,7 @@ describe('StateAnchorPublisher', function () {
             'a non-elected member is not bound').to.equal(false);
     });
 
-    it('_backfillBatch re-broadcasts stamped match rows on the hub-DB mirror feed', async function () {
+    it('backfillBatch re-broadcasts stamped match rows on the hub-DB mirror feed', async function () {
         let bus = buildMesh(1, { matches: [matchRow('m1'), matchRow('m2', 'retracted')] });
         let nd = bus.nodes[0];
         let broadcast = [];
@@ -2367,7 +2367,7 @@ describe('StateAnchorPublisher', function () {
         expect(broadcast[0].row.a_amount, 'full row, not a partial patch').to.equal('1000');
     });
 
-    it('_backfillBatch does NOT re-broadcast on a null txid or without a broadcaster', async function () {
+    it('backfillBatch does NOT re-broadcast on a null txid or without a broadcaster', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         let broadcast = [];
@@ -2569,7 +2569,7 @@ describe('StateAnchorPublisher', function () {
     // XANC-V0DONE partial: the peer back-fill UPDATE now keys on checkpoint_seq, exactly like
     // the publisher's own stamp, so one V0_DONE cannot mark a DIFFERENT/other seq row at the
     // height. (The full suppression fix - verifying the announced txid on-chain - is an open item.)
-    it('_handleBundleDone: stamps anchor_txid keyed on checkpoint_seq', async function () {
+    it('handleBundleDone: stamps anchor_txid keyed on checkpoint_seq', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         nd.pub._getActiveOraclePublishPubkeys = async () => [nd.pubkey];
@@ -2601,7 +2601,7 @@ describe('StateAnchorPublisher', function () {
     // `IS NULL` selector then skips the row fleet-wide, suppressing the real anchor) and mirrors
     // itself the reward. The gate re-runs the publisher's own election from the LOCAL
     // checkpoint's snapshot_block (no signed-canonical change).
-    it('_handleBundleDone: rejects a forged BUNDLE_DONE from a non-elected oracle_publish member', async function () {
+    it('handleBundleDone: rejects a forged BUNDLE_DONE from a non-elected oracle_publish member', async function () {
         let bus = buildMesh(3);                     // default btcBlock=100 == snapshot_block => since=0, only rank 0 unlocked
         let order = v0Order(bus, CP_ROW);
         let attacker = order[2];                    // a member, but not the elected (rank-0) publisher
@@ -2614,7 +2614,7 @@ describe('StateAnchorPublisher', function () {
         expect(receiver.rewards.length, 'forged BUNDLE_DONE must not mirror a reward (theft blocked)').to.equal(0);
     });
 
-    it('_handleBundleDone: accepts a BUNDLE_DONE from the rank-unlocked elected publisher', async function () {
+    it('handleBundleDone: accepts a BUNDLE_DONE from the rank-unlocked elected publisher', async function () {
         let bus = buildMesh(3);
         let order = v0Order(bus, CP_ROW);
         let publisher = order[0];                   // rank 0 is always unlocked
@@ -2637,7 +2637,7 @@ describe('StateAnchorPublisher', function () {
     // (getanchoraction) for the DECODED anchor at THIS checkpoint and only lets the
     // stamp+reward through when it exists, is not decoded-invalid, is buried
     // >= XCHAIN_CONFIRMATIONS_DOGE, and its payload hashes byte-match our copy.
-    describe('_handleBundleDone on-chain ANCHOR verification', function () {
+    describe('handleBundleDone on-chain ANCHOR verification', function () {
         // Build a signed BUNDLE_DONE from the rank-0 (always unlocked) elected publisher
         // for the mesh checkpoint, returning {receiver, d}.
         function electedBundleDone(bus, txid) {
@@ -2648,7 +2648,7 @@ describe('StateAnchorPublisher', function () {
         let matching = {
             block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
             actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-            // A v0 BUNDLE section is root-bearing by construction, and _verifyAnchorOnChain
+            // A v0 BUNDLE section is root-bearing by construction, and verifyAnchorOnChain
             // byte-matches the two light-client roots on exactly that version, so an honest
             // indexer answer carries them.
             state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
@@ -2833,7 +2833,7 @@ describe('StateAnchorPublisher', function () {
     // CURRENT oracle_publish member impersonate the sole elected publisher and
     // stamp/suppress the anchor + mirror the reward). Rejection is a silent
     // return: anchor_txid stays null and no reward is mirrored.
-    describe('_handleBundleDone size-1 elected set (finding 1205)', function () {
+    describe('handleBundleDone size-1 elected set (finding 1205)', function () {
         it('rejects a NON-elected current member when the elected set has exactly one member', async function () {
             let bus = buildMesh(2);
             let elected  = bus.nodes[0];             // the SOLE elected publisher (size-1 set)
@@ -2915,7 +2915,7 @@ describe('StateAnchorPublisher', function () {
             nd.db.checkpoints.push(Object.assign({}, CP_ROW, {
                 id: 99, network: 'mainnet', block_index: 777, anchor_txid: null
             }));
-            // Capture the network the archive is built for (arg 0 of _buildArchive).
+            // Capture the network the archive is built for (arg 0 of buildArchive).
             let capturedNetwork = null;
             let origBuild = nd.pub.buildArchive.bind(nd.pub);
             nd.pub.buildArchive = async (network, ...rest) => {
@@ -3054,8 +3054,8 @@ describe('StateAnchorPublisher stop() archive-attestation teardown (#2360)', fun
     });
 });
 
-// _cpFromRow intentionally omits the SPV roots, and the co-sign guards compare via
-// _rawCanonicalCheckpoint so the presence-gated root suffix can never flip them
+// cpFromRow intentionally omits the SPV roots, and the co-sign guards compare via
+// rawCanonicalCheckpoint so the presence-gated root suffix can never flip them
 // fail-closed post-flag-day (#2462).
 describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canonical (#2462)', function () {
     const ckptMod = require('../../src/checkpoint_commitment_activation.js');
@@ -3068,7 +3068,7 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
         ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest = savedRegtest;
     });
 
-    it('_rawCanonicalCheckpoint matches across the rootless and root-bearing shapes while canonicalCheckpoint differs', function () {
+    it('rawCanonicalCheckpoint matches across the rootless and root-bearing shapes while canonicalCheckpoint differs', function () {
         let row = {
             chain: 'BTC', network: 'regtest', block_index: 494,
             block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
@@ -3078,12 +3078,12 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
             block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
         };
         let rootless = StateAnchorPublisher.prototype.cpFromRow(row);
-        expect(rootless).to.not.have.property('state_root');    // _cpFromRow drops the roots by design
+        expect(rootless).to.not.have.property('state_root');    // cpFromRow drops the roots by design
         let rootBearing = Object.assign({}, rootless, {
             state_root: row.state_root, state_root_version: row.state_root_version,
             block_merkle_root: row.block_merkle_root, block_merkle_version: row.block_merkle_version
         });
-        // The guard (via _rawCanonicalCheckpoint) still binds identity fields and
+        // The guard (via rawCanonicalCheckpoint) still binds identity fields and
         // passes even when exactly one operand carries roots.
         expect(StateCheckpointEngine.rawCanonicalCheckpoint(rootless))
             .to.equal(StateCheckpointEngine.rawCanonicalCheckpoint(rootBearing));
@@ -3095,7 +3095,7 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
 });
 
 // ── anchor_reward_attestations mirror INSERT ──────────────────────
-describe('StateAnchorPublisher._recordRewardAttestation', function () {
+describe('StateAnchorPublisher.recordRewardAttestation', function () {
     const sinon = require('sinon');
 
     function makePub(){
@@ -3146,7 +3146,7 @@ describe('StateAnchorPublisher._recordRewardAttestation', function () {
 });
 
 // ── The attestation row waits for a MINED anchor, not a broadcast one ────
-// _broadcastWithRetry returns on DOGE mempool acceptance, so writing the append-only,
+// broadcastWithRetry returns on DOGE mempool acceptance, so writing the append-only,
 // never-retracted mirror row there minted a permanent COLLECT-spendable reward for an
 // anchor that could still be evicted or reorged away. Both producer sites now queue.
 describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', function () {
@@ -3191,7 +3191,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         confirmations: 60, txid: TXID,
         block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
         actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-        // A v0 bundle is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
+        // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
         state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
     }, over || {});
 
@@ -3390,7 +3390,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         confirmations: 60, txid: TXID,
         block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
         actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-        // A v0 bundle is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
+        // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
         state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
     }, over || {});
 

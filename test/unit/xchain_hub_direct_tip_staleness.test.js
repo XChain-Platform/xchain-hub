@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 //
 // _resolveBtcLatestBlock has two paths and only the first one is age-gated.
-// When _btcPushedTipFresh rejects a frozen pushed tip, the direct getlatestblock
+// When btcPushedTipFresh rejects a frozen pushed tip, the direct getlatestblock
 // path re-serves the same frozen height, so a halted BTC stack still anchors
 // rounds. `lag` cannot catch it: a halted bitcoind freezes the decoder and the
 // committed tip together, so lag reads 0 on a dead chain.

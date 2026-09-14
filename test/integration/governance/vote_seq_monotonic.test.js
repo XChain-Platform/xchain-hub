@@ -124,7 +124,7 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
             "SELECT vote, signature, vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ?",
             [PROPOSAL, kp.pubkeyHex]);
         // A partial overwrite (new signature, old vote) would leave a row whose
-        // evidence does not authenticate, and _ingestResultVotes would then drop
+        // evidence does not authenticate, and ingestResultVotes would then drop
         // this voter on every follower. Prove they moved together.
         expect(ValidatorIdentity.verify(
             Governance.voteSigningPayload(PROPOSAL, rows[0].vote, kp.pubkeyHex, Number(rows[0].vote_seq)),

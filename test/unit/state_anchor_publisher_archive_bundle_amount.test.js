@@ -11,9 +11,9 @@
 // contact legal@dankest.llc.
 
 // Regression guard for the frozen-amount predicate in
-// StateAnchorPublisher._verifyArchiveAgainstLocal (finding #6126).
+// StateAnchorPublisher.verifyArchiveAgainstLocal (finding #6126).
 //
-// RewardTracker._recordAnchorRewardLocked derives THREE frozen forms
+// RewardTracker.recordAnchorRewardLocked derives THREE frozen forms
 // (anchor_<CHAIN>, anchor_bundle, anchor_archive); the archive co-sign verifier
 // carried only two, so an anchor_bundle row fell through to the operator-tunable
 // ANCHOR_REWARD_PER_PUBLISH. anchor_bundle is the only per-anchor reward the v0 bundle

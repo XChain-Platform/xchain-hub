@@ -65,7 +65,7 @@ describe('validator_order.canonicalValidatorOrder', function () {
         expect(a.map(v => v.addr)).to.deep.equal(['ws://a', 'ws://m', 'ws://z']);
     });
 
-    // XChainHub._propagateValidatorSet hands ONE array to five engines; an
+    // XChainHub.propagateValidatorSet hands ONE array to five engines; an
     // in-place sort would let the first engine's canonicalization rewrite the
     // input every later engine sees.
     it('returns a new array and never mutates the input', function () {

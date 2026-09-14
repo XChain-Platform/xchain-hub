@@ -86,7 +86,7 @@ describe('ring caps reject a negative operator value', function () {
         let ac = new AttestationConsensus(hub, { getProvider: () => null });
         expect(ac.tornDownMax).to.equal(10000);
 
-        // A negative cap evicted the rid just marked, so _bufferEarlyMessage
+        // A negative cap evicted the rid just marked, so bufferEarlyMessage
         // parked the prior-attempt envelopes the mark exists to drop.
         ac.markTornDown('rid-1');
         expect(ac.tornDown.has('rid-1')).to.be.true;

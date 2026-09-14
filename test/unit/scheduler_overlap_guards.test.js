@@ -133,9 +133,9 @@ describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
     });
 });
 
-// ── AttestationSpotChecker._schedulerTick ───────────────────────────────────
+// ── AttestationSpotChecker.schedulerTick ───────────────────────────────────
 
-describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
+describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
 
     const AttestationSpotChecker = require('../../src/attestation/spot_checker');
 
@@ -343,9 +343,9 @@ describe('OracleRound._executeRound overlap guard', function () {
     });
 });
 
-// ── XChainHub._runOwnCapabilityCheck ────────────────────────────────────────
+// ── XChainHub.runOwnCapabilityCheck ────────────────────────────────────────
 
-describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
+describe('XChainHub.runOwnCapabilityCheck overlap guard', function () {
 
     let hub, runAllSelfTests, broadcast;
 
@@ -397,9 +397,9 @@ describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
     });
 });
 
-// ── XChainHub._pollOwnStake ─────────────────────────────────────────────────
+// ── XChainHub.pollOwnStake ─────────────────────────────────────────────────
 
-describe('XChainHub._pollOwnStake overlap guard', function () {
+describe('XChainHub.pollOwnStake overlap guard', function () {
 
     let hub, axiosStub, refreshOwnQualification;
 
@@ -449,14 +449,14 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
     });
 });
 
-// ── XChainHub._refreshTransportSignerSet ────────────────────────────────────
+// ── XChainHub.refreshTransportSignerSet ────────────────────────────────────
 
 // The sharper half of this one is not duplicated work but ORDER. Each pass resolves
 // the BTC tip at its own start, so two passes in flight can finish out of order and
 // the older one's validator snapshot lands last, dropping a just-rotated key from
 // transport auth until the next tick.
 
-describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
+describe('XChainHub.refreshTransportSignerSet overlap guard', function () {
 
     const NEWER = 'ab'.repeat(32);
     const OLDER = 'cd'.repeat(32);

@@ -284,7 +284,7 @@ class PeerManager extends EventEmitter {
     // Both handlers come from api.js, so this is a second ENTRANCE to the existing
     // routes, never a second implementation: no SQL, no auth rule and no schema
     // version is restated here, and the API's own HUB_API_KEY gate runs unchanged.
-    // Only two shapes are ever delegated (_isFeedRequest / FEED_SUBSCRIBE_PATH):
+    // Only two shapes are ever delegated (isFeedRequest / FEED_SUBSCRIBE_PATH):
     // GET of a mirror snapshot, and the mirror subscribe upgrade. Every other
     // request on this port is answered 404 and every other upgrade stays gossip,
     // so the write methods on the private API are not reachable from here.
@@ -320,7 +320,7 @@ class PeerManager extends EventEmitter {
 
     // Set the chain-effective signer set (Option A). Pubkeys must be lowercase
     // hex. Additive to the registry: a pubkey in EITHER set is admitted. The
-    // caller (XChainHub._refreshTransportSignerSet) never clears this to empty
+    // caller (XChainHub.refreshTransportSignerSet) never clears this to empty
     // on an upstream failure, so the registry stays the authorization floor.
     setEffectiveSignerSet(set) {
         this.effectiveSignerSet = set;  // Set<pubkeyHex> | null
@@ -452,7 +452,7 @@ class PeerManager extends EventEmitter {
 
     // Should a message this hub AUTHORS be held back?
     //
-    // The mirror image of the membership test _verifySignature applies to an
+    // The mirror image of the membership test verifySignature applies to an
     // arriving envelope: a hub whose signing key is outside the chain-effective
     // signer set is an observer, so every peer drops what it authors before the
     // handler runs. Proposing, preparing, committing, voting or asking for a
@@ -628,7 +628,7 @@ class PeerManager extends EventEmitter {
             // could sign envelopes naming every OTHER validator's addr and forge a
             // full quorum (or stuff the oracle median that all hubs then co-sign).
             // If the registry knows this sender, the signing key MUST be the pubkey
-            // registered to it (the same addr<->pubkey binding _handleCapabilityMessage
+            // registered to it (the same addr<->pubkey binding handleCapabilityMessage
             // enforces). A sender the registry doesn't know still passes here (an
             // on-chain-active key not yet in the manual registry, or a relayed gossip
             // origin), but its votes are dropped downstream by _isKnownSender, so
@@ -848,7 +848,7 @@ class PeerManager extends EventEmitter {
 
     removeInboundPeer(ws) {
         // Only the peers-map cleanup is gated on ws._peerAddr. That field is set in
-        // _registerInboundPeer, which runs only once an inbound frame has cleared the
+        // registerInboundPeer, which runs only once an inbound frame has cleared the
         // JSON/type/timestamp/rate/signature checks, whereas the per-IP count is
         // incremented for EVERY accepted socket. Gating the decrement on it too leaked
         // the increment on every pre-auth close (self-connection guard, rate-limited
@@ -876,7 +876,7 @@ class PeerManager extends EventEmitter {
         // Decrement per-IP connection count. Clearing ws._remoteIp makes the release
         // idempotent: a counter decremented twice under-counts just as permanently as
         // one never decremented at all, and nothing reads the field after close (the
-        // rate-key read in _handleInbound is message-time only).
+        // rate-key read in handleInbound is message-time only).
         if (ws._remoteIp) {
             let count = (this.ipConnectionCounts.get(ws._remoteIp) || 1) - 1;
             if (count <= 0) this.ipConnectionCounts.delete(ws._remoteIp);
@@ -954,7 +954,7 @@ class PeerManager extends EventEmitter {
         // whose peers are staged but not launched) emits one of these per peer per
         // retry, and at error level that buries everything real in the same log.
         // The message is stashed and reported once per backoff step instead, by
-        // _scheduleReconnect, which is the only place that knows how many times in
+        // scheduleReconnect, which is the only place that knows how many times in
         // a row this peer has failed and how long the next wait is.
         ws.on('error', (e) => {
             peer.lastError = (e && e.message) ? e.message : String(e);
@@ -1005,7 +1005,7 @@ class PeerManager extends EventEmitter {
     }
 
 // Record a peer's advertised consensus rules and raise the two alarms this
-    // module exists for. Called only after _verifySignature passed, so `sender` is
+    // module exists for. Called only after verifySignature passed, so `sender` is
     // an authenticated staked key and `data.rules` is covered by that signature.
     //
     // TWO ALARMS, and the second is the one that matters. Telling an operator that
@@ -1127,7 +1127,7 @@ class PeerManager extends EventEmitter {
     startPingInterval() {
         this.pingTimer = setInterval(() => {
             // Ping outbound dialed peers only. Inbound peers also live in this.peers
-            // (after _registerInboundPeer) but are pinged via wss.clients below.
+            // (after registerInboundPeer) but are pinged via wss.clients below.
             // Pinging them here as well would race the two loops and terminate the
             // inbound ws.
             for (let [addr, peer] of this.peers) {
@@ -1172,7 +1172,7 @@ class PeerManager extends EventEmitter {
         if (!entry || (now - entry.windowStart) > 60000) {
             // Hard size cap as a backstop to the interval pruner: evict the oldest
             // bucket if the map is full so a burst of distinct keys between prune
-            // cycles cannot grow it without bound (mirrors _addToDedup).
+            // cycles cannot grow it without bound (mirrors addToDedup).
             if (!entry && this.peerMsgCounts.size >= this.dedupCacheMax) {
                 let oldest = this.peerMsgCounts.keys().next().value;
                 this.peerMsgCounts.delete(oldest);

@@ -220,7 +220,7 @@ class CrossChainCallEngine extends EventEmitter {
         this._polling   = false;
 
         // Process-lifetime counter for result-relay attempt failures (one per
-        // per-call catch in _pollTargetResults). Surfaced by getcrosschaincallstats.
+        // per-call catch in pollTargetResults). Surfaced by getcrosschaincallstats.
         this._resultAttemptFailures = 0;
 
         // Node-local result-relay backoff (M-14): call_id -> { attempts, nextAt (ms epoch) }.
@@ -263,11 +263,11 @@ class CrossChainCallEngine extends EventEmitter {
     // Return operator-visible relay backlog depth and lifetime failure counter.
     // Mirrors getattestationstats: pending_relay_count is the number of dispatch
     // rows per target chain that do not yet have a result row; result_attempt_failures
-    // is a process-lifetime count of per-call errors in _pollTargetResults.
+    // is a process-lifetime count of per-call errors in pollTargetResults.
     async getStats(){
         let rows = [];
         try {
-            // Mirror _pollTargetResults' retracted-result filter so the backlog
+            // Mirror pollTargetResults' retracted-result filter so the backlog
             // count matches what the engine will actually re-relay: a
             // dispatch whose only result row is 'retracted' is pending again.
             rows = await this.db.findCrossChainCallsByPhase();
@@ -409,7 +409,7 @@ class CrossChainCallEngine extends EventEmitter {
     // completed at confirmation depth, and run a result round for each.
     async pollTargetResults(coin){
         // The result-leg join carries `AND r.status <> 'retracted'` for the same
-        // reason _rowExists does: after a deep reorg leaves a 'retracted'
+        // reason rowExists does: after a deep reorg leaves a 'retracted'
         // result row, an unfiltered join would see r.id IS NOT NULL, exclude the
         // dispatch, and never re-relay the result (the call could then only deliver
         // the deterministic 'expired' callback). Filtering retracted result rows
@@ -648,7 +648,7 @@ class CrossChainCallEngine extends EventEmitter {
         // re-derived from a BIGINT round-trip by xexec.js and the archive verifier, so
         // a leader-supplied '041' would pass every Number()-based check below, collect
         // an honest quorum, and finalize a row whose signatures no verifier can ever
-        // rebuild - permanently stranding the call, because _rowExists still sees it.
+        // rebuild - permanently stranding the call, because rowExists still sees it.
         // Fail closed BEFORE any numeric comparison; honest leaders build these with
         // Number(), so this never fires on an honest round.
         if(!CANONICAL_INT_FIELDS[row.phase]) return false;
@@ -699,7 +699,7 @@ class CrossChainCallEngine extends EventEmitter {
         let depth  = latest - Number(call.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[row.source_chain]) return false;
 
-        // Lifecycle gates, mirroring _maybeDispatch. The leader path never
+        // Lifecycle gates, mirroring maybeDispatch. The leader path never
         // even sees an expired or settled request: it polls getpendingcrosschaincalls
         // (SQL-filtered to request_status='pending') and refuses to START a round once
         // the deadline is reached. The follower path re-fetches by call_id through
@@ -794,7 +794,7 @@ class CrossChainCallEngine extends EventEmitter {
         // follower's DB may be the only one they read. Deterministic from BTC
         // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
         //
-        // FAIL CLOSED, on the rationale CrossChainDexEngine._writeFinalizedMatch spells
+        // FAIL CLOSED, on the rationale CrossChainDexEngine.writeFinalizedMatch spells
         // out in full (item 2385): the persist is a PRECONDITION of the row below, not a
         // best-effort side-write. A swallowed DB throw, or a silent zero-row persist (the
         // sentinel snapshot degrades to [] on an indexer RPC error / 401-403, so the
@@ -845,7 +845,7 @@ class CrossChainCallEngine extends EventEmitter {
         // The round id is derived from phase + call_id alone, so every later dispatch poll
         // returned at `if(this._inflight.has(roundId)) return` and no poll could ever
         // recover the dispatch or the result, even after the DB came back. Defer instead:
-        // the upsert wrote nothing, so _rowExists still reports the call open and the next
+        // the upsert wrote nothing, so rowExists still reports the call open and the next
         // poll re-proposes cleanly.
         try {
             await this.db.setCrossChainCallFinalized(row, btcChainId);
@@ -856,7 +856,7 @@ class CrossChainCallEngine extends EventEmitter {
             return;
         }
         // Release the in-flight slot BEFORE the mirror: the row is durable, so a delivery
-        // failure must not wedge the round. _mirrorCallRow cannot throw.
+        // failure must not wedge the round. mirrorCallRow cannot throw.
         this._inflight.delete(row.round_id);
         await this.mirrorCallRow(row);
         console.log('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
@@ -959,7 +959,7 @@ class CrossChainCallEngine extends EventEmitter {
     // Bitcoin indexer follows, reported through pushchaintip. Stamped on call rows so a mirror
     // that survived a re-genesis can refuse a call minted on the dead chain. Unknown reads as
     // NULL, which every mirror accepts, and a lookup failure must never fail a finalized row,
-    // so it degrades to NULL. Twin of CrossChainDexEngine._resolveBtcChainId; keep in lockstep.
+    // so it degrades to NULL. Twin of CrossChainDexEngine.resolveBtcChainId; keep in lockstep.
     async resolveBtcChainId(network){
         try {
             if(!this.db || typeof this.db.getChainTip !== 'function') return null;

@@ -39,7 +39,7 @@ describe('Boundary: CrossChainEngine', function () {
 
     describe('chain pair validator set fallback', function () {
 
-        it('_getChainPairSet returns pair-specific set when available', function () {
+        it('getChainPairSet returns pair-specific set when available', function () {
             let pairSet = [makeValidator(1), makeValidator(2)];
             let pairMap = new Map();
             pairMap.set('BTC-LTC', pairSet);
@@ -50,7 +50,7 @@ describe('Boundary: CrossChainEngine', function () {
             expect(result).to.equal(pairSet);
         });
 
-        it('_getChainPairSet tries reversed ordering (DOGE-BTC → BTC-DOGE)', function () {
+        it('getChainPairSet tries reversed ordering (DOGE-BTC → BTC-DOGE)', function () {
             let pairSet = [makeValidator(1), makeValidator(2), makeValidator(3)];
             let pairMap = new Map();
             pairMap.set('BTC-DOGE', pairSet);
@@ -61,7 +61,7 @@ describe('Boundary: CrossChainEngine', function () {
             expect(result).to.equal(pairSet);
         });
 
-        it('_getChainPairSet falls back to full validator set when pair not found', function () {
+        it('getChainPairSet falls back to full validator set when pair not found', function () {
             cc.setValidatorSet(VALIDATORS_4);
             cc.setChainPairValidators(new Map());
 
@@ -69,7 +69,7 @@ describe('Boundary: CrossChainEngine', function () {
             expect(result).to.equal(VALIDATORS_4);
         });
 
-        it('_getChainPairSet falls back when pair validators array is empty', function () {
+        it('getChainPairSet falls back when pair validators array is empty', function () {
             let pairMap = new Map();
             pairMap.set('BTC-LTC', []);
             cc.setChainPairValidators(pairMap);
@@ -80,7 +80,7 @@ describe('Boundary: CrossChainEngine', function () {
             expect(result).to.equal(VALIDATORS_4);
         });
 
-        it('_getChainPairSet with no chain pair map returns full set', function () {
+        it('getChainPairSet with no chain pair map returns full set', function () {
             cc.setValidatorSet(VALIDATORS_4);
             cc.setChainPairValidators(new Map());
 

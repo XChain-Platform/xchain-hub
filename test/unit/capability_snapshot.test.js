@@ -286,7 +286,7 @@ describe('CapabilitySnapshot', function () {
             expect(before.validators[0].pubkey).to.equal('old');
 
             // (b) governance MIN_STAKE change lands: registry updates, hub flushes
-            //     (mirrors XChainHub._applyCapabilityGovernanceChange on the event).
+            //     (mirrors XChainHub.applyCapabilityGovernanceChange on the event).
             threshold = '50000';
             snap.flushCapability('attestation');
 

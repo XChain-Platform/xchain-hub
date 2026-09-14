@@ -86,7 +86,7 @@ const DEFAULT_REJUDGE_SWEEP_MS   = 5 * 60 * 1000;        // 5m between re-judge 
 
 // Which inconclusive reasons can change on a later attempt. Only a reason whose
 // cause is the JUDGE being unavailable is retried: the provider is paused
-// (llm.js _markInconclusive 'provider_paused'), its endpoint is unreachable, or
+// (llm.js markInconclusive 'provider_paused'), its endpoint is unreachable, or
 // its rolling spend window is spent ('budget_exhausted', heals when the window rolls).
 // Every other reason is a property of the round's own bytes (meta_unrecognized,
 // meta_uncorroborated, no_proposals, unparseable, empty_verdict, truncated_pick)
@@ -134,7 +134,7 @@ class AttestationSpotChecker {
         this._reorgHandler   = null;
         this._scheduler      = null;
         this._sweeper        = null;
-        this._tickInFlight   = false;   // scheduler self-overlap guard, see _schedulerTick()
+        this._tickInFlight   = false;   // scheduler self-overlap guard, see schedulerTick()
         this._sweepInFlight  = false;   // same guard for the re-judge sweep
 
         // Durable-outcome retention, see _pruneStats(). 0 (explicitly configured)
@@ -290,7 +290,7 @@ class AttestationSpotChecker {
     }
 
     // Drive the re-judge sweep on its own timer rather than folding it
-    // into _schedulerTick. The injection scheduler is inert unless SPOT_CHECK_ENABLED
+    // into schedulerTick. The injection scheduler is inert unless SPOT_CHECK_ENABLED
     // plus an injector plus a non-empty corpus are all present, and in exactly that
     // state the module still judges externally-registered spot-checks (see header),
     // so a sweep hung off the scheduler would never run for the deployments that
@@ -317,11 +317,11 @@ class AttestationSpotChecker {
     }
 
     // One re-judge pass: re-ask the judge about every held spot-check and score the
-    // ones that now have a conclusive verdict, through the same _persistStats /
-    // _recordFailure paths the inline judge uses. Still-inconclusive records stay
+    // ones that now have a conclusive verdict, through the same persistStats /
+    // recordFailure paths the inline judge uses. Still-inconclusive records stay
     // until they run out of attempts or age out; each record is independently
     // guarded so one provider failure cannot abort the pass or throw out of the
-    // timer. Overlap-guarded for the same reason _schedulerTick is: nothing
+    // timer. Overlap-guarded for the same reason schedulerTick is: nothing
     // bounds a judge round trip, so a hung provider would otherwise let passes
     // stack up and re-ask the same records concurrently.
     async sweepReJudge(){
@@ -488,7 +488,7 @@ class AttestationSpotChecker {
         let blockIndex = Number(event.request && event.request.block_index) || 0;
         // Everything the sweep needs to re-ask the judge later. Built
         // before the call so both failure branches below can hand it straight to
-        // _deferReJudge; the queue entry is already gone by this point (line above),
+        // deferReJudge; the queue entry is already gone by this point (line above),
         // and an ok finalization is terminal, so this record is the only way back.
         let deferRecord = {
             providerId:      entry.providerId,

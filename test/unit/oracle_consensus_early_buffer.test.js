@@ -131,7 +131,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         oc._handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, digest));
 
         await oc._handlePropose(proposeEnvelope(digest));
-        // _checkCommitQuorum stores via async db call; let it settle.
+        // checkCommitQuorum stores via async db call; let it settle.
         await new Promise(r => setImmediate(r));
 
         // quorum for N=3 is 2. replayed commits must finalize the round.
@@ -139,13 +139,13 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         expect(hub.db.doQuery.getCalls().some(c => String(c.args[0]).includes('INSERT INTO price_snapshots'))).to.be.true;
     });
 
-    it('drains at the proposer site too (_proposeRound)', function () {
-        let digest = null; // computed inside _proposeRound from aggregated submissions
+    it('drains at the proposer site too (proposeRound)', function () {
+        let digest = null; // computed inside proposeRound from aggregated submissions
         let subs = new Map([
             [VALSET[1].addr, { sender: VALSET[1].addr, prices: PRICES }],
         ]);
         // Buffer a vote keyed by the round before proposing. Digest must match
-        // what _proposeRound computes over its own aggregation.
+        // what proposeRound computes over its own aggregation.
         let aggregated = oc._aggregateAll(subs);
         digest = oc._digest(ROUND, aggregated);
         oc._handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, digest));

@@ -67,7 +67,7 @@ function _withEnv(extra, fn){
         throw e;
     }
     // An async fn must keep the scenario env across its awaits (credential
-    // resolution happens per _runLlm call, not just in the sync prefix), so
+    // resolution happens per runLlm call, not just in the sync prefix), so
     // restore only once the promise settles.
     if (result && typeof result.then === 'function') {
         return Promise.resolve(result).then(
@@ -130,7 +130,7 @@ describe('llm provider, agree (judge_model)', function () {
 
     it('returns null when judge is unreachable (no credentials)', async function () {
         // Multi-proposal case wants to call the judge; with no creds the
-        // _runLlm throws and agree() catches → null (no_quorum surface).
+        // runLlm throws and agree() catches → null (no_quorum surface).
         const r = await _withEnv({}, async () => {
             const fresh = _reloadProvider();
             return await fresh.agree([
@@ -1054,7 +1054,7 @@ describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
         expect(err.paused).to.equal(true);
     });
 
-    it('_setConfig max_budget_usd feeds _resolveMaxBudgetUsd; 0 falls back to the default', function () {
+    it('_setConfig max_budget_usd feeds resolveMaxBudgetUsd; 0 falls back to the default', function () {
         delete process.env.LLM_MAX_BUDGET_USD;
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
@@ -1794,8 +1794,8 @@ describe('llm provider, auth credential fallback chain', function () {
         expect(result.error).to.equal('no_credential_configured');
     });
 
-    it('fetch throws using auth.reason when detail is absent (_runLlm error path)', async function () {
-        // B56: `auth.detail || auth.reason || 'no credentials'` in _runLlm
+    it('fetch throws using auth.reason when detail is absent (runLlm error path)', async function () {
+        // B56: `auth.detail || auth.reason || 'no credentials'` in runLlm
         const { llm } = reloadWithAuthStub({
             ok: false, reason: 'my_custom_reason', detail: null
         });
@@ -1818,9 +1818,9 @@ describe('llm provider, auth credential fallback chain', function () {
     });
 });
 
-// ---- _callAnthropic error format edge cases --------------------------------
+// ---- callAnthropic error format edge cases --------------------------------
 
-describe('llm provider, _callAnthropic error format edge cases', function () {
+describe('llm provider, callAnthropic error format edge cases', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -2394,7 +2394,7 @@ describe('llm provider, judge fallback chain', function () {
             });
         });
 
-        it('types the budget error at its source for every _runLlm caller', async function () {
+        it('types the budget error at its source for every runLlm caller', async function () {
             process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '1';
             await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
                 const llm = _reloadProvider();

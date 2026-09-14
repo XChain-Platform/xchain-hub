@@ -15,12 +15,12 @@
  * An absent spend-state file has two causes and only one of them has earned a
  * fresh allowance.
  *
- * _loadState's own header states that every one of its rules is fail-closed, and
+ * loadState's own header states that every one of its rules is fail-closed, and
  * the corrupt-file rule beside it seeds the window CONSUMED on the principle that
  * a broken store must never read as a green light. The absent-file rule did not
  * follow it: it returned an empty window, which is right for a genuine first run
  * and wrong for a store that cannot be written at all. On a read-only disk
- * _persist() lands no byte, so the file never appears, every restart reads ENOENT,
+ * persist() lands no byte, so the file never appears, every restart reads ENOENT,
  * and the per-window ceiling is unbounded across restarts.
  *
  * These tests hold the distinction by its failure mode: an unwritable store must
@@ -91,7 +91,7 @@ describe('SpendGuard: an absent state file is not always a first run', function 
     });
 
     it('treats an absent directory under a writable parent as a first run', function () {
-        // _persist() mkdirs the tree it needs, so a missing leaf directory under a
+        // persist() mkdirs the tree it needs, so a missing leaf directory under a
         // writable parent is still a store this hub can write.
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spendguard-mk-'));
         made.push(root);
@@ -104,7 +104,7 @@ describe('SpendGuard: an absent state file is not always a first run', function 
 });
 
 /*
- * _persist() caught its write failure, warned once and returned, and
+ * persist() caught its write failure, warned once and returned, and
  * reserve() ignored the outcome: the token came back and the caller broadcast a
  * spend that no file on disk records. After the restart that store reads ENOENT,
  * the window comes back empty, and the allowance is handed out again - once per

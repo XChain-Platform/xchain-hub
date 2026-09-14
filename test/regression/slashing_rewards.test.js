@@ -41,7 +41,7 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
     const sd = new SlashDetector(hub);
     sd._resolveValidatorPubkey = (sender) => sender;   // sender IS the pubkey in these tests
     const slashed = [];
-    // The real _recordSlashProposal returns true once the row persists and false
+    // The real recordSlashProposal returns true once the row persists and false
     // on a rejected pubkey or a failed write, and the non-participation latch
     // re-arms on a falsy return so a failed write can be retried next round. A
     // stub returning undefined therefore impersonates a permanently failing DB

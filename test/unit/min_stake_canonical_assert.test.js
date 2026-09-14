@@ -215,7 +215,7 @@ describe('XChainHub._assertCanonicalMinStakes', function () {
         });
     });
 
-    describe('_loadCapabilityConfigFile integration', function () {
+    describe('loadCapabilityConfigFile integration', function () {
 
         let tmpPath;
         afterEach(function () { if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch (_) {} } });

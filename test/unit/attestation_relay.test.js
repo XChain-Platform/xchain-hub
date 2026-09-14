@@ -1369,7 +1369,7 @@ describe('AttestationRelay', function () {
 
         it('stamps the eviction key onto every WAL record it writes', async function () {
             // a record with no deadline is one no later process can ever retire,
-            // so the stamp is applied centrally in _appendWal rather than per call site.
+            // so the stamp is applied centrally in appendWal rather than per call site.
             const relay = new AttestationRelay(makeHub());
             relay.noteDeadline('LTC', REQ_ID, 3160010);
             relay.setBroadcastHook(async () => ({ txid: 'deadbeef' }));

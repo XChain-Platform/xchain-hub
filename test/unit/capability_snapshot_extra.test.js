@@ -19,7 +19,7 @@
 //   - getActiveValidatorSnapshot()
 //   - getQuorum()
 //   - isInSnapshot()
-//   - _prune() (cache eviction)
+//   - prune() (cache eviction)
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
@@ -310,9 +310,9 @@ describe('CapabilitySnapshot (extra coverage)', function () {
         });
     });
 
-    // ── _prune() ─────────────────────────────────────────────────────────────
+    // ── prune() ─────────────────────────────────────────────────────────────
 
-    describe('_prune()', function () {
+    describe('prune()', function () {
         it('evicts expired cache entries', function () {
             let snap = new CapabilitySnapshot(makeHub());
             let now  = Date.now();

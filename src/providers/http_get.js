@@ -56,7 +56,7 @@ const USER_AGENT = 'XChain-Attestation/1.0';
 // attestation fleet into an internal port scanner and make that hub fetch a
 // URL its peers structurally cannot reach, diverging the round. Same shape as
 // the platform's other regtest-only seams (OracleConsensus
-// ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub._oracleMaxAgeSeconds).
+// ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub.oracleMaxAgeSeconds).
 //
 // The network comes from `options.network` first (AttestationRound passes the
 // hub's api.js-validated HUB_NETWORK; the e2e harness runs several hubs in one
@@ -249,7 +249,7 @@ exports.fetch = async (payload, options) => {
 //
 // NOTE: agree() returns a winner body when the simple-majority quorum is met,
 // but finalization of a byte_equality round also requires max(quorum, redundancy)
-// winner-matching signatures (see AttestationConsensus._checkCommitQuorum). A
+// winner-matching signatures (see AttestationConsensus.checkCommitQuorum). A
 // follower only re-signs on byte-identical body match (AttestationConsensus ~582).
 // So when redundancy=3, effective finalization requires 3-of-3 byte-identical
 // signatures, not the 2-of-3 majority this function's quorum check alone suggests.

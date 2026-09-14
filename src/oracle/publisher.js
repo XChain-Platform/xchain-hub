@@ -26,14 +26,14 @@
  * LEADER FAILOVER: opt-in, off by default. A window's leader publishes it; a
  * follower arms a timer staggered by its DISTANCE from that leader in the
  * rotation and, if the window is still not on chain when the timer fires,
- * re-assembles the identical batch itself (_scheduleTakeover / _attemptTakeover).
+ * re-assembles the identical batch itself (scheduleTakeover / attemptTakeover).
  * Set ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS to arm it. Before this existed a
  * silent leader meant the window was never published by anyone, however healthy
  * the rest of the set was.
  *
  * The safety property is that a hub only steps in when it can PROVE it would
  * have seen the leader succeed. That proof is the indexer pushing landed PRICE
- * actions back to this hub (the same feed _pruneObservedWindow reads). A hub
+ * actions back to this hub (the same feed pruneObservedWindow reads). A hub
  * that has never observed one declines every takeover, because on that hub
  * "not on chain" and "on chain but I was not told" are the same observation,
  * and guessing wrong pays DOGE twice for a duplicate on-chain batch.
@@ -142,7 +142,7 @@ const CATCHUP_WINDOWS_PER_SWEEP = 4;
 // How often that sweep runs when there is nothing to catch up on. An hour at the
 // shipped defaults: the refusals it recovers from are either transient or content
 // drift that reconciliation repairs, and neither gets better by asking again sooner.
-// See _startBufferCatchupSweep.
+// See startBufferCatchupSweep.
 const DEFAULT_BATCH_CATCHUP_INTERVAL_MS = 3600000;
 // ...and how often it runs while a BACKLOG deeper than one sweep is waiting. Four
 // windows an hour is a drain rate of 96 windows a day, and the fleet was measured on
@@ -150,7 +150,7 @@ const DEFAULT_BATCH_CATCHUP_INTERVAL_MS = 3600000;
 // months to walk once. The hourly idle is what made the backlog structurally
 // undrainable; nothing about the serialization required it, because a sweep never has
 // more than CATCHUP_WINDOWS_PER_SWEEP assemblies outstanding either way (see
-// _runCatchupSweepTick's in-flight await). At a minute a 697-window backlog is walked
+// runCatchupSweepTick's in-flight await). At a minute a 697-window backlog is walked
 // in about three hours instead.
 const DEFAULT_BATCH_CATCHUP_BACKLOG_INTERVAL_MS = 60000;
 // Failed catch-up attempts after which a window is retired from the sweep, and the
@@ -225,7 +225,7 @@ class OraclePublisher {
         this.lastPublishedTxid  = null;
         // Highest CONFIRMED round in the durable marker table, read at startup. Answers
         // "has this hub ever published?" from evidence that excludes intent-only rows,
-        // and costs no extra query because _hydratePublishedMarkers already reads those
+        // and costs no extra query because hydratePublishedMarkers already reads those
         // rows for the at-most-once guard. Null when no hub DB is wired (dev/test) or
         // when nothing has ever been confirmed.
         this._durableEverPublishedRound = null;
@@ -264,7 +264,7 @@ class OraclePublisher {
         // Only CONFIRMED rows (sent_at IS NOT NULL) are ever pruned: a sent_at NULL row
         // is the quarantine marker for a round whose on-chain state is unknown, which an
         // operator reconciles by hand, so those must survive forever (see
-        // _hydratePublishedMarkers). Keep the most recent N rounds; 0 disables pruning.
+        // hydratePublishedMarkers). Keep the most recent N rounds; 0 disables pruning.
         // Default ~90 days at the 10-minute round default, mirroring the
         // ORACLE_SUBMISSIONS_RETENTION_ROUNDS window on the sibling audit table.
         // The window counts ROUNDS, never wires, so it means the same 90 days under
@@ -320,7 +320,7 @@ class OraclePublisher {
         // Timers for windows this hub may take over, keyed by window index.
         this._takeoverTimers   = new Map();
         // Memoized proof that landed batches actually reach this hub (see
-        // _observationFeedProven). Never cached as false: a feed can come up later.
+        // observationFeedProven). Never cached as false: a feed can come up later.
         this._observationProven = false;
         this._takeoverDarkWarned = false;
         this.takeoverAttempts  = 0;
@@ -406,7 +406,7 @@ class OraclePublisher {
 
         // Publish-pass self-overlap guard, see _processQueue(). Named for the sibling
         // publishers' house convention (AttestationPublisher._sweeping,
-        // AttestationSpotChecker._schedulerTick).
+        // AttestationSpotChecker.schedulerTick).
         this._sweeping = false;
 
         // ---------------- PRICE batch rail (spec section 7) ----------------
@@ -538,7 +538,7 @@ class OraclePublisher {
         // windowIndex -> { count, firstAt } for windows the catch-up sweep has proposed
         // and that produced no wire. Cleared the moment a window is assembled, so what
         // it holds is exactly the set of windows that keep failing. Bounded by the
-        // pending set itself, which _pendingCatchupWindows already bounds.
+        // pending set itself, which pendingCatchupWindows already bounds.
         this._catchupAttempts        = new Map();
         // Where the next sweep starts in the pending list. Without it every sweep spent
         // all four of its slots on the same four oldest windows, so a backlog whose head
@@ -602,7 +602,7 @@ class OraclePublisher {
         this.lastConfirmationCheckAt  = null;
         this._confirmTimer            = null;
         // Watchdog cadence. 0 disables the timer entirely (the counters stay live for
-        // a caller that drives _checkPublishedConfirmations itself).
+        // a caller that drives checkPublishedConfirmations itself).
         this.confirmCheckIntervalMs   = nonNegativeIntConfig(
             process.env.ORACLE_PUBLISH_CONFIRM_CHECK_MS || cfg.ORACLE_PUBLISH_CONFIRM_CHECK_MS,
             300000, 'ORACLE_PUBLISH_CONFIRM_CHECK_MS');
@@ -1353,7 +1353,7 @@ class OraclePublisher {
         }
         this._buffer.set(entry.round, entry);
         // The append above is the durable write (a crash between it and here recovers
-        // the new copy, because _hydrateBuffer replays the file in order and the LAST
+        // the new copy, because hydrateBuffer replays the file in order and the LAST
         // line for a round wins). Compact only after that, so the truncating rewrite is
         // never the thing standing between a finalized round and disk.
         if (prior) this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
@@ -1610,9 +1610,9 @@ class OraclePublisher {
     //     the leader was waiting on. A leader that never asked cannot have broadcast,
     //     so a window with no co-signature is genuine silence and takes over at once.
     //
-    // The signer is read through the hub, never through _getBatchSigner(): that
+    // The signer is read through the hub, never through getBatchSigner(): that
     // accessor CONSTRUCTS and starts a signer as a side effect, which a read-only
-    // question must not do (same pattern as _batchSignTimeouts).
+    // question must not do (same pattern as batchSignTimeouts).
     takeoverAmbiguityAt(windowIndex, first, last) {
         let newest = this._ambiguousWindows.has(windowIndex)
             ? this._ambiguousWindows.get(windowIndex)
@@ -1643,7 +1643,7 @@ class OraclePublisher {
         }
     }
 
-    // Put the deferred takeover back on the clock. Deliberately not _scheduleTakeover:
+    // Put the deferred takeover back on the clock. Deliberately not scheduleTakeover:
     // that one computes the rank stagger from scratch, and this window's stagger has
     // already been served; what is left to wait out is only the cooldown remainder.
     rearmTakeover(windowIndex, delay) {
@@ -1988,8 +1988,8 @@ class OraclePublisher {
     }
 
     // Put back what a restart dropped. _windows is memory-only, so after a restart the
-    // scheduler knows nothing about the rounds _hydrateBuffer just reloaded, and the
-    // "a higher window's round arrived, so close the lower ones" path (_noteWindowRound)
+    // scheduler knows nothing about the rounds hydrateBuffer just reloaded, and the
+    // "a higher window's round arrived, so close the lower ones" path (noteWindowRound)
     // walks exactly that map: a window whose last slot was SKIPPED before the restart
     // would never be closed by the round that proves it can receive nothing more.
     //
@@ -2097,7 +2097,7 @@ class OraclePublisher {
     // sitting in the leader's buffer.
     //
     // Deliberately a slow loop, not a tight retry. The refusal it recovers from is
-    // either transient (a peer down) or content drift that _reconcileBufferedWindow
+    // either transient (a peer down) or content drift that reconcileBufferedWindow
     // repairs from price_snapshots, and neither is fixed by asking again sooner; what
     // a fast retry WOULD buy is a signing round per window per interval across the
     // whole federation, plus a refusal line per peer per attempt in every log.
@@ -2157,7 +2157,7 @@ class OraclePublisher {
     // Turn one closed window into zero or more signed, enqueued PRICE v0 wires.
     //
     // opts.takeover: this hub is NOT the window's leader and is stepping in after
-    // the leader stayed silent (see _attemptTakeover). Everything downstream of the
+    // the leader stayed silent (see attemptTakeover). Everything downstream of the
     // leader check is identical, deliberately: a takeover must put the same
     // canonical content on chain the leader would have, never a variant.
     async _assembleWindow(windowIndex, opts) {
@@ -2330,7 +2330,7 @@ class OraclePublisher {
                           // A batch-sourced row's reference_block is the LANDING chain's
                           // height, not this round's BTC anchor, so its content can no
                           // longer be rebuilt here. It is also, by definition, already on
-                          // chain. See OracleBatchSigner._deriveWindow.
+                          // chain. See OracleBatchSigner.deriveWindow.
                           batchSourced: String(row.proof_head || '').indexOf('{"batch"') === 0 };
                 let admit = ah.columnsAdmitBlocks(row);
                 if (admit !== null) entry.admitBlocks = admit;
@@ -2424,7 +2424,7 @@ class OraclePublisher {
     // A composite verdict of every armed oracle flag day at one BTC anchor. Rounds
     // whose keys differ cannot share a wire: a batch resolves those gates ONCE on the
     // batch anchor, so a straddling range would judge its earlier rounds under a rule
-    // set they never finalized under. OracleBatchSigner._straddlesArmedOracleFlagDay is
+    // set they never finalized under. OracleBatchSigner.straddlesArmedOracleFlagDay is
     // the receiving-side twin of this, and it refuses SILENTLY, so a leader that skips
     // this split simply never reaches quorum and the window never publishes.
     //
@@ -2459,7 +2459,7 @@ class OraclePublisher {
     // How many signatures to SIZE against before the signing round has produced any.
     // The price-capable set at the anchor is the upper bound on what can come back, so
     // packing against it never under-splits; the post-signing measurement in
-    // _signAndSizeRange is the authority either way.
+    // signAndSizeRange is the authority either way.
     async _priceSetSizeHint(anchor, fallback) {
         try {
             if (this.hub && this.hub.capabilitySnapshot) {
@@ -2811,7 +2811,7 @@ class OraclePublisher {
     //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row is an intent-only
     //      QUARANTINE marker: broadcast intent was recorded but the confirmation never
     //      landed, so the round's on-chain state is unknown and only an operator can
-    //      reconcile it (_hydratePublishedMarkers surfaces them at startup and refuses
+    //      reconcile it (hydratePublishedMarkers surfaces them at startup and refuses
     //      to auto-rebroadcast). Pruning one would erase the sole record that a round
     //      needs hand-verification, and the round would then look never-attempted.
     //   2. No round still on the durable queue may be pruned. The marker is what stops
@@ -2857,12 +2857,12 @@ class OraclePublisher {
 
     // Self-overlap guard for the publish pass, the same house convention the sibling
     // publishers carry (AttestationPublisher._sweeping, AttestationSpotChecker
-    // ._schedulerTick). onRoundFinalized awaits a pass per PBFT event and nothing
+    // .schedulerTick). onRoundFinalized awaits a pass per PBFT event and nothing
     // serializes those events, so two rounds finalizing inside one pass duration would
     // otherwise run two passes over the same durable queue. That is a DOUBLE DOGE
     // SPEND, not a duplicate log line: every at-most-once check in the body closes only
     // AFTER the multi-second encoder+sign+broadcast round trip (_publishedRounds.mark
-    // and _markPublished are post-send), and the pre-send intent write is deliberately
+    // and markPublished are post-send), and the pre-send intent write is deliberately
     // idempotent (ON DUPLICATE KEY UPDATE), so a second pass clears every guard while
     // the first pass's broadcast is still in flight and re-broadcasts the same round.
     // A wrapper rather than an inline flag, so none of the body's early returns can
@@ -2927,7 +2927,7 @@ class OraclePublisher {
         // encoder's "no spendable inputs available" once the ancestor limits bite.
         // Defer the pass instead: entries stay on the durable queue, nothing is
         // dead-lettered, and no attempt counter is burned, because this is not a
-        // broadcast failure. Fail soft, see _confirmedUtxoAvailable.
+        // broadcast failure. Fail soft, see confirmedUtxoAvailable.
         if (!(await this.confirmedUtxoAvailable())) {
             this.noConfirmedUtxoDeferrals++;
             this.lastNoConfirmedUtxoAt = Date.now();
@@ -2977,7 +2977,7 @@ class OraclePublisher {
 
             // Quarantined round (an intent-only durable marker from a pre-crash broadcast
             // whose on-chain state is unknown). NEVER re-broadcast: drop the stale queue
-            // entry and leave it for operator replay. Surfaced at startup in _hydratePublishedMarkers.
+            // entry and leave it for operator replay. Surfaced at startup in hydratePublishedMarkers.
             if (entryRounds.some(r => this._quarantinedRounds.has(r))) {
                 console.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
                 continue;
@@ -3185,7 +3185,7 @@ class OraclePublisher {
         // pass actually resolved (published, dead-lettered, or dropped as already-sent),
         // and carry everything else through untouched.
         // Built as `remaining` PLUS the mid-pass arrivals, never as a filter over the
-        // fresh read alone: _readQueue swallows a read failure as an empty list, and a
+        // fresh read alone: readQueue swallows a read failure as an empty list, and a
         // rebuild derived only from it would then truncate the queue and lose every
         // round this pass meant to retry. This shape is never worse than the old blind
         // rewrite, only strictly more inclusive.

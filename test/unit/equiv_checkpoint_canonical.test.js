@@ -103,7 +103,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(SCE.canonicalCheckpoint(cpOn))
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON);
         });
-        it('_rawCanonicalCheckpoint is always the bare bytes (used nested by the v1 archive)', function () {
+        it('rawCanonicalCheckpoint is always the bare bytes (used nested by the v1 archive)', function () {
             expect(SCE.rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
         });
     });
@@ -134,7 +134,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
     // emit the empty suffix, i.e. they agree for the wrong reason, and a one-sided edit
     // to the suffix (field order, the .toLowerCase(), the pipe count, either gate) ships
     // green. The two sides gate that suffix by DIFFERENT rules on purpose (the hub on
-    // CHECKPOINT_COMMITMENT AND root presence, StateCheckpointEngine._checkpointRootSuffix;
+    // CHECKPOINT_COMMITMENT AND root presence, StateCheckpointEngine.checkpointRootSuffix;
     // the indexer on the wire VERSION being 0, anchor.js), which makes their equivalence
     // on a REAL v0 section exactly the property that needs asserting. Spec D41 records
     // that the difference is safe only because a v0 section is root-bearing by
@@ -275,7 +275,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
     //
     // The archive extension is an independent three-way agreement, and until now
     // nothing executed all three producers against one fixture:
-    //   producer  xchain-hub      StateAnchorPublisher._archiveCanonical
+    //   producer  xchain-hub      StateAnchorPublisher.archiveCanonical
     //   verifier  xchain-indexer  Anchor.canonical, FORMAT 1
     //   recovery  xchain-indexer  AnchorRecovery.wrapperCanonical
     // Every existing test is self-referential: the hub verifies its own published
@@ -328,8 +328,8 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         // are both in play, so this is the case that pins the suffix across all three.
         it('above the EQUIV flag day: all three produce identical bytes (v1)', function () {
             const hub = hubCanonical(cpOn);
-            expect(indexerCanonical(cpOn, 1)).to.equal(hub, 'indexer Anchor.canonical(FORMAT=1) drifted from hub _archiveCanonical');
-            expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery.wrapperCanonical drifted from hub _archiveCanonical');
+            expect(indexerCanonical(cpOn, 1)).to.equal(hub, 'indexer Anchor.canonical(FORMAT=1) drifted from hub archiveCanonical');
+            expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery.wrapperCanonical drifted from hub archiveCanonical');
             // Pinned literal so a THREE-sided edit (all copies changed together) still fails.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
         });

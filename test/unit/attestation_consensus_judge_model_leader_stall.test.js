@@ -19,7 +19,7 @@
 // PREPAREs that expire are downstream: they are parked at the non-leader
 // judge_model guard awaiting a winner the leader never emits. The leader never
 // emits one because `if(pending.proposals.size < need) return` in
-// _maybeAdvanceFromProposals is never satisfied, and under judge_model only the
+// maybeAdvanceFromProposals is never satisfied, and under judge_model only the
 // elected leader may run agree(). So the federation waits on one hub's count.
 //
 // The one way that count falls short leaving NO trace is the responsible-set
@@ -56,7 +56,7 @@ describe('AttestationConsensus: judge_model leader stalls when its responsible s
 
     // A PROPOSE signed the way _handlePropose verifies it: over the canonical
     // built from the wire values. mirrorEra is false on the round, so
-    // _readWireEffectiveTime returns null and the canonical takes no stamp.
+    // readWireEffectiveTime returns null and the canonical takes no stamp.
     function proposeFrom(identity) {
         let canonical = consensus._buildCanonical(RID, 'llm', BODY, 'ok', '', 0, null).toString('utf8');
         return {

@@ -90,7 +90,7 @@ class ReorgHandler extends EventEmitter {
 
         // How far a reported reorg `timestamp` may PREDATE our own node's block_time
         // for reorgHeight before we refuse to act on it (see
-        // _timestampConsistentWithBlockTime). Default 3h: covers the ~2h future
+        // timestampConsistentWithBlockTime). Default 3h: covers the ~2h future
         // miner-timestamp skew consensus rules allow, plus clock-skew margin.
         this.timestampSkewToleranceMs = parseInt(process.env.REORG_TIMESTAMP_SKEW_MS) || 10800000;
 
@@ -575,7 +575,7 @@ class ReorgHandler extends EventEmitter {
     checkCommitQuorum(reorgId) {
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.finalized) return;
-        // Same invariant as _checkPrepareQuorum: an unverified round never
+        // Same invariant as checkPrepareQuorum: an unverified round never
         // executes a rollback on this hub, no matter how many commits arrive.
         if (pending.selfVerified !== true) return;
 

@@ -74,7 +74,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
     // The election primitive
     // -----------------------------------------------------------------
 
-    describe('_getLeader() / _leaderAt()', function () {
+    describe('_getLeader() / leaderAt()', function () {
 
         it('indexes sorted snapshot pubkeys by (seq + view) % N', function () {
             let members = memberSetOf(SNAPSHOT_SET);
@@ -125,7 +125,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
     // blocker (2): a snapshot member whose addr binding differs between
     // hubs must still be recognized as leader, or the fix reintroduces the very
     // divergence it removes.
-    describe('_isLeaderIdentity()', function () {
+    describe('isLeaderIdentity()', function () {
         it('matches on the verified pubkey when the addr binding differs', function () {
             let leader = { addr: 'ws://binding-a:10001', pubkey: 'ab'.repeat(32) };
             expect(consensus.isLeaderIdentity(leader, 'ws://binding-b:10001', 'ab'.repeat(32))).to.be.true;
@@ -244,7 +244,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
         it('recognizes the elected leader by verified pubkey when its addr binding differs', async function () {
             // This hub's registry binds the elected key to a stale addr, so
-            // _addrForPubkey resolves an addr the peer no longer speaks from.
+            // addrForPubkey resolves an addr the peer no longer speaks from.
             consensus.setValidatorSet(DRIFTED_LIVE_SET.map(v =>
                 v.pubkey === SNAPSHOT_LEADER.pubkey ? { pubkey: v.pubkey, addr: 'ws://stale-binding:10001' } : v));
 
@@ -289,7 +289,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
     // View change: the new leader comes from the same pinned population
     // -----------------------------------------------------------------
 
-    describe('_handleViewChange() / _initiateViewChange()', function () {
+    describe('_handleViewChange() / initiateViewChange()', function () {
 
         // (5 + 1) % 4 = 2 over the snapshot; (5 + 1) % 5 = 1 over the live set.
         const PINNED_NEW_LEADER = VALIDATORS_4[2];
@@ -328,7 +328,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(pm.broadcast.calledWith('PBFT_NEW_VIEW', sinon.match.any)).to.be.false;
         });
 
-        it('_initiateViewChange stashes the round population so the initiator keeps electing from it', function () {
+        it('initiateViewChange stashes the round population so the initiator keeps electing from it', function () {
             let members = memberSetOf(SNAPSHOT_SET);
             consensus.initiateViewChange(SEQ, 2, false, [], members);
             expect(consensus.viewChangeQuorums.get(SEQ).memberPubkeys).to.deep.equal(members);

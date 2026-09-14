@@ -15,8 +15,8 @@
 //   - stop() clears all timers
 //   - _handleMessage: invalid round, late submission, duplicate sender,
 //     max submissions, invalid prices, known validator pubkey → DB persist path
-//   - _scheduleFinalization: fallback-suppression branch
-//   - _pruneSubmissions: old round eviction
+//   - scheduleFinalization: fallback-suppression branch
+//   - pruneSubmissions: old round eviction
 //   - _persistSubmissions: null pubkey fallback
 
 const sinon             = require('sinon');
@@ -333,9 +333,9 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
-    // ── _scheduleFinalization: fallback suppression ──────────────────────────
+    // ── scheduleFinalization: fallback suppression ──────────────────────────
 
-    describe('_scheduleFinalization(): fallback suppression', function () {
+    describe('scheduleFinalization(): fallback suppression', function () {
         it('suppresses finalization when fallback active for > roundInterval', function (done) {
             // Set a very short submissionWindow so the timer fires quickly
             or.submissionWindow = 10;
@@ -413,9 +413,9 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
-    // ── _pruneSubmissions ────────────────────────────────────────────────────
+    // ── pruneSubmissions ────────────────────────────────────────────────────
 
-    describe('_pruneSubmissions()', function () {
+    describe('pruneSubmissions()', function () {
         it('removes rounds older than currentRound - 1', function () {
             or.currentRound = 5;
             or.submissions.set(3, new Map());  // too old
@@ -428,9 +428,9 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
-    // ── _pruneSubmissionsDb (durable retention) ──────────────────────────────
+    // ── pruneSubmissionsDb (durable retention) ──────────────────────────────
 
-    describe('_pruneSubmissionsDb()', function () {
+    describe('pruneSubmissionsDb()', function () {
         it('deletes oracle_submissions rows older than the retention window', async function () {
             or.submissionsRetentionRounds = 100;
             or.currentRound = 1000;
@@ -475,7 +475,7 @@ describe('OracleRound (extra coverage)', function () {
     // timeout let oracle_submissions grow for the process lifetime and the first
     // signal an operator got was DB pressure with nothing pointing at retention.
 
-    describe('_onSubmissionsPruneFailure()', function () {
+    describe('onSubmissionsPruneFailure()', function () {
         let warn;
 
         beforeEach(function () { warn = sinon.stub(console, 'warn'); });

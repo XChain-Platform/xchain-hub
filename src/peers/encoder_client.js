@@ -86,7 +86,7 @@ class EncoderClient {
         // response.data.error check below ever runs, so every publisher surface logged the
         // bare 'Request failed with status code 429' and lost the one thing an operator
         // needs: whether the encoder is misconfigured, shedding load, or being handed an
-        // oversized batch. Unwrap the body the way CapabilitySnapshot._onFetchError does.
+        // oversized batch. Unwrap the body the way CapabilitySnapshot.onFetchError does.
         //
         // Two constraints, both load-bearing:
         //   - RETHROW THE SAME OBJECT, never a fresh Error. isAmbiguousSendError

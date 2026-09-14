@@ -74,7 +74,7 @@ describe('OracleRound', function () {
     // step 5: the XCHAIN/USD composition gate
     // -----------------------------------------------------------------
 
-    describe('_xchainPriceGateOpen(): whether this round carries the derived pair', function () {
+    describe('xchainPriceGateOpen(): whether this round carries the derived pair', function () {
 
         it('is CLOSED before the network resolves, so a hub that cannot tell stays quiet', function () {
             // currentBtcNetwork is only set by a successful per-round resolve. A hub
@@ -294,7 +294,7 @@ describe('OracleRound', function () {
 
         it('advances the skip streak once per durably-skipped round', function () {
             // noteRoundSkipped() is wired to the consensus 'round:skipped' event, which
-            // _markLocallySkipped emits exactly once per round.
+            // markLocallySkipped emits exactly once per round.
             or.noteRoundSkipped();
             or.noteRoundSkipped();
             expect(or.consecutiveSkippedRounds).to.equal(2);

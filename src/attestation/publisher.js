@@ -93,7 +93,7 @@ const ATTEST_WIRE_MAX_BYTES          = 8189;    // must equal MAX_DATA_BYTES in 
 // mirroring OraclePublisher's ~90-day oracle_published_rounds window.
 const DEFAULT_PUBLISHED_RETENTION_MS = 7776000000;   // 90 days
 // Multiple of the re-presentability horizon the effective window is FLOORED at.
-// The horizon itself is governance-controlled (see _publishedRetentionFloorMs), so
+// The horizon itself is governance-controlled (see publishedRetentionFloorMs), so
 // the safety multiple is what absorbs a hub whose indexer view lags the chain.
 const PUBLISHED_RETENTION_DEADLINE_SAFETY = 4;
 // Cap on how many queued request ids the prune DELETE will carry as an exclusion
@@ -174,7 +174,7 @@ class AttestationPublisher {
         // with no confirmation: the process died between recording intent and marking
         // the send done, so whether the BTC tx landed is unknown. Never auto-rebroadcast
         // (that is the second-fee spend the marker exists to prevent); surfaced at
-        // startup by _hydratePublishedMarkers for an operator to verify and replay.
+        // startup by hydratePublishedMarkers for an operator to verify and replay.
         // Holds `_publicationKey` entries, plus a bare request id for a pre-upgrade
         // marker row that names no status and so holds the whole request.
         this._quarantinedRequests = new Set();
@@ -194,9 +194,9 @@ class AttestationPublisher {
 
         // Retention window for the durable attest_published_requests marker table.
         // One row lands per ATTEST v1 request forever, so the money-bearing broadcast
-        // path grew a table (and, through _hydratePublishedMarkers, a per-restart
+        // path grew a table (and, through hydratePublishedMarkers, a per-restart
         // SELECT) without bound. Only CONFIRMED rows are ever pruned and only past the
-        // re-presentability floor; see _prunePublishedRequests for both invariants.
+        // re-presentability floor; see prunePublishedRequests for both invariants.
         // 0 disables pruning; garbage or a negative value falls back to the default.
         this.publishedRequestsRetentionMs = parseInt(
             process.env.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS ||
@@ -717,7 +717,7 @@ class AttestationPublisher {
     // Longest wall-clock window in which a CONFIRMED marker can still change a
     // decision, derived from live governance rather than from a baked constant.
     //
-    // A confirmed marker is only ever read through _durableSendGate, and that gate is
+    // A confirmed marker is only ever read through durableSendGate, and that gate is
     // reachable from exactly two places: onRequestFinalized (an AttestationConsensus
     // finalization, which only fires for a request the consensus polled out of the
     // indexer's PENDING set) and the replay sweep (which reaches the gate only past
@@ -746,7 +746,7 @@ class AttestationPublisher {
 
     // Bound the durable attest_published_requests marker table to the retention
     // window. Without this the table appends one row per paid ATTEST request forever,
-    // and _hydratePublishedMarkers re-reads all of it into memory on every restart.
+    // and hydratePublishedMarkers re-reads all of it into memory on every restart.
     //
     // Three invariants dominate this DELETE, all load-bearing on a path that spends
     // real BTC:
@@ -754,7 +754,7 @@ class AttestationPublisher {
     //   1. `sent_at IS NOT NULL AND intent_status IS NULL` is mandatory. Either an
     //      intent-only row or a row still holding an armed intent is a QUARANTINE
     //      marker for a publication whose on-chain state is unknown after a crash;
-    //      _hydratePublishedMarkers turns it into a permanent operator-only hold.
+    //      hydratePublishedMarkers turns it into a permanent operator-only hold.
     //      Pruning one would erase the sole record that it needs hand-verification,
     //      and the next finalization would broadcast it again.
     //   2. No request still on the durable WAL may be pruned, the exact analogue of
@@ -762,7 +762,7 @@ class AttestationPublisher {
     //      orderable round, so the queue is excluded by identity instead of by a
     //      cutoff clamp, which is tighter than a clamp rather than looser.
     //   3. The window is floored at the re-presentability horizon
-    //      (_publishedRetentionFloorMs), so a configured window shorter than the
+    //      (publishedRetentionFloorMs), so a configured window shorter than the
     //      longest provider deadline cannot delete a marker a live path can still
     //      reach.
     //
@@ -828,7 +828,7 @@ class AttestationPublisher {
     // intent, because the caller may still decline to send after it
     // and an intent row for a request that was never sent is indistinguishable from a
     // crash-mid-send, so a restart would quarantine a perfectly replayable request.
-    // Intent is armed by _armPublishIntent once the send is actually committed to.
+    // Intent is armed by armPublishIntent once the send is actually committed to.
     // Answers for the PUBLICATION (request id plus response status), not for the
     // request: a request whose advisory failure row is already on chain is still
     // waiting for its ok response, and gating that ok on the failure's marker drops the
@@ -911,7 +911,7 @@ class AttestationPublisher {
 
     // Truncate-and-rewrite the durable queue. Returns true on a confirmed fsync'd
     // write, false on failure, so the dequeue path can tell whether a just-published
-    // entry is still on disk (mirrors OraclePublisher._rewriteQueue).
+    // entry is still on disk (mirrors OraclePublisher.rewriteQueue).
     rewriteQueue(entries){
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
@@ -1082,7 +1082,7 @@ class AttestationPublisher {
     // Both passes read the same queue FILE, and every gate that would stop the second
     // one is read before the first arms it: _publishedRequests.mark(rid) lands only
     // after broadcaster() resolves, pendingIds still lists the request because nothing
-    // has been mined, and _removeFromQueue runs at the very end. So two overlapping
+    // has been mined, and removeFromQueue runs at the very end. So two overlapping
     // sweeps re-broadcast the SAME finalized response, spending the BTC fee twice for a
     // duplicate on-chain ATTEST response, which is exactly the double-spend the
     // at-most-once set and the ambiguous-send cooldown exist to prevent. The guard is a

@@ -121,7 +121,7 @@ function loadSignerHooks(env){
 
 // Apply loaded hooks to a publisher (anything exposing the standard setters).
 // Wiring OraclePublisher alone covers StateAnchorPublisher too, because it
-// borrows the hooks via _resolveSigner().
+// borrows the hooks via resolveSigner().
 //
 // `chain` is the rail the publisher settles on. Every wiring site in
 // XChainHub.js passes it explicitly; publisher.signingChain (declared by the

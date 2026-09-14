@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // Regression guard for the archive reward cross-pubkey check in
-// StateAnchorPublisher._verifyArchiveAgainstLocal (finding #4383).
+// StateAnchorPublisher.verifyArchiveAgainstLocal (finding #4383).
 //
 // This is the only follower-side gate that stops a Byzantine elected archive
 // leader from collecting a co-sign quorum for a fabricated reward. It must

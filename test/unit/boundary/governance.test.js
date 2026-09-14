@@ -35,10 +35,10 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds - normal parameters (MAX_INCREASE=50%, MAX_DECREASE=33%)
+    // validateChangeBounds - normal parameters (MAX_INCREASE=50%, MAX_DECREASE=33%)
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds - normal parameters', function () {
+    describe('validateChangeBounds - normal parameters', function () {
 
         it('exactly 50% increase (100→150) - should NOT throw', function () {
             expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
@@ -60,10 +60,10 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds - slashing parameters (MAX_SLASH_INCREASE=25%, MAX_SLASH_DECREASE=20%)
+    // validateChangeBounds - slashing parameters (MAX_SLASH_INCREASE=25%, MAX_SLASH_DECREASE=20%)
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds - slashing parameters', function () {
+    describe('validateChangeBounds - slashing parameters', function () {
 
         it('SLASH_DEVIATION_THRESHOLD: exactly 25% increase - should NOT throw', function () {
             expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125')).to.not.throw();
@@ -85,10 +85,10 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds - skip conditions
+    // validateChangeBounds - skip conditions
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds - skip conditions', function () {
+    describe('validateChangeBounds - skip conditions', function () {
 
         it('currentValue="0" - skips validation (no throw)', function () {
             // Division by zero guard: current === 0 → return early

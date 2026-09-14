@@ -11,7 +11,7 @@
 // A byte-budget split can leave a lagging chain's sections in a bundle whose MAX
 // snapshot_block is OLDER than the network-wide max the caller resolved its
 // oracle_publish set at. The election KEY was already per-bundle; the POPULATION was
-// not, so the leader ranked itself over a set no verifier uses: _handleAttestSignReq
+// not, so the leader ranked itself over a set no verifier uses: handleAttestSignReq
 // and the BUNDLE_DONE gate both re-resolve at the bundle's own block, as does the
 // indexer when it verifies the anchor. These tests pin the population to the same
 // block as the key.

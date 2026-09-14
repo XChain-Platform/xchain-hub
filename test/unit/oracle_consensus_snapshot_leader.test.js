@@ -87,7 +87,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
         });
     });
 
-    describe('_addrForPubkey()', function () {
+    describe('addrForPubkey()', function () {
         it('resolves via the loaded validator set first', function () {
             expect(oc.addrForPubkey(VALIDATORS_3[1].pubkey.toLowerCase()))
                 .to.equal(VALIDATORS_3[1].addr);
@@ -231,7 +231,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
     });
 
-    it('_leaderSubmissionAddr matches the leader submission by verified pubkey under a different addr binding', function () {
+    it('leaderSubmissionAddr matches the leader submission by verified pubkey under a different addr binding', function () {
         let twinAddr = 'ws://validator-1-twin:10001';
         let subs = new Map([[twinAddr, { prices: [], pubkey: VALIDATORS_3[0].pubkey.toLowerCase() }]]);
         let leader = { addr: VALIDATORS_3[0].addr, pubkey: VALIDATORS_3[0].pubkey.toLowerCase() };

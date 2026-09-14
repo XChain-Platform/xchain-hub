@@ -369,7 +369,7 @@ class SpendGuard {
             if (e && e.code === 'ENOENT'){
                 // A first run and a store that was never writable raise the same
                 // ENOENT, and only the first has earned a fresh allowance. On a
-                // read-only disk _persist() lands no byte, so without this the
+                // read-only disk persist() lands no byte, so without this the
                 // window resets on every restart and the ceiling is unbounded
                 // across them, which is the one shape this file exists to stop.
                 if (this.storeIsWritable()) return;
@@ -393,18 +393,18 @@ class SpendGuard {
             this._spends.push({ t: t, cost: Number.isFinite(c) && c > 0 ? c : this.estSpendUsdCents });
             this.ceiling.record(t);                             // the count ceiling shares every entry
         }
-        this._spends.sort((a, b) => a.t - b.t);                 // _prune() assumes ascending
+        this._spends.sort((a, b) => a.t - b.t);                 // prune() assumes ascending
         if (this._spends.length)
             console.log(this.label + ': restored ' + this._spends.length + ' spend(s) totalling $' +
                         (this.spentInWindow(now) / 100).toFixed(2) + ' from ' + this._statePath +
                         '; the per-window ceiling survives this restart');
     }
 
-    // Could _persist() land a byte here? Permission probe only: it creates nothing
+    // Could persist() land a byte here? Permission probe only: it creates nothing
     // and writes nothing, so the write path keeps its single call site and this
     // stays safe to run during construction.
     //
-    // Walks to the nearest existing ancestor because _persist() mkdirs the tree it
+    // Walks to the nearest existing ancestor because persist() mkdirs the tree it
     // needs, so an absent directory under a writable parent is still a store this
     // hub can write. Anything else (no permission, no reachable parent) is not.
     storeIsWritable(){
@@ -475,7 +475,7 @@ class SpendGuard {
     // Pre-send guard on the store itself. A store that has already refused a write
     // cannot record the spend the caller is about to make, so while it is broken
     // every gate refuses. Re-probes by writing the CURRENT state (idempotent, and the
-    // same bytes _persist() would have written), so a hub whose disk comes back
+    // same bytes persist() would have written), so a hub whose disk comes back
     // resumes on its own rather than needing a restart to notice.
     storeUsable(){
         if (!this._statePath || !this._persistBroken) return true;

@@ -260,7 +260,7 @@ describe('AttestationConsensus: a judge_model leader stamps effective_time at wi
     });
 
     it('leaves a judge_model provider_error round on the proposal stamp, because every hub establishes that one itself', async function () {
-        // No ok proposal anywhere: _maybeAdvanceFromProposals reaches provider_error
+        // No ok proposal anywhere: maybeAdvanceFromProposals reaches provider_error
         // AHEAD of the leader gate, so a follower establishes this outcome locally
         // and its adoption branch only runs while it has no winner of its own. A
         // fresh leader stamp here would sign bytes no follower ever adopts.

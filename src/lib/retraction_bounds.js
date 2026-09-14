@@ -26,7 +26,7 @@
  *
  * Absent (undefined/null) still means open-ended / unfenced, which is the
  * documented older-indexer contract; only SUPPLIED-but-invalid is rejected.
- * The accepted set mirrors RetractionConsensus._normalizeRetraction so a
+ * The accepted set mirrors RetractionConsensus.normalizeRetraction so a
  * retraction this hub applies locally is one its peers will also co-sign.
  */
 

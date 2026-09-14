@@ -15,7 +15,7 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/_readQueue/_rewriteQueue/_removeFromQueue, _getBroadcaster, _myRank,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
  * _computeResponsible, _fetchPendingRequestIds, _resolveBtcIndexerUrl,
  * _defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
@@ -469,7 +469,7 @@ describe('AttestationPublisher: buildAttestationResponseWire', function () {
     });
 });
 
-// ---------- _enqueue / _readQueue / _rewriteQueue / _removeFromQueue --------
+// ---------- _enqueue / readQueue / rewriteQueue / removeFromQueue --------
 
 describe('AttestationPublisher: queue I/O', function () {
 
@@ -487,7 +487,7 @@ describe('AttestationPublisher: queue I/O', function () {
         try { fs.unlinkSync(pub.queuePath); } catch (_) {}
     });
 
-    it('_enqueue appends a JSON line and _readQueue parses it back', function () {
+    it('_enqueue appends a JSON line and readQueue parses it back', function () {
         const entry = { ts: 12345, requestId: '11'.repeat(32), wire: 'ATTEST|1|...' };
         pub._enqueue(entry);
         const entries = pub.readQueue();
@@ -505,12 +505,12 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(entries[1].requestId).to.equal('bb'.repeat(32));
     });
 
-    it('_readQueue returns [] when the file does not exist', function () {
+    it('readQueue returns [] when the file does not exist', function () {
         fs.unlinkSync(pub.queuePath);
         expect(pub.readQueue()).to.deep.equal([]);
     });
 
-    it('_readQueue skips malformed JSON lines', function () {
+    it('readQueue skips malformed JSON lines', function () {
         fs.writeFileSync(pub.queuePath, 'not json\n{"requestId":"aa".repeat(32),"wire":"W"}\n');
         // The second line is also not valid JSON as written; let's write proper content
         fs.writeFileSync(pub.queuePath,
@@ -523,7 +523,7 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(entries[0].requestId).to.equal('aa'.repeat(32));
     });
 
-    it('_readQueue filters entries without requestId or wire', function () {
+    it('readQueue filters entries without requestId or wire', function () {
         fs.writeFileSync(pub.queuePath,
             JSON.stringify({ requestId: 'aa'.repeat(32) }) + '\n' +  // missing wire
             JSON.stringify({ wire: 'W' }) + '\n' +                     // missing requestId
@@ -534,7 +534,7 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(entries[0].requestId).to.equal('bb'.repeat(32));
     });
 
-    it('_rewriteQueue replaces file contents with the given entries', function () {
+    it('rewriteQueue replaces file contents with the given entries', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
         pub.rewriteQueue([{ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' }]);
@@ -543,14 +543,14 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(entries[0].requestId).to.equal('cc'.repeat(32));
     });
 
-    it('_rewriteQueue with empty array clears the file', function () {
+    it('rewriteQueue with empty array clears the file', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.rewriteQueue([]);
         const entries = pub.readQueue();
         expect(entries).to.have.length(0);
     });
 
-    it('_removeFromQueue removes matching IDs and keeps others', function () {
+    it('removeFromQueue removes matching IDs and keeps others', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
         pub._enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
@@ -560,13 +560,13 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(entries[0].requestId).to.equal('cc'.repeat(32));
     });
 
-    it('_removeFromQueue is a no-op for empty drop set', function () {
+    it('removeFromQueue is a no-op for empty drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.removeFromQueue(new Set());
         expect(pub.readQueue()).to.have.length(1);
     });
 
-    it('_removeFromQueue is a no-op for null drop set', function () {
+    it('removeFromQueue is a no-op for null drop set', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.removeFromQueue(null);
         expect(pub.readQueue()).to.have.length(1);
@@ -586,7 +586,7 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' })).to.equal(true);
     });
 
-    it('_rewriteQueue logs error (does not throw) on unwritable path', function () {
+    it('rewriteQueue logs error (does not throw) on unwritable path', function () {
         const errStub = sinon.stub(console, 'error');
         pub.queuePath = '/nonexistent-root/cannot-write.jsonl';
         pub.rewriteQueue([]);
@@ -595,9 +595,9 @@ describe('AttestationPublisher: queue I/O', function () {
     });
 });
 
-// ---------- _getBroadcaster -------------------------------------------------
+// ---------- getBroadcaster -------------------------------------------------
 
-describe('AttestationPublisher: _getBroadcaster', function () {
+describe('AttestationPublisher: getBroadcaster', function () {
 
     it('returns a function wrapping broadcastFn when set', function () {
         const pub = makePublisher();

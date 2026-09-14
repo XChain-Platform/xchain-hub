@@ -106,38 +106,38 @@ describe('Boundary: Consensus (PBFT)', function () {
 
     describe('sequence number handling', function () {
 
-        it('_loadSeq parses integer from DB string', async function () {
+        it('loadSeq parses integer from DB string', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
-        it('_loadSeq defaults to 0 on empty result', async function () {
+        it('loadSeq defaults to 0 on empty result', async function () {
             hub.db.doQuery.resolves([]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
-        it('_loadSeq defaults to 0 on non-numeric value', async function () {
+        it('loadSeq defaults to 0 on non-numeric value', async function () {
             hub.db.doQuery.resolves([{ value: 'not-a-number' }]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
-        it('_loadSeq handles very large sequence number', async function () {
+        it('loadSeq handles very large sequence number', async function () {
             hub.db.doQuery.resolves([{ value: '9007199254740991' }]); // MAX_SAFE_INTEGER
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(Number.MAX_SAFE_INTEGER);
         });
 
-        it('_loadSeq rethrows a DB read fault (fail closed, #2244)', async function () {
+        it('loadSeq rethrows a DB read fault (fail closed, #2244)', async function () {
             // A swallowed read fault used to reset seq to 0, silently reopening
             // the stale-seq replay guard; _loadSeq now fails closed like its
             // sibling _saveSeq.
             hub.db.doQuery.rejects(new Error('DB down'));
             let threw = null;
             try { await consensus.loadSeq(); } catch (e) { threw = e; }
-            expect(threw, 'a DB read fault must propagate out of _loadSeq').to.not.equal(null);
+            expect(threw, 'a DB read fault must propagate out of loadSeq').to.not.equal(null);
             expect(threw.message).to.equal('DB down');
         });
 

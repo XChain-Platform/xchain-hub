@@ -17,7 +17,7 @@ const EventEmitter = require('events');
 const gen          = require('./helpers/generators');
 
 // PeerManager is constructed directly, so we need to mock its dependencies
-// but call _handleInbound, _buildEnvelope, _makeId directly.
+// but call handleInbound, buildEnvelope, _makeId directly.
 const PeerManager = require('../../src/peers/manager');
 
 const SELF_ADDR = 'ws://self-validator:10001';
@@ -36,7 +36,7 @@ describe('Fuzz: PeerManager', function () {
             P2P_PORT:            19999,
             P2P_HOST:            '127.0.0.1'
         }, dbStub);
-        // Initialize the internal structures that _handleInbound uses
+        // Initialize the internal structures that handleInbound uses
         pm.validatorAddr = SELF_ADDR;
         pm.seenIds = new Map();
         pm.peers = new Map();
@@ -57,13 +57,13 @@ describe('Fuzz: PeerManager', function () {
     }
 
     // -----------------------------------------------------------------
-    // _handleInbound(): structural robustness
+    // handleInbound(): structural robustness
     // -----------------------------------------------------------------
 
-    describe('_handleInbound() robustness', function () {
+    describe('handleInbound() robustness', function () {
 
-        it('arbitrary JSON objects never crash _handleInbound', function () {
-            // _handleInbound does JSON.parse then accesses envelope.type etc.
+        it('arbitrary JSON objects never crash handleInbound', function () {
+            // handleInbound does JSON.parse then accesses envelope.type etc.
             // JSON.parse("null") → null, and null.type throws. This tests that
             // object-shaped JSON never crashes (non-object JSON is handled by
             // the non-JSON test below via the catch in JSON.parse).
@@ -89,7 +89,7 @@ describe('Fuzz: PeerManager', function () {
             ), { numRuns: 300 });
         });
 
-        it('non-JSON strings never crash _handleInbound', function () {
+        it('non-JSON strings never crash handleInbound', function () {
             fc.assert(fc.property(
                 fc.string({ minLength: 0, maxLength: 500 }),
                 function (raw) {
@@ -100,7 +100,7 @@ describe('Fuzz: PeerManager', function () {
         });
 
         it('malformed envelopes are always silently dropped (no message emitted)', function () {
-            // Note: _handleInbound does JSON.parse then accesses envelope.type.
+            // Note: handleInbound does JSON.parse then accesses envelope.type.
             // If JSON.parse produces null, number, string, or array, envelope.type
             // throws TypeError. This is a real bug: the try/catch only covers
             // JSON.parse, not the field access. We filter to only test object-shaped
@@ -230,10 +230,10 @@ describe('Fuzz: PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _buildEnvelope()
+    // buildEnvelope()
     // -----------------------------------------------------------------
 
-    describe('_buildEnvelope()', function () {
+    describe('buildEnvelope()', function () {
 
         it('all required fields are always present and correctly typed', function () {
             fc.assert(fc.property(

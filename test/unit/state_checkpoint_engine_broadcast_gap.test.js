@@ -21,7 +21,7 @@
 // "you have every row produced through ts", and state_checkpoints is a HUB_STATE_TABLES
 // member with no FULL_REPAGE re-page, so the mirror then certifies completeness past a
 // committed, quorum-signed checkpoint until the socket happens to reconnect.
-// dropAllForResync is the sanctioned repair; OracleConsensus._finalize is the precedent.
+// dropAllForResync is the sanctioned repair; OracleConsensus.finalize is the precedent.
 
 const { expect }            = require('chai');
 const sinon                 = require('sinon');

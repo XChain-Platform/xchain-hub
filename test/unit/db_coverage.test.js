@@ -68,10 +68,10 @@ describe('Database: extended coverage', function () {
     });
 
     // -----------------------------------------------------------------
-    // _failFastIfFatal()
+    // failFastIfFatal()
     // -----------------------------------------------------------------
 
-    describe('_failFastIfFatal()', function () {
+    describe('failFastIfFatal()', function () {
         ['ER_ACCESS_DENIED_ERROR', 'ER_DBACCESS_DENIED_ERROR',
          'ER_SPECIFIC_ACCESS_DENIED_ERROR', 'ER_PASSWORD_NO_MATCH'].forEach(function (code) {
             it('throws a descriptive error on fatal code ' + code, function () {

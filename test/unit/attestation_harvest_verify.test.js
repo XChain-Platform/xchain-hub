@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 //
 // Stress-sweep 2026-07-08: the PROPOSE-signature harvest in
-// _maybeAdvanceFromProposals must re-verify each proposal's signature over the
+// maybeAdvanceFromProposals must re-verify each proposal's signature over the
 // CANONICAL WINNER (which binds status='ok'), not trust it on a body+meta match.
 // A proposal that matches the winner body but was signed over a different status
 // must NOT be counted, or its signature inflates the quorum and the on-chain

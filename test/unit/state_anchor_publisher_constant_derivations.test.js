@@ -203,7 +203,7 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(pub.v7Bytes(sections(1, 1), hex(64), 1) - one, 'one more attesting signer').to.equal(SIG_PAIR_BYTES);
         });
 
-        it('_v7Bytes predicts the real wire length without the signatures existing yet', function () {
+        it('v7Bytes predicts the real wire length without the signatures existing yet', function () {
             // The split has to size a tail BEFORE the attestation round fills it, so the
             // arithmetic must agree with the builder byte for byte.
             const pub  = mkPub();

@@ -443,7 +443,7 @@ describe('ProviderRegistry', function () {
 
         it('falls back to the current def additional_config when no history exists', function () {
             let reg = new ProviderRegistry(makeHub());
-            // No _seedProviderConfigGenesis call: history is empty.
+            // No seedProviderConfigGenesis call: history is empty.
             let ac = reg.getAdditionalConfig('llm', 100);
             expect(ac.approved_models[0]).to.equal('claude-sonnet-4-6');
         });
@@ -533,7 +533,7 @@ describe('ProviderRegistry', function () {
 
         it('falls back to the live definition when no history exists', function () {
             let reg = new ProviderRegistry(makeHub());
-            // No _seedProviderConfigGenesis call: history is empty.
+            // No seedProviderConfigGenesis call: history is empty.
             expect(reg.getMinStake('http_get', 100)).to.equal('10000');
         });
 
@@ -654,7 +654,7 @@ describe('ProviderRegistry', function () {
 
         it('falls back to the live definition when no history exists', function () {
             let reg = new ProviderRegistry(makeHub());
-            // No _seedProviderConfigGenesis call: history is empty. No worse than the
+            // No seedProviderConfigGenesis call: history is empty. No worse than the
             // pre-anchoring behaviour, which read live unconditionally.
             expect(reg.getConsensusStrategy('llm', 100)).to.equal('judge_model');
         });
@@ -693,7 +693,7 @@ describe('ProviderRegistry', function () {
         });
 
         it('agrees with the live governance apply path on the anchored floor', async function () {
-            // A hub that applies the change live (XChainHub._applyProviderGovernanceChange)
+            // A hub that applies the change live (XChainHub.applyProviderGovernanceChange)
             // and one that restarts and replays it from governance_proposals must resolve
             // the SAME floor at the same block; a floor read by only one of the two paths
             // is a cross-hub divergence.

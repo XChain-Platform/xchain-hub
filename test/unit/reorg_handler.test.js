@@ -129,10 +129,10 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // _hashesWellFormed()
+    // hashesWellFormed()
     // -----------------------------------------------------------------
 
-    describe('_hashesWellFormed()', function () {
+    describe('hashesWellFormed()', function () {
         it('accepts two distinct 64-hex hashes', function () {
             expect(rh.hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
         });
@@ -505,7 +505,7 @@ describe('ReorgHandler', function () {
             expect(pm.broadcast.called, 'no COMMIT broadcast for an unverified round').to.be.false;
 
             rh.checkCommitQuorum(reorgId);
-            // _checkCommitQuorum refuses an unverified round inline, so the refusal is
+            // checkCommitQuorum refuses an unverified round inline, so the refusal is
             // already decided by the time it returns.
             expect(hub.db.doQuery.called, 'no rollback for an unverified round').to.be.false;
         });
@@ -1124,7 +1124,7 @@ describe('ReorgHandler', function () {
         });
     });
 
-    describe('_checkCommitQuorum() rollback failure', function () {
+    describe('checkCommitQuorum() rollback failure', function () {
         it('logs and clears the pending reorg when rollback execution throws', async function () {
             sinon.stub(rh, '_executeRollback').rejects(new Error('db down'));
             rh.pendingReorgs.set('BTC:5:1', {

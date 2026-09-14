@@ -133,7 +133,7 @@ function maxBatchWindowRounds(opts) {
  * canonical coin registry. Never read from env: the key is content-hashed into
  * CONSENSUS_CONFIG_PIN and the indexer reads only the pinned bundle, so an env
  * value here would size the window against a bound no node enforces
- * (XChainHub._oracleMaxAgeSeconds says the same thing for its own quotes).
+ * (XChainHub.oracleMaxAgeSeconds says the same thing for its own quotes).
  *
  * The TIGHTEST bound in the registry wins, not the landing chain's. One batch rail
  * feeds every chain's fee gate: the wire lands on DOGE, but the snapshots it carries
@@ -145,7 +145,7 @@ function maxBatchWindowRounds(opts) {
  * removes the way a one-line registry edit could silently un-fix this.
  *
  * Falls back to the landing chain and then to the same BTC candidates
- * XChainHub._registryOracleMaxAge uses, so an unknown network still resolves rather
+ * XChainHub.registryOracleMaxAge uses, so an unknown network still resolves rather
  * than leaving the rail unbounded.
  *
  * @param {string} network 'mainnet' | 'testnet' | 'regtest'

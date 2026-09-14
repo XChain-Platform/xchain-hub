@@ -94,7 +94,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         expect(oc.locallySkipped.has(ROUND)).to.be.true;
 
         // The federation's PROPOSE re-created the round and it reached commit quorum;
-        // _finalizeCommittedRound persists (ON DUPLICATE KEY UPDATE upgrades the
+        // finalizeCommittedRound persists (ON DUPLICATE KEY UPDATE upgrades the
         // skipped rows) and marks it finalized.
         sinon.stub(oc, '_storeSnapshot').resolves();
         oc.pendingRounds.set(ROUND, {
@@ -113,7 +113,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         expect(oc.finalized.has(ROUND)).to.be.true;
     });
 
-    it('_markLocallySkipped is a no-op once the round is already finalized', function () {
+    it('markLocallySkipped is a no-op once the round is already finalized', function () {
         oc.markFinalized(ROUND);
         oc.markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.false;

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// _broadcastWithRetry double-broadcast guard. A lost ACK on a
+// broadcastWithRetry double-broadcast guard. A lost ACK on a
 // mempool-accepted DOGE anchor must never lead to a rebuilt-PSBT re-broadcast
 // (a double-spend: fresh UTXOs mean both txs can confirm). Covers the
 // pre-broadcast existence check, the ambiguous-send error classification in
@@ -35,7 +35,7 @@ function ambiguousErr(msg){
     return e;
 }
 
-describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
+describe('StateAnchorPublisher: broadcastWithRetry guard', function () {
 
     it('keeps the legacy behavior with no existsCheck: retries pre-send failures with a fresh call, then succeeds', async function () {
         const pub = mkPub();
@@ -142,7 +142,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
 // branch answers neither: an ambiguous (lost-ACK) send pays a real fee against a
 // window that records nothing, and a pause landing during the retry delay stays
 // invisible to the loop.
-describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function () {
+describe('StateAnchorPublisher: broadcastWithRetry spend accounting', function () {
 
     // Cents charged to the rolling window by this call, whatever exit it took.
     function spent(pub){ return pub.spendGuard.spentInWindow(); }
@@ -255,7 +255,7 @@ describe('StateAnchorPublisher: _broadcastWithRetry spend accounting', function 
     });
 });
 
-describe('StateAnchorPublisher: _isAmbiguousSendError classification', function () {
+describe('StateAnchorPublisher: isAmbiguousSendError classification', function () {
     const pub = mkPub();
 
     it('encoder RPC rejections are NOT ambiguous (the node answered, tx refused)', function () {
@@ -344,7 +344,7 @@ describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
     });
 });
 
-describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
+describe('StateAnchorPublisher: findExistingCheckpointAnchor', function () {
 
     const ROW = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 };
 

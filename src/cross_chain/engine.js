@@ -75,7 +75,7 @@ class CrossChainEngine extends EventEmitter {
         // Finalized attestation IDs, bounded FIFO (R2-CCF4): this set is a
         // steady-state dedup guard that only ever grew, so a long-lived hub
         // leaked one entry per finalized attestation forever. Cap it with an
-        // insertion-order ring, mirroring CrossChainDexConsensus._markFinalized.
+        // insertion-order ring, mirroring CrossChainDexConsensus.markFinalized.
         // The window only needs to outlast in-flight rounds for the same id, so
         // a large bound is ample; re-finalization after eviction is harmless
         // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
@@ -224,7 +224,7 @@ class CrossChainEngine extends EventEmitter {
             };
             await this.storeAttestation(attestation);
             // Same post-store bookkeeping the consensus path does in
-            // _checkCommitQuorum. Without it a single-operator hub wrote an
+            // checkCommitQuorum. Without it a single-operator hub wrote an
             // 'attested' row that nothing downstream ever heard about: SwapTracker
             // subscribes to 'attestation:finalized', so its swap_records rows sat at
             // 'initiated' forever, and a repeat request re-ran the whole path instead
@@ -244,7 +244,7 @@ class CrossChainEngine extends EventEmitter {
         let digest = this._digest(attestationId, confirmations);
 
         // Lock the VOTE POPULATION alongside the quorum, from the same snapshot that
-        // sized it, so N's divisor and its numerator read one set (see _countedVotes).
+        // sized it, so N's divisor and its numerator read one set (see countedVotes).
         let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
 
         return new Promise((resolve, reject) => {
@@ -265,7 +265,7 @@ class CrossChainEngine extends EventEmitter {
             };
 
             // Add own PREPARE
-            // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see _addVote).
+            // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see addVote).
             let selfPkOnPropose = this.selfPubkey();
             if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
             this.pendingAttestations.set(attestationId, pending);
@@ -319,7 +319,7 @@ class CrossChainEngine extends EventEmitter {
     // enforces the registry binding on every verified envelope (a registered sender's
     // envelope MUST carry its registered key's signature), so this resolves the identity
     // that actually signed rather than a claim. Own addr falls back to the local identity
-    // for a hub absent from its own registry. Mirrors OracleConsensus._resolveSenderPubkey.
+    // for a hub absent from its own registry. Mirrors OracleConsensus.resolveSenderPubkey.
     resolveSenderPubkey(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         let pk = (registry && typeof registry.get === 'function') ? registry.get(sender) : null;
@@ -609,7 +609,7 @@ class CrossChainEngine extends EventEmitter {
 
         // Use the round's locked quorum (captured at attestation creation),
         // not a live recompute; this keeps every hub in lockstep across the round.
-        // Votes are counted against the round's locked snapshot population (_countedVotes),
+        // Votes are counted against the round's locked snapshot population (countedVotes),
         // so the threshold and the electorate come from one set.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (this.countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
@@ -630,7 +630,7 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
-        // Same locked quorum and same snapshot-gated tally as _checkPrepareQuorum.
+        // Same locked quorum and same snapshot-gated tally as checkPrepareQuorum.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (this.countedVotes(pending, pending.commits) >= quorum) {
             pending.finalized = true;
@@ -682,7 +682,7 @@ class CrossChainEngine extends EventEmitter {
 
     // Persist a quorum-finalized attestation, retrying a transient DB failure
     // with exponential backoff before giving up. Safe to re-run:
-    // _storeAttestation upserts on attestation_id.
+    // storeAttestation upserts on attestation_id.
     async _storeWithRetry(attestation) {
         let delay = this.storeRetryBaseMs;
         for (let attempt = 1; ; attempt++) {

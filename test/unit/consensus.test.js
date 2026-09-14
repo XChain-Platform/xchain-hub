@@ -192,7 +192,7 @@ describe('Consensus (PBFT)', function () {
         });
 
         // The hub hands the SAME array object to five engines
-        // (XChainHub._propagateValidatorSet), so an in-place sort here would
+        // (XChainHub.propagateValidatorSet), so an in-place sort here would
         // reorder a caller's array and leak one engine's canonicalization into
         // the next engine's input.
         it('does not mutate or reorder the caller\'s array', function () {
@@ -218,7 +218,7 @@ describe('Consensus (PBFT)', function () {
 
         // Mixed-case pubkeys for the same key must not sort into two different
         // buckets; the sort key is the lowercased pubkey, matching
-        // Governance._buildValidatorSnapshot and OracleConsensus._getLeader.
+        // Governance.buildValidatorSnapshot and OracleConsensus._getLeader.
         it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set', function () {
             const lower = [
                 { pubkey: 'aa'.repeat(32), addr: 'ws://1:1' },
@@ -310,7 +310,7 @@ describe('Consensus (PBFT)', function () {
 
             let promise = consensus.propose({ cfg: 1 });
 
-            // Wait for the async _lockSnapshot to resolve before checking broadcast
+            // Wait for the async lockSnapshot to resolve before checking broadcast
             await new Promise(r => setImmediate(r));
 
             // Should have broadcast PRE_PREPARE as first call
@@ -464,7 +464,7 @@ describe('Consensus (PBFT)', function () {
         });
 
         // Freshness bound on the leader-stamped height. An ancient but INDEXED height
-        // passes _blockEchoOk and yields a valid snapshot, so without this bound a
+        // passes blockEchoOk and yields a valid snapshot, so without this bound a
         // Byzantine leader grinds the height to size quorum N, to elect itself under
         // (seq + view) % N, and to land below the STAKE_WEIGHTED_QUORUM activation.
         describe('leader-stamped btcBlockHeight freshness bound', function () {
@@ -633,7 +633,7 @@ describe('Consensus (PBFT)', function () {
         it('does NOT apply config twice under a re-entrant COMMIT while the apply is in flight', async function () {
             // Stress-sweep 2026-07-08: `applied` is set only after the async apply
             // resolves, so a second COMMIT reaching quorum mid-apply would re-run
-            // _applyConfig without the _applying in-flight guard.
+            // applyConfig without the _applying in-flight guard.
             let config = { y: 2 };
             let digest = consensus._digest(config);
             let release;
@@ -670,7 +670,7 @@ describe('Consensus (PBFT)', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
-        it('_initiateViewChange increments view and broadcasts', function () {
+        it('initiateViewChange increments view and broadcasts', function () {
             consensus.view = 0;
             consensus.initiateViewChange(5);
             expect(consensus.view).to.equal(1);
@@ -748,8 +748,8 @@ describe('Consensus (PBFT)', function () {
         // -------------------------------------------------------------
         // Validator churn between proposal creation and view-change.
         // View-change acceptance must use the round-locked quorum
-        // (proposal-creation snapshot), exactly like _checkPrepareQuorum
-        // and _checkCommitQuorum (never a live recompute). Otherwise a set
+        // (proposal-creation snapshot), exactly like checkPrepareQuorum
+        // and checkCommitQuorum (never a live recompute). Otherwise a set
         // that grew can stall the election (liveness) and a set that shrank
         // can let too few votes (even a single node) to promote a new leader
         // (safety).
@@ -809,7 +809,7 @@ describe('Consensus (PBFT)', function () {
 
         it('the initiating node recovers the locked quorum from viewChangeQuorums after its proposal is gone', function () {
             // Initiator path: the timeout deletes the proposal before
-            // _initiateViewChange runs, so the initiator can't read
+            // initiateViewChange runs, so the initiator can't read
             // proposal.quorum. It relies on the stashed value.
             consensus.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
@@ -828,13 +828,13 @@ describe('Consensus (PBFT)', function () {
             // Churn: set shrinks to N=3. Live quorum is 1.
             consensus.setValidatorSet(VALIDATORS_3);
 
-            // Own vote was added by _initiateViewChange; add one more (size 2).
+            // Own vote was added by initiateViewChange; add one more (size 2).
             consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.pendingViewChanges.get(1).size).to.equal(2);
             expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW: 2 < locked 5
         });
 
-        it('_initiateViewChange stashes the locked quorum and prunes already-applied rounds', function () {
+        it('initiateViewChange stashes the locked quorum and prunes already-applied rounds', function () {
             consensus.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
             consensus.lastAppliedSeq = 10;
@@ -851,26 +851,26 @@ describe('Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('sequence persistence', function () {
-        it('_loadSeq reads from DB', async function () {
+        it('loadSeq reads from DB', async function () {
             hub.db.doQuery.resolves([{ value: '42' }]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(42);
         });
 
-        it('_loadSeq defaults to 0 on empty result (genuine fresh install)', async function () {
+        it('loadSeq defaults to 0 on empty result (genuine fresh install)', async function () {
             hub.db.doQuery.resolves([]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
         });
 
-        it('_loadSeq fails CLOSED on a read fault, not open at 0 (#970c0586)', async function () {
+        it('loadSeq fails CLOSED on a read fault, not open at 0 (#970c0586)', async function () {
             // A swallowed read fault would leave seq/lastAppliedSeq at 0 and
             // reopen the stale-seq replay guard. Mirror _saveSeq: rethrow.
             consensus.lastAppliedSeq = 5;
             hub.db.doQuery.rejects(new Error('injected DB read fault'));
             let threw = false;
             try { await consensus.loadSeq(); } catch (e) { threw = true; }
-            expect(threw, 'read fault must propagate out of _loadSeq').to.be.true;
+            expect(threw, 'read fault must propagate out of loadSeq').to.be.true;
             expect(consensus.lastAppliedSeq, 'guard baseline must not reset to 0').to.equal(5);
         });
 
@@ -887,10 +887,10 @@ describe('Consensus (PBFT)', function () {
             let threw = false;
             try { await consensus._saveSeq(5); }
             catch (e) { threw = true; expect(e.message).to.equal('db down'); }
-            expect(threw, '_saveSeq must reject so _checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
+            expect(threw, '_saveSeq must reject so checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
         });
 
-        it('_loadSeq rethrows a DB read fault so startup fails closed (#970c0586)', async function () {
+        it('loadSeq rethrows a DB read fault so startup fails closed (#970c0586)', async function () {
             // Was: swallowed the error and left seq at 0, silently reopening the
             // stale-seq replay guard. Now mirrors _saveSeq and rethrows.
             hub.db.doQuery.rejects(new Error('db down'));
@@ -963,7 +963,7 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('routes PRE_PREPARE and swallows handler errors', async function () {
-            // Force _lockSnapshot to throw inside the async handler so the
+            // Force lockSnapshot to throw inside the async handler so the
             // dispatch-site .catch is exercised.
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: () => { throw new Error('boom'); }, getQuorum: () => 3 };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -981,10 +981,10 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // _lockSnapshot + snapshot-quorum propose
+    // lockSnapshot + snapshot-quorum propose
     // -----------------------------------------------------------------
 
-    describe('_lockSnapshot()', function () {
+    describe('lockSnapshot()', function () {
         it('returns the snapshot acquired at the resolved BTC tip', async function () {
             hub.capabilitySnapshot = {
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000 }),
@@ -1347,12 +1347,12 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.get(5).commits.size).to.equal(0);
         });
 
-        it('_checkPrepareQuorum returns when the proposal is resolved', function () {
+        it('checkPrepareQuorum returns when the proposal is resolved', function () {
             consensus.pendingProposals.set(5, { resolved: true });
             expect(() => consensus.checkPrepareQuorum(5)).to.not.throw();
         });
 
-        it('_checkCommitQuorum returns when the proposal is already applied', function () {
+        it('checkCommitQuorum returns when the proposal is already applied', function () {
             consensus.pendingProposals.set(5, { applied: true });
             expect(() => consensus.checkCommitQuorum(5)).to.not.throw();
         });
@@ -1372,7 +1372,7 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('follower apply error (no reject handler): swallows, keeps proposal pending for retry, applied stays false', async function () {
-            // A follower has no resolve/reject handlers. On _applyConfig failure the
+            // A follower has no resolve/reject handlers. On applyConfig failure the
             // proposal must remain in pendingProposals with applied=false so that an
             // external retry or a subsequent COMMIT message can re-trigger the apply
             // once the DB recovers. Dropping the proposal on error here would leave
@@ -1405,7 +1405,7 @@ describe('Consensus (PBFT)', function () {
             expect(consensus._getQuorum()).to.equal(0);
         });
 
-        it('_loadSeq treats a non-numeric stored value as 0', async function () {
+        it('loadSeq treats a non-numeric stored value as 0', async function () {
             hub.db.doQuery.resolves([{ value: 'abc' }]);
             await consensus.loadSeq();
             expect(consensus.seq).to.equal(0);
@@ -1438,7 +1438,7 @@ describe('Consensus (PBFT)', function () {
             hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => WHALE.pubkey });
         }
 
-        describe('_lockSnapshot()', function () {
+        describe('lockSnapshot()', function () {
             it('weighted: locks the source-keyed weight snapshot at/above activation', async function () {
                 hub.network = 'testnet';   // activation height 0
                 hub._resolveBtcLatestBlock = sinon.stub().resolves(1);
@@ -1469,7 +1469,7 @@ describe('Consensus (PBFT)', function () {
             });
         });
 
-        describe('_quorumMet()', function () {
+        describe('quorumMet()', function () {
             it('count mode: vote-set size vs the round-locked quorum', function () {
                 let ctx = { weighted: false, quorum: 3 };
                 expect(consensus.quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(false);
@@ -1485,7 +1485,7 @@ describe('Consensus (PBFT)', function () {
             });
         });
 
-        describe('_resolveSenderPubkey()', function () {
+        describe('resolveSenderPubkey()', function () {
             it('prefers envelope.sig_pubkey (lowercased)', function () {
                 expect(consensus.resolveSenderPubkey({ sender: 'ws://x', sig_pubkey: 'AABB' })).to.equal('aabb');
             });
@@ -1566,7 +1566,7 @@ describe('Consensus (PBFT)', function () {
                 p.commitPubkeys.add(WHALE.pubkey.toLowerCase());
                 consensus.pendingProposals.set(1, p);
                 consensus.checkCommitQuorum(1);
-                await new Promise(r => setImmediate(r));   // _applyConfig is async
+                await new Promise(r => setImmediate(r));   // applyConfig is async
                 expect(hub.applyConfig.calledWith({ cfg: 1 })).to.be.true;
             });
         });
@@ -1574,7 +1574,7 @@ describe('Consensus (PBFT)', function () {
         describe('view-change weighted', function () {
             beforeEach(beWhale);
 
-            it('_initiateViewChange stashes the weighted context + seeds self view-change pubkey', function () {
+            it('initiateViewChange stashes the weighted context + seeds self view-change pubkey', function () {
                 consensus.initiateViewChange(5, 3, true, normValidators());
                 let ctx = consensus.viewChangeQuorums.get(5);
                 expect(ctx.quorum).to.equal(3);
@@ -1615,7 +1615,7 @@ describe('Consensus (PBFT)', function () {
 
     describe('null-snapshot fail-closed gate (#5334)', function () {
 
-        it('_hasDeterministicSnapshot: true only for a real validators array', function () {
+        it('hasDeterministicSnapshot: true only for a real validators array', function () {
             expect(consensus.hasDeterministicSnapshot(null)).to.be.false;
             expect(consensus.hasDeterministicSnapshot({})).to.be.false;
             expect(consensus.hasDeterministicSnapshot({ validators: 'nope' })).to.be.false;
@@ -1693,7 +1693,7 @@ describe('Consensus (PBFT)', function () {
             expect(hub.applyConfig.calledOnceWith({ ok: true })).to.be.true;
         });
 
-        it('_isEmptyFederationSnapshot: true only for a present-but-empty snapshot in a federation', function () {
+        it('isEmptyFederationSnapshot: true only for a present-but-empty snapshot in a federation', function () {
             consensus.minValidators = 4;
             expect(consensus.isEmptyFederationSnapshot(null)).to.be.false;
             expect(consensus.isEmptyFederationSnapshot({ validators: [] })).to.be.true;
@@ -1704,7 +1704,7 @@ describe('Consensus (PBFT)', function () {
 
         it('(a2) propose() throws over an EMPTY federation snapshot instead of applying unilaterally', async function () {
             // A present-but-empty snapshot yields quorum 0 and passes
-            // _hasDeterministicSnapshot, so the null-gate does not catch it. The
+            // hasDeterministicSnapshot, so the null-gate does not catch it. The
             // leader must refuse rather than apply the change with no quorum.
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[1].addr;

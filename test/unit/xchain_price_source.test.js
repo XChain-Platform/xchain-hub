@@ -389,7 +389,7 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
         // that restriction is code rather than an api.js comment, because a stray env var on
         // a validator was a slashing lottery. Same enforced shape as the platform's other
         // consensus-adjacent seams (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS,
-        // XChainHub._oracleMaxAgeSeconds).
+        // XChainHub.oracleMaxAgeSeconds).
         const OVERRIDES = {
             XCHAIN_PRICE_WINDOW_BLOCKS:       '10',
             XCHAIN_PRICE_CONFIRMATION_BUFFER: '0',

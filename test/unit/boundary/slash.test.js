@@ -226,7 +226,7 @@ describe('Boundary: SlashDetector', function () {
     // Repeated deviation: 24h window, fires at length >= 3
     // -----------------------------------------------------------------
 
-    describe('_trackDeviation(): repeated deviation 24h window boundary', function () {
+    describe('trackDeviation(): repeated deviation 24h window boundary', function () {
 
         function repeatedCalls() {
             return hub.db.doQuery.getCalls().filter(

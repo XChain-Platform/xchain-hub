@@ -199,7 +199,7 @@ class OracleConsensus extends EventEmitter {
         // /_handleCommit refused to buffer, so the hub permanently held a NULL
         // price_snapshot for a round the rest of the federation finalized. When the
         // round does reach commit quorum here, _storeSnapshot's ON DUPLICATE KEY
-        // UPDATE upgrades the 'skipped' rows to 'finalized' and _markFinalized moves
+        // UPDATE upgrades the 'skipped' rows to 'finalized' and markFinalized moves
         // the round out of this set. Bounded by the same insertion-order ring as
         // `finalized` (round is not attacker-chosen here -- only this hub's own
         // finalizeRound writes it -- but the ring keeps it from growing for the
@@ -223,7 +223,7 @@ class OracleConsensus extends EventEmitter {
         // attacker-controlled envelope.data, so without this a single Byzantine
         // validator streaming PREPAREs with millions of fresh round numbers inside
         // the 60s TTL grows earlyMessages without bound (memory DoS) and makes every
-        // _pruneEarlyMessages an O(rounds) scan (O(n^2) CPU). Map preserves insertion
+        // pruneEarlyMessages an O(rounds) scan (O(n^2) CPU). Map preserves insertion
         // order, so eviction is FIFO on the oldest round key. 256 >> any legitimate
         // in-flight round concurrency (rounds are ~10 min apart).
         // positiveIntConfig, not `parseInt(env) || 256`, and here it is a HANG, not a
@@ -275,7 +275,7 @@ class OracleConsensus extends EventEmitter {
             this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;
         // Extra slack on top of the round's own timer ladder before the
         // abandonment watchdog declares the round lost. Additive only:
-        // _roundAbandonMs() derives the window from the ladder, so a deployment
+        // roundAbandonMs() derives the window from the ladder, so a deployment
         // that widens ORACLE_FINALIZATION_TIMEOUT widens the watchdog with it and
         // this knob never has to be retuned alongside it.
         this.roundAbandonGraceMs = positiveIntConfig(process.env.ORACLE_ROUND_ABANDON_GRACE_MS,
@@ -320,7 +320,7 @@ class OracleConsensus extends EventEmitter {
     async start() {
         // Seed the in-memory last-finalized-price cache from price_snapshots so a
         // cold-started hub applies the same historical-deviation co-sign band a
-        // warm hub does (seq 4382). Without this, _getLastFinalizedPrice returns
+        // warm hub does (seq 4382). Without this, getLastFinalizedPrice returns
         // null on every pair until the hub itself stores a round, so a freshly
         // restarted hub would co-sign a Byzantine price for any pair it does not
         // locally submit that a long-running hub would withhold on. Local accept-
@@ -343,12 +343,12 @@ class OracleConsensus extends EventEmitter {
         this._reseedIntervalMs = positiveIntConfig(process.env.ORACLE_CLAMP_RESEED_MS, 60000,
             'ORACLE_CLAMP_RESEED_MS');
         this._reseedTimer = setInterval(() => {
-            // In-flight guard, the convention XChainHub._refreshTransportSignerSet uses:
+            // In-flight guard, the convention XChainHub.refreshTransportSignerSet uses:
             // the query is an unbounded round trip and a bare setInterval stacks passes.
             if (this._reseedRunning) return;
             this._reseedRunning = true;
             this.seedLastFinalizedPrices({ quiet: true })
-                .catch(() => { /* _seedLastFinalizedPrices never rejects; belt and braces */ })
+                .catch(() => { /* seedLastFinalizedPrices never rejects; belt and braces */ })
                 .then(() => { this._reseedRunning = false; });
         }, this._reseedIntervalMs);
         if (this._reseedTimer.unref) this._reseedTimer.unref();
@@ -360,7 +360,7 @@ class OracleConsensus extends EventEmitter {
 
     // Populate _lastFinalizedPrices with the most-recently-finalized price per
     // coin_pair from price_snapshots. Mirrors the cache keying in
-    // _updateLastFinalizedPrices (key = coin_pair, value = price string) and the
+    // updateLastFinalizedPrices (key = coin_pair, value = price string) and the
     // "latest finalized = highest round_number" ordering used by hub.getPrice().
     // Fail-soft: an empty table or a query error leaves the cache empty (the prior
     // cold-start behavior), so this can never block hub startup.
@@ -451,7 +451,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Hold a PREPARE/COMMIT that arrived before this hub's pendingRounds entry
-    // exists for the round. Replayed by _drainEarlyMessages once it does.
+    // exists for the round. Replayed by drainEarlyMessages once it does.
     bufferEarlyMessage(round, envelope) {
         let now = Date.now();
         this.pruneEarlyMessages(now);
@@ -505,7 +505,7 @@ class OracleConsensus extends EventEmitter {
         if (this.finalized.has(round)) return;
         // The round reached a durable outcome, so the abandonment watchdog has
         // nothing left to record. Disarmed here as well as in
-        // _clearRoundTracking, because the single-node finalize path never calls
+        // clearRoundTracking, because the single-node finalize path never calls
         // that.
         this.disarmRoundWatchdog(round);
         this.finalized.add(round);
@@ -517,7 +517,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Record a round this hub stored as 'skipped' for a local reason (stress-sweep
-    // #7). Unlike _markFinalized this does NOT block a later federation PROPOSE from
+    // #7). Unlike markFinalized this does NOT block a later federation PROPOSE from
     // processing; it only prevents this hub from re-skipping the same round and lets
     // getSubmissionsInfo/health distinguish a local skip from a true finalize.
     // Bounded by the same insertion-order ring as `finalized`.
@@ -680,7 +680,7 @@ class OracleConsensus extends EventEmitter {
         // count, so the finalization THRESHOLD becomes a function of local reachability:
         // at one height a hub holding a seven-member snapshot needs five votes while a
         // hub whose fetch failed needs three over its live four. The same null also
-        // unfilters the member tally (_countDistinctMembers) and reverts leader election
+        // unfilters the member tally (countDistinctMembers) and reverts leader election
         // to live-set rotation. The under-quorum hub then publishes a PRICE v0 the
         // indexer rejects at its own gate (actions/price.js re-derives the count over
         // getValidatorsByCapability at the same height), so the degradation buys no
@@ -750,11 +750,11 @@ class OracleConsensus extends EventEmitter {
             : this._getQuorum();
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
-            // Mirror the federated _proposeRound guard: _aggregateAll can
+            // Mirror the federated proposeRound guard: _aggregateAll can
             // legitimately return [] while submissions exist (every pair dropped
             // by the price clamp or the 2-source deviation gate). Without this,
             // _storeSnapshot early-returns on empty prices (no finalized AND no
-            // skipped row - a silent drop), yet _markFinalized still resets the
+            // skipped row - a silent drop), yet markFinalized still resets the
             // stall gauges and round:finalized still emits an empty-pair PRICE v0
             // on-chain. Store a durable skipped-round row and stop instead.
             if (aggregated.length === 0) {
@@ -802,7 +802,7 @@ class OracleConsensus extends EventEmitter {
         // this hub takes (leader, elected fallback, or a follower that only waits).
         // Arm the abandonment watchdog before the seat split so all three leave the
         // same durable record when the round dies. Disarmed by
-        // _clearRoundTracking on finalize and on an immediate skip.
+        // clearRoundTracking on finalize and on an immediate skip.
         this.armRoundWatchdog(round, btcBlockHeight, btcBlockTime);
 
         let leader   = this._getLeader(round, memberPubkeys);
@@ -949,13 +949,13 @@ class OracleConsensus extends EventEmitter {
             finalized:      false,
             timer:          null,
             // Snapshot of the validator set at this round's block boundary.
-            // Locked here so _checkPrepareQuorum/_checkCommitQuorum compute
+            // Locked here so checkPrepareQuorum/checkCommitQuorum compute
             // against the same N for the round's full lifecycle, even when
             // on-chain stake state changes mid-round (capability-staking spec §6).
             snapshot:       snapshot || null,
             quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this._getQuorum(),
             // STAKE_WEIGHTED_QUORUM round? Carry the source-keyed validator weights so
-            // _checkPrepareQuorum/_checkCommitQuorum can tally signer stake (the count
+            // checkPrepareQuorum/checkCommitQuorum can tally signer stake (the count
             // quorum above is ignored when weighted).
             weighted:       !!weighted,
             validators:     this.normalizeValidators(snapshot, weighted),
@@ -1066,7 +1066,7 @@ class OracleConsensus extends EventEmitter {
 
     // Normalize a locked snapshot's validators into the source-keyed shape the
     // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
-    // Mirrors Consensus._normalizeValidators, including the truncation carry.
+    // Mirrors Consensus.normalizeValidators, including the truncation carry.
     //
     // SWQ-TRUNC parity: the marker is a plain array property CapabilitySnapshot sets on
     // the SNAPSHOT, so the .map below drops it while meetsStakeThreshold reads it off the
@@ -1088,7 +1088,7 @@ class OracleConsensus extends EventEmitter {
     // Pubkey set of a locked capability snapshot, or null when there is no usable
     // snapshot (indexer unreachable / empty validators). Null disables the
     // membership filter, preserving the legacy graceful-degradation path; the
-    // empty-snapshot case is separately skipped via _isEmptyFederationSnapshot.
+    // empty-snapshot case is separately skipped via isEmptyFederationSnapshot.
     _memberPubkeySet(snapshot) {
         if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
         let set = new Set();
@@ -1313,7 +1313,7 @@ class OracleConsensus extends EventEmitter {
                     ? this.hub.capabilitySnapshot.getQuorum(snap)
                     : this._getQuorum();
                 // Refuse to open a pending round on an empty federation snapshot: quorum
-                // would be 0 and _quorumMet (count mode) returns `size >= 0` = true, so a
+                // would be 0 and quorumMet (count mode) returns `size >= 0` = true, so a
                 // single PREPARE/COMMIT would finalize. A legitimate leader skips such a
                 // round (finalizeRound), so a PROPOSE for one is spurious/Byzantine; drop
                 // it. Genuine single-node hubs receive no PROPOSEs, and a healthy
@@ -1424,10 +1424,10 @@ class OracleConsensus extends EventEmitter {
             // pair fall through to the historical-snapshot bound below.
             // Resolve the proposer's verified pubkey and exclude EVERY addr bound to
             // it, not just envelope.sender: the registry may bind one key to several
-            // addrs (see _addrForPubkey / _leaderSubmissionAddr), so a leader can gossip
+            // addrs (see addrForPubkey / leaderSubmissionAddr), so a leader can gossip
             // its submission from addr A and PROPOSE from addr B. An addr-only exclusion
             // would leave A's price in the reference and let the pair self-validate at
-            // deviation 0. Mirror _leaderSubmissionAddr's pubkey resolution; keep the
+            // deviation 0. Mirror leaderSubmissionAddr's pubkey resolution; keep the
             // raw-addr guard as a belt-and-suspenders fallback for unknown-pubkey addrs.
             let refSubs = new Map();
             let proposerPk = this.resolveSenderPubkey(envelope.sender);
@@ -1521,7 +1521,7 @@ class OracleConsensus extends EventEmitter {
                         // genuine price movement between rounds, while still bounding a Byzantine
                         // leader from injecting values that are orders of magnitude off. The band
                         // is ORACLE_MAX_CHANGE_PER_ROUND, which is what the aggregation clamp
-                        // (_clampToLastFinalized) emits for every pair EXCEPT those carrying a
+                        // (clampToLastFinalized) emits for every pair EXCEPT those carrying a
                         // tighter per-pair override (maxChangeForPair; XCHAIN/USD is at 10%).
                         //
                         // Deliberately NOT maxChangeForPair() here, and this asymmetry is
@@ -1610,7 +1610,7 @@ class OracleConsensus extends EventEmitter {
         // handler; a concurrent handler creating one during the await is caught
         // by the has() re-check here.
         // THE FOLLOWER BOUND on the leader's admission map (section 5.3, C3), the price
-        // rail's twin of CrossChainDexConsensus._admissionBoundHolds. In the admission era
+        // rail's twin of CrossChainDexConsensus.admissionBoundHolds. In the admission era
         // the PROPOSE must carry a map, every chain in it must sit inside this hub's own
         // window above its own tip, and the map must name every chain this federation
         // serves (the price read set is every chain). Refused rather than co-signed on any
@@ -1848,12 +1848,12 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
-        // Same quorum rule as _checkPrepareQuorum (see _quorumMet).
+        // Same quorum rule as checkPrepareQuorum (see quorumMet).
         if (this.quorumMet(pending, pending.commits)) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
             // Fire-and-forget (mirrors the prior promise-chain behavior); durability,
-            // retry, and re-drive-on-failure live in _finalizeCommittedRound.
+            // retry, and re-drive-on-failure live in finalizeCommittedRound.
             this.finalizeCommittedRound(round);
         }
     }
@@ -1864,16 +1864,16 @@ class OracleConsensus extends EventEmitter {
     // (the prior code deleted pending + tracking in the .catch with no retry and no
     // durable record, leaving pending.finalized already true so replayed COMMITs
     // could never re-finalize; the round evaporated on a one-off DB hiccup). Retry
-    // the store a bounded number of times; only on durable success do we _markFinalized,
+    // the store a bounded number of times; only on durable success do we markFinalized,
     // delete round state, and emit. If every attempt fails we do NOT delete round state
     // and we RESET pending.finalized=false, so a later replayed COMMIT re-enters
-    // _checkCommitQuorum and re-drives finalization instead of the round being lost.
+    // checkCommitQuorum and re-drives finalization instead of the round being lost.
     async finalizeCommittedRound(round) {
         let pending = this.pendingRounds.get(round);
         if (!pending) return;
 
         // Record the endorsement breadth the round actually finalized on: distinct
-        // qualified member pubkeys, the same tally _quorumMet counts, not the raw
+        // qualified member pubkeys, the same tally quorumMet counts, not the raw
         // addr-keyed prepare set. A key registered under two addrs (or a registered
         // non-member whose PREPARE joined the set but never the quorum) inflated the
         // persisted, mirrored and API-served validator_count above the endorsers that
@@ -1933,7 +1933,7 @@ class OracleConsensus extends EventEmitter {
 
         // Every store attempt failed. Do NOT delete round state and do NOT leave
         // pending.finalized=true: resetting it lets a subsequent replayed COMMIT
-        // re-enter _checkCommitQuorum and re-drive finalization once the DB recovers,
+        // re-enter checkCommitQuorum and re-drive finalization once the DB recovers,
         // rather than the quorum-signed round being silently and permanently dropped.
         console.error('Oracle: Round ' + round + ' snapshot store failed after ' +
             maxAttempts + ' attempts; retaining round state and re-driving on a timer ' +
@@ -1947,12 +1947,12 @@ class OracleConsensus extends EventEmitter {
     // Re-drive a stalled finalize on our OWN timer, so a quorum-signed round self-heals when
     // the DB comes back (item 4281). Resetting finalized=false above only makes the round
     // re-drivable BY A PEER, and each peer broadcasts COMMIT exactly once behind
-    // pending._commitSent (_checkPrepareQuorum), so nothing is guaranteed to arrive: with the
+    // pending._commitSent (checkPrepareQuorum), so nothing is guaranteed to arrive: with the
     // eviction timer already cleared at commit quorum and no sweep over pendingRounds, a DB
     // outage outlasting the bounded retry above stranded the round in memory forever,
     // unpersisted and unpublished.
     //
-    // Reuses the pending.timer slot so stop() and a later _checkCommitQuorum both tear this
+    // Reuses the pending.timer slot so stop() and a later checkCommitQuorum both tear this
     // down, and clears first so a round can never hold two outstanding retries.
     _armFinalizeRetry(round, pending) {
         let delay = Math.min((pending._finalizeRetryMs || 0) * 2 || FINALIZE_RETRY_BASE_MS,
@@ -1962,7 +1962,7 @@ class OracleConsensus extends EventEmitter {
         pending.timer = setTimeout(() => {
             let p = this.pendingRounds.get(round);
             // Bail when another path already finished the round, or one is mid-flight:
-            // finalized=true is exactly the in-flight claim _checkCommitQuorum makes.
+            // finalized=true is exactly the in-flight claim checkCommitQuorum makes.
             if (!p || p.finalized || this.finalized.has(round)) return;
             // Make the same claim before re-entering, so a peer COMMIT landing now cannot
             // start a second finalize and emit round:finalized twice.
@@ -2245,7 +2245,7 @@ class OracleConsensus extends EventEmitter {
         // Ordered first, and fail-closed by throwing, for the reason StateCheckpointEngine
         // states for its oracle_publish persist: a mirror subscriber must never receive a
         // quorum-signed row it cannot verify. A throw here skips the price_snapshots
-        // INSERT and its broadcast entirely; _finalizeCommittedRound's retry loop then
+        // INSERT and its broadcast entirely; finalizeCommittedRound's retry loop then
         // retains the round and re-drives it, and OracleRound's finalizeRound .catch logs
         // the single-node path.
         //
@@ -2454,7 +2454,7 @@ class OracleConsensus extends EventEmitter {
         }
         // #7: mark as LOCALLY skipped, not finalized, so a legitimate later PROPOSE
         // from the federation still processes and can upgrade the 'skipped' rows to
-        // 'finalized'. _markFinalized would have frozen this round's NULL price here.
+        // 'finalized'. markFinalized would have frozen this round's NULL price here.
         this.markLocallySkipped(round);
         this.clearRoundTracking(round);
         console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
@@ -2623,7 +2623,7 @@ class OracleConsensus extends EventEmitter {
         // Key the signatures map on LOWERCASE pubkey hex (item 5334). This was the one
         // wire-pubkey keying site in the engine that stored the value verbatim, while every
         // structure the map is read beside is normalized: pending.validators (:697/:1235),
-        // _memberPubkeySet, _resolveSenderPubkey, and PriceAggregator's verifier of the same
+        // _memberPubkeySet, resolveSenderPubkey, and PriceAggregator's verifier of the same
         // PRICE v0 proof. Hex decoding is case-insensitive, so a peer sending 'AB..' hex
         // verified and then took a SECOND map slot beside its own 'ab..' entry, duplicating
         // that validator in the sigsArray this hub publishes on the wire. (The weighted
@@ -2669,7 +2669,7 @@ class OracleConsensus extends EventEmitter {
     // The round each cached reference came from, parallel to _lastFinalizedPrices
     // (Map<coin_pair, round>). Kept as a second map rather than boxing the value so
     // every existing reader of _lastFinalizedPrices still sees a plain price string.
-    // Absent for an entry written without a round (see _noteFinalizedPrice).
+    // Absent for an entry written without a round (see noteFinalizedPrice).
     lastFinalizedRoundFor(coinPair) {
         if (!this._lastFinalizedRounds) return null;
         let r = this._lastFinalizedRounds.get(coinPair);
@@ -2713,7 +2713,7 @@ class OracleConsensus extends EventEmitter {
 
     // Record one pair's finalized price, newest round wins. Returns true when the
     // entry moved. The cache means "the price from this pair's HIGHEST finalized
-    // round", which is what _seedLastFinalizedPrices computes; before the stamp the
+    // round", which is what seedLastFinalizedPrices computes; before the stamp the
     // runtime writer disagreed with the seed, so a late _storeSnapshot for an older
     // round (a locally-skipped round stored by a late PROPOSE, a replayed COMMIT)
     // walked the reference BACKWARDS. An unstamped write is trusted as current, so
@@ -2877,7 +2877,7 @@ class OracleConsensus extends EventEmitter {
             rearms: entry.rearms, pending: !!pending,
             reference_block: entry.btcBlockHeight, block_timestamp: entry.btcBlockTime
         });
-        // NOT _markFinalized: the skip is local and reprocessable, so a late
+        // NOT markFinalized: the skip is local and reprocessable, so a late
         // federation quorum still upgrades these rows to 'finalized' (#7).
         this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
             'round abandoned before finalization').catch(err =>
@@ -2932,7 +2932,7 @@ class OracleConsensus extends EventEmitter {
     // True when `addr` (with verified pubkey `pubkey`, may be null) is the
     // round leader. Matches on addr OR verified pubkey so a snapshot-derived
     // leader is still recognized when this hub's addr binding for that key
-    // differs from the one _addrForPubkey picked.
+    // differs from the one addrForPubkey picked.
     isLeaderIdentity(leader, addr, pubkey) {
         if (!leader) return false;
         if (leader.addr && leader.addr === addr) return true;
@@ -2977,7 +2977,7 @@ class OracleConsensus extends EventEmitter {
     // members, or a live peer is connected); a genuine single-node / regtest
     // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
     // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
-    // earlier on both round paths by _hasDeterministicSnapshot.
+    // earlier on both round paths by hasDeterministicSnapshot.
     isEmptyFederationSnapshot(snapshot) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
@@ -2990,8 +2990,8 @@ class OracleConsensus extends EventEmitter {
     // malformed) is not a smaller federation, it is an unknown one, and sizing quorum
     // from local live state at that point makes the finalization threshold a function of
     // this hub's reachability. Present-but-EMPTY is a different case (a real, agreed-upon
-    // zero-qualifier set) and is handled by _isEmptyFederationSnapshot.
-    // Mirrors Consensus._hasDeterministicSnapshot.
+    // zero-qualifier set) and is handled by isEmptyFederationSnapshot.
+    // Mirrors Consensus.hasDeterministicSnapshot.
     hasDeterministicSnapshot(snapshot) {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }

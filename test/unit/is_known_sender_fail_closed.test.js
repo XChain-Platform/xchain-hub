@@ -10,7 +10,7 @@
 
 // Vote admission is keyed on the PROVEN SIGNING KEY, in a union of the
 // chain-effective signer set and the local registry, mirroring what transport
-// auth already does (PeerManager._verifySignature).
+// auth already does (PeerManager.verifySignature).
 //
 // Why: quorum N is CHAIN-derived, so a validator that stakes on chain raises the
 // agreement threshold on every hub immediately. When admission keyed on
@@ -43,7 +43,7 @@ const CHAIN_KEYED = [
 ];
 
 // Governance and ReorgHandler deliberately do NOT appear above. Both derive their
-// quorum denominator from the LOCAL registry (Governance via _buildValidatorSnapshot
+// quorum denominator from the LOCAL registry (Governance via buildValidatorSnapshot
 // off validatorSet, ReorgHandler via _getQuorum off validatorSet), so neither has the
 // chain-denominator/registry-numerator mismatch this change fixes, and neither should
 // start admitting on chain state alone. They keep the registry-keyed predicate.
@@ -240,7 +240,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
     });
 });
 
-describe('Consensus._quorumMet counts signing keys', function () {
+describe('Consensus.quorumMet counts signing keys', function () {
     const Consensus = require('../../src/consensus/pbft');
 
     it('counts the KEY set, not the addr set, when keys are present', function () {

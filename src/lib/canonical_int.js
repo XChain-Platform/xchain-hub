@@ -24,7 +24,7 @@
  * fallback), pass follower validation, collect an honest quorum over bytes
  * containing that spelling, and leave a finalized row whose signatures no
  * verifier can ever reproduce. The row still exists, so the engine's own
- * _rowExists/duplicate guards never re-relay it: the call is stranded for good.
+ * rowExists/duplicate guards never re-relay it: the call is stranded for good.
  *
  * The guard is deliberately on the FOLLOWER side and fail-closed. It leaves the
  * signed canonical format untouched, so it needs no activation flag and no

@@ -13,8 +13,8 @@
 // Regression for the lost-COMMIT / late-PREPARE stall: after this node has
 // broadcast its COMMIT (_commitSent=true), a late PREPARE whose signature
 // crosses the commit quorum must finalize the round. Before the fix,
-// _handlePrepare stored the sig but only called _checkPrepareQuorum (which
-// short-circuits on _commitSent), so _checkCommitQuorum never re-ran and a
+// _handlePrepare stored the sig but only called checkPrepareQuorum (which
+// short-circuits on _commitSent), so checkCommitQuorum never re-ran and a
 // fully-quorate round sat until the round timeout discarded the work.
 
 const sinon                = require('sinon');

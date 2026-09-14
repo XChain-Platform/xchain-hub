@@ -188,7 +188,7 @@ class XChainHub {
         // on a non-consensus hub, its mirror stays empty, and its indexer records every
         // on-chain PRICE batch `invalid: insufficient signer stake`. The pass itself
         // disarms on a hub that DOES run oracle consensus, whose round-finalization
-        // writer already owns those rows; see PriceAggregator._runsOracleConsensus for
+        // writer already owns those rows; see PriceAggregator.runsOracleConsensus for
         // why that decision is deferred to the first pass rather than taken here.
         this.priceAggregator.startPriceCapabilityDerivation();
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
@@ -226,7 +226,7 @@ class XChainHub {
         }
 
         // MUST succeed before the P2P listener opens: a null registry makes
-        // _verifySignature accept any signed envelope from any sender.
+        // verifySignature accept any signed envelope from any sender.
         await this._loadValidatorPubkeys();
 
         // An empty (non-null) registry is fine: it rejects every unknown sender, the
@@ -238,7 +238,7 @@ class XChainHub {
         await this.peerManager.start();
 
         // Option A transport auth: best-effort immediate refresh plus a periodic poll,
-        // inert on a hub with no chain validator set. Rationale at _refreshTransportSignerSet.
+        // inert on a hub with no chain validator set. Rationale at refreshTransportSignerSet.
         let refreshMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_REFRESH_MS) || 30000;
         this.refreshTransportSignerSet().catch(e => console.error('Initial transport signer-set refresh failed:', e));
         this._transportSetTimer = setInterval(() => {
@@ -249,7 +249,7 @@ class XChainHub {
     // Refresh the chain-effective signer set from the on-chain validator snapshot. The
     // set is ADDITIVE to the registry, so transport auth follows key rotation; it is
     // NEVER cleared on an upstream failure, since the registry stays the auth floor.
-    // In-flight guard, the same one _pollOwnStake and _runOwnCapabilityCheck carry: the
+    // In-flight guard, the same one pollOwnStake and runOwnCapabilityCheck carry: the
     // two awaits below are unbounded round trips, so a slow indexer lets the bare
     // setInterval stack passes. Each pass resolves the BTC tip at its own START, so an
     // older slow pass finishing last would write the OLDER block's validator snapshot
@@ -389,7 +389,7 @@ class XChainHub {
         // Queues finalized rounds for DOGE publishing; inert until a transport is wired.
         this.oraclePublisher = new OraclePublisher(this);
         // The single wiring point for ALL on-chain DOGE publishing: StateAnchorPublisher
-        // borrows these hooks via _resolveSigner(). Throws on a broken module.
+        // borrows these hooks via resolveSigner(). Throws on a broken module.
         //
         // Every applySignerHooks call below names the rail its publisher settles on.
         // The operator signer holds ONE key; the loader refuses to wire it into a
@@ -524,7 +524,7 @@ class XChainHub {
         // must never be gated on a DOGE rail. Publishing needs a signer module
         // exporting broadcast(payload) (every ROLLCALL is two-phase P2SH); without
         // one the engine stays sign-and-gossip only and getrollcallstatus says so.
-        // The DOGE hooks are borrowed at send time via _resolveSigner, so this
+        // The DOGE hooks are borrowed at send time via resolveSigner, so this
         // construction does not depend on startOracle having run.
         this.rollcallRound = new RollcallRound(this);
         let rcSignerHooks = loadSignerHooks();
@@ -914,7 +914,7 @@ class XChainHub {
         } catch(e){
             console.error('Error loading validator pubkeys:', e);
             // Fail closed: propagate so startP2P never opens the listener with a null
-            // registry, which would make _verifySignature accept any signed message.
+            // registry, which would make verifySignature accept any signed message.
             // Reload callers already hold a non-null registry, so they just see an error.
             throw e;
         }
@@ -1582,7 +1582,7 @@ class XChainHub {
     // Resolve the latest BTC block index: first hub.db.getChainTip (populated by the
     // indexer's pushChainTip on the network _resolveBtcIndexerUrl picks), then a direct
     // getlatestblock call for stacks with no tip push. Null when both paths fail, and
-    // null when the direct path only re-serves a height _btcDirectTipAcceptable dates
+    // null when the direct path only re-serves a height btcDirectTipAcceptable dates
     // as frozen.
     async _resolveBtcLatestBlock(){
         // A cross-network configs tree makes this throw. Degrade to the documented null
@@ -1672,7 +1672,7 @@ class XChainHub {
         let ageS = Math.floor(Date.now() / 1000) - blockTime;
         if(ageS > maxAge){
             // Info, not warn: a 1200s bound refuses ~13.5% of live mainnet blocks, the
-            // direct path answers one call later, and _btcDirectTipAcceptable is the
+            // direct path answers one call later, and btcDirectTipAcceptable is the
             // gate that warns when the chain has actually stopped.
             console.log('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
                 's old, past MAX_TIP_AGE_S (' + maxAge + '): a long block gap, taking the direct indexer path');
@@ -1753,13 +1753,13 @@ class XChainHub {
         return tip;
     }
 
-    // Per-chain freshness gate for the admission tip. Today's gates (_btcPushedTipFresh,
-    // _btcDirectTipAcceptable) are BTC-only and date a tip against a stored block_time;
+    // Per-chain freshness gate for the admission tip. Today's gates (btcPushedTipFresh,
+    // btcDirectTipAcceptable) are BTC-only and date a tip against a stored block_time;
     // the decoder tip carries no time, so this one dates it against the last height THIS
     // hub observed for that chain and how long ago it observed it.
     //
     // A height that BEATS the last observation proves the chain moved and is always
-    // taken, exactly as _btcDirectTipAcceptable takes an advancing height. Only a height
+    // taken, exactly as btcDirectTipAcceptable takes an advancing height. Only a height
     // that has NOT moved can be dated as frozen, and only after the chain's own window.
     //
     // First sight is accepted and recorded: a tip we have never seen before cannot be
@@ -2048,7 +2048,7 @@ class XChainHub {
     }
 
     // Applies a finalized ATTESTATION_PROVIDER change to the block-anchored provider
-    // history, on the anchoring rationale at _applyCapabilityGovernanceChange above.
+    // history, on the anchoring rationale at applyCapabilityGovernanceChange above.
     async applyProviderGovernanceChange(ev){
         if(!ev || !ev.parameter || !this.providerRegistry) return;
         let providerId = ProviderRegistry.parseAttestationProviderParam(ev.parameter);

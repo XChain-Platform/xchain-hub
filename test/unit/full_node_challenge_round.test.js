@@ -225,7 +225,7 @@ describe('FullNodeChallengeRound', function () {
 
     // ── canonical bytes (CONSENSUS-CRITICAL: must match indexer nodeproof.js) ──
     describe('canonical / wire', function () {
-        it('_verdictCanonical = challenge|epoch|sorted-pass, EQUIV-wrapped on regtest', function () {
+        it('verdictCanonical = challenge|epoch|sorted-pass, EQUIV-wrapped on regtest', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             const cid = 'f'.repeat(64);
             const out = eng.verdictCanonical(cid, 288, [P1, P2]);
@@ -237,7 +237,7 @@ describe('FullNodeChallengeRound', function () {
         // .sort() orders by UTF-16 code unit, which diverges from UTF-8 byte order above
         // the BMP; the indexer VERIFIER (nodeproof.js) is pinned to Buffer.compare, so
         // every producing site here must be too or the two sides sign different bytes.
-        it('_buildVerdictWire sorts PASS by BYTE, not UTF-16 code unit', function () {
+        it('buildVerdictWire sorts PASS by BYTE, not UTF-16 code unit', function () {
             const eng    = new FullNodeChallengeRound(makeHub());
             const wide   = '！';      // UTF-8 EF BC 81
             const astral = '\u{1F600}';   // UTF-8 F0 9F 98 80, UTF-16 lead unit D83D
@@ -249,11 +249,11 @@ describe('FullNodeChallengeRound', function () {
             expect(wire.slice(5, 7)).to.deep.equal([wide, astral]);
         });
 
-        it('_answerCanonical binds challenge + answer', function () {
+        it('answerCanonical binds challenge + answer', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             expect(eng.answerCanonical('cid', 'deadbeef')).to.equal('XNODEANS|cid|deadbeef');
         });
-        it('_buildVerdictWire emits NODEPROOF|0|cid|epoch|n|pass…|m|pk|sig…', function () {
+        it('buildVerdictWire emits NODEPROOF|0|cid|epoch|n|pass…|m|pk|sig…', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             const state = {
                 challengeId: 'cid', epoch: 288,
@@ -414,7 +414,7 @@ describe('FullNodeChallengeRound', function () {
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
             expect(req, 'no sign request on abstain').to.not.exist;
         });
-        it('_claimantSet reads the full_node capability snapshot', async function () {
+        it('claimantSet reads the full_node capability snapshot', async function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: P1 }, { pubkey: P2 }] });
             const eng = new FullNodeChallengeRound(hub);
@@ -422,7 +422,7 @@ describe('FullNodeChallengeRound', function () {
             expect([...set].sort()).to.deep.equal([P1, P2].sort());
             expect(hub.capabilitySnapshot.getSnapshot.calledWith('full_node', 288)).to.equal(true);
         });
-        it('_claimantSet returns null (fail closed) when the snapshot is unresolved (null)', async function () {
+        it('claimantSet returns null (fail closed) when the snapshot is unresolved (null)', async function () {
             // #2646: getSnapshot signals every failure mode by returning null, so an
             // unresolved snapshot must abstain, not degrade to an empty claimant set.
             const hub = makeHub();
@@ -430,13 +430,13 @@ describe('FullNodeChallengeRound', function () {
             const eng = new FullNodeChallengeRound(hub);
             expect(await eng.claimantSet(288)).to.equal(null);
         });
-        it('_claimantSet returns null when the snapshot shape is malformed (validators not an array)', async function () {
+        it('claimantSet returns null when the snapshot shape is malformed (validators not an array)', async function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: 'nope' });
             const eng = new FullNodeChallengeRound(hub);
             expect(await eng.claimantSet(288)).to.equal(null);
         });
-        it('_claimantSet returns a real empty Set for a legitimately empty snapshot', async function () {
+        it('claimantSet returns a real empty Set for a legitimately empty snapshot', async function () {
             // A genuinely empty validators array is distinct from unresolved and
             // must NOT abstain (it yields a real, empty claimant set).
             const hub = makeHub();
@@ -532,7 +532,7 @@ describe('FullNodeChallengeRound', function () {
             // Hold the verdict broadcast open so a second finalize can race the first's await.
             let release = null, calls = 0;
             eng.broadcastFn = () => { calls++; return new Promise(res => { release = () => res({ txid: 'TX' + calls }); }); };
-            const p1 = eng.closeCollection(288);        // leader self-signs → quorum 1 → _maybeFinalize (broadcast held open)
+            const p1 = eng.closeCollection(288);        // leader self-signs → quorum 1 → maybeFinalize (broadcast held open)
             const p2 = eng.maybeFinalize(288);          // a second trigger during the broadcast await must NOT re-broadcast
             release();
             await Promise.all([p1, p2]);
@@ -890,7 +890,7 @@ describe('FullNodeChallengeRound', function () {
             expect(signed, 'must not co-sign a pass list containing a copier').to.not.exist;
         });
 
-        it('_onAnswer rejects a non-64-hex digest', async function () {
+        it('onAnswer rejects a non-64-hex digest', async function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
@@ -898,7 +898,7 @@ describe('FullNodeChallengeRound', function () {
             expect(st.answers.has(P1)).to.equal(false);
         });
 
-        it('_answerDigest binds challenge, pubkey, and answer', function () {
+        it('answerDigest binds challenge, pubkey, and answer', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             const d1 = eng.answerDigest('cid', P1, 'ans');
             expect(d1).to.match(/^[0-9a-f]{64}$/);
@@ -1031,7 +1031,7 @@ describe('FullNodeChallengeRound', function () {
     // building anything, so that branch could never land a verdict. Pin the shape
     // against the encoder's real contract, the same way PublisherDefaultBroadcast.test.js
     // pins it for the four sibling publishers.
-    describe('_broadcastVerdict (encoder fallback)', function () {
+    describe('broadcastVerdict (encoder fallback)', function () {
         function makeMockEncoder() {
             return {
                 createTxArgs: null,

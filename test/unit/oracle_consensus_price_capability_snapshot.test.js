@@ -69,7 +69,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
             prices:         [{ coinPair: 'BTC/USD', price: '100000' }],
             btcBlockHeight: BTC_ANCHOR,
             btcBlockTime:   1700000000,
-            finalized:      true                      // set by _checkCommitQuorum before the store
+            finalized:      true                      // set by checkCommitQuorum before the store
         }, overrides || {});
     }
 

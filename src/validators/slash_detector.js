@@ -263,7 +263,7 @@ class SlashDetector {
     }
 
     // The pairs whose published price for `round` sits ON a clamp bound, i.e. the pairs
-    // OracleConsensus._clampToLastFinalized actually moved. Derived, not carried: no
+    // OracleConsensus.clampToLastFinalized actually moved. Derived, not carried: no
     // field is added to round:finalized, no wire format changes and no query is issued,
     // so accusation sets and SlashGovernance evidence hashes stay byte-identical.
     //
@@ -341,7 +341,7 @@ class SlashDetector {
             // latch keeps a single proposal per crossing while staying
             // retry-safe: an exact `===` fired only at the precise count, so
             // a DB write that failed at the threshold (errors are swallowed
-            // in _recordSlashProposal) could never be retried and the offense
+            // in recordSlashProposal) could never be retried and the offense
             // was lost. The latch is set only after the row persists.
             if (!this.nonParticipationFired.get(v.pubkey)) {
                 let rate = ((entry.history.length - entry.missed) / entry.history.length).toFixed(4);

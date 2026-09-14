@@ -286,7 +286,7 @@ describe('AttestationConsensus: lifecycle', function () {
     });
 });
 
-describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
+describe('AttestationConsensus: _buildCanonical / signCanonical', function () {
 
     afterEach(() => sinon.restore());
 
@@ -303,19 +303,19 @@ describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
             crypto.createHash('sha256').update(body, 'utf8').digest('hex') + 'ok');
     });
 
-    it('_signCanonical returns null when there is no identity', function () {
+    it('signCanonical returns null when there is no identity', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = null;
         expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     });
 
-    it('_signCanonical returns null (not throw) when identity.sign throws', function () {
+    it('signCanonical returns null (not throw) when identity.sign throws', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = { sign: () => { throw new Error('hsm offline'); } };
         expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     });
 
-    it('_signCanonical produces a verifiable signature with a real identity', function () {
+    it('signCanonical produces a verifiable signature with a real identity', function () {
         let id = mkIdentity();
         let hub = createMockHub({ identity: id });
         let c = new AttestationConsensus(hub, makeProviderRegistry());
@@ -326,7 +326,7 @@ describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
     });
 });
 
-describe('AttestationConsensus: _markFinalized ring buffer', function () {
+describe('AttestationConsensus: markFinalized ring buffer', function () {
 
     it('evicts the oldest request id once finalizedMax is exceeded', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
@@ -458,7 +458,7 @@ describe('AttestationConsensus: early-message buffer', function () {
         clock.restore();
     });
 
-    it('_drainEarlyMessages is a no-op when nothing is buffered', function () {
+    it('drainEarlyMessages is a no-op when nothing is buffered', function () {
         expect(() => c.drainEarlyMessages('none')).to.not.throw();
     });
 });
@@ -779,7 +779,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
     });
 
     // Makes the cross-handler dependency above executable rather than prose.
-    // _maybeAdvanceFromProposals returns at once when a winner exists, and the
+    // maybeAdvanceFromProposals returns at once when a winner exists, and the
     // winner-canonical sweep runs only at winner establishment, so a late PROPOSE is
     // recorded but contributes NO signature; only that peer's own PREPARE (or COMMIT)
     // does. A change that moves where signatures are counted must trip this test.
@@ -1161,7 +1161,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
     // while we still hold fewer than `need` proposals, so we adopt before running
     // our own agree()). The adopt path must echo our own endorsing PREPARE and
     // self-add to prepares, or the winner-set early-return in
-    // _maybeAdvanceFromProposals silences this node for the whole round: every
+    // maybeAdvanceFromProposals silences this node for the whole round: every
     // responsible node then caps at R-1 prepares < max(quorum, REDUNDANCY), no
     // COMMIT is ever sent, and the round expires (permanent request loss).
     it('byte_equality adopt: echoes own PREPARE once + self-adds, so the round un-deadlocks', async function () {
@@ -1228,7 +1228,7 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
     });
 });
 
-describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', function () {
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -1566,26 +1566,26 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         expect(c.pending.get(rid).proposals.size).to.equal(before);
     });
 
-    it('_maybeAdvanceFromProposals returns for an unknown request', async function () {
+    it('maybeAdvanceFromProposals returns for an unknown request', async function () {
         await c.maybeAdvanceFromProposals('does-not-exist'); // !pending guard
     });
 
-    it('_maybeAdvanceFromProposals returns when a winner already exists', async function () {
+    it('maybeAdvanceFromProposals returns when a winner already exists', async function () {
         c.pending.set('z', { finalized: false, winner: { body: Buffer.from('x'), meta: '' } });
         await c.maybeAdvanceFromProposals('z'); // winner guard
     });
 
-    it('_checkPrepareQuorum returns early when no winner is set', function () {
+    it('checkPrepareQuorum returns early when no winner is set', function () {
         c.pending.set('z', { winner: null, finalized: false, prepares: new Set(), quorum: 1, redundancy: 1 });
         expect(() => c.checkPrepareQuorum('z')).to.not.throw();
     });
 
-    it('_checkPrepareQuorum returns early when a commit was already sent', function () {
+    it('checkPrepareQuorum returns early when a commit was already sent', function () {
         c.pending.set('z', { winner: {}, finalized: false, _commitSent: true, prepares: new Set() });
         expect(() => c.checkPrepareQuorum('z')).to.not.throw();
     });
 
-    it('_checkCommitQuorum returns early for a finalized round', function () {
+    it('checkCommitQuorum returns early for a finalized round', function () {
         c.pending.set('z', { finalized: true });
         expect(() => c.checkCommitQuorum('z')).to.not.throw();
     });
@@ -1596,7 +1596,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         expect(bare.config).to.deep.equal({});
     });
 
-    it('_maybeAdvanceFromProposals returns when an agree() is already in flight', async function () {
+    it('maybeAdvanceFromProposals returns when an agree() is already in flight', async function () {
         c.pending.set('z', { finalized: false, winner: null, _agreeing: true });
         await c.maybeAdvanceFromProposals('z'); // _agreeing guard
     });
@@ -1643,7 +1643,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
 
     it('broadcasts an empty body_b64 when our own proposal has no body', async function () {
         const RID = '7a'.repeat(16);
-        // A null body makes _signCanonical throw→null and myBody falsy.
+        // A null body makes signCanonical throw→null and myBody falsy.
         await c.propose(RID, roundState(me, [me, p1], null, 'http_get', 2));
         await flush();
         let propose = hub._peerManager.broadcast.getCalls().find(call => call.args[0] === 'ATTEST_PROPOSE');
@@ -2354,7 +2354,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
     // item 6489: the already-marked branch must not build a drop event from an
     // `envelope` this method never takes, so a second teardown for one rid threw
     // ReferenceError out of the bare round-timeout timer (an uncaught hub fault).
-    it('_markTornDown is idempotent and does not throw when the rid is already marked (6489)', function () {
+    it('markTornDown is idempotent and does not throw when the rid is already marked (6489)', function () {
         c.markTornDown(RID);
         expect(() => c.markTornDown(RID)).to.not.throw();
         expect(c.tornDown.has(RID)).to.equal(true);

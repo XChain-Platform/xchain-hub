@@ -29,7 +29,7 @@ const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require(
 const { parseAttestationProviderParam } = require('./provider_registry.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 // Federation-uniform oracle co-sign band: the absolute floor under the slash band
-// (see _validateSlashBandFloor). constants.js requires nothing, so no cycle.
+// (see validateSlashBandFloor). constants.js requires nothing, so no cycle.
 const { ORACLE_DEVIATION_THRESHOLD } = require('../constants.js');
 const { noteDrop } = require('../consensus/diagnostics');
 
@@ -74,7 +74,7 @@ const GOV_SNAPSHOT_MAX_BYTES      = 262144;   // 256 KB serialized
 
 // GOV-VOTE-REPLAY-1: the exact bytes a governance vote is signed over.
 // THREE paths produce these bytes (vote() signs, _handleVote and
-// _ingestResultVotes verify), and a one-byte disagreement between them silently
+// ingestResultVotes verify), and a one-byte disagreement between them silently
 // drops every peer's vote, so they all call this and nothing builds the payload
 // inline. Key order is part of the wire contract: never reorder it.
 //
@@ -149,9 +149,9 @@ class Governance extends EventEmitter {
     }
 
     // Canonicalize the set's ORDER on the way in, so
-    // _getProposalLeader (`validatorSet[hash(proposalId) % N]`) picks the same
+    // getProposalLeader (`validatorSet[hash(proposalId) % N]`) picks the same
     // tally leader on every hub for identical membership. Membership checks
-    // and _buildValidatorSnapshot are unaffected: the former is order-blind and
+    // and buildValidatorSnapshot are unaffected: the former is order-blind and
     // the latter already sorted by pubkey. See validator_order.js.
     setValidatorSet(validators) {
         this.validatorSet = canonicalValidatorOrder(validators);
@@ -416,7 +416,7 @@ class Governance extends EventEmitter {
         let signature = this.identity ? this.identity.sign(votePayload) : '';
 
         // Record the vote (upsert -- allows changing vote during voting period,
-        // but only ever forward: _upsertVote refuses a non-increasing seq)
+        // but only ever forward: upsertVote refuses a non-increasing seq)
         await this.upsertVote(proposalId, voterPubkey, voteChoice, signature, seq);
 
         this.peerManager.broadcast(GOV_VOTE, {
@@ -575,7 +575,7 @@ class Governance extends EventEmitter {
         // Byzantine peer can broadcast a raw GOV_PROPOSE that never went through
         // propose(); without this, every hub records and votes on an out-of-bounds
         // change. Drop it (never record it) so the whole federation ignores it,
-        // matching the MIN_STAKE and block-anchor drops above. _validateChangeBounds
+        // matching the MIN_STAKE and block-anchor drops above. validateChangeBounds
         // is a no-op for non-numeric parameters, so only numeric out-of-bounds
         // proposals are affected.
         //
@@ -772,7 +772,7 @@ class Governance extends EventEmitter {
         // Without this, any one registered validator could broadcast a forged 'passed' that
         // every follower records while the real leader tallies the true outcome locally --
         // a permanent governance split-brain. The tally side is already leader-pinned
-        // (_isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
+        // (isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
         // of its broadcast still passes (sender == leader) and is absorbed by the 0-row guard.
         if (!this._isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'gov_result', sender: envelope.sender, envelope });
@@ -991,10 +991,10 @@ class Governance extends EventEmitter {
     // Absolute floor under the slash band, mirroring the guard SlashDetector's
     // constructor already hard-enforces (SlashDetector.js): a slash band tighter than
     // the federation-uniform oracle co-sign band would slash submissions inside the
-    // band the federation just co-signed. _validateChangeRatio caps only the SIZE of a
+    // band the federation just co-signed. validateChangeRatio caps only the SIZE of a
     // change, so from the 0.05 default a -20% proposal (0.04) cleared every gate,
     // and applying the approved value then bricked the hub at its next restart.
-    // Sits outside _validateChangeRatio's numeric early-returns so a non-numeric or
+    // Sits outside validateChangeRatio's numeric early-returns so a non-numeric or
     // zero CURRENT value cannot skip it. A proposed 0 is refused here although
     // SlashDetector's `parseFloat(...) || DEFAULT` would fall back to the band: the
     // ratio bound already refuses it, and refusing is the safe direction.

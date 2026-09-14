@@ -223,7 +223,7 @@ class OracleRound {
         // these the oracle_submissions audit table grows for the process lifetime and
         // the first operator signal is DB pressure. _submissionsPruneDark is an edge
         // latch, not a counter: the sweep runs every round, so an unlatched warn would
-        // reprint the same fault forever (same posture as OraclePublisher._logSnapshotDark).
+        // reprint the same fault forever (same posture as OraclePublisher.logSnapshotDark).
         this.submissionsPruneFailures = 0;
         this.lastSubmissionsPruneFailureRound = null;
         this._submissionsPruneDark = false;
@@ -406,7 +406,7 @@ class OracleRound {
     // Advance the skip streak on a round that became a durable non-finalized record.
     // Sole authoritative writer of the increment (wired to the consensus
     // 'round:skipped' event in start()), because that event fires once per round from
-    // _markLocallySkipped's idempotent guard, which is precisely the round set
+    // markLocallySkipped's idempotent guard, which is precisely the round set
     // _hydrateFreshnessCounters counts. The three local increments this replaced did
     // not partition the round space the same way: a failed fetch that later also hit
     // the chain-tip-fallback branch counted one round twice, and a round the local
@@ -434,7 +434,7 @@ class OracleRound {
 
         // Surface recently skipped rounds so operators can detect feed-outage gaps
         // straight from the diagnostics RPC. In-memory submission maps only retain
-        // the current and previous round (see _pruneSubmissions), so a missed round
+        // the current and previous round (see pruneSubmissions), so a missed round
         // is otherwise invisible; the durable record lives in price_snapshots
         // (status='skipped', written when a round produces no usable prices).
         // skippedRounds keeps its whole-round semantic (no pair finalized): the
@@ -537,7 +537,7 @@ class OracleRound {
             lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
             // Retention-sweep failures. Additive and count-only: the log carries the
             // driver message, this payload is the public read tier (see
-            // _onSubmissionsPruneFailure). Without these a stalled sweep is visible
+            // onSubmissionsPruneFailure). Without these a stalled sweep is visible
             // only to whoever is tailing the hub log.
             submissionsPruneFailures:          this.submissionsPruneFailures,
             lastSubmissionsPruneFailureRound:  this.lastSubmissionsPruneFailureRound,
@@ -1166,7 +1166,7 @@ class OracleRound {
     }
 
     // Bound the durable oracle_submissions audit table to the retention window.
-    // The in-memory _pruneSubmissions only trims the Map; without this the table
+    // The in-memory pruneSubmissions only trims the Map; without this the table
     // grows monotonically. Keyed to round_number (indexed) so the DELETE is cheap
     // and deterministic; keeps the most recent submissionsRetentionRounds rounds.
     // oracle_submissions is diagnostic-only (finalized values live in

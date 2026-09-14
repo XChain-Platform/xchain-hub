@@ -24,7 +24,7 @@
  *
  * The hub reads it at the three sites that key on the reduced identity: the cross-pubkey
  * dedup guard (RewardTracker.recordAnchorReward), the follower co-sign cross-check
- * (StateAnchorPublisher._verifyArchiveAgainstLocal) and the archive batch_seq stamp.
+ * (StateAnchorPublisher.verifyArchiveAgainstLocal) and the archive batch_seq stamp.
  *
  ********************************************************************/
 

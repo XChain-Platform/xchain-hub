@@ -239,7 +239,7 @@ class StateAnchorPublisher {
         //   plus four attestation pairs once the tail is filled. THAT RESERVE is why
         //   the value is 6000 and not something nearer 8000. It binds chunk 0 only (a
         //   v2 continuation carries ~30 B of overhead), but one uniform slice keeps
-        //   _splitChunks trivial.
+        //   splitChunks trivial.
         //   Tuner rule: this is the knob to LOWER when the federation grows. A v1
         //   with a 5+5 quorum needs chunkMaxBytes <= ~5860, a 7+7 quorum <= ~5080.
         //   Raising it costs fewer v2 txs but overflows the head first.
@@ -284,7 +284,7 @@ class StateAnchorPublisher {
         //     <<  36 blocks (~6h)  <<  ANCHOR_INTERVAL_MS (24h)
         // Left inequality: a healthy but slow leader is never overtaken, so the
         // federation does not pay DOGE twice for the same checkpoint (it also keeps
-        // the on-chain verification wait in _handleBundleDone well inside one rank).
+        // the on-chain verification wait in handleBundleDone well inside one rank).
         // Right inequality: ranks 1-3 unlock at ~6/12/18h, so up to three backups
         // still get a slot inside one publishing cycle and a dead rank 0 cannot
         // cost the federation a whole day of anchoring. Anything in ~6..144 blocks
@@ -516,7 +516,7 @@ class StateAnchorPublisher {
         // as the (rank-unlocked) elected archive leader for that batch_seq AND its
         // signature over the archive canonical verifies (the rank ladder alone is
         // wire-keyed, so the signature is what proves the sender holds the key it
-        // names), and consulted in _handleFinalized to authenticate the
+        // names), and consulted in handleFinalized to authenticate the
         // FINALIZED sender. The archive election is keyed on election_block (the
         // BTC tip at archive time), which the FINALIZED canonical does NOT carry,
         // so it cannot be re-derived at finalize time; this binds it from the
@@ -526,7 +526,7 @@ class StateAnchorPublisher {
         this._observedArchiveLeadersCap = 256;
         // Checkpoint IDENTITY observed per batch_seq (from the SIGN_REQ, recorded
         // alongside the leader). FINALIZED carries only batch_seq, not the
-        // checkpoint identity getanchoraction needs, so _handleFinalized reads this
+        // checkpoint identity getanchoraction needs, so handleFinalized reads this
         // to verify the batch's archive checkpoint landed on DOGE before mirroring
         // the anchor_archive reward (mirrored below the archive-reward
         // flag-day; derived on-chain from the ANCHOR v1 tail at/above it). Identity only,
@@ -535,7 +535,7 @@ class StateAnchorPublisher {
         // Archive MEMBERSHIP observed per (batch_seq, proposer), from a SIGN_REQ body
         // this hub decompressed, CRC-checked and byte-verified against its own rows for
         // the co-sign decision. The XANCFIN canonical commits to (batch_seq, txid, match
-        // COUNT) and never to WHICH rows, so _handleFinalized holds the announced id
+        // COUNT) and never to WHICH rows, so handleFinalized holds the announced id
         // lists to this set before anything is stamped. Recorded ONLY where the body was
         // already parsed, so no hub decompresses an extra archive on the p2p path.
         this._observedArchiveContents = new Map();
@@ -564,7 +564,7 @@ class StateAnchorPublisher {
         // verification, which always queries the DOGE indexer: every ANCHOR (for a
         // BTC/LTC/DOGE checkpoint) is a DOGE transaction, and only the DOGE
         // decoder+indexer decode the P2SH anchor payload (a raw getrawtransaction
-        // cannot bind the tx to the checkpoint). Unset -> _verifyAnchorOnChain
+        // cannot bind the tx to the checkpoint). Unset -> verifyAnchorOnChain
         // returns 'no-indexer' and the receiver paths abstain (fail closed); wire
         // DOGE_INDEXER_URL fleet-wide before deploy.
         this.indexers = {};
@@ -591,7 +591,7 @@ class StateAnchorPublisher {
         // drill-venue property to plan around, not a divergence.
         this.dogeConfirmations = coins.resolveConfirmations(cfg, this.network).DOGE;
 
-        // XANC_BUNDLE_DONE is broadcast the instant _broadcastWithRetry
+        // XANC_BUNDLE_DONE is broadcast the instant broadcastWithRetry
         // returns a txid, i.e. while the DOGE anchor is still in the mempool, but the
         // receiver only stamps once that anchor is buried dogeConfirmations deep (60 on
         // DOGE, ~1 hour). The announcement is one-shot, so at announce time every peer
@@ -633,7 +633,7 @@ class StateAnchorPublisher {
         // row per DOGE-spending broadcast and never removed one, so they grew for the
         // life of the deployment while their oracle_published_rounds sibling was swept.
         // Only CONFIRMED rows are pruned, and only past a floor derived from
-        // anchorIntentTtlMs; see _pruneAnchorMarkers for both invariants. 0 disables
+        // anchorIntentTtlMs; see pruneAnchorMarkers for both invariants. 0 disables
         // pruning; garbage or a negative value falls back to the default.
         this.anchorMarkerRetentionMs = parseInt(process.env.ANCHOR_MARKER_RETENTION_MS ||
                                                 cfg.ANCHOR_MARKER_RETENTION_MS, 10);
@@ -812,7 +812,7 @@ class StateAnchorPublisher {
         if(this._attestRound && !this._attestRound.done && this._attestRound.resolve)
             this._attestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting publish
         this._attestRound = null;
-        // Mirror the _attestRound teardown for its archive twin: _runArchiveAttestationRound
+        // Mirror the _attestRound teardown for its archive twin: runArchiveAttestationRound
         // is an awaited promise settled only by an unref'd timer, so without this a stop()
         // mid-round leaves _publishArchive hung during shutdown.
         if(this._archiveAttestRound && this._archiveAttestRound.timer) clearTimeout(this._archiveAttestRound.timer);
@@ -940,7 +940,7 @@ class StateAnchorPublisher {
             // confirms, the whole balance is change sitting unconfirmed behind it.
             // Defer the flush instead of building on it; rows stay pending, no marker
             // is armed, no intent is recorded, and the next wake retries as a normal
-            // flush. Fail soft, see _confirmedUtxoAvailable.
+            // flush. Fail soft, see confirmedUtxoAvailable.
             if(!(await this.confirmedUtxoAvailable(signer))){
                 this.noteNoConfirmedUtxo('this flush');
                 return { anchored: [], archive: 'none', skipped: 'no_confirmed_utxo' };
@@ -1027,7 +1027,7 @@ class StateAnchorPublisher {
     }
 
     // This hub's position in `order`, or -1 when it is absent (or has no identity).
-    // Read-only: telemetry only, never a gate. _mayPublish stays the single
+    // Read-only: telemetry only, never a gate. mayPublish stays the single
     // publish decision so a reporting bug can never authorize a spend.
     _myRank(order){
         if(!this.identity || !order || order.length === 0) return -1;
@@ -1107,12 +1107,12 @@ class StateAnchorPublisher {
             }
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
             // Split BEFORE electing, so each bundle the split produces runs its own
-            // election at its own SNAPSHOT_BLOCK (_publishBundle re-resolves the set there).
+            // election at its own SNAPSHOT_BLOCK (publishBundle re-resolves the set there).
             // Sizing uses the max-height oracle_publish set as the attestation tail: exact
             // for an unsplit bundle, whose block IS this one, and a close estimate for a
             // split group at an older block, where the set of that height sizes the round.
             // Size the tail the bundle will ACTUALLY carry. Below the anchor-reward
-            // flag-day _publishBundle attaches none at all, so charging a tail there would
+            // flag-day publishBundle attaches none at all, so charging a tail there would
             // refuse sections that anchor fine today; at/above it an unmet attestation
             // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
             let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
@@ -1153,7 +1153,7 @@ class StateAnchorPublisher {
             // Elect over the oracle_publish set at THIS bundle's own snapshot block, never
             // the caller's network-wide MAX. A byte-budget split can leave a lagging chain's
             // sections in a group whose MAX is older, and BOTH follower verifiers resolve the
-            // set at the group's own block (_handleAttestSignReq, the BUNDLE_DONE gate), as
+            // set at the group's own block (handleAttestSignReq, the BUNDLE_DONE gate), as
             // does the indexer when it verifies the anchor. Ranking the leader over a
             // different population than every verifier is a divergence, not a preference:
             // the attest round refuses to co-sign, BUNDLE_DONE is rejected, and an anchor
@@ -1261,11 +1261,11 @@ class StateAnchorPublisher {
             }
             let payload = this._buildV7Payload(group, me, attestSigs);
             // Last byte-budget gate, on the payload that will actually be signed and sent.
-            // _splitBundle sizes an ESTIMATED tail before the attestation round runs, and
+            // splitBundle sizes an ESTIMATED tail before the attestation round runs, and
             // after a split it estimates at the caller's network-wide oracle_publish set
             // rather than this group's own block, so the estimate can come in low.
             // Downstream the encoder answers an oversize action with a RangeError that
-            // _broadcastWithRetry burns its whole retry budget on, after the anchor
+            // broadcastWithRetry burns its whole retry budget on, after the anchor
             // intents are already recorded and then withdrawn. Refuse here instead:
             // counted, loud, and ahead of the intent loop, with the rows left pending.
             let payloadBytes = Buffer.byteLength(payload, 'utf8');
@@ -1306,7 +1306,7 @@ class StateAnchorPublisher {
                 // (anchor_txid stays NULL) and do NOT stamp, reward, or announce.
                 // Stamping NULL keeps the rows matching the selector so the bundle
                 // re-anchors and re-burns DOGE every flush, and peers ignore a null-txid
-                // announcement anyway (_handleBundleDone early-returns on !d.txid).
+                // announcement anyway (handleBundleDone early-returns on !d.txid).
                 // The intents are NOT withdrawn: an empty return from broadcast_tx is not
                 // proof nothing was sent, so the markers hold the sections for the TTL.
                 console.error('StateAnchorPublisher: v0 bundle broadcast returned no txid for ' + chains + '/' +
@@ -1315,7 +1315,7 @@ class StateAnchorPublisher {
             }
             for(let s of group) await this.markAnchorSent(s, txid);
             // First-writer-wins per section, exactly like the peer path in
-            // _applyBundleDone. In the documented failover race a hub may already have
+            // applyBundleDone. In the documented failover race a hub may already have
             // stamped a peer's txid; without the IS NULL guard, completing our own
             // in-flight publish would overwrite it and leave the fleet holding divergent
             // anchor_txid bytes.
@@ -1327,7 +1327,7 @@ class StateAnchorPublisher {
             // Name the rank this bundle was published at. A backup-rank publish is
             // otherwise byte-identical to a healthy leader publish in every observable
             // signal, so a dead rank-0 stays invisible while the ladder absorbs its work.
-            // Computed from the SAME `order` _mayPublish decided on, so the label can
+            // Computed from the SAME `order` mayPublish decided on, so the label can
             // never disagree with the decision that produced the spend.
             let myRank = this._myRank(order);
             // Gate the publish counters and the log verb on whether this call actually
@@ -1373,7 +1373,7 @@ class StateAnchorPublisher {
                         // The identity the mined-anchor proof re-SELECTs and re-verifies
                         // against: the FIRST section (chain-ascending), which carries the
                         // same txid as every other. The attestation ROW's chain is 'DOGE'
-                        // (D21), resolved in _recordRewardAttestation from the reward type.
+                        // (D21), resolved in recordRewardAttestation from the reward type.
                         chain: String(group[0].chain), network: network,
                         blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
                         txid: txid, anchorVersion: 0,
@@ -1456,7 +1456,7 @@ class StateAnchorPublisher {
     //     tables in HUB_STATE_TABLES. It makes no hub-to-hub federation claim, so replacing it
     //     with one would trade a true sentence for a false one on a consensus table.
     //   - The XANCPUB quorum a receiver re-verifies is the SAME quorum XANCPUB_SIGN already put
-    //     on the wire, verified the same way (_handleAttestSign). The receiver mints money rows,
+    //     on the wire, verified the same way (handleAttestSign). The receiver mints money rows,
     //     so it re-verifies against its OWN oracle_publish set at snapshot_block and re-proves
     //     the anchor mined, and never trusts the wire for either.
     // Ordering came out as the indexer's PRE-ARMING BLOCKERS note pinned it: the mined-anchor
@@ -1504,7 +1504,7 @@ class StateAnchorPublisher {
     // mirror subscribers. Never throws: the row is durable, so a delivery failure must not
     // fail the write or block federation. A throw from the read-back and a zero-row result
     // are the same undeliverable-row event, and dropAllForResync is the sanctioned repair
-    // (StateCheckpointEngine._broadcastRowOrResync and CrossChainCallEngine._mirrorCallRow
+    // (StateCheckpointEngine._broadcastRowOrResync and CrossChainCallEngine.mirrorCallRow
     // are the in-repo precedents, each a local copy by house convention). Without it the
     // heartbeat watermark certifies completeness past a committed attestation row an
     // attached indexer never received, and that table mints COLLECT-spendable rewards, so
@@ -1579,7 +1579,7 @@ class StateAnchorPublisher {
     //      snapshot_block with the canonical rebuilt LOCALLY from the tuple and the FROZEN
     //      amount, so a forged, short, or amount-inflated quorum verifies against nothing;
     //   4. the mined anchor, re-proved by handing the entry to the SAME deferred queue the
-    //      publisher uses, so the row is written only once _verifyAnchorOnChain binds that
+    //      publisher uses, so the row is written only once verifyAnchorOnChain binds that
     //      exact txid at that exact ANCHOR version against our own checkpoint row, buried
     //      dogeConfirmations deep on our own DOGE indexer.
     // A receiver never re-broadcasts and never federates its own write (`federate` unset),
@@ -1740,7 +1740,7 @@ class StateAnchorPublisher {
     //
     // ONE queue covers both halves of the rail: a receiver's re-proof of a peer's reward
     // attestation is handed to this same queue rather than to one of its own
-    // (_handleRewardAttestation step 4), so the two 36-block terms of the budget are the
+    // (handleRewardAttestation step 4), so the two 36-block terms of the budget are the
     // same constant seen twice and this one read counts both.
     deferredRewardAttestFloor(nowMs){
         let now   = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
@@ -1765,7 +1765,7 @@ class StateAnchorPublisher {
     // the announceRetryMs timer and at the head of every flush, beside the BUNDLE_DONE and
     // FINALIZED drains.
     //
-    // Only 'verified' writes: _verifyAnchorOnChain binds the exact txid AND the exact
+    // Only 'verified' writes: verifyAnchorOnChain binds the exact txid AND the exact
     // ANCHOR version, so neither a never-mined transaction nor a different anchor for the
     // same checkpoint can stand in as proof. A decided CONTENT verdict ('rejected:mismatch'
     // / ':version') is terminal for this txid and drops the entry: both are checked only
@@ -1795,7 +1795,7 @@ class StateAnchorPublisher {
                 continue;
             }
             try {
-                // Re-SELECT our OWN checkpoint row (never a cached copy): _verifyAnchorOnChain
+                // Re-SELECT our OWN checkpoint row (never a cached copy): verifyAnchorOnChain
                 // byte-matches the decoded on-chain payload against it.
                 let rows = await this.db.getStateCheckpointByChain(String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq));
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
@@ -1812,7 +1812,7 @@ class StateAnchorPublisher {
                     // held the entry, and nothing retried. Retrying is safe and idempotent
                     // (INSERT IGNORE on uq_reward_tuple), the existing announceRetryTtlMs TTL
                     // bounds it, and a persistence failure is logged distinctly from the
-                    // re-verification catch below, which is about _verifyAnchorOnChain.
+                    // re-verification catch below, which is about verifyAnchorOnChain.
                     try {
                         await this.recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
                                                             Number(e.snapshotBlock), e.publisher, e.attestSigs,
@@ -1916,7 +1916,7 @@ class StateAnchorPublisher {
     // the attestation round filled the tail, and the oversize payload died at the
     // encoder's RangeError instead of being refused here - a checkpoint silently off
     // chain, with bundlesOversize still reading 0. That asymmetry rode on a degraded
-    // ATTEST_SIG_COUNT 0 fallback that no longer exists: _publishBundle DEFERS an unmet
+    // ATTEST_SIG_COUNT 0 fallback that no longer exists: publishBundle DEFERS an unmet
     // publisher-attestation quorum, because the indexer's v0 parser rejects a count-0
     // bundle outright. The caller passes 0 only below the anchor-reward flag-day, where
     // the payload genuinely carries no tail.
@@ -1952,7 +1952,7 @@ class StateAnchorPublisher {
     // indexer's Anchor._rewardCanonical (a divergence forks the derived reward row). The
     // amount is the FROZEN consensus constant (ar.ANCHOR_REWARD_AMOUNT, read from the twin
     // module, NOT the operator-tunable ANCHOR_REWARD_PER_PUBLISH env). The EQUIV wrapper uses
-    // the bundle's NETWORK (b.network) like _canonical/_archiveCanonical, NOT this.network,
+    // the bundle's NETWORK (b.network) like _canonical/archiveCanonical, NOT this.network,
     // and a distinct 'XANCPUB|...' roundId gives the attestation its own equivocation family so
     // a validator that signs both the checkpoint root canonical and this reward attestation in
     // the same round is never falsely slashable.
@@ -1991,7 +1991,7 @@ class StateAnchorPublisher {
         // _resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
         // deterministic snapshot is unavailable), which is right for the callers that
         // must not build on a divergent set. Here it would abort the whole anchor: this
-        // round is awaited inside _publishBundle, whose catch only logs the failure and
+        // round is awaited inside publishBundle, whose catch only logs the failure and
         // drops the bundle, so a transient snapshot outage would withhold the ANCHOR
         // itself rather than just its reward. Degrade instead, byte-identically to the
         // snapCount === 0 abstain below: no attestation, a v0 with ATTEST_SIG_COUNT 0
@@ -2049,7 +2049,7 @@ class StateAnchorPublisher {
             // distinct-source stake, identical to the archive round.
             let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
             // Preserve the truncation flag so the weighted reward quorum
-            // (_checkAttestQuorum via meetsStakeThreshold) fails closed on an over-cap
+            // (checkAttestQuorum via meetsStakeThreshold) fails closed on an over-cap
             // oracle_publish snapshot, identical to the archive round. Without this the
             // publisher-attestation quorum fail-OPENS on a truncated set, emitting a v0
             // whose reward the indexer would drop (stranded credit).
@@ -2122,7 +2122,7 @@ class StateAnchorPublisher {
 
         // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block,
         // hash-ordered by the bundle election key) and confirm the proposer is
-        // rank-unlocked on the SAME failover ladder _publishBundle used, bounded to our own
+        // rank-unlocked on the SAME failover ladder publishBundle used, bounded to our own
         // BTC tip (anti-spam; the binding security is the byte-match below).
         let eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
@@ -2200,14 +2200,14 @@ class StateAnchorPublisher {
     }
 
     // Run the archive publisher-attestation round for a batch THIS hub is publishing
-    // (mirrors _runPublisherAttestationRound for the archive leg). The signing/quorum set
+    // (mirrors runPublisherAttestationRound for the archive leg). The signing/quorum set
     // is resolved at the wrapper checkpoint's snapshot_block, the SAME set the indexer
     // (anchor.js formats[1]) verifies the attestation against.
     async runArchiveAttestationRound(cp, batchSeq, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
         // Same fail-closed resolver, same reason to degrade rather than propagate (see
-        // _runPublisherAttestationRound): this round is awaited in _publishArchive AFTER
+        // runPublisherAttestationRound): this round is awaited in _publishArchive AFTER
         // the wrapper co-sign quorum has already been collected, so a throw here discards
         // a completed round instead of publishing the count-0 head the archive's own
         // liveness note promises. Abstaining matches the snapCount === 0 branch below.
@@ -2315,7 +2315,7 @@ class StateAnchorPublisher {
 
     // Follower: co-sign the ARCHIVE publisher attestation ONLY when the proposer is an
     // archive leader we OBSERVED pass the election/rank check for THIS batch_seq (the same
-    // observed-leader authority _handleFinalized trusts), the attestation binds the
+    // observed-leader authority handleFinalized trusts), the attestation binds the
     // proposer itself as the earner, and we hold oracle_publish at the batch's wrapper
     // snapshot_block. The canonical is rebuilt from OUR OWN stashed checkpoint identity
     // and the frozen ARCHIVE_REWARD_AMOUNT, so neither a wire-supplied snapshot_block nor
@@ -2519,7 +2519,7 @@ class StateAnchorPublisher {
         // cursor: every hub writes its own state_checkpoints rows (_acceptFinalized on
         // both the leader and follower paths), so id ordering is local insertion order,
         // which MATCH_KEYS already calls "the hub-assigned mirror cursor" and
-        // _verifyArchiveAgainstLocal deletes before byte-comparing. The selected row
+        // verifyArchiveAgainstLocal deletes before byte-comparing. The selected row
         // feeds _archiveElectionKey, which advertises itself as "deterministic +
         // identical on every hub"; keying that on a locally-ordered pick let two hubs
         // elect over different keys for the same batch_seq (divergent rank orders, a
@@ -2538,10 +2538,10 @@ class StateAnchorPublisher {
 
         // Durable at-most-once for the ARCHIVE spend, the twin of the
         // anchor_published_checkpoints gate in _publishPendingCheckpoints. A crash
-        // between an accepted v1/v2 send and _backfillBatch leaves every source row
+        // between an accepted v1/v2 send and backfillBatch leaves every source row
         // pending. The archive path does read mined state, through getarchiveanchor
         // rather than getanchoraction, but only at the send: _publishArchive passes
-        // _findExistingArchiveAnchor to _broadcastWithRetry, and that lookup answers from
+        // findExistingArchiveAnchor to broadcastWithRetry, and that lookup answers from
         // parsed on-chain actions, so a send still sitting in the DOGE mempool reads as
         // absent. Without this marker the next flush therefore rebuilds the whole batch
         // under a fresh seq and re-pays for the head plus every chunk. Checked here,
@@ -2649,8 +2649,8 @@ class StateAnchorPublisher {
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         // An UNRESOLVED (empty) signing set is not a quorum of one: defer the round,
-        // exactly as the two publisher-attestation rounds already do (_runPublisherAttestationRound
-        // / _runArchiveAttestationRound both abstain on snapCount === 0). The election gate
+        // exactly as the two publisher-attestation rounds already do (runPublisherAttestationRound
+        // / runArchiveAttestationRound both abstain on snapCount === 0). The election gate
         // above fails closed on an empty set, but it reads a DIFFERENT resolver at a
         // DIFFERENT height (_getActiveOraclePublishPubkeys @ electionBlock vs
         // _resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
@@ -2686,8 +2686,8 @@ class StateAnchorPublisher {
         // the v1 'invalid: insufficient valid signatures (0/1)', while full-parse recovery
         // throws on the same wrapper - and this hub would dequeue the settled rows behind
         // it. The two sibling attestation rounds prove membership before their own
-        // singleton fast path (_runPublisherAttestationRound /
-        // _runArchiveAttestationRound); this round holds the same guard.
+        // singleton fast path (runPublisherAttestationRound /
+        // runArchiveAttestationRound); this round holds the same guard.
         let signatures = new Map();
         if(signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
@@ -2770,7 +2770,7 @@ class StateAnchorPublisher {
     // The batch_seq is deliberately NOT in the key. It came from
     // _getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own
     // cross_chain_matches / cross_chain_calls / validator_rewards, with no consensus
-    // step: it is only fleet-uniform while _backfillBatch plus the XANC_FINALIZED gossip
+    // step: it is only fleet-uniform while backfillBatch plus the XANC_FINALIZED gossip
     // have landed everywhere. Once two hubs' tables differ by one missed back-fill they
     // keyed the SAME wrapper differently, so each ranked itself 0 under its own key and
     // both published (two archives at batches 26 and 27 for one wrapper, observed live),
@@ -2845,7 +2845,7 @@ class StateAnchorPublisher {
         let weighted = swq.isStakeWeightedQuorumActive(Number(block), net);
         // Gate on snapshot PRESENCE, not non-emptiness, matching the three sibling
         // resolvers (CrossChainDexEngine/CrossChainCallEngine/StateCheckpointEngine)
-        // and the _coerceValidators contract: an actual array (even length 0) is a
+        // and the coerceValidators contract: an actual array (even length 0) is a
         // legitimate snapshot; only a malformed shape yields null. Gating on
         // length > 0 conflated "legitimately empty at this block" with "indexer
         // unavailable" and routed the former into the per-hub-local table, so two
@@ -3004,7 +3004,7 @@ class StateAnchorPublisher {
     // appends `batch_seq` to the v0 round id so the v0 (per-block) and v1 (archive)
     // canonicals (which legitimately share checkpoint_seq) get DISTINCT equivocation
     // keys; otherwise an honest validator that signs both is falsely slashable (R-4 fix).
-    // Nests _rawCanonicalCheckpoint (not canonicalCheckpoint) so the header lands outside.
+    // Nests rawCanonicalCheckpoint (not canonicalCheckpoint) so the header lands outside.
     archiveCanonical(cp, batchSeq, count, crc, totalChunks){
         let raw = StateCheckpointEngine.rawCanonicalCheckpoint(cp) + '|' +
                   String(batchSeq) + '|' + String(count) + '|' + crc + '|' + String(totalChunks);
@@ -3194,7 +3194,7 @@ class StateAnchorPublisher {
     // rows as one that arrives already buried.
     async applyBundleDone(d, sender, rows){
         // Key each stamp on checkpoint_seq exactly as the publisher's own stamp does:
-        // the section list is part of the signed _bundleDoneCanonical, so binding seq here
+        // the section list is part of the signed bundleDoneCanonical, so binding seq here
         // stops one BUNDLE_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
         // same height.
         for(let row of rows){
@@ -3258,7 +3258,7 @@ class StateAnchorPublisher {
     //   expect.rejectVersions - a set of ANCHOR versions to REJECT when no single
     //                    exact version is expected (the BUNDLE_DONE checkpoint path passes
     //                    {1,2}, the archive-carrying set ARCHIVE_VERSIONS names in
-    //                    _findExistingCheckpointAnchor, so an archive anchor cannot pose
+    //                    findExistingCheckpointAnchor, so an archive anchor cannot pose
     //                    as a checkpoint anchor).
     // Without `expect` this only proves "this checkpoint is anchored at depth".
     //
@@ -3374,8 +3374,8 @@ class StateAnchorPublisher {
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         // Fail CLOSED on an unresolved election set, the same way the LEADER does
         // at the identical condition (_startArchiveRound: "empty oracle_publish set,
-        // deferring round (fail closed)") and the same way _handleFinalized and
-        // _handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
+        // deferring round (fail closed)") and the same way handleFinalized and
+        // handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
         // every membership tie to the federation, so during an unresolved window a
         // NON-MEMBER could solicit co-signatures from the historical wrapper set and
         // assemble a duplicate v1 under a batch_seq of its own choosing: honest CONTENT
@@ -3425,7 +3425,7 @@ class StateAnchorPublisher {
         // chunk reassembly for both batches. Refuse, and say so on the wire so the
         // proposer can converge instead of re-proposing the same stale seq every flush.
         //
-        // Placed BEFORE _recordObservedArchiveLeader on purpose: recording it would
+        // Placed BEFORE recordObservedArchiveLeader on purpose: recording it would
         // authorize this leader's FINALIZED to stamp our rows under the stale seq.
         // Refusing costs no liveness - the proposer re-derives above our seq and comes
         // back - and a hub that is genuinely BEHIND (its next seq is at or below the
@@ -3463,10 +3463,10 @@ class StateAnchorPublisher {
         let local = await this.db.getStateCheckpointByChainAndNetwork(cp.chain, cp.network, Number(cp.block_index));
         if(!local || local.length === 0) return;
         let mine = this.cpFromRow(local[0]);
-        // Rootless compare, deliberately: _archiveCanonical nests
-        // _rawCanonicalCheckpoint by construction and _cpFromRow omits the SPV root
+        // Rootless compare, deliberately: archiveCanonical nests
+        // rawCanonicalCheckpoint by construction and cpFromRow omits the SPV root
         // fields, so this guard binds identity fields only. Pinning to
-        // _rawCanonicalCheckpoint keeps it immune to the presence-gated root suffix.
+        // rawCanonicalCheckpoint keeps it immune to the presence-gated root suffix.
         if(StateCheckpointEngine.rawCanonicalCheckpoint(mine) !== StateCheckpointEngine.rawCanonicalCheckpoint(cp)) return;
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
@@ -3482,7 +3482,7 @@ class StateAnchorPublisher {
         if(!archive || !Array.isArray(archive.matches) || archive.matches.length !== Number(d.match_count)) return;
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
         // decides which oracle_publish group the completeness check requires, and `mine`
-        // is byte-matched to the wire cp above (snapshot_block rides _rawCanonicalCheckpoint).
+        // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
             console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
@@ -3510,7 +3510,7 @@ class StateAnchorPublisher {
     //
     // `wrapperSnapshotBlock` is the archive wrapper checkpoint's snapshot_block (the
     // caller's own byte-matched row, never the archive body), needed because the
-    // completeness check below has to know which oracle_publish group _buildArchive
+    // completeness check below has to know which oracle_publish group buildArchive
     // was obliged to emit for the wrapper itself.
     async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
         for(let am of archive.matches){
@@ -3702,7 +3702,7 @@ class StateAnchorPublisher {
         // delegated by two sources contributes TWO rows; a pubkey-only map collapsed
         // them to one, making archived.size < resolved.length so `resolved.length !==
         // archived.size` rejected every archive containing a multi-source key (the
-        // co-sign stall). The builder (_buildArchive) already emits both rows, so the
+        // co-sign stall). The builder (buildArchive) already emits both rows, so the
         // verifier is the odd one out. Inert below SWQ, where source='' and there is one
         // row per pubkey (key becomes `pubkey|`).
         let groups = new Map();              // block|capability -> Map<pubkey|source, {amount, source}>
@@ -3723,12 +3723,12 @@ class StateAnchorPublisher {
         // group and refuses the wrapper or the affected match/call: a quorum-signed but
         // permanently unrecoverable anchor stranding settled cross_chain rows.
         //
-        // Re-derive the group list exactly as the honest builder does (_buildArchive
+        // Re-derive the group list exactly as the honest builder does (buildArchive
         // `wants`) and seed any missing key with an EMPTY map, so the loop below judges it
         // with the same `resolved.length !== archived.size` rule as every present group.
         // Seeding rather than rejecting outright is deliberate: a group whose set OUR OWN
         // resolution also finds empty is legitimately absent from an honest archive
-        // (_buildArchive emits one row per member, so an empty set emits nothing), and
+        // (buildArchive emits one row per member, so an empty set emits nothing), and
         // rejecting it would stall co-signing on honest rounds.
         let wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
             .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
@@ -3960,7 +3960,7 @@ class StateAnchorPublisher {
         // which this process could not know (the re-election allocated a different one).
         // Chunks broadcast under any other number are orphans: they would carry the
         // archive bytes but attach to no head, and the batch would never reassemble.
-        // Only the CHUNK addressing moves. Local bookkeeping (_backfillBatch, the
+        // Only the CHUNK addressing moves. Local bookkeeping (backfillBatch, the
         // FINALIZED announcement, the reward's round reference) stays on round.batchSeq,
         // because peers observed this round's SIGN_REQ under that seq and authenticate
         // the FINALIZED against it; nothing binds the local seq to match_batch_seq.
@@ -4008,7 +4008,7 @@ class StateAnchorPublisher {
         // unrecoverable hole. Treat it exactly like a lost chunk: keep the rows
         // pending so a later round re-archives them under a fresh batch seq.
         //
-        // _quorumVerified is the SOLE verdict. A `round.validators.length === 1`
+        // quorumVerified is the SOLE verdict. A `round.validators.length === 1`
         // short-circuit used to sit in front of it, justified by the claim that the
         // indexer stores single-validator anchors as recoverable 'unverified'. It does
         // not: anchor.js reaches 'unverified' only when it mirrors NO oracle_publish
@@ -4018,7 +4018,7 @@ class StateAnchorPublisher {
         // recovery throws on the same wrapper - so the bypass dequeued settled rows
         // behind an anchor neither the live indexer nor recovery can ever reconstruct.
         // The legitimate single-node federation is unaffected: a sole member that signed
-        // its own archive clears _quorumVerified on its own (bftQuorumOrSingle(1, 1) === 1).
+        // its own archive clears quorumVerified on its own (bftQuorumOrSingle(1, 1) === 1).
         // A weighted singleton whose stake is zero, blank-sourced or truncated now fails
         // closed, which is parity with anchor.js reaching the same verdict on the same
         // bytes, not a regression: the rows stay pending instead of being stranded.
@@ -4092,7 +4092,7 @@ class StateAnchorPublisher {
                 // the anchor_archive reward (only when the attestation tail actually landed).
                 // Same confirm-then-write rule as the v0 bundle site. onChainValid above
                 // is a signature-quorum verdict, not proof the v1 head was mined, and `txid` is
-                // the mempool txid _broadcastWithRetry returned, so the row is queued until the
+                // the mempool txid broadcastWithRetry returned, so the row is queued until the
                 // head is buried at version 1.
                 if(attested){
                     let mePk = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
@@ -4121,7 +4121,7 @@ class StateAnchorPublisher {
         if(!d || !Array.isArray(d.matches)) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(null);
-        // Fail CLOSED on an empty set (see _handleBundleDone): membership is the only tie
+        // Fail CLOSED on an empty set (see handleBundleDone): membership is the only tie
         // to a federation member, so an empty set must reject. Otherwise a forged
         // FINALIZED backfills real matches as archived and strands them for recovery.
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
@@ -4157,7 +4157,7 @@ class StateAnchorPublisher {
         // arbitrary local rows archived with attacker-chosen statuses, stranding
         // them from every future archive round. Re-verify the announced content
         // against OUR OWN rows before stamping (receiver-side only, no
-        // wire-format change; same authority argument as _verifyArchiveAgainstLocal:
+        // wire-format change; same authority argument as verifyArchiveAgainstLocal:
         // every hub writes finalized rows, so the local DB is authoritative).
         // Rejecting is always safe: back-fill is local bookkeeping and missed
         // rows simply re-archive under a fresh batch seq.
@@ -4177,7 +4177,7 @@ class StateAnchorPublisher {
         // TERMINAL row forever, so rows no archive on DOGE ever carried are suppressed
         // and unreachable to full-parse recovery. Hold the announcement to the archive
         // body this hub decompressed and byte-verified for its co-sign. An honest leader
-        // announces exactly round.matchIds, the same array _buildArchive serialized, so
+        // announces exactly round.matchIds, the same array buildArchive serialized, so
         // this costs no liveness; a stray row leaves the WHOLE back-fill unstamped and
         // the rows re-archive under a fresh seq.
         //
@@ -4200,7 +4200,7 @@ class StateAnchorPublisher {
         // (`batch_seq IS NULL OR archived_status <> status`) then skip those rows, which
         // for a row already at its TERMINAL status means forever. An elected-yet-
         // Byzantine leader that announces real pending rows carrying their true current
-        // statuses passes _verifyFinalizedAgainstLocal (the statuses genuinely match) and
+        // statuses passes verifyFinalizedAgainstLocal (the statuses genuinely match) and
         // can suppress them with an archive it never published.
         //
         // An honest leader NEVER emits that shape: _publishArchive rewrites every match
@@ -4213,8 +4213,8 @@ class StateAnchorPublisher {
         // closing that needs the announced txid verified on DOGE at depth. That gate
         // cannot simply be inlined here - the FINALIZED is broadcast at 0 confirmations
         // (mempool) exactly like XANC_BUNDLE_DONE, so it needs the same defer-and-re-verify
-        // queue (_deferBundleDone / _drainDeferredBundleDone), plus an archive-head version SET
-        // {1, 6} in _verifyArchiveCheckpointOnChain, which today hardcodes v1 because it
+        // queue (deferBundleDone / drainDeferredBundleDone), plus an archive-head version SET
+        // {1, 6} in verifyArchiveCheckpointOnChain, which today hardcodes v1 because it
         // only runs below the flag-day.
         let terminalAnnounced = (d.matches || []).some(m => m && m.status !== '__partial__') ||
                                 calls.some(c => c && c.status !== '__partial__') ||
@@ -4321,7 +4321,7 @@ class StateAnchorPublisher {
         if(d.txid && !partial && Number.isFinite(Number(d.snapshot_block))){
             // d.snapshot_block is an unsigned wire field used as the mirrored
             // reward's block-scoped source-resolution key. Bound it by the same
-            // re-derivation _verifyArchiveAgainstLocal applies to archived reward
+            // re-derivation verifyArchiveAgainstLocal applies to archived reward
             // rows: the credited pubkey must hold oracle_publish AT that block
             // (a fabricated block index fails the membership resolution).
             let setAtSnap = await this._getActiveOraclePublishPubkeys(Number(d.snapshot_block));
@@ -4340,7 +4340,7 @@ class StateAnchorPublisher {
                 // anchor - the elected leader records its own reward directly, so a
                 // co-signer's mirror is redundant (INSERT IGNORE-deduped) and the
                 // rows re-archive under a fresh seq if the checkpoint later confirms.
-                // d.txid is bound into the signed _finalizedCanonical and names the v1
+                // d.txid is bound into the signed finalizedCanonical and names the v1
                 // archive head, so it is passed through to bind the specific archive
                 // transaction, not merely "some anchor for this checkpoint".
                 // At/above the archive-reward flag-day the reward is DERIVED
@@ -4353,7 +4353,7 @@ class StateAnchorPublisher {
                 // the locally stashed identity; re-deriving from the hub's own network
                 // double-credited on an unscoped hub (network===''), forking the
                 // COLLECT-spendable rail live-vs-recovered. When no local identity is
-                // stashed, _verifyArchiveCheckpointOnChain returns 'no-checkpoint-id'
+                // stashed, verifyArchiveCheckpointOnChain returns 'no-checkpoint-id'
                 // and nothing is recorded, so the fallback only feeds the flag-day gate.
                 let cpId  = this.observedArchiveCheckpoint(Number(d.batch_seq));
                 let cpNet = cpId ? String(cpId.network) : this.network;
@@ -4436,7 +4436,7 @@ class StateAnchorPublisher {
     // sentinel (keeps the row archive-eligible; benign) or byte-equal our row's
     // current status. A row we do NOT hold passes: its UPDATE is a no-op and a
     // late joiner has no copy of earlier history. Announced rewards must at
-    // least be anchor-rail rows (same bar _verifyArchiveAgainstLocal sets);
+    // least be anchor-rail rows (same bar verifyArchiveAgainstLocal sets);
     // their UPDATE only ever stamps batch_seq on rows we already derived.
     async verifyFinalizedAgainstLocal(matches, calls, rewards){
         for(let m of (matches || [])){
@@ -4482,7 +4482,7 @@ class StateAnchorPublisher {
         if(!set){ set = new Set(); this._observedArchiveLeaders.set(batchSeq, set); }
         set.add(String(pubkey).toLowerCase());
         // Stash the batch's checkpoint identity (first observation wins). Identity
-        // ONLY (chain/network/block_index/checkpoint_seq) - _handleFinalized
+        // ONLY (chain/network/block_index/checkpoint_seq) - handleFinalized
         // re-SELECTs our OWN checkpoint row from it before verifying, so a Byzantine
         // wire cp can never inject foreign hashes; a wrong identity just fails to
         // resolve locally and the reward mirror abstains.
@@ -4517,7 +4517,7 @@ class StateAnchorPublisher {
     }
 
     // Record the member ids of an archive body this hub verified against its own rows
-    // (called from _handleSignReq once _verifyArchiveAgainstLocal passes, so the parse
+    // (called from _handleSignReq once verifyArchiveAgainstLocal passes, so the parse
     // is already paid for). Keyed by PROPOSER, because the failover ladder legitimately
     // unlocks several ranks for one batch_seq and each proposes its own body. UNIONED
     // across proposals from the same proposer: a round that times out stamps nothing, so
@@ -4577,11 +4577,11 @@ class StateAnchorPublisher {
 
     // Verify the checkpoint an archive batch is bound to really landed on DOGE, for
     // the FINALIZED reward gate. Resolves the stashed identity to OUR OWN
-    // state_checkpoints row (never the wire), then defers to _verifyAnchorOnChain.
+    // state_checkpoints row (never the wire), then defers to verifyAnchorOnChain.
     // Returns 'no-checkpoint-id' (never saw the SIGN_REQ) / 'absent-local' (we do
     // not hold the referenced checkpoint) as ABSTAIN reasons, else the
-    // _verifyAnchorOnChain verdict. `announcedTxid` is the FINALIZED's txid, which is
-    // bound into the signed _finalizedCanonical and is the txid of the v1 ARCHIVE HEAD
+    // verifyAnchorOnChain verdict. `announcedTxid` is the FINALIZED's txid, which is
+    // bound into the signed finalizedCanonical and is the txid of the v1 ARCHIVE HEAD
     // (_publishArchive broadcasts the v1 payload first, then the v2 continuation
     // chunks). Binding it, plus the archive-head version set {1}, closes the archive
     // half of XANC-ELECTED-FORGE-1: proving the CHECKPOINT is anchored is not enough,
@@ -4772,7 +4772,7 @@ class StateAnchorPublisher {
 
     // Maps a state_checkpoints row to the 9 identity fields only; deliberately OMITS
     // state_root / state_root_version / block_merkle_root / block_merkle_version.
-    // The co-sign guards that consume this compare via _rawCanonicalCheckpoint, so the
+    // The co-sign guards that consume this compare via rawCanonicalCheckpoint, so the
     // omission is safe; adding the root fields to only one operand of a guard would flip
     // it fail-closed post-flag-day. Never carry roots here one-sided.
     cpFromRow(row){
@@ -5243,7 +5243,7 @@ class StateAnchorPublisher {
         }
         // Everything above is pre-send (building/signing; no money has moved).
         // Only broadcast_tx has a side effect, so only ITS failures get the
-        // ambiguity classification _broadcastWithRetry keys the no-double-
+        // ambiguity classification broadcastWithRetry keys the no-double-
         // broadcast guard on.
         try {
             return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
@@ -5257,7 +5257,7 @@ class StateAnchorPublisher {
     // DOGE indexer whether this checkpoint already has a mined, non-invalid
     // anchor. Returns { exists: true, txid } / null (definitively absent);
     // THROWS when undetermined (no indexer wired, unreachable, error reply), so
-    // _broadcastWithRetry can distinguish "absent" from "can't tell". Any depth
+    // broadcastWithRetry can distinguish "absent" from "can't tell". Any depth
     // counts: even a 1-conf anchor spent our DOGE, so re-broadcasting would
     // double-spend regardless of whether it is deep enough to 'verify' yet.
     //
@@ -5274,7 +5274,7 @@ class StateAnchorPublisher {
     // An archive-head answer is not "absent" either: a real checkpoint anchor
     // can sit BENEATH it at a lower action_index, and calling that absent
     // re-broadcasts and double-spends. So narrow with the RPC's exact-version
-    // filter (the same one _verifyAnchorOnChain binds) across the checkpoint
+    // filter (the same one verifyAnchorOnChain binds) across the checkpoint
     // versions and decide on that, rather than on the unfiltered top row.
     // (The archive path has no such query surface, so it pairs the
     // ambiguous-error defer with its own durable marker,
@@ -5317,7 +5317,7 @@ class StateAnchorPublisher {
                 // would answer every one of these with the same archive head, and
                 // accepting that is the adoption this whole branch exists to stop.
                 // Undetermined (throw), never "absent": a false absent re-broadcasts,
-                // and it would also drop _broadcastWithRetry's ambiguous-send defer.
+                // and it would also drop broadcastWithRetry's ambiguous-send defer.
                 if(r && r.exists && Number(r.version) !== Number(v))
                     throw new Error('getanchoraction ignored the version filter (asked v' + v +
                                     ', answered v' + r.version + '); cannot rule out an existing anchor');
@@ -5358,10 +5358,10 @@ class StateAnchorPublisher {
     }
 
     // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1 head + its v2
-    // chunks), the archive-path sibling of _findExistingCheckpointAnchor above.
+    // chunks), the archive-path sibling of findExistingCheckpointAnchor above.
     //
     // The archive path publishes BEFORE it records: _publishArchive broadcasts the head
-    // and every continuation chunk, and only then does _backfillBatch stamp the rows. A
+    // and every continuation chunk, and only then does backfillBatch stamp the rows. A
     // crash in that window leaves the rows pending, so the next flush re-elects exactly
     // the same matches and pays for the whole archive a second time. The checkpoint
     // path's guard could not be reused, because the identity every archive read is keyed
@@ -5399,7 +5399,7 @@ class StateAnchorPublisher {
         // A decoded-invalid head anchored nothing, so it is not an archive we can adopt
         // or attach chunks to. Same verdict as the checkpoint path.
         if(/^invalid/i.test(String(res.status || ''))) return null;
-        // Adopting needs a txid: it is what _backfillBatch stamps and what the FINALIZED
+        // Adopting needs a txid: it is what backfillBatch stamps and what the FINALIZED
         // announcement carries, and a null txid drives the '__partial__' sentinel, which
         // would leave the rows pending and adopt the same txid-less head again every
         // flush (a livelock, not a saving). Treat it as absent and republish instead.
@@ -5452,7 +5452,7 @@ class StateAnchorPublisher {
     // The existence check above closes a lost ACK only where it can SEE the earlier send,
     // and getanchoraction resolves a txid through mined blocks, so an anchor sitting in
     // the DOGE mempool reads as DEFINITIVELY ABSENT. Everything else that knows a send
-    // went out is in memory (_broadcastWithRetry's lastErr / ambiguous-poll loop) and
+    // went out is in memory (broadcastWithRetry's lastErr / ambiguous-poll loop) and
     // `anchor_txid` is stamped only after the broadcast returns. A crash in between
     // therefore leaves the row still matching the `anchor_txid IS NULL` selector with
     // nothing anywhere recording that DOGE already paid, and the next flush rebuilds a
@@ -5544,8 +5544,8 @@ class StateAnchorPublisher {
     // getanchoraction, which serves CHECKPOINT_VERSIONS only. getarchiveanchor answers
     // "did we already publish THIS batch" from the batch's own content (checkpoint
     // identity + crc + count + author), and _publishArchive passes it to
-    // _broadcastWithRetry as the head's existsCheck via _findExistingArchiveAnchor, plus
-    // _findExistingArchiveChunk per continuation chunk. What that lookup cannot see is a
+    // broadcastWithRetry as the head's existsCheck via findExistingArchiveAnchor, plus
+    // findExistingArchiveChunk per continuation chunk. What that lookup cannot see is a
     // send that has not mined yet: it answers from parsed on-chain actions, so an archive
     // still in the DOGE mempool reads as definitively absent. This marker covers exactly
     // that window, together with the ambiguous-send defer, and it is read before the
@@ -5612,7 +5612,7 @@ class StateAnchorPublisher {
     // ----- Retention for the two anchor marker tables -----
     //
     // Both tables appended one row per DOGE-spending broadcast and removed one only on
-    // a definitive pre-send failure (_withdrawAnchorIntent / _withdrawArchiveIntent,
+    // a definitive pre-send failure (withdrawAnchorIntent / withdrawArchiveIntent,
     // both `sent_at IS NULL`), so a confirmed marker persisted for the life of the
     // deployment while the oracle_published_rounds sibling was swept.
     //
@@ -5631,7 +5631,7 @@ class StateAnchorPublisher {
     //      either table goes through _anchorIntentHolds, which is false for any marker
     //      whose intent_at is older than the TTL, so a row this DELETE can reach is one
     //      that already changes no decision. anchor_published_archives is stricter
-    //      still: _getLiveArchiveIntent only ever selects `settled_at IS NULL`, so a
+    //      still: getLiveArchiveIntent only ever selects `settled_at IS NULL`, so a
     //      settled row is not read at all.
     //
     // The cutoff is measured on intent_at, not sent_at, because intent_at is the column

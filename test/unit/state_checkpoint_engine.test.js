@@ -391,7 +391,7 @@ describe('StateCheckpointEngine', function () {
     });
 
     it('confirmations offset: checkpoints the tip MINUS CHECKPOINT_CONFIRMATIONS (snapshot_block unchanged)', async function () {
-        // tip.block_index = 500; _runRound re-fetches getblockhashes at (tip - confirmations),
+        // tip.block_index = 500; runRound re-fetches getblockhashes at (tip - confirmations),
         // so the persisted block_index is 497 while snapshot_block tracks the BTC cadence block.
         let bus = buildMesh(1, {
             btcBlock: 100,
@@ -426,7 +426,7 @@ describe('StateCheckpointEngine', function () {
             let eng = makeEngine({ validators: [{ pubkey: 'aa', source: 's1', weight: '100' }], truncated: true });
             let validators = await eng._resolveCapabilityValidators('oracle_publish', 100);
             expect(validators.truncated).to.be.true;
-            // The exact computation _handleFinalized runs (weighted path) now refuses.
+            // The exact computation handleFinalized runs (weighted path) now refuses.
             expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.false;
         });
 
@@ -597,7 +597,7 @@ describe('StateCheckpointEngine', function () {
             expect(signs.length, 'ground seq refused').to.equal(0);
         });
 
-        it('_handleFinalized rejects a finalized checkpoint whose seq does not match snapshot_block', async function () {
+        it('handleFinalized rejects a finalized checkpoint whose seq does not match snapshot_block', async function () {
             let bus = buildMesh(1, { btcBlock: 300 });
             let nd  = bus.nodes[0];
             await nd.engine.start();

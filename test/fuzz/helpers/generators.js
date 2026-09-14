@@ -142,7 +142,7 @@ function fc_invalidPrivkeyHex() {
 // P2P message envelopes
 // ---------------------------------------------------------------------------
 
-// Well-formed P2P envelope (passes all field validation in _handleInbound)
+// Well-formed P2P envelope (passes all field validation in handleInbound)
 function fc_p2pEnvelope(selfAddr) {
     return fc.record({
         type:      fc.string({ unit: fc.constantFrom('A','B','C','_','O','R','P'), minLength: 3, maxLength: 20 }),

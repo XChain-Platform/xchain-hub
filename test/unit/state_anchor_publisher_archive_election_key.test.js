@@ -12,7 +12,7 @@
 
 // The ARCHIVE election key must not carry the hub-local batch seq drawn by
 // _getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own tables with no
-// consensus step: that seq is fleet-uniform only while _backfillBatch plus the XANC_FINALIZED
+// consensus step: that seq is fleet-uniform only while backfillBatch plus the XANC_FINALIZED
 // gossip have landed everywhere, so one missed back-fill makes two hubs key the SAME
 // wrapper checkpoint differently: each ranks itself 0 under its own key and both
 // publish (batches 26 and 27 for one wrapper, seen live), and after a degraded round

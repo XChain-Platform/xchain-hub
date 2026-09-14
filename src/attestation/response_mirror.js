@@ -44,7 +44,7 @@
  * artifact true. Only the second layer is consensus: a row from a peer whose
  * envelope verified is still dropped if its content signatures do not, and a row
  * whose content verifies would be equally true arriving any other way. This is the
- * XANCREWARD shape (StateAnchorPublisher._federateRewardAttestation), with one
+ * XANCREWARD shape (StateAnchorPublisher.federateRewardAttestation), with one
  * difference worth naming: XANCREWARD needs a sender signature INSIDE its payload
  * because its receiver re-runs an on-chain proof keyed to the relayer's identity,
  * while nothing here is keyed to who relayed, so the transport layer is left
@@ -147,7 +147,7 @@ const PARK_RETRY_MS = 15000;
 
 // One page of the pending-request queue is enough to resolve a request, because the
 // wire's own (block_index, action_index) positions the keyset cursor on it. See
-// _resolveLocalRequest for why using an untrusted value as a cursor is safe.
+// resolveLocalRequest for why using an untrusted value as a cursor is safe.
 const REQUEST_LOOKUP_LIMIT = 100;
 
 class AttestationResponseMirror {
@@ -217,7 +217,7 @@ class AttestationResponseMirror {
                 // artifact leaves this hub exactly once per finalized round: the
                 // duplicate path (a retry round re-finalizing the same request)
                 // sends nothing, and the gossip RECEIVER never re-sends at all
-                // (see _ingestGossipRow). With every responsible hub finalizing
+                // (see ingestGossipRow). With every responsible hub finalizing
                 // the same round independently, one hop per producer is already
                 // full coverage of the federation, while forwarding on receipt
                 // would multiply one artifact by the peer count on every hop and
@@ -633,7 +633,7 @@ class AttestationResponseMirror {
     // batch-inserted row is the ONLY copy that exists. Deleting would turn a cosmetic
     // reorg on one rail into a permanent hole in the response history, which §4.4 calls
     // a fork rather than a lag. Setting `batch_action_index` back to NULL is also the
-    // only thing that lets the batch re-land: _linkBatchAction sets the column WHERE it
+    // only thing that lets the batch re-land: linkBatchAction sets the column WHERE it
     // IS NULL, so a stale link would otherwise outlive the chain that justified it.
     //
     // THE IDENTITY IS CHECKED BEFORE ANYTHING IS CLEARED. The caller names the batch by
@@ -889,8 +889,8 @@ class AttestationResponseMirror {
             network:              network,
             request_id:           rid,
             // Informational, and overwritten from this hub's own request row once it
-            // resolves (see _ingestGossipRow). Accepted here only as the cursor hint
-            // _resolveLocalRequest uses.
+            // resolves (see ingestGossipRow). Accepted here only as the cursor hint
+            // resolveLocalRequest uses.
             request_action_index: this.intOrNull(d.request_action_index),
             request_block_index:  this.intOrNull(d.request_block_index),
             provider_id:          providerId,
@@ -1237,7 +1237,7 @@ class AttestationResponseMirror {
         return Number.isFinite(n) ? Math.trunc(n) : null;
     }
 
-    // An admission HEIGHT off the wire, or null. Deliberately NOT _intOrNull: that one
+    // An admission HEIGHT off the wire, or null. Deliberately NOT intOrNull: that one
     // reads '' as 0 (Number('') is 0) and would turn a missing height into "admissible at
     // block 0", which is the row binding at the first block every indexer already has.
     // Null here means the legacy row, which binds by effective_time at every height.

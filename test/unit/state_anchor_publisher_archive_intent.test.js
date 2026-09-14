@@ -14,7 +14,7 @@
 // pinned in StateAnchorPublisher.anchor-intent.test.js.
 //
 // _publishArchive broadcasts a v1 head plus N v2 chunks and only afterwards stamps the
-// source rows (_backfillBatch). It passes NO existsCheck, because the archive path has
+// source rows (backfillBatch). It passes NO existsCheck, because the archive path has
 // no mined-state query surface at all (getanchoraction serves CHECKPOINT_VERSIONS
 // only), so everything that knew a send had gone out lived in memory. A crash between
 // an accepted send and the back-fill therefore left every row still matching the
@@ -331,7 +331,7 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
     });
 
     // The accepted-but-unacked window end to end: the process dies
-    // before _backfillBatch, and the next flush must NOT rebuild and re-pay.
+    // before backfillBatch, and the next flush must NOT rebuild and re-pay.
     describe('crash after an accepted archive send', function () {
         it('does not rebuild and re-broadcast the batch on the next flush', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS });

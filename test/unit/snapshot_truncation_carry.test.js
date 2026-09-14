@@ -33,8 +33,8 @@ describe('capability-snapshot truncation carry (round locking)', function () {
     // Both engines normalize with a `this`-free prototype method, so a bare call is the
     // whole unit; no hub, DB or indexer is involved in the behaviour under test.
     const normalizers = [
-        ['Consensus._normalizeValidators',       (s, w) => Consensus.prototype.normalizeValidators.call({}, s, w)],
-        ['OracleConsensus._normalizeValidators', (s, w) => OracleConsensus.prototype.normalizeValidators.call({}, s, w)]
+        ['Consensus.normalizeValidators',       (s, w) => Consensus.prototype.normalizeValidators.call({}, s, w)],
+        ['OracleConsensus.normalizeValidators', (s, w) => OracleConsensus.prototype.normalizeValidators.call({}, s, w)]
     ];
 
     for (const [name, normalize] of normalizers) {

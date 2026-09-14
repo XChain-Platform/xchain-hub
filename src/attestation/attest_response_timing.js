@@ -53,7 +53,7 @@
  * its proposals refused by its peers and would refuse every one of theirs: not a
  * fork, but a federation that silently stops finalizing. So off regtest a
  * differing override is IGNORED with a warning (the house shape, matching
- * XChainHub._oracleMaxAgeSeconds and providers/http_get's private-address
+ * XChainHub.oracleMaxAgeSeconds and providers/http_get's private-address
  * hatch), and on regtest a value that is not a non-negative integer THROWS
  * rather than resolving to NaN and stamping `now + NaN` into a canonical no
  * verifier can rebuild.

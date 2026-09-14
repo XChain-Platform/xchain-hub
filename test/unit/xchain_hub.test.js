@@ -503,14 +503,14 @@ describe('XChainHub', function () {
             hub.identity = { getPubkeyHex: () => 'aa'.repeat(33) };
         });
 
-        it('_parseCapabilityParameter recognizes CAPABILITY_<CAP>_MIN_STAKE', function () {
+        it('parseCapabilityParameter recognizes CAPABILITY_<CAP>_MIN_STAKE', function () {
             expect(hub.parseCapabilityParameter('CAPABILITY_PRICE_MIN_STAKE'))
                 .to.deep.equal({ capability: 'price', parameterKey: 'MIN_STAKE' });
             expect(hub.parseCapabilityParameter('CAPABILITY_CROSS_CHAIN_MIN_STAKE'))
                 .to.deep.equal({ capability: 'cross_chain', parameterKey: 'MIN_STAKE' });
         });
 
-        it('_parseCapabilityParameter returns null for non-capability params', function () {
+        it('parseCapabilityParameter returns null for non-capability params', function () {
             expect(hub.parseCapabilityParameter('ORACLE_ROUND_INTERVAL')).to.be.null;
             expect(hub.parseCapabilityParameter('CAPABILITY_BOGUS_MIN_STAKE')).to.be.null;
             expect(hub.parseCapabilityParameter('')).to.be.null;
@@ -886,7 +886,7 @@ describe('XChainHub', function () {
             let threw = false;
             try { await hub._loadValidatorPubkeys(); } catch (e) { threw = true; }
             // Must propagate so startP2P never opens the listener with a null
-            // registry (a null registry makes _verifySignature accept any
+            // registry (a null registry makes verifySignature accept any
             // signed envelope; see PeerManager).
             expect(threw).to.be.true;
             expect(hub.peerManager.setValidatorPubkeys.called).to.be.false;
@@ -925,7 +925,7 @@ describe('XChainHub', function () {
         let hub;
         beforeEach(function () { hub = new XChainHub('h', 1, 'd', 'u', 'p', null); });
 
-        it('_btcIndexerHeaders includes x-api-key only when configured', function () {
+        it('btcIndexerHeaders includes x-api-key only when configured', function () {
             delete process.env.BTC_INDEXER_API_KEY;
             expect(hub.btcIndexerHeaders()).to.not.have.property('x-api-key');
             process.env.BTC_INDEXER_API_KEY = 'fixture';
@@ -952,7 +952,7 @@ describe('XChainHub', function () {
             delete process.env.BTC_INDEXER_URL;
         });
 
-        it('_parseDecimalParts parses decimals and rejects junk', function () {
+        it('parseDecimalParts parses decimals and rejects junk', function () {
             expect(hub.parseDecimalParts('12.50')).to.deep.equal({ neg: false, int: '12', frac: '50' });
             expect(hub.parseDecimalParts('-3')).to.deep.equal({ neg: true, int: '3', frac: '' });
             expect(hub.parseDecimalParts('+.5')).to.deep.equal({ neg: false, int: '0', frac: '5' });
@@ -961,7 +961,7 @@ describe('XChainHub', function () {
             expect(hub.parseDecimalParts(null)).to.be.null;
         });
 
-        it('_compareDecimal orders values exactly (incl. signs and scale)', function () {
+        it('compareDecimal orders values exactly (incl. signs and scale)', function () {
             expect(hub.compareDecimal('10', '10.00')).to.equal(0);
             expect(hub.compareDecimal('1.5', '1.50001')).to.equal(-1);
             expect(hub.compareDecimal('2', '1.9')).to.equal(1);

@@ -238,7 +238,7 @@ class AttestationConsensus extends EventEmitter {
         // A-F5: early buffering happens BEFORE the round (and thus the responsible-set
         // membership check) exists, so an attacker could (a) flood arbitrary requestIds
         // to grow the map without bound (only per-rid was capped) and (b) buffer an
-        // envelope carrying an oversized body_b64 (the _maxBodyB64Length gate only runs
+        // envelope carrying an oversized body_b64 (the maxBodyB64Length gate only runs
         // once `pending` exists). Cap both: a distinct-rid ceiling with FIFO eviction,
         // and a serialized-size gate on each buffered envelope. Mirrors the DEX half
         // (CrossChainDexConsensus, A-F5).
@@ -256,13 +256,13 @@ class AttestationConsensus extends EventEmitter {
 
         // Early-COMMIT buffer. A COMMIT can arrive after `pending` exists but
         // before a winner is established: the PROPOSE->agree() transition is
-        // async, and _drainEarlyMessages replays buffered envelopes in arrival
+        // async, and drainEarlyMessages replays buffered envelopes in arrival
         // order, so a COMMIT can be replayed ahead of its own PROPOSE. Without
         // buffering, such a COMMIT hits the `!winner` guard in _handleCommit and
         // is permanently dropped, costing the round that peer's vote and
         // stalling finalization in quorum>1 federations until a re-broadcast or
         // round timeout. Hold these per-request and drain them the instant a
-        // winner is set (in _maybeAdvanceFromProposals / _handlePrepare).
+        // winner is set (in maybeAdvanceFromProposals / _handlePrepare).
         // Map<rid, Array<envelope>>
         this.earlyCommits = new Map();
         this.earlyCommitMaxPerRid = 32;
@@ -272,14 +272,14 @@ class AttestationConsensus extends EventEmitter {
         // which keeps the rid RETRYABLE) leaves the top-of-handler
         // `if(this.finalized.has(rid)) return` guards inert, so a PROPOSE/PREPARE/
         // COMMIT that arrives for that rid after teardown falls into
-        // _bufferEarlyMessage and is parked for the full earlyMessageTtlMs. When a
-        // retry round for the same rid opens within that window, _drainEarlyMessages
+        // bufferEarlyMessage and is parked for the full earlyMessageTtlMs. When a
+        // retry round for the same rid opens within that window, drainEarlyMessages
         // replays those prior-attempt envelopes; the attestation canonical carries
         // no attempt discriminator, so their sigs still verify and a stale body can
         // win the first-wins proposal slot ahead of a peer's fresh vote. The
         // write-time TTL check bounds buffer AGE, not attempt boundaries, so it does
         // not close this. Track torn-down rids and drop (not park) their envelopes
-        // in _bufferEarlyMessage; propose() clears the mark when it installs a fresh
+        // in bufferEarlyMessage; propose() clears the mark when it installs a fresh
         // round so a legitimate retry can buffer again. Ring-bounded FIFO like
         // `finalized` so it cannot leak under requestId flooding.
         this.tornDown       = new Set();
@@ -372,8 +372,8 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Mark a round id as torn down without finalization (timeout / non-ok
-    // finalization) so _bufferEarlyMessage drops rather than parks its late
-    // envelopes. Ring-bounded FIFO, mirroring _markFinalized (item 2640).
+    // finalization) so bufferEarlyMessage drops rather than parks its late
+    // envelopes. Ring-bounded FIFO, mirroring markFinalized (item 2640).
     markTornDown(rid){
         // Already marked; return without a drop event (noteDrop counts dropped
         // MESSAGES and this path drops none, and it read an `envelope` this
@@ -411,7 +411,7 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Has `pubkey` proposed for `rid` at any point in the request's life, across
-    // every retry round? Read by AttestationRound._resolveLeader to tell a leader
+    // every retry round? Read by AttestationRound.resolveLeader to tell a leader
     // slot that is silent from one that is merely slow. An evicted (or never
     // recorded) rid reads false, which costs the round one more rotation window of
     // patience before it skips - the safe direction, since a wrongly skipped LIVE
@@ -502,7 +502,7 @@ class AttestationConsensus extends EventEmitter {
         let expiresAt = this.earlyMessageTtl.get(rid);
         this.earlyMessages.delete(rid);
         this.earlyMessageTtl.delete(rid);
-        // Enforce the buffer TTL on REPLAY, not only on write (_bufferEarlyMessage). A
+        // Enforce the buffer TTL on REPLAY, not only on write (bufferEarlyMessage). A
         // round that times out and is later re-proposed under the same rid would otherwise
         // replay stale PBFT envelopes buffered during the prior attempt; the attestation
         // canonical carries no attempt discriminator, so those sigs still verify and leak
@@ -516,7 +516,7 @@ class AttestationConsensus extends EventEmitter {
     // Hold a COMMIT that arrived before this round established a winner. See
     // the earlyCommits note in the constructor for why these can't be dropped.
     bufferEarlyCommit(rid, envelope){
-        // Size gate (A-F5 parity with _bufferEarlyMessage): drop an oversized
+        // Size gate (A-F5 parity with bufferEarlyMessage): drop an oversized
         // pre-winner COMMIT rather than buffer it. Without this a peer could park
         // up to earlyCommitMaxPerRid envelopes each bounded only by the ~1 MB
         // WebSocket frame limit, a memory-amplification vector for the whole hub
@@ -643,7 +643,7 @@ class AttestationConsensus extends EventEmitter {
         let mirrorEra     = this._isMirrorEra(requestBlock);
         // This hub's candidate stamp, picked here at proposal time. It is the
         // ROUND's effective time only if this hub is the elected leader; every hub
-        // settles on the leader's in _resolveRoundEffectiveTime. Picking one
+        // settles on the leader's in resolveRoundEffectiveTime. Picking one
         // regardless is what lets any responsible hub lead without a second round
         // trip, and it is the value this hub's own PROPOSE signature covers.
         let myEffective   = mirrorEra ? this.chooseEffectiveTime() : null;
@@ -733,7 +733,7 @@ class AttestationConsensus extends EventEmitter {
             // Inbound body-size gate for this round's lifetime, derived from the
             // max_response_bytes AttestationRound already read to bound its own
             // fetch. Pinning it here is what keeps the gate consistent with the
-            // bytes this hub itself proposed; see _bodyB64Limit. Null when the
+            // bytes this hub itself proposed; see bodyB64Limit. Null when the
             // round state carries no cap (legacy/synthetic round states), which
             // leaves the live per-message read in place.
             maxBodyB64Length: Number(roundState.pinnedMaxResponseBytes) > 0
@@ -885,7 +885,7 @@ class AttestationConsensus extends EventEmitter {
         let meta = String(d.meta || '');
         // Mirror era: the proposer signed over ITS OWN stamp, so the canonical that
         // verifies its signature is built from the wire value, not from this hub's.
-        // Spelling guard first (see _readWireEffectiveTime).
+        // Spelling guard first (see readWireEffectiveTime).
         let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
         if(wireEffective === undefined) return;
         let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
@@ -894,7 +894,7 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
         // Bound it here as well as at the PREPARE adoption sites, because the
-        // ELECTED LEADER's proposal is where _resolveRoundEffectiveTime takes the
+        // ELECTED LEADER's proposal is where resolveRoundEffectiveTime takes the
         // round's stamp from: an unbounded value reaching that resolver would be a
         // leader-chosen field adopted without ever having been checked. An honest
         // proposal is inside the window by construction, so this refuses only a
@@ -1015,7 +1015,7 @@ class AttestationConsensus extends EventEmitter {
 
         pending._agreeing = true;
         let winner;
-        // Log-only could-not-judge channel (providers/llm.js _markInconclusive):
+        // Log-only could-not-judge channel (providers/llm.js markInconclusive):
         // agree() fills it before every inconclusive null so the warn line below
         // can tell a judge outage / pause / spent budget from a genuine
         // not-equivalent verdict. Never reaches the canonical, PREPARE or status.
@@ -1058,7 +1058,7 @@ class AttestationConsensus extends EventEmitter {
         // so PBFT messages are delivered while it runs:
         //   - a responsible peer's signed no_quorum PREPARE can establish a winner and
         //     leave signatures in the map over THAT canonical. Assigning the judge's ok
-        //     winner below would not clear them, and _checkCommitQuorum gates on
+        //     winner below would not clear them, and checkCommitQuorum gates on
         //     signatures.size, so the round finalizes carrying a signature that does not
         //     verify over the emitted canonical and the indexer rejects the response
         //     below redundancy. First writer wins: the raced outcome stands, and the
@@ -1089,7 +1089,7 @@ class AttestationConsensus extends EventEmitter {
 
         // Settle the round's single effective_time, before any canonical below is
         // built from it. Which value that is depends on the strategy; see
-        // _settleWinnerEffectiveTime for the rule and why judge_model cannot take
+        // settleWinnerEffectiveTime for the rule and why judge_model cannot take
         // the same one byte_equality does.
         this.settleWinnerEffectiveTime(pending, pending.status);
 
@@ -1243,7 +1243,7 @@ class AttestationConsensus extends EventEmitter {
         // every hub reaches this line on its own and must converge on a stamp
         // already on the wire, while a judge_model no_quorum is only ever reached
         // behind the leader gate and carries the judge call's latency with it. See
-        // _settleWinnerEffectiveTime.
+        // settleWinnerEffectiveTime.
         this.settleWinnerEffectiveTime(pending, status);
 
         // Error PROPOSEs were signed over this exact canonical (empty body,
@@ -1430,7 +1430,7 @@ class AttestationConsensus extends EventEmitter {
             // always holds its own proposal) co-sign on faith, forcing the round to
             // no_quorum even though all honest bodies are byte-identical - stalling
             // the request to deadline. Buffer until `need` proposals are in hand
-            // (the same threshold _maybeAdvanceFromProposals uses), then adopt only
+            // (the same threshold maybeAdvanceFromProposals uses), then adopt only
             // if our own agree() over the ok proposals yields no winner. judge_model
             // is deliberately exempt: only the leader runs the judge, so a follower
             // genuinely cannot re-derive the verdict (the seam note below), and its
@@ -1448,7 +1448,7 @@ class AttestationConsensus extends EventEmitter {
                     if(nonOkModule && typeof nonOkModule.agree === 'function')
                         derivedWinner = nonOkModule.agree(okForVerdict, { expectedN: needNq });
                 } catch (_) { derivedWinner = null; }
-                // agree() is dual-shape by contract (see _maybeAdvanceFromProposals):
+                // agree() is dual-shape by contract (see maybeAdvanceFromProposals):
                 // the ok-winner path awaits it, but this is the SYNCHRONOUS PBFT
                 // PREPARE handler and cannot. A thenable return is therefore not a
                 // derived winner, and reading it as one (every Promise is truthy)
@@ -1590,7 +1590,7 @@ class AttestationConsensus extends EventEmitter {
                 let matchesProposal = false;
                 for(let p of pending.proposals.values()){
                     // Only OK proposals can vouch: agree() selects among ok proposals
-                    // exclusively (_maybeAdvanceFromProposals filters), and a failed
+                    // exclusively (maybeAdvanceFromProposals filters), and a failed
                     // fetch proposes provider_error with an EMPTY body - without this
                     // filter a Byzantine leader could canonicalize an empty-body
                     // 'ok' winner by hash-matching any peer's error proposal (AF1-R1).
@@ -1683,7 +1683,7 @@ class AttestationConsensus extends EventEmitter {
                     // Semantic consensus: our own body is byte-divergent from the
                     // judge-selected winner even though both are valid. Re-sign
                     // the canonical winner so our vote carries a verifying
-                    // signature over the agreed bytes (see _maybeAdvanceFromProposals).
+                    // signature over the agreed bytes (see maybeAdvanceFromProposals).
                     let reSig = this.signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), pending.effectiveTime);
                     if(reSig) pending.signatures.set(pending.myPubkey, reSig);
                     // judge_model elects ONE leader to run agree() + PREPARE; followers
@@ -1717,7 +1717,7 @@ class AttestationConsensus extends EventEmitter {
                     if(Buffer.compare(winnerHash, myHash) === 0 && myProposal.meta === meta){
                         // Our PROPOSE sig transfers only if it verifies over the winner
                         // canonical (it binds status: a matching body signed over a
-                        // non-ok status does not verify; see _maybeAdvanceFromProposals);
+                        // non-ok status does not verify; see maybeAdvanceFromProposals);
                         // otherwise re-sign the winner canonical.
                         let mySig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
                             ? String(myProposal.sig)
@@ -1727,7 +1727,7 @@ class AttestationConsensus extends EventEmitter {
                         // we adopted the winner from a peer's PREPARE BEFORE running our
                         // own agree() (gossip reordering: missed a PROPOSE, got the
                         // derived PREPARE), and the winner-set early-return in
-                        // _maybeAdvanceFromProposals means we will never broadcast our
+                        // maybeAdvanceFromProposals means we will never broadcast our
                         // own PREPARE by any other route. Without this echo every
                         // responsible node tops out one prepare short of
                         // max(quorum, REDUNDANCY), no COMMIT is ever sent, and the round
@@ -1755,7 +1755,7 @@ class AttestationConsensus extends EventEmitter {
             // over the CANONICAL WINNER body/status/meta (mirror _handleCommit),
             // NOT over the sender's own (possibly divergent) body. Storing a sig
             // over a divergent body would inflate signatures.size, which is the gate
-            // _checkCommitQuorum finalizes on, so the emitted on-chain response
+            // checkCommitQuorum finalizes on, so the emitted on-chain response
             // could carry signatures that don't all verify over the winner (and
             // be deterministically rejected by the indexer).
             // Winner (and, in the mirror era, its stamp) already settled: the sender
@@ -1782,8 +1782,8 @@ class AttestationConsensus extends EventEmitter {
             this.drainEarlyMessages(rid);
             // A late PREPARE can carry the signature that crosses the commit
             // quorum AFTER this node already broadcast its COMMIT. In that state
-            // _checkPrepareQuorum short-circuits on `_commitSent`, so the only
-            // finalization gate (_checkCommitQuorum) would otherwise never be
+            // checkPrepareQuorum short-circuits on `_commitSent`, so the only
+            // finalization gate (checkCommitQuorum) would otherwise never be
             // re-run and a fully-quorate round would stall until round timeout
             // (e.g. the peer's COMMIT was lost on best-effort gossip). Re-check,
             // but ONLY once we have committed: before that, prepare quorum is the
@@ -1845,7 +1845,7 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.winner){
             // Winner not yet established (the PROPOSE->agree() transition is
             // async). Hold this COMMIT and replay it once the winner is set,
-            // rather than dropping the peer's vote. See _drainEarlyCommits.
+            // rather than dropping the peer's vote. See drainEarlyCommits.
             // Membership gate (A-F5 parity): pending.responsible is populated at
             // round start, before the winner, so apply the same responsible-set
             // check used post-winner (below) here too. This refuses to buffer
@@ -1876,7 +1876,7 @@ class AttestationConsensus extends EventEmitter {
     checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
-        // As in _checkPrepareQuorum: quorum <= redundancy by construction (see
+        // As in checkPrepareQuorum: quorum <= redundancy by construction (see
         // propose()), so this max() always resolves to redundancy.
         let needed = Math.max(pending.quorum, pending.redundancy);
         // Gate on the number of VALID signatures over the canonical body, not on
@@ -2202,21 +2202,21 @@ class AttestationConsensus extends EventEmitter {
     // FLOOR. Under byte_equality every hub runs its own agree() and establishes its
     // own winner locally, so the only value they can all arrive at without a round
     // trip is one that is already on the wire - which is the whole argument in
-    // _resolveRoundEffectiveTime's header, unchanged. Under judge_model only the
+    // resolveRoundEffectiveTime's header, unchanged. Under judge_model only the
     // elected leader establishes a winner and every follower adopts the stamp off
     // the leader's PREPARE (_handlePrepare's winner-establishing blocks), so the
     // leader is free to pick a fresh value here, and has to: agree() is an LLM
     // round trip that runs for as long as it runs, and a stamp chosen back at
     // proposal time has aged by that whole latency before any follower sees it.
     // Once the ageing exceeds ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S the
-    // PREPARE fails _effectiveTimeWithinFollowerWindow at every follower and the
+    // PREPARE fails effectiveTimeWithinFollowerWindow at every follower and the
     // round times out on a body all of them agree with, every cycle, forever.
     // Widening that slack is not the repair: the low guard is a propagation floor
     // (see the constants), so a stamp that has aged that close to the fleet's
     // clocks is genuinely unsafe to publish, not merely inconvenient.
     //
     // PROVIDER_ERROR KEEPS THE PROPOSAL STAMP EVEN UNDER JUDGE_MODEL. That outcome
-    // is derivable with no judge call, so _maybeAdvanceFromProposals reaches it
+    // is derivable with no judge call, so maybeAdvanceFromProposals reaches it
     // ahead of the leader gate and EVERY responsible hub establishes it locally.
     // The adoption branch that would carry a leader's fresh stamp to a follower
     // only runs while that follower has no winner of its own, so a leader stamping

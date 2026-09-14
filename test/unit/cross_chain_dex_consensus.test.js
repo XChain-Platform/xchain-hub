@@ -439,8 +439,8 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
     it('FINAL_SYNC: a straggler finalizes under the PROOF view, not its own rotated view', async function () {
         // The catch-up path verifies the offered proof against the canonical rebuilt at
         // the PROOF's view, so it adopts that view and not only row/canonical/signatures.
-        // A pending.view left at whatever the straggler rotated to is what _finalize
-        // emits and _markFinalized caches, so with the EQUIV header active the node
+        // A pending.view left at whatever the straggler rotated to is what finalize
+        // emits and markFinalized caches, so with the EQUIV header active the node
         // publishes a quorum proof under a view none of its signatures cover and re-serves
         // the same wrong view to the NEXT straggler. Every other FINAL_SYNC test runs at
         // view 0, where the two views coincide and nothing can diverge.
@@ -754,7 +754,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(victim.finalized.length, 'a real quorum of the declared set still rescues the round').to.equal(1);
     });
 
-    it('A-F5: _bufferEarlyMessage caps distinct ids (FIFO) and drops oversized envelopes', function () {
+    it('A-F5: bufferEarlyMessage caps distinct ids (FIFO) and drops oversized envelopes', function () {
         let bus = buildMesh(1);
         let c = bus.nodes[0].consensus;
         c.earlyMessageMaxDistinctIds = 4;

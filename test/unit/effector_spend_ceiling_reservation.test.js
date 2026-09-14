@@ -13,8 +13,8 @@
  **********************************************************************
  *
  * Await-safe spend gating on the two effectors whose sends are driven by
- * unawaited event handlers: OraclePublisher._processQueueInner and
- * AttestationRelay._broadcast.
+ * unawaited event handlers: OraclePublisher.processQueueInner and
+ * AttestationRelay.broadcast.
  *
  * Both used to gate an AWAITED broadcast with the pure spendGuard.allow()
  * predicate and only call record() after the send returned. src/lib/spend_guard.js
@@ -138,7 +138,7 @@ describe('await-safe spend gating on the hub effectors', function () {
         pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-9' });
 
         // A DB whose only intent write would strand the round: an intent-only row is
-        // what _hydratePublishedMarkers quarantines forever, so a round the ceiling
+        // what hydratePublishedMarkers quarantines forever, so a round the ceiling
         // declined must never reach the INSERT.
         const doQuery = sinon.stub();
         doQuery.withArgs(sinon.match(/SELECT round, txid, sent_at/)).resolves([]);

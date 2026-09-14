@@ -221,7 +221,7 @@ describe('AttestationRound zero-confirmation flip', function () {
             let hub = makeHub({
                 network: 'regtest',
                 capabilitySnapshot: capSS,
-                // Spread first: _readFetchCache now calls db.findAttestationFetchCache()
+                // Spread first: readFetchCache now calls db.findAttestationFetchCache()
                 // instead of issuing SQL inline, and it calls this.doQuery, which stays
                 // the own override below, so every dbRows fixture above still drives it.
                 db: { ...DB_METHODS, doQuery: sinon.stub().resolves(dbRows || []) }
@@ -279,7 +279,7 @@ describe('AttestationRound zero-confirmation flip', function () {
             let fetchStub = reg.getModule().fetch;
             fetchStub.resetHistory();
             sinon.stub(console, 'log');
-            // _readFetchCache swallows a missing/erroring findAttestationFetchCache into
+            // readFetchCache swallows a missing/erroring findAttestationFetchCache into
             // a silent cache miss (a warn, then treated as no cache), so a regression that
             // drops the named method back off the double would still look like a pass on
             // the two assertions below (it just pays the provider once more, on a table

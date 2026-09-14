@@ -35,7 +35,7 @@ const sinon      = require('sinon');
 const CrossChainBridgeEngine = require('../../src/cross_chain/bridge_engine.js');
 const { relayMarginFloorS, RELAY_MIN_FUTURE_S } = require('../../src/lib/relay_margin.js');
 
-// The engine with nothing wired: _policyMarginS is pure, and the constructor is the only
+// The engine with nothing wired: policyMarginS is pure, and the constructor is the only
 // thing it needs. p2pConfig carries the indexer URLs so the constructor takes the same
 // branch a live hub does.
 function bareEngine(){
@@ -88,7 +88,7 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
         expect(engine.policyMarginS(new Set(), 'DOGE')).to.be.above(RELAY_MIN_FUTURE_S);
     });
 
-    // The margin reaches the signed row through _maybeSnapshotPolicy, which is where a
+    // The margin reaches the signed row through maybeSnapshotPolicy, which is where a
     // regression would actually bite. Drive that path for a DOGE-only token and read the
     // effective_time off the row handed to the consensus.
     it('stamps the copy-sized margin on the row it proposes, not a BTC-sized one', async function(){

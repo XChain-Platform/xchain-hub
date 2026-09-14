@@ -25,7 +25,7 @@
  * Canonicalizing here makes the leader a function of the MEMBERSHIP rather
  * than of the query that produced it, which is the property the federation
  * actually needs. The sort key mirrors the one already used by
- * Governance._buildValidatorSnapshot and OracleConsensus._getLeader's
+ * Governance.buildValidatorSnapshot and OracleConsensus._getLeader's
  * snapshot path: lowercased signing pubkey ascending.
  *
  * Consensus-breaking by construction (it moves the leader for any set a hub
@@ -43,11 +43,11 @@
 
 // Total order over validators: lowercased signing pubkey ascending, then addr
 // ascending. The addr tie-break matters because the registry may bind one
-// signing key to several addrs (see OracleConsensus._addrForPubkey); leaning on
+// signing key to several addrs (see OracleConsensus.addrForPubkey); leaning on
 // Array.prototype.sort's stability instead would only preserve the incoming
 // order, which is precisely the thing that is not canonical.
 //
-// Returns a NEW array: XChainHub._propagateValidatorSet hands the SAME array
+// Returns a NEW array: XChainHub.propagateValidatorSet hands the SAME array
 // object to every engine, so sorting in place would mutate a caller's array and
 // let one engine's canonicalization leak into another's input. A non-array
 // input is passed through untouched so a caller's malformed value fails where

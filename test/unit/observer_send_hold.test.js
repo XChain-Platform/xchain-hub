@@ -13,7 +13,7 @@
 // An observer hub does not send into rounds it cannot sign.
 //
 // A hub whose signing key is outside the chain-effective signer set has every
-// envelope it authors dropped at each peer's _verifySignature, before any
+// envelope it authors dropped at each peer's verifySignature, before any
 // handler runs. The testnet service hub sat in exactly that state after it was
 // re-admitted: five validators logged PEER_REJECT reason=not_in_signer_set once
 // every 4 s for hours, and the hub itself recorded CHECKPOINT_STALLED every two
@@ -278,7 +278,7 @@ describe('observer hub does not author into rounds it cannot sign', function () 
         it('stays silent when the refresh reinstalls the same members in a new Set', function () {
             attachPeer();
             for (let i = 0; i < 20; i++) {
-                // What _refreshTransportSignerSet does every 30s: a new object, same members.
+                // What refreshTransportSignerSet does every 30s: a new object, same members.
                 pm.setEffectiveSignerSet(new Set([peer.pubkeyHex.toLowerCase()]));
                 pm.broadcast('PBFT_PREPARE', { seq: i });
             }

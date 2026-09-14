@@ -275,7 +275,7 @@ describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', fu
 
 describe('consensus_rules_digest: the heartbeat alarms', function () {
 
-    // A PeerManager with no sockets: _notePeerRules and the report are pure over
+    // A PeerManager with no sockets: notePeerRules and the report are pure over
     // this.peerRules, so the alarm logic is drivable without a federation.
     function makePeerManager() {
         const pm = Object.create(PeerManager.prototype);

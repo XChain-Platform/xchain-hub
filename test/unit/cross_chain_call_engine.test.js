@@ -31,7 +31,7 @@ const CALL_ID = 'c'.repeat(64);
 const sha256  = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
 // ── real getcrosschaincall response shape (item 2367) ────────────────────────
-// _validateDispatch re-verifies a leader's proposed row field-for-field against
+// validateDispatch re-verifies a leader's proposed row field-for-field against
 // the source indexer's getcrosschaincall reply. A hand-written `call:` stub can
 // therefore assert a field the REAL handler never emits, which is exactly how the
 // push_generation pin passed CI while being dead in production: the handler's
@@ -119,7 +119,7 @@ function memDb() {
                 return rows.filter(r => r.call_id === params[0] && r.phase === 'dispatch').slice(0, 1);
             }
             if (sql.startsWith('INSERT INTO cross_chain_calls')) {
-                // Column order mirrors _writeFinalizedRow's cols array.
+                // Column order mirrors writeFinalizedRow's cols array.
                 // Implementation uses ON DUPLICATE KEY UPDATE so reorg-retracted
                 // rows are overwritten with re-finalized content instead of
                 // being silently discarded (fix #4049).
@@ -233,7 +233,7 @@ describe('CrossChainCallEngine', function () {
 
     afterEach(function () { sinon.restore(); });
 
-    describe('dispatch discovery gating (_maybeDispatch)', function () {
+    describe('dispatch discovery gating (maybeDispatch)', function () {
 
         it('proposes a dispatch row only once the request is at confirmation depth', async function () {
             const { engine } = makeEngine();
@@ -483,7 +483,7 @@ describe('CrossChainCallEngine', function () {
             const { engine } = makeEngine();
             const stub = sinon.stub(engine, '_indexerCall');
 
-            // Deadline already reached at OUR tip: refused (mirrors _maybeDispatch's gate).
+            // Deadline already reached at OUR tip: refused (mirrors maybeDispatch's gate).
             stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
                             call: pendingCall({ deadline_block: 200 }) });
             expect(await engine.validateProposedMatch(dispatchRow())).to.equal(false);
@@ -512,7 +512,7 @@ describe('CrossChainCallEngine', function () {
         // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
         // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
         // different bytes, reject the quorum, and strand the call permanently (the
-        // finalized row still satisfies _rowExists, so it is never re-relayed).
+        // finalized row still satisfies rowExists, so it is never re-relayed).
         it('refuses a noncanonical integer spelling on any signed field', async function () {
             const { engine } = makeEngine();
             sinon.stub(engine, '_indexerCall').resolves({
@@ -594,7 +594,7 @@ describe('CrossChainCallEngine', function () {
                 });
                 expect(res.call).to.have.property('push_generation',
                     4, 'getcrosschaincall must stamp the source-reorg fence generation; without it every '
-                     + 'follower re-derives 0 and CrossChainCallEngine.js:_validateDispatch refuses every '
+                     + 'follower re-derives 0 and CrossChainCallEngine.js:validateDispatch refuses every '
                      + 'honest dispatch once the source chain has rolled back once');
             });
 
@@ -643,7 +643,7 @@ describe('CrossChainCallEngine', function () {
 
             // Every other field the pin compares must also survive the round trip through the
             // real literal, so a future whitelist edit that drops one of THEM fails here too.
-            it('every field _validateDispatch pins is present in the real response', async function () {
+            it('every field validateDispatch pins is present in the real response', async function () {
                 const { engine } = makeEngine();
                 const divergent = {
                     action_index: 42, contract_index: 6, target_chain: 'LTC',
@@ -664,7 +664,7 @@ describe('CrossChainCallEngine', function () {
 
     describe('persistence + retraction', function () {
 
-        it('_writeFinalizedRow upserts (ON DUPLICATE KEY UPDATE) and mirrors the stored row', async function () {
+        it('writeFinalizedRow upserts (ON DUPLICATE KEY UPDATE) and mirrors the stored row', async function () {
             const { engine, db, broadcaster } = makeEngine();
             const row = {
                 round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
@@ -693,7 +693,7 @@ describe('CrossChainCallEngine', function () {
         // best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
         // validator_signatures no local capability_snapshot can verify is the exact
         // state the persist-before-insert ordering exists to prevent. Mirrors the
-        // CrossChainDexEngine._writeFinalizedMatch guards (item 2385).
+        // CrossChainDexEngine.writeFinalizedMatch guards (item 2385).
         function finalizeRow() {
             return {
                 round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
@@ -705,7 +705,7 @@ describe('CrossChainCallEngine', function () {
             };
         }
 
-        it('_writeFinalizedRow fails closed and defers when the snapshot persist THROWS', async function () {
+        it('writeFinalizedRow fails closed and defers when the snapshot persist THROWS', async function () {
             const { engine, db, broadcaster } = makeEngine();
             const row = finalizeRow();
             const forget = engine.consensus.forgetFinalized;
@@ -720,7 +720,7 @@ describe('CrossChainCallEngine', function () {
             expect(forget.calledWith(row.round_id), 'the round must be re-proposable').to.equal(true);
         });
 
-        it('_writeFinalizedRow fails closed and defers on a silent ZERO-row persist', async function () {
+        it('writeFinalizedRow fails closed and defers on a silent ZERO-row persist', async function () {
             const { engine, db, broadcaster } = makeEngine();
             const row = finalizeRow();
             const forget = engine.consensus.forgetFinalized;
@@ -741,7 +741,7 @@ describe('CrossChainCallEngine', function () {
         // and the round retired in consensus, and because the round id is derived from
         // phase + call_id alone, every later poll returned at the _inflight guard and the
         // dispatch (or result) could never be recovered, even after the DB came back.
-        it('_writeFinalizedRow defers instead of wedging the round when the INSERT throws', async function () {
+        it('writeFinalizedRow defers instead of wedging the round when the INSERT throws', async function () {
             const { engine, db, broadcaster } = makeEngine();
             const row = finalizeRow();
             const forget = engine.consensus.forgetFinalized;
@@ -763,7 +763,7 @@ describe('CrossChainCallEngine', function () {
 
         // The row is durable by the time the mirror runs, so a delivery failure must
         // release the round and force a subscriber resync rather than wedge it.
-        it('_writeFinalizedRow releases the round and forces a resync when the mirror read fails', async function () {
+        it('writeFinalizedRow releases the round and forces a resync when the mirror read fails', async function () {
             const { engine, db, broadcaster } = makeEngine();
             broadcaster.dropAllForResync = sinon.stub();
             const row = finalizeRow();
@@ -964,7 +964,7 @@ describe('CrossChainCallEngine', function () {
         });
 
         // With no write pending, the fence holds nothing: it is a window guard over the
-        // awaits in _writeFinalizedRow, not a journal that grows for the life of the hub.
+        // awaits in writeFinalizedRow, not a journal that grows for the life of the hub.
         it('prunes fence entries no pending write can consult', async function () {
             const { engine } = makeEngine();
             await engine.retractCallsForReorg('BTC', 40);

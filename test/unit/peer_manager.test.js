@@ -48,10 +48,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _buildEnvelope()
+    // buildEnvelope()
     // -----------------------------------------------------------------
 
-    describe('_buildEnvelope()', function () {
+    describe('buildEnvelope()', function () {
         it('creates envelope with required fields', function () {
             let env = pm.buildEnvelope('TEST', { foo: 'bar' });
             expect(env).to.have.property('id');
@@ -128,10 +128,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _verifySignature()
+    // verifySignature()
     // -----------------------------------------------------------------
 
-    describe('_verifySignature()', function () {
+    describe('verifySignature()', function () {
 
         it('returns true for valid signature when REQUIRE_SIGNATURES is true', function () {
             pm.requireSigs = true;
@@ -198,10 +198,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _verifySignature(): Option A (sig_pubkey union membership)
+    // verifySignature(): Option A (sig_pubkey union membership)
     // -----------------------------------------------------------------
 
-    describe('_verifySignature(): Option A', function () {
+    describe('verifySignature(): Option A', function () {
 
         let identity;
         beforeEach(function () {
@@ -374,7 +374,7 @@ describe('PeerManager', function () {
             expect(rejects('invalid_signature')).to.have.lengthOf(0);
         });
 
-        it('_verifySignature keeps its boolean verdict and only annotates the out-param', function () {
+        it('verifySignature keeps its boolean verdict and only annotates the out-param', function () {
             pm.setEffectiveSignerSet(new Set());
             let outcome = {};
             expect(pm.verifySignature(signedRaw(), outcome), 'fail closed is unchanged').to.be.false;
@@ -476,10 +476,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _handleInbound: guards, events, self-connection, rate limit, sig
+    // handleInbound: guards, events, self-connection, rate limit, sig
     // -----------------------------------------------------------------
 
-    describe('_handleInbound() branches', function () {
+    describe('handleInbound() branches', function () {
         function mk(type, id, sender) {
             return JSON.stringify({ id, type, sender: sender || 'ws://peer:10001', timestamp: Date.now(), data: {} });
         }
@@ -613,10 +613,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _relay()
+    // relay()
     // -----------------------------------------------------------------
 
-    describe('_relay()', function () {
+    describe('relay()', function () {
         it('sends to other open peers, skipping the original sender and the source ws', function () {
             let sourceWs = { readyState: 1, send: sinon.stub() };
             let otherWs  = { readyState: 1, send: sinon.stub() };
@@ -635,7 +635,7 @@ describe('PeerManager', function () {
     // inbound peer registration / removal
     // -----------------------------------------------------------------
 
-    describe('_registerInboundPeer() / _removeInboundPeer()', function () {
+    describe('registerInboundPeer() / removeInboundPeer()', function () {
         it('keeps an existing outbound connection when an inbound arrives for the same addr', function () {
             let outboundWs = { readyState: 1 };
             pm.peers.set('ws://p:1', { ws: outboundWs, inbound: false, state: 'open' });
@@ -653,11 +653,11 @@ describe('PeerManager', function () {
             expect(connected).to.equal('ws://p:2');
         });
 
-        it('_removeInboundPeer returns quietly when the ws has no addr', function () {
+        it('removeInboundPeer returns quietly when the ws has no addr', function () {
             expect(() => pm.removeInboundPeer({ _peerAddr: null })).to.not.throw();
         });
 
-        it('_removeInboundPeer deletes the peer, emits disconnect, and decrements the IP count', function () {
+        it('removeInboundPeer deletes the peer, emits disconnect, and decrements the IP count', function () {
             let ws = { _peerAddr: 'ws://p:1', _remoteIp: '1.2.3.4' };
             pm.peers.set('ws://p:1', { ws, inbound: true, state: 'open' });
             pm.ipConnectionCounts.set('1.2.3.4', 2);
@@ -669,7 +669,7 @@ describe('PeerManager', function () {
             expect(pm.ipConnectionCounts.get('1.2.3.4')).to.equal(1);
         });
 
-        it('_removeInboundPeer clears the IP entry when the count reaches zero', function () {
+        it('removeInboundPeer clears the IP entry when the count reaches zero', function () {
             let ws = { _peerAddr: 'ws://p:1', _remoteIp: '5.6.7.8' };
             pm.peers.set('ws://p:1', { ws, inbound: true, state: 'open' });
             pm.ipConnectionCounts.set('5.6.7.8', 1);
@@ -681,14 +681,14 @@ describe('PeerManager', function () {
         // is only set once a frame has passed signature verification, so a socket that
         // closes before authenticating used to keep its increment forever and march the
         // IP to maxConnectionsPerIp.
-        it('_removeInboundPeer releases the IP count for a socket that closed before authenticating', function () {
+        it('removeInboundPeer releases the IP count for a socket that closed before authenticating', function () {
             let ws = { _peerAddr: null, _remoteIp: '9.9.9.9' };
             pm.ipConnectionCounts.set('9.9.9.9', 1);
             pm.removeInboundPeer(ws);
             expect(pm.ipConnectionCounts.has('9.9.9.9')).to.be.false;
         });
 
-        it('_removeInboundPeer does not double-decrement when invoked twice for one socket', function () {
+        it('removeInboundPeer does not double-decrement when invoked twice for one socket', function () {
             let ws = { _peerAddr: null, _remoteIp: '7.7.7.7' };
             pm.ipConnectionCounts.set('7.7.7.7', 2);
             pm.removeInboundPeer(ws);
@@ -709,10 +709,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _connectToPeer() / _scheduleReconnect() (no real sockets)
+    // _connectToPeer() / scheduleReconnect() (no real sockets)
     // -----------------------------------------------------------------
 
-    describe('_connectToPeer() / _scheduleReconnect()', function () {
+    describe('_connectToPeer() / scheduleReconnect()', function () {
         it('_connectToPeer rejects an invalid address format', function () {
             pm._connectToPeer('not-an-addr');
             expect(pm.peers.has('not-an-addr')).to.be.false;
@@ -724,21 +724,21 @@ describe('PeerManager', function () {
             expect(pm.peers.get('ws://p:1').state).to.equal('open'); // untouched
         });
 
-        it('_scheduleReconnect does nothing when not running', function () {
+        it('scheduleReconnect does nothing when not running', function () {
             pm.running = false;
             pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 2000 });
             pm.scheduleReconnect('ws://p:1');
             expect(pm.peers.get('ws://p:1').reconnectTimer).to.be.undefined;
         });
 
-        it('_scheduleReconnect skips inbound peers', function () {
+        it('scheduleReconnect skips inbound peers', function () {
             pm.running = true;
             pm.peers.set('ws://p:1', { inbound: true });
             pm.scheduleReconnect('ws://p:1');
             expect(pm.peers.get('ws://p:1').reconnectTimer).to.be.undefined;
         });
 
-        it('_scheduleReconnect arms a timer, doubles the backoff, and reconnects', function () {
+        it('scheduleReconnect arms a timer, doubles the backoff, and reconnects', function () {
             let clock = sinon.useFakeTimers();
             pm.running = true;
             let connect = sinon.stub(pm, '_connectToPeer');
@@ -794,7 +794,7 @@ describe('PeerManager', function () {
             pm.running = true;
 
             // Every dial is refused: the socket errors, then closes, and close is
-            // where _scheduleReconnect is called from.
+            // where scheduleReconnect is called from.
             sinon.stub(pm, '_connectToPeer').callsFake(function (addr) {
                 pm.peers.get(addr).lastError = 'connect ECONNREFUSED 10.0.0.1:10001';
                 pm.scheduleReconnect(addr);
@@ -877,7 +877,7 @@ describe('PeerManager', function () {
     // -----------------------------------------------------------------
 
     describe('background timers', function () {
-        it('_startHeartbeat broadcasts HEARTBEAT on its interval', function () {
+        it('startHeartbeat broadcasts HEARTBEAT on its interval', function () {
             let clock = sinon.useFakeTimers();
             config.P2P_HEARTBEAT_INTERVAL = 1000;
             let bcast = sinon.stub(pm, 'broadcast');
@@ -888,7 +888,7 @@ describe('PeerManager', function () {
             clock.restore();
         });
 
-        it('_startDedupPruner removes expired ids and keeps live ones', function () {
+        it('startDedupPruner removes expired ids and keeps live ones', function () {
             let clock = sinon.useFakeTimers();
             config.P2P_DEDUP_PRUNE_INTERVAL = 1000;
             pm.seenIds.set('old', Date.now() - 1);       // expired
@@ -901,7 +901,7 @@ describe('PeerManager', function () {
             clock.restore();
         });
 
-        it('_startPingInterval pings live peers/clients and terminates unresponsive ones', function () {
+        it('startPingInterval pings live peers/clients and terminates unresponsive ones', function () {
             let clock = sinon.useFakeTimers();
             config.P2P_WS_PING_INTERVAL = 1000;
             let liveOut = { readyState: 1, _isAlive: true,  ping: sinon.stub(), terminate: sinon.stub() };
@@ -919,7 +919,7 @@ describe('PeerManager', function () {
             clock.restore();
         });
 
-        it('_startPingInterval terminates an unresponsive outbound peer', function () {
+        it('startPingInterval terminates an unresponsive outbound peer', function () {
             let clock = sinon.useFakeTimers();
             config.P2P_WS_PING_INTERVAL = 1000;
             let deadOut = { readyState: 1, _isAlive: false, ping: sinon.stub(), terminate: sinon.stub() };
@@ -936,8 +936,8 @@ describe('PeerManager', function () {
     // dedup cache bound / rate window / DB recording
     // -----------------------------------------------------------------
 
-    describe('_addToDedup() / _checkMsgRate() / _recordPeer()', function () {
-        it('_addToDedup evicts the oldest id at the cache cap', function () {
+    describe('addToDedup() / _checkMsgRate() / recordPeer()', function () {
+        it('addToDedup evicts the oldest id at the cache cap', function () {
             pm.dedupCacheMax = 2;
             pm.addToDedup('a');
             pm.addToDedup('b');
@@ -967,12 +967,12 @@ describe('PeerManager', function () {
             clock.restore();
         });
 
-        it('_recordPeer is a no-op without a db', function () {
+        it('recordPeer is a no-op without a db', function () {
             let pm2 = new PeerManager(config, null);
             expect(() => pm2.recordPeer('a', 'a', true)).to.not.throw();
         });
 
-        it('_recordPeer issues an upsert into p2p_peers', function () {
+        it('recordPeer issues an upsert into p2p_peers', function () {
             pm.recordPeer('ws://p:1', 'ws://p:1', true);
             expect(dbStub.doQuery.calledOnce).to.be.true;
             expect(dbStub.doQuery.getCall(0).args[0]).to.include('p2p_peers');

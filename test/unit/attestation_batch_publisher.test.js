@@ -875,7 +875,7 @@ describe('AttestationBatchPublisher', function () {
         });
 
         // A crash marker is a genuinely unknown outcome and stays quarantined across a
-        // restart: the retry path must not have widened what _hydrateMarkers admits.
+        // restart: the retry path must not have widened what hydrateMarkers admits.
         it('still quarantines a genuine intent-only crash marker after a restart', async function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;

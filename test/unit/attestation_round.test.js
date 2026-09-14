@@ -247,9 +247,9 @@ describe('AttestationRound', function () {
         });
     });
 
-    // ── _evictStaleSeen ──────────────────────────────────────────────────────
+    // ── evictStaleSeen ──────────────────────────────────────────────────────
 
-    describe('_evictStaleSeen()', function () {
+    describe('evictStaleSeen()', function () {
         it('removes entries older than retryAfterMs', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
@@ -271,9 +271,9 @@ describe('AttestationRound', function () {
         });
     });
 
-    // ── _evictStaleRounds ────────────────────────────────────────────────────
+    // ── evictStaleRounds ────────────────────────────────────────────────────
 
-    describe('_evictStaleRounds()', function () {
+    describe('evictStaleRounds()', function () {
         it('removes rounds whose proposedAt is past the TTL', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());

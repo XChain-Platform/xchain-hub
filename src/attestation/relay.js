@@ -263,7 +263,7 @@ class AttestationRelay {
 
         // Durable at-most-once record of v3 broadcasts. A duplicate v3 is rejected
         // on-chain ('REQUEST_ID already present'), so replaying one only burns a real
-        // BTC fee; the WAL is what stops a restart from doing that. See _loadWal for
+        // BTC fee; the WAL is what stops a restart from doing that. See loadWal for
         // why a crash between intent and outcome is treated as sent.
         this.walPath   = process.env.ATTEST_RELAY_QUEUE_PATH || cfg.ATTEST_RELAY_QUEUE_PATH || './data/attest-relay-queue.jsonl';
         this._published = new AtMostOnce();
@@ -298,7 +298,7 @@ class AttestationRelay {
         //
         // ANY status EXCEPT a refusal, once ATTEST_RELAY_REJECT_SLOT is armed: a
         // refused row names a request that was never materialized. See
-        // _withoutRefusedRows for why that exclusion had to wait for the arm.
+        // withoutRefusedRows for why that exclusion had to wait for the arm.
         this._homeRelayed = new Set();
 
         // Per-origin pending views, request_id -> row, same role for the response leg:
@@ -789,7 +789,7 @@ class AttestationRelay {
         if(String(req.origin_chain || '') !== coin) return;
 
         // Index the absolute deadline BEFORE the already-relayed guards, for the reason
-        // spelled out in _maybeRelayResponse: the record that most needs evicting is one
+        // spelled out in maybeRelayResponse: the record that most needs evicting is one
         // this node has already published, and those returns are hit on every later tick.
         this.noteDeadline(coin, rid, req.deadline_block);
 
@@ -933,7 +933,7 @@ class AttestationRelay {
 
     // The response leg's canonical. Note the asymmetry with the request leg: the
     // response body enters ALREADY HASHED, and the indexer hashes the raw
-    // base64-DECODED bytes, not the base64 text, which is why _responseFieldsFromHome
+    // base64-DECODED bytes, not the base64 text, which is why responseFieldsFromHome
     // hashes the bytes it is about to encode rather than the string it read.
     _relayResponseCanonical(r){
         let raw = [
@@ -1002,7 +1002,7 @@ class AttestationRelay {
 
         // The request leg needs no deadline field on the row: this node is looking at
         // the origin row itself, which carries the absolute deadline. Index it here so a
-        // node that only ever CO-SIGNS (and therefore never runs _maybeMaterialize for
+        // node that only ever CO-SIGNS (and therefore never runs maybeMaterialize for
         // this request) can still evict the record its own broadcast may create.
         this.noteDeadline(coin, rid, mine.deadline_block);
         if(Number.isFinite(Number(res.latest))) this._originLatest[coin] = Number(res.latest);
@@ -1208,7 +1208,7 @@ class AttestationRelay {
                     ' (' + sigs.length + ' sigs, snapshot ' + row.snapshot_block + ', rank ' + rank + ')');
 
         // Rank 0 is the round's broadcaster; every other rank waits out its failover
-        // window in _sweepFinalized so a silent leader costs one window, not the
+        // window in sweepFinalized so a silent leader costs one window, not the
         // request's whole deadline.
         if(rank === 0) await this.broadcast(phase, rid);
     }
@@ -1225,7 +1225,7 @@ class AttestationRelay {
             .map(pk => ({ pubkey: pk, hash: crypto.createHash('sha256').update(rid, 'utf8').update(pk, 'utf8').digest('hex') }))
             .sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0));
         let idx = ordered.findIndex(v => v.pubkey === myPubkey);
-        return idx;   // -1 when we did not sign, which _sweepFinalized treats as never eligible
+        return idx;   // -1 when we did not sign, which sweepFinalized treats as never eligible
     }
 
     async sweepFinalized(){
@@ -1291,7 +1291,7 @@ class AttestationRelay {
         }
 
         // The intent record goes down BEFORE the send so a crash mid-flight is
-        // recoverable as ambiguous rather than invisible. See _loadWal.
+        // recoverable as ambiguous rather than invisible. See loadWal.
         if(!this.appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'intent' })){
             // Nothing goes on the wire without a durable record, so the leg stays
             // retryable and the reserved budget goes back.
@@ -1581,7 +1581,7 @@ class AttestationRelay {
     //   deadline_block by that chain's confirmation depth PLUS the grace window. Past
     //   that point the origin indexer's expiry sweep has taken the row out of 'pending'
     //   and no reorg this driver honours can put it back, and BOTH re-entry paths here
-    //   (_maybeMaterialize, _maybeRelayResponse) refuse the same horizon on their way in.
+    //   (maybeMaterialize, maybeRelayResponse) refuse the same horizon on their way in.
     //   So there is no path from a forgotten key back to a second broadcast.
     //
     // A chain whose tip we have never read is skipped: eviction runs off observed
@@ -1636,7 +1636,7 @@ class AttestationRelay {
             let leg   = (String(rec.leg || '') === 'response') ? 'response' : 'request';
             let key   = leg + '|' + rid;
             let prior = state.get(key);
-            // The same fold _loadWal applies, tracking the record that carried the state.
+            // The same fold loadWal applies, tracking the record that carried the state.
             if(rec.phase === 'sent'){ state.set(key, 'sent'); keep.set(key, rec); }
             else if(rec.phase === 'failed' && prior !== 'sent'){ state.set(key, 'failed'); keep.set(key, rec); }
             else if(rec.phase === 'intent' && prior === undefined){ state.set(key, 'intent'); keep.set(key, rec); }

@@ -490,7 +490,7 @@ describe('PriceFetcher', function () {
         });
 
         it('Coinbase: rejections are counted, not accumulated as NaN (#6190)', async function () {
-            // Coinbase reaches _reportBoundRejects like every other source, but its key
+            // Coinbase reaches reportBoundRejects like every other source, but its key
             // was missing from the _boundRejects declaration, so `undefined + n` pinned
             // the counter at NaN on the first rejection and the warn line printed
             // "Cumulative for this source: NaN." for the rest of the process, on the
