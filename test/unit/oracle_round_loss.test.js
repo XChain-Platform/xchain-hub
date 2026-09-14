@@ -119,7 +119,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
                 let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
                 if (newRound === this.lastExecutedRound) return;
                 if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1)
-                    this._noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
+                    this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
                 this.lastExecutedRound = newRound;
             });
             await or._executeRound();
@@ -140,7 +140,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         });
 
         it('a wide gap is recorded once by range and its rows are capped', function () {
-            or._noteRoundNumbersSkipped(100, 300);
+            or.noteRoundNumbersSkipped(100, 300);
             const rec = lost('round_numbers_skipped');
             expect(rec).to.have.length(1);
             expect(rec[0]).to.include('count=201');
@@ -152,7 +152,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
             sinon.stub(or, '_executeRoundInner').callsFake(async function () {
                 let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
                 if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1)
-                    this._noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
+                    this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
                 this.lastExecutedRound = newRound;
             });
             await or._executeRound();
@@ -161,7 +161,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
         it('a finalizeRound rejection past the gates leaves a record, not just a prose error line', async function () {
             consensus.finalizeRound.rejects(new Error('db went away'));
-            or._scheduleFinalization(ROUND);
+            or.scheduleFinalization(ROUND);
             await clock.tickAsync(Number(or.submissionWindow) + 1);
             await Promise.resolve();
 
@@ -176,7 +176,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
             or.chainTipFallbackActive        = true;
             or.lastSuccessfulChainTipFetchAt = Date.now() - or.roundInterval - 1;
             storeSkipped.rejects(new Error('insert failed'));
-            or._scheduleFinalization(ROUND);
+            or.scheduleFinalization(ROUND);
             await clock.tickAsync(Number(or.submissionWindow) + 1);
             await Promise.resolve();
 
@@ -186,7 +186,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
 
         it('a synchronous throw inside the finalization timer leaves a record', async function () {
             consensus.finalizeRound = () => { throw new Error('boom'); };
-            or._scheduleFinalization(ROUND);
+            or.scheduleFinalization(ROUND);
             await clock.tickAsync(Number(or.submissionWindow) + 1);
 
             const rec = lost('finalize_threw');
@@ -197,8 +197,8 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         it('stop() with a round submitted but not finalized records it and writes its skipped row', async function () {
             or.currentBtcBlockHeight = HEIGHT;
             or.currentBtcBlockTime   = TIME;
-            or._scheduleFinalization(ROUND);
-            or._scheduleFinalization(ROUND + 1);
+            or.scheduleFinalization(ROUND);
+            or.scheduleFinalization(ROUND + 1);
             expect(or.finalizationTimers.size).to.equal(2);
 
             await or.stop();
@@ -221,7 +221,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         });
 
         it('a round that finalizes normally leaves no record', async function () {
-            or._scheduleFinalization(ROUND);
+            or.scheduleFinalization(ROUND);
             await clock.tickAsync(Number(or.submissionWindow) + 1);
             await Promise.resolve();
             expect(consensus.finalizeRound.calledOnce).to.equal(true);
@@ -253,7 +253,7 @@ describe('round loss: every silent round exit leaves a round_lost record', funct
         }
 
         async function abandonRound() {
-            await clock.tickAsync(oc._roundAbandonMs() + 1000);
+            await clock.tickAsync(oc.roundAbandonMs() + 1000);
             await Promise.resolve();
         }
 

@@ -252,8 +252,8 @@ class OracleRound {
     // computes identically from the shared epoch and interval - see the header of
     // xchain_price_activation.js for why a locally-observed chain tip is the wrong key
     // here and how it would stall the whole round.
-    _xchainPriceGateOpen() {
-        return this._xchainPriceGateOpenFor(this.currentRound);
+    xchainPriceGateOpen() {
+        return this.xchainPriceGateOpenFor(this.currentRound);
     }
 
     // The same gate keyed on an EXPLICIT round rather than the one being composed now.
@@ -262,7 +262,7 @@ class OracleRound {
     // finalized while its own currentRound may already have advanced, so reading the
     // gate off currentRound there would answer for the wrong instant near the
     // threshold. Same fail-closed contract; see xchain_price_activation.js.
-    _xchainPriceGateOpenFor(round) {
+    xchainPriceGateOpenFor(round) {
         let t = roundStartSeconds(round, this.epochStart, this.roundInterval);
         if (t === null) return false;
         return isXchainPriceActive(t, this.currentBtcNetwork);
@@ -689,7 +689,7 @@ class OracleRound {
         // in between with no tick, no submission and no row: record the run first.
         // A fresh start (-1) is not a gap.
         if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1) {
-            this._noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
+            this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
         }
         this.lastExecutedRound = newRound;
 
@@ -769,7 +769,7 @@ class OracleRound {
         }
 
         // Prune old submissions (keep current and previous round only)
-        this._pruneSubmissions();
+        this.pruneSubmissions();
         // Best-effort DB retention for the oracle_submissions audit table. Fire-and-
         // forget: a retention failure must never stall or crash a money-bearing
         // consensus round (same posture as the tolerated audit-row insert failures).
@@ -777,7 +777,7 @@ class OracleRound {
         // made this the only error path in the round loop with no log and no counter.
         // The round number is captured HERE rather than read inside the handler: the
         // sweep settles asynchronously and this.currentRound may already have advanced.
-        this._pruneSubmissionsDb().catch(err => this._onSubmissionsPruneFailure(err, this.currentRound));
+        this.pruneSubmissionsDb().catch(err => this.onSubmissionsPruneFailure(err, this.currentRound));
 
         // Initialize submission map for this round
         if (!this.submissions.has(this.currentRound)) {
@@ -799,7 +799,7 @@ class OracleRound {
             // local fetch failure the federation then salvages is not a skipped
             // round, and counting it here also double-counted a round that went on
             // to hit the chain-tip-fallback skip below (item 4942).
-            this._scheduleFinalization(this.currentRound);
+            this.scheduleFinalization(this.currentRound);
             return;
         }
 
@@ -807,7 +807,7 @@ class OracleRound {
             console.warn('Oracle: No prices available for round ' + this.currentRound);
             // Same rationale as the fetch-failure path above: record the gap, and
             // let the durable skip write advance the streak.
-            this._scheduleFinalization(this.currentRound);
+            this.scheduleFinalization(this.currentRound);
             return;
         }
 
@@ -826,7 +826,7 @@ class OracleRound {
         //
         // Fed this round's own BTC/USD from the fetch above, because the published
         // value is on-chain XCHAIN/BTC x the validator's own BTC/USD (§6).
-        if (this.xchainPriceSource && this._xchainPriceGateOpen()) {
+        if (this.xchainPriceSource && this.xchainPriceGateOpen()) {
             let btcUsd = prices.find(p => p.coinPair === 'BTC/USD');
             let entry  = await this.xchainPriceSource.derive({
                 round:            this.currentRound,
@@ -878,13 +878,13 @@ class OracleRound {
         // finalized round. They are updated by markRoundFinalized() on the consensus
         // 'round:finalized' event, so a commit-quorum stall (where the fetch keeps
         // succeeding but no round finalizes) ages the gauge instead of masking it.
-        this._scheduleFinalization(this.currentRound);
+        this.scheduleFinalization(this.currentRound);
     }
 
     // Record a run of round numbers the scheduler stepped over: one line for the run,
     // a skipped row for the first ROUND_GAP_SKIP_ROW_CAP, anchored at each round's
     // nominal wall-clock start so every hub that stepped over it writes the same row.
-    _noteRoundNumbersSkipped(from, to) {
+    noteRoundNumbersSkipped(from, to) {
         let count = to - from + 1;
         noteRoundLost({
             phase: 'schedule', round: from, cause: 'round_numbers_skipped',
@@ -906,7 +906,7 @@ class OracleRound {
     }
 
     // Schedule finalization for a round after the submission window
-    _scheduleFinalization(round) {
+    scheduleFinalization(round) {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
         let btcBlockTime   = this.currentBtcBlockTime;
@@ -1086,7 +1086,7 @@ class OracleRound {
             // own aggregation filters submissions down to. Registering the peers is NOT
             // the alternative: it puts a key in a local table without telling this hub
             // anything about the stake behind it.
-            this._persistFromStakeWeight(round, envelope, validPrices, senderPubkey);
+            this.persistFromStakeWeight(round, envelope, validPrices, senderPubkey);
             return;
         }
         // Remote peer submission: _handleMessage is a synchronous message handler, so this
@@ -1103,7 +1103,7 @@ class OracleRound {
     // Async and self-catching because _handleMessage is a synchronous handler: this is
     // fire-and-forget exactly like the registered-sender persist beside it, and an
     // indexer fault must cost an audit row rather than the round.
-    async _persistFromStakeWeight(round, envelope, prices, senderPubkey) {
+    async persistFromStakeWeight(round, envelope, prices, senderPubkey) {
         let feed = this.hub && this.hub.stakeWeightFeed;
         try {
             if (senderPubkey && feed && typeof feed.isQualified === 'function' &&
@@ -1157,7 +1157,7 @@ class OracleRound {
     }
 
     // Prune old submission data (keep current and previous round only)
-    _pruneSubmissions() {
+    pruneSubmissions() {
         for (let [round] of this.submissions) {
             if (round < this.currentRound - 1) {
                 this.submissions.delete(round);
@@ -1171,7 +1171,7 @@ class OracleRound {
     // and deterministic; keeps the most recent submissionsRetentionRounds rounds.
     // oracle_submissions is diagnostic-only (finalized values live in
     // price_snapshots), so dropping aged rows is safe and never consensus-visible.
-    async _pruneSubmissionsDb() {
+    async pruneSubmissionsDb() {
         if (!this.submissionsRetentionRounds || this.submissionsRetentionRounds <= 0) return;
         let cutoff = this.currentRound - this.submissionsRetentionRounds;
         if (cutoff <= 0) return;
@@ -1202,7 +1202,7 @@ class OracleRound {
     // gated read), and a raw driver error can carry a DB user, host or schema detail.
     // getSubmissionsInfo already draws this line for droppedPairsReadError, which
     // exposes a boolean and logs the exception.
-    _onSubmissionsPruneFailure(err, round) {
+    onSubmissionsPruneFailure(err, round) {
         this.submissionsPruneFailures++;
         this.lastSubmissionsPruneFailureRound = round != null ? round : this.currentRound;
         if (this._submissionsPruneDark) return;

@@ -325,7 +325,7 @@ class OracleConsensus extends EventEmitter {
         // restarted hub would co-sign a Byzantine price for any pair it does not
         // locally submit that a long-running hub would withhold on. Local accept-
         // gate only: no signed bytes change, no reindex.
-        await this._seedLastFinalizedPrices();
+        await this.seedLastFinalizedPrices();
 
         // Re-run the seed on a timer so the clamp reference tracks the DATABASE, not
         // this process's own finalize history (item 5834). The cache had exactly two
@@ -347,7 +347,7 @@ class OracleConsensus extends EventEmitter {
             // the query is an unbounded round trip and a bare setInterval stacks passes.
             if (this._reseedRunning) return;
             this._reseedRunning = true;
-            this._seedLastFinalizedPrices({ quiet: true })
+            this.seedLastFinalizedPrices({ quiet: true })
                 .catch(() => { /* _seedLastFinalizedPrices never rejects; belt and braces */ })
                 .then(() => { this._reseedRunning = false; });
         }, this._reseedIntervalMs);
@@ -364,7 +364,7 @@ class OracleConsensus extends EventEmitter {
     // "latest finalized = highest round_number" ordering used by hub.getPrice().
     // Fail-soft: an empty table or a query error leaves the cache empty (the prior
     // cold-start behavior), so this can never block hub startup.
-    async _seedLastFinalizedPrices(opts) {
+    async seedLastFinalizedPrices(opts) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         try {
             // One row per coin_pair: the price from that pair's highest finalized
@@ -378,7 +378,7 @@ class OracleConsensus extends EventEmitter {
                     // Merge, never replace the map: a truncated or partial read must not
                     // drop a pair's reference, since an absent reference means NO clamp
                     // at all and an unbounded aggregate is worse than a stale bound.
-                    if (this._noteFinalizedPrice(r.coin_pair, r.price, r.round_number)) seeded++;
+                    if (this.noteFinalizedPrice(r.coin_pair, r.price, r.round_number)) seeded++;
                 }
             }
             if (seeded > 0 && !(opts && opts.quiet))
@@ -507,7 +507,7 @@ class OracleConsensus extends EventEmitter {
         // nothing left to record. Disarmed here as well as in
         // _clearRoundTracking, because the single-node finalize path never calls
         // that.
-        this._disarmRoundWatchdog(round);
+        this.disarmRoundWatchdog(round);
         this.finalized.add(round);
         this._finalizedOrder.push(round);
         if (this._finalizedOrder.length > this.finalizedMax) {
@@ -521,7 +521,7 @@ class OracleConsensus extends EventEmitter {
     // processing; it only prevents this hub from re-skipping the same round and lets
     // getSubmissionsInfo/health distinguish a local skip from a true finalize.
     // Bounded by the same insertion-order ring as `finalized`.
-    _markLocallySkipped(round) {
+    markLocallySkipped(round) {
         if (this.finalized.has(round) || this.locallySkipped.has(round)) return;
         this.locallySkipped.add(round);
         this._locallySkippedOrder.push(round);
@@ -719,7 +719,7 @@ class OracleConsensus extends EventEmitter {
         // the unfiltered legacy map (graceful degradation, same as the quorum
         // fallback below).
         let memberPubkeys = this._memberPubkeySet(snapshot);
-        submissions = this._filterSubmissionsToSnapshot(submissions, memberPubkeys);
+        submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
         if (!submissions || submissions.size === 0) {
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                 'no submissions from snapshot members');
@@ -803,7 +803,7 @@ class OracleConsensus extends EventEmitter {
         // Arm the abandonment watchdog before the seat split so all three leave the
         // same durable record when the round dies. Disarmed by
         // _clearRoundTracking on finalize and on an immediate skip.
-        this._armRoundWatchdog(round, btcBlockHeight, btcBlockTime);
+        this.armRoundWatchdog(round, btcBlockHeight, btcBlockTime);
 
         let leader   = this._getLeader(round, memberPubkeys);
         let myAddr   = this.peerManager.validatorAddr;
@@ -812,8 +812,8 @@ class OracleConsensus extends EventEmitter {
         // Every return past this point is a seat, not an outcome: stamp it on the
         // watchdog entry so the abandonment record names what this hub waited on.
         if (isLeader) {
-            this._noteRoundSeat(round, 'leader');
-            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+            this.noteRoundSeat(round, 'leader');
+            this.proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
                 .catch(err => console.error('Oracle: proposal for round ' + round + ' failed:', err && err.message));
             return;
         }
@@ -821,9 +821,9 @@ class OracleConsensus extends EventEmitter {
         // Follower path. Record when this round became ready to finalize so the
         // receiver-side leader-timeout grace in _handlePropose measures the same
         // window every other hub does.
-        this._markRoundReady(round);
+        this.markRoundReady(round);
 
-        let leaderSubAddr   = this._leaderSubmissionAddr(submissions, leader);
+        let leaderSubAddr   = this.leaderSubmissionAddr(submissions, leader);
         let leaderSubmitted = leaderSubAddr != null;
         if (leaderSubmitted) {
             // The leader has a submission on record and is expected to broadcast
@@ -836,27 +836,27 @@ class OracleConsensus extends EventEmitter {
             // by the time this fires the round is already taken and we abort.
             let fb = [...submissions.keys()].filter(a => a !== leaderSubAddr).sort()[0];
             if (fb === myAddr) {
-                this._noteRoundSeat(round, 'elected_fallback_awaiting_leader', { leader: leaderSubAddr });
+                this.noteRoundSeat(round, 'elected_fallback_awaiting_leader', { leader: leaderSubAddr });
                 let t = setTimeout(() => {
                     this.leaderTimers.delete(round);
                     if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
                     // Same snapshot membership filter as the election above so a
                     // non-member submitter arriving during the grace cannot shift
                     // the fallback election (Oracle M1).
-                    let subs = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
+                    let subs = this.filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
                     if (!subs || subs.size === 0) {
-                        this._noteRoundSeat(round, 'fallback_without_member_submissions', { leader: leaderSubAddr });
+                        this.noteRoundSeat(round, 'fallback_without_member_submissions', { leader: leaderSubAddr });
                         return;
                     }
                     // Re-elect against the (possibly grown) submission set in case
                     // gossip delivered more submitters during the grace.
-                    let fb2 = [...subs.keys()].filter(a => a !== this._leaderSubmissionAddr(subs, leader)).sort()[0];
+                    let fb2 = [...subs.keys()].filter(a => a !== this.leaderSubmissionAddr(subs, leader)).sort()[0];
                     if (fb2 !== myAddr) {
-                        this._noteRoundSeat(round, 'awaiting_other_fallback', { leader: leaderSubAddr, fallback: fb2 });
+                        this.noteRoundSeat(round, 'awaiting_other_fallback', { leader: leaderSubAddr, fallback: fb2 });
                         return;
                     }
-                    this._noteRoundSeat(round, 'fallback_proposer', { leader: leaderSubAddr });
-                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+                    this.noteRoundSeat(round, 'fallback_proposer', { leader: leaderSubAddr });
+                    this.proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
                         .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
                 // Don't let an armed grace timer keep the process alive on its own;
@@ -865,7 +865,7 @@ class OracleConsensus extends EventEmitter {
                 this.leaderTimers.set(round, t);
                 return;
             }
-            this._noteRoundSeat(round, 'follower_awaiting_leader', { leader: leaderSubAddr, fallback: fb });
+            this.noteRoundSeat(round, 'follower_awaiting_leader', { leader: leaderSubAddr, fallback: fb });
             return;
         }
 
@@ -873,24 +873,24 @@ class OracleConsensus extends EventEmitter {
         let fallbackAddr = [...submissions.keys()].sort()[0];
         if (fallbackAddr !== myAddr) {
             // Someone else is the fallback. Wait for their PROPOSE.
-            this._noteRoundSeat(round, 'awaiting_other_fallback', { leader: null, fallback: fallbackAddr });
+            this.noteRoundSeat(round, 'awaiting_other_fallback', { leader: null, fallback: fallbackAddr });
             return;
         }
 
         // I'm the fallback. Grace period in case a real-leader PROPOSE is in flight;
         // if pendingRounds gets populated during the grace, abort.
-        this._noteRoundSeat(round, 'fallback_in_grace', { leader: null });
+        this.noteRoundSeat(round, 'fallback_in_grace', { leader: null });
         let t = setTimeout(() => {
             this.leaderTimers.delete(round);
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             // Filter to snapshot members, matching the election above (Oracle M1).
-            let subs = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
+            let subs = this.filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
             if (!subs || subs.size === 0) {
-                this._noteRoundSeat(round, 'fallback_without_member_submissions', { leader: null });
+                this.noteRoundSeat(round, 'fallback_without_member_submissions', { leader: null });
                 return;
             }
-            this._noteRoundSeat(round, 'fallback_proposer', { leader: null });
-            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
+            this.noteRoundSeat(round, 'fallback_proposer', { leader: null });
+            this.proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys)
                 .catch(err => console.error('Oracle: fallback proposal for round ' + round + ' failed:', err && err.message));
         }, FALLBACK_GRACE_MS);
         // Don't let this grace timer keep the process alive on its own; register
@@ -910,7 +910,7 @@ class OracleConsensus extends EventEmitter {
     // as before and a caller that does not await it observes no change. A hub with no
     // fresh tip proposes nothing rather than a guessed height (section 5.3); the fallback
     // seat then takes the round on the same rule.
-    async _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
+    async proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
             this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
@@ -1106,7 +1106,7 @@ class OracleConsensus extends EventEmitter {
     // registry may bind one key to several addrs, dedup on the verified key,
     // first arrival wins (Map iteration is insertion-ordered). A null memberPubkeys
     // (no usable snapshot) returns the map unchanged (legacy behavior).
-    _filterSubmissionsToSnapshot(submissions, memberPubkeys) {
+    filterSubmissionsToSnapshot(submissions, memberPubkeys) {
         if (!submissions || !memberPubkeys) return submissions;
         let filtered = new Map();
         let seen = new Set();
@@ -1142,7 +1142,7 @@ class OracleConsensus extends EventEmitter {
     // already logged the reason). Separate from _handlePropose so the bound can run
     // ahead of every other reader of the wire height, the clamp-reference activation
     // gate included.
-    async _boundedProposeHeight(round, btcBlockHeight) {
+    async boundedProposeHeight(round, btcBlockHeight) {
         // Fix (#1225): do NOT substitute the round id for a missing BTC block
         // height on a federated hub. The leader locked the price snapshot at the
         // real round block in finalizeRound; pinning the follower's snapshot at
@@ -1231,7 +1231,7 @@ class OracleConsensus extends EventEmitter {
         // snapshot / leader / quorum-mode resolution further down. One drop decision,
         // taken once, ahead of all of them. A height the bound refuses leaves this
         // handler having touched nothing.
-        let blockHeight = await this._boundedProposeHeight(round, btcBlockHeight);
+        let blockHeight = await this.boundedProposeHeight(round, btcBlockHeight);
         if (blockHeight === null) return;
 
         // Align the clamp reference to THIS round before the co-sign gate below reads
@@ -1335,7 +1335,7 @@ class OracleConsensus extends EventEmitter {
         // filtered to snapshot members (Oracle M1) so the election and the
         // deviation reference only see qualified validators.
         let leader       = this._getLeader(round, memberPubkeys);
-        let submissions  = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
+        let submissions  = this.filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
         // Identify the proposer by the key that PROVABLY signed this envelope
         // (PeerManager verified it, and binds a registered sender to its
         // registered key), not by a registry lookup on the sender addr. The
@@ -1365,7 +1365,7 @@ class OracleConsensus extends EventEmitter {
             // not trusting a peer-supplied set for a price-oracle integrity gate.
             let keys = submissions ? [...submissions.keys()] : [];
             if (keys.length > 0) {
-                let leaderSubAddr   = this._leaderSubmissionAddr(submissions, leader);
+                let leaderSubAddr   = this.leaderSubmissionAddr(submissions, leader);
                 let leaderSubmitted = leaderSubAddr != null;
                 if (!leaderSubmitted) {
                     let fallbackAddr = keys.sort()[0];
@@ -1512,7 +1512,7 @@ class OracleConsensus extends EventEmitter {
                     // against the most recent finalized snapshot price when available, so a
                     // Byzantine leader cannot inject any (0, PRICE_MAX) value for pairs that
                     // quorum co-signers happened to not fetch in this round.
-                    let lastPrice = this._getLastFinalizedPrice(p.coinPair);
+                    let lastPrice = this.getLastFinalizedPrice(p.coinPair);
                     if (lastPrice !== null && bcmath.bcgt(lastPrice, '0')) {
                         // Shared deviation_band helper; reference = last finalized
                         // price, already the canonical orientation here (behavior-preserving).
@@ -1627,7 +1627,7 @@ class OracleConsensus extends EventEmitter {
                 return;
             }
             if (era) {
-                let verdict = await this._checkProposedAdmit(admitBlocks);
+                let verdict = await this.checkProposedAdmit(admitBlocks);
                 if (!verdict.ok) {
                     console.warn('Oracle: refusing PROPOSE for round ' + round + ' from ' + envelope.sender +
                         ': admission map ' + verdict.reason);
@@ -1677,7 +1677,7 @@ class OracleConsensus extends EventEmitter {
             // missed the boundary, or it had no submissions of its own) still
             // observed the round through gossip and must hold a record of it.
             // Idempotent with the finalizeRound arming.
-            this._armRoundWatchdog(round, pending.btcBlockHeight, pending.btcBlockTime);
+            this.armRoundWatchdog(round, pending.btcBlockHeight, pending.btcBlockTime);
             // Replay any PREPARE/COMMIT that arrived while this handler was
             // awaiting the snapshot fetch above (finding F7).
             this.drainEarlyMessages(round);
@@ -1698,7 +1698,7 @@ class OracleConsensus extends EventEmitter {
         }
         // A second PROPOSE for a round already pending must carry the SAME map, or two
         // leaders are collecting signatures over two byte strings under one digest.
-        if (this._spellAdmit(pending.admitBlocks) !== this._spellAdmit(proposedAdmit)) {
+        if (this.spellAdmit(pending.admitBlocks) !== this.spellAdmit(proposedAdmit)) {
             console.warn('Oracle: PROPOSE admission-map conflict for round ' + round + ' from ' + envelope.sender);
             return;
         }
@@ -1707,7 +1707,7 @@ class OracleConsensus extends EventEmitter {
         if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
 
         if (sig_pubkey && sig) {
-            this._verifyAndStoreSig(pending, sig_pubkey, sig);
+            this.verifyAndStoreSig(pending, sig_pubkey, sig);
         }
 
         let mySig = this._signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight, pending.admitBlocks);
@@ -1750,7 +1750,7 @@ class OracleConsensus extends EventEmitter {
         }
 
         this.addVote(pending.prepares, envelope);
-        if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
+        if (sig_pubkey && sig) this.verifyAndStoreSig(pending, sig_pubkey, sig);
         this.checkPrepareQuorum(round);
     }
 
@@ -1777,7 +1777,7 @@ class OracleConsensus extends EventEmitter {
         }
 
         this.addVote(pending.commits, envelope);
-        if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
+        if (sig_pubkey && sig) this.verifyAndStoreSig(pending, sig_pubkey, sig);
         this.checkCommitQuorum(round);
     }
 
@@ -1796,7 +1796,7 @@ class OracleConsensus extends EventEmitter {
         // from the snapshot's qualified set, so a vote from a key with no qualifying
         // stake must not count toward it. Null memberPubkeys keeps the raw count
         // (graceful degradation, matching the quorum fallback).
-        return this._countDistinctMembers(pending, voteSet) >= quorum;
+        return this.countDistinctMembers(pending, voteSet) >= quorum;
     }
 
     // Distinct qualified MEMBER-KEY tally for one of the round's vote sets. The
@@ -1805,7 +1805,7 @@ class OracleConsensus extends EventEmitter {
     // snapshot membership. Null memberPubkeys (no usable snapshot) degrades to the
     // raw count, matching the quorum fallback. Defined once so the finalization
     // tally and the validator_count recorded beside it cannot drift.
-    _countDistinctMembers(pending, voteSet) {
+    countDistinctMembers(pending, voteSet) {
         if (!voteSet) return 0;
         if (!pending || !pending.memberPubkeys) return voteSet.size;
         let counted = 0;
@@ -1854,7 +1854,7 @@ class OracleConsensus extends EventEmitter {
             if (pending.timer) clearTimeout(pending.timer);
             // Fire-and-forget (mirrors the prior promise-chain behavior); durability,
             // retry, and re-drive-on-failure live in _finalizeCommittedRound.
-            this._finalizeCommittedRound(round);
+            this.finalizeCommittedRound(round);
         }
     }
 
@@ -1868,7 +1868,7 @@ class OracleConsensus extends EventEmitter {
     // delete round state, and emit. If every attempt fails we do NOT delete round state
     // and we RESET pending.finalized=false, so a later replayed COMMIT re-enters
     // _checkCommitQuorum and re-drives finalization instead of the round being lost.
-    async _finalizeCommittedRound(round) {
+    async finalizeCommittedRound(round) {
         let pending = this.pendingRounds.get(round);
         if (!pending) return;
 
@@ -1878,7 +1878,7 @@ class OracleConsensus extends EventEmitter {
         // non-member whose PREPARE joined the set but never the quorum) inflated the
         // persisted, mirrored and API-served validator_count above the endorsers that
         // cleared quorum (item 4941).
-        let validatorCount = this._countDistinctMembers(pending, pending.prepares);
+        let validatorCount = this.countDistinctMembers(pending, pending.prepares);
         let proof = JSON.stringify([...pending.commits]);
 
         const maxAttempts = 3;
@@ -1891,7 +1891,7 @@ class OracleConsensus extends EventEmitter {
                 // drop the in-memory round state.
                 this.markFinalized(round);
                 this.pendingRounds.delete(round);
-                this._clearRoundTracking(round);
+                this.clearRoundTracking(round);
                 console.log('Oracle: Round ' + round + ' finalized (' +
                     pending.prepares.size + ' prepares, ' +
                     pending.commits.size + ' commits)' +
@@ -1967,7 +1967,7 @@ class OracleConsensus extends EventEmitter {
             // Make the same claim before re-entering, so a peer COMMIT landing now cannot
             // start a second finalize and emit round:finalized twice.
             p.finalized = true;
-            Promise.resolve(this._finalizeCommittedRound(round)).catch(err =>
+            Promise.resolve(this.finalizeCommittedRound(round)).catch(err =>
                 console.error('Oracle: re-finalize of round %s threw:', round, err && err.message));
         }, delay);
         // Never hold the process open on a retry that may re-arm indefinitely; stop() is
@@ -2171,7 +2171,7 @@ class OracleConsensus extends EventEmitter {
                 return null;
             }
         }
-        return this._clampToLastFinalized(coinPair, median);
+        return this.clampToLastFinalized(coinPair, median);
     }
 
     // Per-pair bounded-change clamp. The trim + median above bound what a
@@ -2192,8 +2192,8 @@ class OracleConsensus extends EventEmitter {
     // round-aligned change). No history (brand-new pair, cold standalone cache) means no
     // clamp; the unverifiable-pair gate covers that case on the co-sign side.
     // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
-    _clampToLastFinalized(coinPair, price) {
-        let last = this._getLastFinalizedPrice(coinPair);
+    clampToLastFinalized(coinPair, price) {
+        let last = this.getLastFinalizedPrice(coinPair);
         if (last === null || !bcmath.bcgt(last, '0')) return price;
         let pct = maxChangeForPair(coinPair);
         let maxDelta = bcmath.bcmul(last, String(pct), 8);
@@ -2277,7 +2277,7 @@ class OracleConsensus extends EventEmitter {
         // finalized write over the marker.
         try {
             let finalizedPairs = new Set(prices.map(p => p.coinPair));
-            let missingPairs = this._markerPairs(round).filter(pair => !finalizedPairs.has(pair));
+            let missingPairs = this.markerPairs(round).filter(pair => !finalizedPairs.has(pair));
             if (missingPairs.length) {
                 console.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
                     + ' configured pair(s): ' + missingPairs.join(', ')
@@ -2297,7 +2297,7 @@ class OracleConsensus extends EventEmitter {
         // round:finalized and no wire format changes, so evidence bodies and their
         // hashes are byte-identical. One round is kept, replaced on the next store.
         this._clampReference = { round: round, prices: new Map(this._lastFinalizedPrices || []) };
-        this._updateLastFinalizedPrices(prices, round);
+        this.updateLastFinalizedPrices(prices, round);
 
         // Broadcast the finalized rows to hub-DB mirror subscribers (distributed indexers),
         // mirroring StateCheckpointEngine/CrossChainDexEngine. This must happen AFTER the
@@ -2419,11 +2419,11 @@ class OracleConsensus extends EventEmitter {
     // currentRound-keyed: the stored round may already be behind. Fails closed the same
     // way the composition gate does, so an unreachable OracleRound narrows the marker
     // set back to the fetched pairs rather than inventing a row.
-    _markerPairs(round) {
+    markerPairs(round) {
         let pairs = PriceFetcher.getCoinPairs();
         try {
-            if (this.oracleRound && typeof this.oracleRound._xchainPriceGateOpenFor === 'function'
-                && this.oracleRound._xchainPriceGateOpenFor(round))
+            if (this.oracleRound && typeof this.oracleRound.xchainPriceGateOpenFor === 'function'
+                && this.oracleRound.xchainPriceGateOpenFor(round))
                 return [...pairs, ...DERIVED_PAIRS];
         } catch (e) { /* fail closed to the fetched pairs */ }
         return pairs;
@@ -2435,7 +2435,7 @@ class OracleConsensus extends EventEmitter {
     async _storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
-        let coinPairs = this._markerPairs(round);
+        let coinPairs = this.markerPairs(round);
         // One multi-row INSERT so the skipped round lands atomically (same torn-read
         // rationale as _storeSnapshot).
         if (coinPairs.length) {
@@ -2455,8 +2455,8 @@ class OracleConsensus extends EventEmitter {
         // #7: mark as LOCALLY skipped, not finalized, so a legitimate later PROPOSE
         // from the federation still processes and can upgrade the 'skipped' rows to
         // 'finalized'. _markFinalized would have frozen this round's NULL price here.
-        this._markLocallySkipped(round);
-        this._clearRoundTracking(round);
+        this.markLocallySkipped(round);
+        this.clearRoundTracking(round);
         console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
     }
 
@@ -2483,7 +2483,7 @@ class OracleConsensus extends EventEmitter {
     // The follower bound on a proposed map: the shared checker resolves THIS hub's own tips
     // and refuses fail-closed when it cannot. Returns { ok, map } with the map normalised
     // through the encoder, so what is pinned is exactly what will be signed.
-    async _checkProposedAdmit(admitBlocks) {
+    async checkProposedAdmit(admitBlocks) {
         let map;
         try { map = ah.decodeAdmitBlocks(ah.encodeAdmitBlocks(admitBlocks)); }
         catch (e) { return { ok: false, reason: 'is not a canonical admission map (' + (e && e.message) + ')' }; }
@@ -2494,7 +2494,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     // One spelling for "same map or both absent", used to compare two proposals for one round.
-    _spellAdmit(map) {
+    spellAdmit(map) {
         if (map === null || map === undefined) return null;
         try { return ah.encodeAdmitBlocks(map); } catch (e) { return '(unspellable)'; }
     }
@@ -2618,7 +2618,7 @@ class OracleConsensus extends EventEmitter {
     // Verify a (pubkey, sig) pair against the pending round's canonical PRICE v0 payload,
     // and store it on the pending round's signatures map if valid.
     // The pending object must have a `round` field set when it's created.
-    _verifyAndStoreSig(pending, pubkeyHex, sigHex) {
+    verifyAndStoreSig(pending, pubkeyHex, sigHex) {
         if (!pending || !pubkeyHex || !sigHex) return false;
         // Key the signatures map on LOWERCASE pubkey hex (item 5334). This was the one
         // wire-pubkey keying site in the engine that stored the value verbatim, while every
@@ -2661,7 +2661,7 @@ class OracleConsensus extends EventEmitter {
     // check for pairs this hub has no live local submission for (seq 4083).
     // Synchronous best-effort: reads from the in-memory cache populated by
     // _storeSnapshot. Falls back to null when not cached (first round, cold start).
-    _getLastFinalizedPrice(coinPair) {
+    getLastFinalizedPrice(coinPair) {
         if (!this._lastFinalizedPrices) return null;
         return this._lastFinalizedPrices.get(coinPair) || null;
     }
@@ -2670,7 +2670,7 @@ class OracleConsensus extends EventEmitter {
     // (Map<coin_pair, round>). Kept as a second map rather than boxing the value so
     // every existing reader of _lastFinalizedPrices still sees a plain price string.
     // Absent for an entry written without a round (see _noteFinalizedPrice).
-    _lastFinalizedRoundFor(coinPair) {
+    lastFinalizedRoundFor(coinPair) {
         if (!this._lastFinalizedRounds) return null;
         let r = this._lastFinalizedRounds.get(coinPair);
         return Number.isFinite(r) ? r : null;
@@ -2679,7 +2679,7 @@ class OracleConsensus extends EventEmitter {
     // Highest round any cached reference came from, or null when nothing is
     // stamped. This is the cache's position, which is what "behind the round being
     // judged" is measured against.
-    _maxCachedFinalizedRound() {
+    maxCachedFinalizedRound() {
         if (!this._lastFinalizedRounds || this._lastFinalizedRounds.size === 0) return null;
         let max = null;
         for (const r of this._lastFinalizedRounds.values()) {
@@ -2700,14 +2700,14 @@ class OracleConsensus extends EventEmitter {
         this._lastFinalizedRefreshRound = round;
 
         // The reference for round N is round N-1; anything at or past that is current.
-        const cached = this._maxCachedFinalizedRound();
+        const cached = this.maxCachedFinalizedRound();
         if (cached !== null && cached >= round - 1) return;
 
-        await this._seedLastFinalizedPrices({ quiet: true });
+        await this.seedLastFinalizedPrices({ quiet: true });
 
         // Still behind after a read means this hub's own database never received the
         // previous round. Diagnostic only; nothing gates on it.
-        const after = this._maxCachedFinalizedRound();
+        const after = this.maxCachedFinalizedRound();
         if (after === null || after < round - 1) this._staleClampReference++;
     }
 
@@ -2718,13 +2718,13 @@ class OracleConsensus extends EventEmitter {
     // round (a locally-skipped round stored by a late PROPOSE, a replayed COMMIT)
     // walked the reference BACKWARDS. An unstamped write is trusted as current, so
     // callers that have no round keep the prior set-always behaviour.
-    _noteFinalizedPrice(coinPair, price, round) {
+    noteFinalizedPrice(coinPair, price, round) {
         if (!coinPair || price === null || price === undefined || price === '') return false;
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         if (!this._lastFinalizedRounds) this._lastFinalizedRounds = new Map();
         let r = Number(round);
         let stamped = Number.isFinite(r);
-        let known = this._lastFinalizedRoundFor(coinPair);
+        let known = this.lastFinalizedRoundFor(coinPair);
         if (stamped && known !== null && r < known) return false;
         this._lastFinalizedPrices.set(coinPair, String(price));
         if (stamped) this._lastFinalizedRounds.set(coinPair, r);
@@ -2736,10 +2736,10 @@ class OracleConsensus extends EventEmitter {
     // drive this directly, and any future caller without one, keep the unstamped
     // set-always behaviour. Rounds arriving by push come in through
     // noteIngestedPriceRow instead.
-    _updateLastFinalizedPrices(prices, round) {
+    updateLastFinalizedPrices(prices, round) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         for (let p of prices) {
-            if (p.coinPair && p.price) this._noteFinalizedPrice(p.coinPair, p.price, round);
+            if (p.coinPair && p.price) this.noteFinalizedPrice(p.coinPair, p.price, round);
         }
     }
 
@@ -2758,14 +2758,14 @@ class OracleConsensus extends EventEmitter {
     // priceless and older-round rows are ignored by the monotonic guard above.
     noteIngestedPriceRow(row) {
         if (!row || row.status !== 'finalized') return false;
-        return this._noteFinalizedPrice(row.coin_pair, row.price, row.round_number);
+        return this.noteFinalizedPrice(row.coin_pair, row.price, row.round_number);
     }
 
     // Record the first time we saw this round as ready to finalize. The
     // receiver-side leader-timeout grace in _handlePropose measures from here.
     // Opportunistically evicts entries for rounds that never finalized (the rare
     // stuck case) so the map can't grow unbounded.
-    _markRoundReady(round) {
+    markRoundReady(round) {
         let now = Date.now();
         let ttl = this.finalizationTimeout * 2 + this.leaderTimeout;
         for (let [r, ts] of this.roundReadyAt) {
@@ -2775,14 +2775,14 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Forget per-round leader-timeout bookkeeping once the round is done.
-    _clearRoundTracking(round) {
+    clearRoundTracking(round) {
         this.roundReadyAt.delete(round);
         let t = this.leaderTimers.get(round);
         if (t) {
             clearTimeout(t);
             this.leaderTimers.delete(round);
         }
-        this._disarmRoundWatchdog(round);
+        this.disarmRoundWatchdog(round);
     }
 
     // --- Round-abandonment watchdog ---
@@ -2791,7 +2791,7 @@ class OracleConsensus extends EventEmitter {
     // Derived from the round's own timer ladder (leader timeout -> fallback grace
     // -> finalization window) plus slack, so it is always the LAST timer to fire
     // and never pre-empts a round that is still legitimately in flight.
-    _roundAbandonMs() {
+    roundAbandonMs() {
         return this.leaderTimeout + FALLBACK_GRACE_MS + this.finalizationTimeout
              + this.roundAbandonGraceMs;
     }
@@ -2806,7 +2806,7 @@ class OracleConsensus extends EventEmitter {
     // block_timestamp) every other hub writes. Re-deriving them at fire time would
     // stamp each hub's rows with its own wall clock and make the per-round presence
     // digests differ for a round every hub actually agreed on.
-    _armRoundWatchdog(round, btcBlockHeight, btcBlockTime) {
+    armRoundWatchdog(round, btcBlockHeight, btcBlockTime) {
         if (this.finalized.has(round) || this.locallySkipped.has(round)) return;
         if (this.roundWatchdogs.has(round)) return;
         let entry = {
@@ -2816,17 +2816,17 @@ class OracleConsensus extends EventEmitter {
             rearms:         0
         };
         this.roundWatchdogs.set(round, entry);
-        this._scheduleRoundWatchdog(round, entry, this._roundAbandonMs());
+        this.scheduleRoundWatchdog(round, entry, this.roundAbandonMs());
     }
 
-    _scheduleRoundWatchdog(round, entry, delay) {
-        entry.timer = setTimeout(() => this._onRoundAbandoned(round), delay);
+    scheduleRoundWatchdog(round, entry, delay) {
+        entry.timer = setTimeout(() => this.onRoundAbandoned(round), delay);
         // A watchdog must never be the reason the process stays alive; stop() is
         // what tears it down on a clean shutdown, matching the leader timers.
         if (entry.timer && typeof entry.timer.unref === 'function') entry.timer.unref();
     }
 
-    _disarmRoundWatchdog(round) {
+    disarmRoundWatchdog(round) {
         let entry = this.roundWatchdogs.get(round);
         if (!entry) return;
         if (entry.timer) clearTimeout(entry.timer);
@@ -2837,7 +2837,7 @@ class OracleConsensus extends EventEmitter {
     // entry, so the round_lost record names what the hub was waiting on. The seat
     // moves as the round progresses (follower -> fallback proposer); the last stamp
     // is the one the record carries. No-op once the round has an outcome.
-    _noteRoundSeat(round, seat, info) {
+    noteRoundSeat(round, seat, info) {
         let entry = this.roundWatchdogs.get(round);
         if (!entry) return;
         entry.seat     = seat;
@@ -2848,7 +2848,7 @@ class OracleConsensus extends EventEmitter {
     // record so this hub's absence of a snapshot is a stated fact rather than a
     // hole, and so hub-to-hub presence comparison (getoracleroundpresence) can tell
     // "we all lost this round" apart from "this hub never saw it".
-    _onRoundAbandoned(round) {
+    onRoundAbandoned(round) {
         let entry = this.roundWatchdogs.get(round);
         if (!entry) return;
         if (this.finalized.has(round) || this.locallySkipped.has(round)) {
@@ -2861,7 +2861,7 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (pending && entry.rearms < ROUND_ABANDON_MAX_REARMS) {
             entry.rearms++;
-            this._scheduleRoundWatchdog(round, entry,
+            this.scheduleRoundWatchdog(round, entry,
                 this.finalizationTimeout + this.roundAbandonGraceMs);
             return;
         }
@@ -2943,7 +2943,7 @@ class OracleConsensus extends EventEmitter {
     // Addr under which the leader's submission is recorded in a
     // snapshot-filtered submission map (keys are addrs, values carry the
     // verified pubkey), or null when the leader has not submitted.
-    _leaderSubmissionAddr(submissions, leader) {
+    leaderSubmissionAddr(submissions, leader) {
         if (!leader || !submissions) return null;
         if (leader.addr && submissions.has(leader.addr)) return leader.addr;
         let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
@@ -3021,7 +3021,7 @@ class OracleConsensus extends EventEmitter {
     //
     // Consensus-breaking (every round digest changes), so it ships ungated with
     // the pre-launch batch and its mandatory fleet-wide rebase.
-    _canonicalDigestPrices(prices) {
+    canonicalDigestPrices(prices) {
         if (!Array.isArray(prices)) return prices;
         return prices
             .map(p => ({
@@ -3041,7 +3041,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     _digest(round, prices) {
-        let payload = JSON.stringify({ round: round, prices: this._canonicalDigestPrices(prices) });
+        let payload = JSON.stringify({ round: round, prices: this.canonicalDigestPrices(prices) });
         return crypto.createHash('sha256').update(payload).digest('hex');
     }
 }

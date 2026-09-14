@@ -172,7 +172,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(true);
             const agg = Object.assign(Object.create(PriceAggregator.prototype),
                 { hub: { capabilitySnapshot: cap, network: NETWORK } });
-            const out = await agg._resolvePriceCapabilityValidators(BLOCK);
+            const out = await agg.resolvePriceCapabilityValidators(BLOCK);
 
             expect(out).to.be.an('array');
             expect(out.truncated).to.equal(true);   // the persist guard reads exactly this
@@ -182,7 +182,7 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             const cap = capStub(false);
             const agg = Object.assign(Object.create(PriceAggregator.prototype),
                 { hub: { capabilitySnapshot: cap, network: NETWORK } });
-            const out = await agg._resolvePriceCapabilityValidators(BLOCK);
+            const out = await agg.resolvePriceCapabilityValidators(BLOCK);
 
             expect(out).to.have.lengthOf(2);
             expect(out.truncated).to.equal(undefined);

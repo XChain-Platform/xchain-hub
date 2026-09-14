@@ -166,7 +166,7 @@ class PriceFetcher {
     // a genuinely mis-scaled upstream would emit 36 lines per round and bury the
     // signal this exists to give. Absences (a pair the source simply did not
     // return) are NOT counted; only values that were present and failed the bound.
-    _reportBoundRejects(sourceKey, label, rejected) {
+    reportBoundRejects(sourceKey, label, rejected) {
         if (!rejected || rejected.length === 0) return;
         // Self-initialising: a source key missing from the declaration above must
         // degrade to a correct count, never to a permanent NaN that reads as a
@@ -182,7 +182,7 @@ class PriceFetcher {
 
     // Render one rejected value for the aggregated warn, truncated so a garbage
     // upstream payload cannot turn a diagnostic line into a multi-kilobyte log entry.
-    static _rejectSample(coinPair, raw) {
+    static rejectSample(coinPair, raw) {
         let shown = String(raw);
         if (shown.length > 32) shown = shown.slice(0, 32) + '...';
         return coinPair + '=' + shown;
@@ -296,7 +296,7 @@ class PriceFetcher {
     // Non-retryable errors fail immediately. Resolves with the axios response;
     // rejects with the last error once every attempt is exhausted. Shared by both
     // price-source fetchers so each gets identical rate-limit resilience.
-    async _fetchWithRetry(url, options) {
+    async fetchWithRetry(url, options) {
         let maxAttempts = 3;
         let lastErr     = null;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -349,7 +349,7 @@ class PriceFetcher {
 
         let response;
         try {
-            response = await this._fetchWithRetry(url, { timeout: this.timeout, headers });
+            response = await this.fetchWithRetry(url, { timeout: this.timeout, headers });
         } catch (err) {
             console.warn('CoinGecko fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             return null;
@@ -369,11 +369,11 @@ class PriceFetcher {
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
                 } else {
-                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, raw));
+                    rejected.push(PriceFetcher.rejectSample(coin + '/' + fiat, raw));
                 }
             }
         }
-        this._reportBoundRejects('coingecko', 'CoinGecko', rejected);
+        this.reportBoundRejects('coingecko', 'CoinGecko', rejected);
         return prices;
     }
 
@@ -403,7 +403,7 @@ class PriceFetcher {
             let url = 'https://api.coinbase.com/v2/exchange-rates?currency=' + encodeURIComponent(coin);
             let response;
             try {
-                response = await this._fetchWithRetry(url, { timeout: this.timeout, headers: {} });
+                response = await this.fetchWithRetry(url, { timeout: this.timeout, headers: {} });
             } catch (err) {
                 // Per-coin failure only. One coin erroring must not discard the two
                 // that answered, the same fail-soft rule the other sources follow.
@@ -422,12 +422,12 @@ class PriceFetcher {
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
                 } else {
-                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, raw));
+                    rejected.push(PriceFetcher.rejectSample(coin + '/' + fiat, raw));
                 }
             }
         }
 
-        this._reportBoundRejects('coinbase', 'Coinbase', rejected);
+        this.reportBoundRejects('coinbase', 'Coinbase', rejected);
         // null, not {}, when every coin failed: fetchPrices counts a source as live
         // only if it contributed a price, and null keeps that distinction honest.
         return anyCoinSucceeded ? prices : null;
@@ -452,7 +452,7 @@ class PriceFetcher {
 
         let response;
         try {
-            response = await this._fetchWithRetry(url, { timeout: this.timeout });
+            response = await this.fetchWithRetry(url, { timeout: this.timeout });
         } catch (err) {
             console.warn('Kraken fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             return null;
@@ -488,10 +488,10 @@ class PriceFetcher {
             if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                 prices[pair] = val;
             } else {
-                rejected.push(PriceFetcher._rejectSample(pair, entry.c[0]));
+                rejected.push(PriceFetcher.rejectSample(pair, entry.c[0]));
             }
         }
-        this._reportBoundRejects('kraken', 'Kraken', rejected);
+        this.reportBoundRejects('kraken', 'Kraken', rejected);
         return prices;
     }
 
@@ -509,7 +509,7 @@ class PriceFetcher {
 
         let response;
         try {
-            response = await this._fetchWithRetry(url, {
+            response = await this.fetchWithRetry(url, {
                 timeout: this.timeout,
                 headers: { 'X-CMC_PRO_API_KEY': this.coinmarketcapApiKey }
             });
@@ -554,11 +554,11 @@ class PriceFetcher {
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
                 } else {
-                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, cmcQuote.price));
+                    rejected.push(PriceFetcher.rejectSample(coin + '/' + fiat, cmcQuote.price));
                 }
             }
         }
-        this._reportBoundRejects('coinmarketcap', 'CoinMarketCap', rejected);
+        this.reportBoundRejects('coinmarketcap', 'CoinMarketCap', rejected);
         return prices;
     }
 

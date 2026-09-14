@@ -150,7 +150,7 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
             finalized:      true
         });
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(store.calledOnce).to.be.true;
         expect(store.firstCall.args[2]).to.equal(2);

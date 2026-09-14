@@ -235,6 +235,6 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
         let twinAddr = 'ws://validator-1-twin:10001';
         let subs = new Map([[twinAddr, { prices: [], pubkey: VALIDATORS_3[0].pubkey.toLowerCase() }]]);
         let leader = { addr: VALIDATORS_3[0].addr, pubkey: VALIDATORS_3[0].pubkey.toLowerCase() };
-        expect(oc._leaderSubmissionAddr(subs, leader)).to.equal(twinAddr);
+        expect(oc.leaderSubmissionAddr(subs, leader)).to.equal(twinAddr);
     });
 });

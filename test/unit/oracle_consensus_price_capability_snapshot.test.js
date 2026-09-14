@@ -119,7 +119,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
     it('writes a price row per validator at the BTC anchor when a quorum-signed round finalizes', async function () {
         oc.pendingRounds.set(ROUND, makePending());
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         let written = priceRows(db);
         expect(written).to.have.length(2);
@@ -139,7 +139,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
     it('anchors the rows at the BTC block, never at the round number or a local height', async function () {
         oc.pendingRounds.set(ROUND, makePending());
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(priceRows(db)).to.have.length(2);
         expect(priceRows(db).every(r => r.snapshot_block === BTC_ANCHOR)).to.be.true;
@@ -151,7 +151,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
     it('persists BEFORE the price_snapshots round insert, so no unverifiable round streams first', async function () {
         oc.pendingRounds.set(ROUND, makePending());
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         let capIdx   = db.calls.findIndex(c => /INSERT IGNORE INTO capability_snapshots/i.test(c.sql));
         let priceIdx = db.calls.findIndex(c => /INSERT INTO price_snapshots/i.test(c.sql));
@@ -163,7 +163,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
     it('mirrors each persisted row to hub-DB subscribers', async function () {
         oc.pendingRounds.set(ROUND, makePending());
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         let capRows = broadcasts.filter(b => b.table === 'capability_snapshots');
         expect(capRows).to.have.length(2);
@@ -172,13 +172,13 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
 
     it('is idempotent: re-finalizing the same round writes no duplicate rows', async function () {
         oc.pendingRounds.set(ROUND, makePending());
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
         expect(priceRows(db)).to.have.length(2);
 
         // A replayed COMMIT re-driving the store for the same round (the retry path).
         oc.finalized.delete(ROUND);
         oc.pendingRounds.set(ROUND, makePending());
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(priceRows(db)).to.have.length(2);
     });
@@ -187,7 +187,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
         hub.capabilitySnapshot.getWeightSnapshot.resolves(weightSnapshot({ truncated: true }));
         oc.pendingRounds.set(ROUND, makePending());
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(priceRows(db)).to.have.length(0);
     });
@@ -203,7 +203,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
         });
         oc.pendingRounds.set(ROUND, makePending({ btcBlockHeight: legacyAnchor }));
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(priceRows(db)).to.have.length(1);
         expect(priceRows(db)[0]).to.include({
@@ -227,7 +227,7 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
         let events = [];
         oc.on('round:finalized', e => events.push(e));
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(db.calls.some(c => /INSERT INTO price_snapshots/i.test(c.sql))).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.false;

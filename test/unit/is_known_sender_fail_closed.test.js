@@ -229,7 +229,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
         const pending = { memberPubkeys: new Set([KEY_CHAIN, KEY_REGISTRY]) };
         // KEY_STRANGER voted but is not in the round's qualified snapshot set.
         const votes = new Set([KEY_CHAIN, KEY_REGISTRY, KEY_STRANGER]);
-        expect(self._countDistinctMembers(pending, votes)).to.equal(2);
+        expect(self.countDistinctMembers(pending, votes)).to.equal(2);
     });
 
     it('CrossChainEngine tallies distinct member keys against the locked snapshot', function () {

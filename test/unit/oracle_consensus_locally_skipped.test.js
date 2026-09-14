@@ -77,7 +77,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
     });
 
     it('finalizing a locally-skipped round moves it out of locallySkipped into finalized', function () {
-        oc._markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.true;
         expect(oc._locallySkippedOrder).to.include(ROUND);
 
@@ -107,7 +107,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
             finalized:      true
         });
 
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
@@ -115,7 +115,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
 
     it('_markLocallySkipped is a no-op once the round is already finalized', function () {
         oc.markFinalized(ROUND);
-        oc._markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
     });
@@ -128,12 +128,12 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         let seen = [];
         oc.on('round:skipped', e => seen.push(e && e.round));
 
-        oc._markLocallySkipped(ROUND);
-        oc._markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
+        oc.markLocallySkipped(ROUND);
         expect(seen).to.deep.equal([ROUND]);
 
         oc.markFinalized(ROUND + 1);
-        oc._markLocallySkipped(ROUND + 1);
+        oc.markLocallySkipped(ROUND + 1);
         expect(seen).to.deep.equal([ROUND]);
     });
 });

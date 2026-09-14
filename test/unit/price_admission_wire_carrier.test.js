@@ -495,11 +495,11 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
         });
 
         it('splits a window at the activation, so no batch straddles it', function () {
-            expect(pub._flagDayKey(LEGACY_AT)).to.not.equal(pub._flagDayKey(ADMIT_AT));
-            const segments = pub._splitByFlagDay(rounds(LEGACY_AT, [undefined, MAP6]));
+            expect(pub.flagDayKey(LEGACY_AT)).to.not.equal(pub.flagDayKey(ADMIT_AT));
+            const segments = pub.splitByFlagDay(rounds(LEGACY_AT, [undefined, MAP6]));
             expect(segments.map(seg => seg.map(r => r.round))).to.deep.equal([[5], [6]]);
-            expect(signer._straddlesArmedOracleFlagDay(LEGACY_AT, ADMIT_AT)).to.equal(true);
-            expect(signer._straddlesArmedOracleFlagDay(ADMIT_AT, ADMIT_AT + 5)).to.equal(false);
+            expect(signer.straddlesArmedOracleFlagDay(LEGACY_AT, ADMIT_AT)).to.equal(true);
+            expect(signer.straddlesArmedOracleFlagDay(ADMIT_AT, ADMIT_AT + 5)).to.equal(false);
         });
 
         it('the signer rebuilds each round\'s map from its stored columns, and refuses a round whose pairs disagree', async function () {
@@ -510,7 +510,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
                 row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
                 row(6, 'BTC/USD', { admit_block_btc: null, admit_block_ltc: null, admit_block_doge: null })
             ]) };
-            const derived = await signer._deriveWindow(5, 6);
+            const derived = await signer.deriveWindow(5, 6);
             expect(derived.map(r => r.admitBlocks)).to.deep.equal([{ BTC: MAP5.BTC, DOGE: MAP5.DOGE }, undefined]);
             expect(signer.db.doQuery.firstCall.args[0]).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge/);
 
@@ -519,15 +519,15 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
                 row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC + 1, admit_block_ltc: null, admit_block_doge: MAP5.DOGE })
             ]) };
             let err = null;
-            try { await signer._deriveWindow(5, 5); } catch (e) { err = e; }
+            try { await signer.deriveWindow(5, 5); } catch (e) { err = e; }
             expect(err && err.message).to.match(/inconsistent anchor\/timestamp\/admission map across round 5/);
         });
 
         it('the buffer entry carries the finalized round\'s map, and only when the event has one', function () {
             const base = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: ADMIT_AT, prices: [{ coinPair: 'BTC/USD', price: '1' }] };
-            expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: MAP5 }, base)).admitBlocks).to.deep.equal(MAP5);
-            expect(pub._bufferEntryFromEvent(Object.assign({ admitBlocks: null }, base))).to.not.have.property('admitBlocks');
-            expect(pub._bufferEntryFromEvent(base)).to.not.have.property('admitBlocks');
+            expect(pub.bufferEntryFromEvent(Object.assign({ admitBlocks: MAP5 }, base)).admitBlocks).to.deep.equal(MAP5);
+            expect(pub.bufferEntryFromEvent(Object.assign({ admitBlocks: null }, base))).to.not.have.property('admitBlocks');
+            expect(pub.bufferEntryFromEvent(base)).to.not.have.property('admitBlocks');
         });
     });
 
@@ -584,7 +584,7 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
 
         it('the LEADER pins the map from its own tips in the era, signs over it and carries it in the PROPOSE', async function () {
             build(NETWORK, TIPS); asLeader();
-            await oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
+            await oc.proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
             const pending = oc.pendingRounds.get(ROUND);
             expect(pending, 'no pending round').to.exist;
             expect(pending.admitBlocks).to.deep.equal(MAP);
@@ -600,14 +600,14 @@ describe('the admission map on the price wire (rows 17 and 14)', function () {
 
         it('the LEADER proposes nothing when a tip is missing, never a guessed height', async function () {
             build(NETWORK, { BTC: ADMIT_AT, LTC: 2400000, DOGE: null }); asLeader();
-            await oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
+            await oc.proposeRound(ROUND, submissionsFrom(leader.addr), false, ADMIT_AT, 1700000000, null, 1, false, null);
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
             expect(proposeCalls().length).to.equal(0);
         });
 
         it('below the activation the PROPOSE carries no map and nothing awaits: byte-identical behaviour', async function () {
             build(NETWORK, TIPS); asLeader();
-            const p = oc._proposeRound(ROUND, submissionsFrom(leader.addr), false, LEGACY_AT, 1700000000, null, 1, false, null);
+            const p = oc.proposeRound(ROUND, submissionsFrom(leader.addr), false, LEGACY_AT, 1700000000, null, 1, false, null);
             // Synchronous to completion below the activation: the round is pending before the await.
             expect(oc.pendingRounds.has(ROUND)).to.equal(true);
             await p;

@@ -208,7 +208,7 @@ class XchainPriceSource {
     // Latest FINALIZED price for a pair strictly below `round`: the consensus-derived
     // winsorization anchor (db.getLatestFinalizedPriceBelowRound records why it is keyed
     // on the round rather than on the newest row this hub holds).
-    async _lastFinalized(pair, round) {
+    async lastFinalized(pair, round) {
         if (!this.hubDb) return null;
         let rows = await this.hubDb.getLatestFinalizedPriceBelowRound(pair, round);
         if (!rows || !rows.length) return null;
@@ -259,7 +259,7 @@ class XchainPriceSource {
 
             // Carry-forward value and winsorization anchor, both from rounds strictly
             // below this one so every validator resolves the same reference.
-            let lastXchainUsd = await this._lastFinalized(XCHAIN_PAIR, round);
+            let lastXchainUsd = await this.lastFinalized(XCHAIN_PAIR, round);
 
             // The band is applied in BTC terms, the units the fills are quoted in, so
             // the anchor is converted with the SAME round's BTC/USD it was published
@@ -278,7 +278,7 @@ class XchainPriceSource {
             // That is deterministic for everyone, because "has any BTC/USD finalized
             // below round R" is consensus data, identical on every honest hub. It only
             // arises before the federation's first BTC/USD finalization.
-            let refBtcUsd = await this._lastFinalized(BTC_PAIR, round);
+            let refBtcUsd = await this.lastFinalized(BTC_PAIR, round);
 
             // D2 (redecided 2026-08-03): the bootstrap is denominated in SATOSHIS, so
             // before it can be carried forward as a USD price it has to be converted,
@@ -338,7 +338,7 @@ class XchainPriceSource {
             // staleness bound and re-brick LTC/DOGE fees within a few rounds.
             let derived = selection.fills.length ? deriveXchainRate(bcmath, selection.fills, refRate) : null;
             if (!derived) {
-                return this._entry(carryForward, Object.assign(meta, { derived: false }));
+                return this.entry(carryForward, Object.assign(meta, { derived: false }));
             }
 
             // D2 supersession gate. Below the threshold the window's trades are real
@@ -353,8 +353,8 @@ class XchainPriceSource {
             //
             // Measured pre-winsorize (totalCoin), so a clamped print cannot inflate the
             // evidence for its own admission.
-            if (!this._volumeSupersedes(derived.totalCoin)) {
-                return this._entry(carryForward, Object.assign(meta, {
+            if (!this.volumeSupersedes(derived.totalCoin)) {
+                return this.entry(carryForward, Object.assign(meta, {
                     derived:        false,
                     reason:         this.minBtcVolume === null
                         ? 'supersession disabled (D2 threshold undecided)'
@@ -366,7 +366,7 @@ class XchainPriceSource {
             }
 
             let usd = toUsd(bcmath, derived.rate, btcUsd);
-            if (!usd) return this._entry(carryForward, Object.assign(meta, { derived: false, reason: 'usd leg unusable' }));
+            if (!usd) return this.entry(carryForward, Object.assign(meta, { derived: false, reason: 'usd leg unusable' }));
 
             // §10 step 6: everything needed to re-derive and audit this print after the
             // fact. §5's claim that manipulation is "visible" is only true if these are
@@ -385,7 +385,7 @@ class XchainPriceSource {
                 minBtcVolume: this.minBtcVolume,
                 refRate:      derived.refRate,
             });
-            return this._entry(usd, meta);
+            return this.entry(usd, meta);
         } catch (err) {
             // Never propagate: this pair is appended to a submission carrying 36
             // others, and a throw here would take the whole round's fetch down.
@@ -401,7 +401,7 @@ class XchainPriceSource {
     // carry-forward rather than publishing a market observation off a number the
     // arithmetic could not read. Closed is the safe direction because the
     // carry-forward is always a value the federation already agreed on.
-    _volumeSupersedes(btcVolume) {
+    volumeSupersedes(btcVolume) {
         if (this.minBtcVolume === null) return false;   // disabled: never supersede
         try {
             return bcmath.bcgte(btcVolume, String(this.minBtcVolume));
@@ -414,7 +414,7 @@ class XchainPriceSource {
     // carried forward. The API sources bound their values the same way for the same
     // reason: garbage must never enter a round, and a carried-forward value read out
     // of a database is no more trusted than a fetched one.
-    _entry(price, meta) {
+    entry(price, meta) {
         let value;
         try {
             value = bcmath.bcformat(price, 8);

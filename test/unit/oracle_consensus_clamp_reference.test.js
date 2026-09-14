@@ -63,9 +63,9 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
     async function runStraddledRound(network, btcBlockHeight) {
         hub.network = network;
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 99)]);
-        await oc._seedLastFinalizedPrices();
-        expect(oc._getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
-        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(99);
+        await oc.seedLastFinalizedPrices();
+        expect(oc.getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
+        expect(oc.lastFinalizedRoundFor('BTC/USD')).to.equal(99);
 
         hub.db.doQuery.resolves([row('BTC/USD', '200.00000000', 100)]);
         oracleRound.getSubmissions.returns(buildSubmissions([
@@ -84,14 +84,14 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
         const price = await runStraddledRound('testnet', ARMED);
 
         expect(price, 'clamped against the round-100 price, not the round-99 one').to.equal(ALIGNED);
-        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(100);
+        expect(oc.lastFinalizedRoundFor('BTC/USD')).to.equal(100);
     });
 
     it('takes the aligned path on a regtest hub, which is armed at genesis', async function () {
         const price = await runStraddledRound('regtest', 0);
 
         expect(price).to.equal(ALIGNED);
-        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(100);
+        expect(oc.lastFinalizedRoundFor('BTC/USD')).to.equal(100);
     });
 
     // The negative control. This is the pre-alignment behaviour the fleet still runs
@@ -102,19 +102,19 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
         expect(price, 'the round-99 reference still bounds the aggregate').to.equal(STALE);
         expect(price).to.not.equal(ALIGNED);
-        expect(oc._lastFinalizedRoundFor('BTC/USD'), 'no round-aligned re-read ran').to.equal(99);
+        expect(oc.lastFinalizedRoundFor('BTC/USD'), 'no round-aligned re-read ran').to.equal(99);
     });
 
     it('keeps the stale timer-only reference on unratified mainnet at any height', async function () {
         const price = await runStraddledRound('mainnet', 9999999);
 
         expect(price).to.equal(STALE);
-        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(99);
+        expect(oc.lastFinalizedRoundFor('BTC/USD')).to.equal(99);
     });
 
     it('issues no query on the common path where the hub already holds the previous round', async function () {
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 100)]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
         hub.db.doQuery.resetHistory();
 
         await oc._refreshLastFinalizedForRound(101);
@@ -124,7 +124,7 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     it('re-reads at most once per round when the database itself is behind', async function () {
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 50)]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
         hub.db.doQuery.resetHistory();
 
         await oc._refreshLastFinalizedForRound(101);
@@ -136,7 +136,7 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     it('counts a reference that is still behind after the re-read', async function () {
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 50)]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
 
         await oc._refreshLastFinalizedForRound(101);
 
@@ -145,24 +145,24 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     it('a rejected query keeps the previous reference and never throws into consensus', async function () {
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 99)]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
 
         hub.db.doQuery.rejects(new Error('replica mid-restore'));
         await oc._refreshLastFinalizedForRound(101);
 
-        expect(oc._getLastFinalizedPrice('BTC/USD'), 'reference survives a failed read').to.equal('100.00000000');
+        expect(oc.getLastFinalizedPrice('BTC/USD'), 'reference survives a failed read').to.equal('100.00000000');
     });
 
     it('an empty result set does not clear the reference', async function () {
         // An absent reference means NO clamp at all, so an unbounded aggregate is
         // worse than a stale bound: a truncated read must never drop a pair.
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 99)]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
 
         hub.db.doQuery.resolves([]);
         await oc._refreshLastFinalizedForRound(101);
 
-        expect(oc._getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
+        expect(oc.getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
     });
 
     it('reports the highest cached round, which is what "behind" is measured against', async function () {
@@ -170,13 +170,13 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
             row('BTC/USD', '100.00000000', 98),
             row('LTC/USD', '50.00000000', 101)
         ]);
-        await oc._seedLastFinalizedPrices();
+        await oc.seedLastFinalizedPrices();
 
-        expect(oc._maxCachedFinalizedRound()).to.equal(101);
+        expect(oc.maxCachedFinalizedRound()).to.equal(101);
     });
 
     it('treats an empty cache as no position rather than round zero', async function () {
-        expect(oc._maxCachedFinalizedRound(), 'a cold cache is null, not 0').to.equal(null);
+        expect(oc.maxCachedFinalizedRound(), 'a cold cache is null, not 0').to.equal(null);
     });
 });
 

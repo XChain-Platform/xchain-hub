@@ -376,7 +376,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             instances.push(second);
             await second.start();
             expect(second._buffer.size).to.equal(2);
-            expect(second._bufferedRange(0, 5).map(r => r.round)).to.deep.equal([1, 2]);
+            expect(second.bufferedRange(0, 5).map(r => r.round)).to.deep.equal([1, 2]);
         });
 
         it('bounds the buffer at ORACLE_BATCH_BUFFER_MAX_ROUNDS, dropping the oldest', async function () {
@@ -398,7 +398,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             for (let r = 0; r < 3; r++) await h.p.onRoundFinalized(roundFixture(r));
             expect(h.p._buffer.size).to.equal(3);
 
-            await h.p._pruneObservedWindow(0, 5);
+            await h.p.pruneObservedWindow(0, 5);
             expect(Array.from(h.p._buffer.keys())).to.deep.equal([2]);
             expect(readJsonl(h.bufferPath).map(e => e.round)).to.deep.equal([2]);
         });
@@ -513,7 +513,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             await h.p.start();
             for (let r = 0; r < 8; r++) await h.p.onRoundFinalized(roundFixture(r));
 
-            let pruned = await h.p._pruneObservedWindow(0, 5);
+            let pruned = await h.p.pruneObservedWindow(0, 5);
             expect(pruned).to.equal(6);
             // Rounds 6 and 7 are outside the batch's claimed range and stay buffered.
             expect(Array.from(h.p._buffer.keys()).sort((a, b) => a - b)).to.deep.equal([6, 7]);
@@ -572,7 +572,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
 
-                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(1);
+                expect(await h.p.reconcileBufferedWindow(0, 5)).to.equal(1);
                 expect(h.p._buffer.has(2)).to.equal(false);
                 // The landing height never reaches the buffer, let alone a proposal.
                 for (let e of h.p._buffer.values()) expect(e.btcBlockHeight).to.not.equal(67856096);
@@ -587,7 +587,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
                 let before = readJsonl(h.bufferPath);
 
-                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(await h.p.reconcileBufferedWindow(0, 5)).to.equal(0);
                 expect(readJsonl(h.bufferPath)).to.deep.equal(before);
                 expect(logs.warn.join('\n')).to.not.match(/disagreed with this hub's own/);
             });
@@ -597,7 +597,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 await h.p.onRoundFinalized(roundFixture(0));
 
-                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(await h.p.reconcileBufferedWindow(0, 5)).to.equal(0);
                 expect(Array.from(h.p._buffer.keys())).to.deep.equal([0]);
             });
 
@@ -610,7 +610,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 await h.p.onRoundFinalized(roundFixture(0));
 
-                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(await h.p.reconcileBufferedWindow(0, 5)).to.equal(0);
                 expect(h.p._buffer.get(0).timestamp).to.equal(1800000000);
                 expect(h.p._buffer.get(0).pairs).to.have.length(2);
                 expect(logs.warn.join('\n')).to.match(/skipping reconcile of buffered round 0/);
@@ -626,7 +626,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 await h.p.onRoundFinalized(roundFixture(0));
 
-                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(await h.p.reconcileBufferedWindow(0, 5)).to.equal(0);
                 expect(h.p._buffer.get(0).timestamp).to.equal(1800000000);
                 expect(logs.warn.join('\n')).to.match(/cannot reconcile the buffered copy of window \[0,5\]/);
             });
@@ -641,7 +641,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             await h.p.start();
             for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
 
-            expect(await h.p._pruneObservedWindow(0, 5)).to.equal(1);
+            expect(await h.p.pruneObservedWindow(0, 5)).to.equal(1);
             expect(Array.from(h.p._buffer.keys()).sort((a, b) => a - b)).to.deep.equal([0, 1, 2, 4, 5]);
         });
     });
@@ -736,7 +736,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 let h = await followerOf({ landed: 99 });
                 await h.p._assembleWindow(1);
 
-                let took = await h.p._attemptTakeover(1);
+                let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(true);
                 expect(h.broadcasts).to.have.length(1);
                 expect(h.p.getStats().takeoverPublished).to.equal(1);
@@ -750,7 +750,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             it('declines when the leader already published, and prunes instead', async function () {
                 // Window 1 covers rounds 6..11; seeing one of them land is proof.
                 let h = await followerOf({ landed: 7 });
-                let took = await h.p._attemptTakeover(1);
+                let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
             });
@@ -762,7 +762,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 let h = await followerOf();   // no landed row at all
                 await h.p.start();
                 await h.p._assembleWindow(1);
-                let took = await h.p._attemptTakeover(1);
+                let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
                 expect(h.p.getStats().takeoverArmed).to.equal(false);
@@ -770,9 +770,9 @@ describe('OraclePublisher PRICE batch rail', function () {
 
             it('declines when the hub DB cannot answer whether the window is on chain', async function () {
                 let h = await followerOf({ landed: 99 });
-                await h.p._observationFeedProven();          // prove the feed first
+                await h.p.observationFeedProven();          // prove the feed first
                 h.hub.db.doQuery = sinon.stub().rejects(new Error('hub db down'));
-                let took = await h.p._attemptTakeover(1);
+                let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
             });
@@ -803,7 +803,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                     // last thing it needed before broadcasting.
                     h.signer.coSignedAt = sinon.stub().returns(Date.now() - 1000);
 
-                    let took = await h.p._attemptTakeover(1);
+                    let took = await h.p.attemptTakeover(1);
 
                     expect(took).to.equal(false);
                     expect(h.broadcasts).to.have.length(0);
@@ -818,7 +818,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                     let h = await followerOf({ landed: 99 });
                     h.signer.coSignedAt = () => Date.now() - 1000;
 
-                    expect(await h.p._attemptTakeover(1)).to.equal(false);
+                    expect(await h.p.attemptTakeover(1)).to.equal(false);
                     // Without the re-arm this window would be dropped by this hub
                     // forever: the timer that fired is already gone.
                     expect(h.p._takeoverTimers.has(1)).to.equal(true);
@@ -832,7 +832,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                     // the leader sent is provably gone.
                     h.signer.coSignedAt = () => Date.now() - COOLDOWN_MS - 1;
 
-                    let took = await h.p._attemptTakeover(1);
+                    let took = await h.p.attemptTakeover(1);
 
                     expect(took).to.equal(true);
                     expect(h.broadcasts).to.have.length(1);
@@ -846,16 +846,16 @@ describe('OraclePublisher PRICE batch rail', function () {
                     // so it cannot have one in flight: that is genuine silence.
                     h.signer.coSignedAt = () => null;
 
-                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(await h.p.attemptTakeover(1)).to.equal(true);
                     expect(h.broadcasts).to.have.length(1);
                 });
 
                 it('defers on an ambiguous send of this hub\'s OWN for the same window', async function () {
                     let h = await followerOf({ landed: 99 });
                     await h.p._assembleWindow(1);
-                    h.p._noteAmbiguousWindow(1);
+                    h.p.noteAmbiguousWindow(1);
 
-                    expect(await h.p._attemptTakeover(1)).to.equal(false);
+                    expect(await h.p.attemptTakeover(1)).to.equal(false);
                     expect(h.broadcasts).to.have.length(0);
                     expect(h.p.getStats().takeoverDeferred).to.equal(1);
                 });
@@ -876,7 +876,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                     expect(readJsonl(h.deadPath)).to.have.length(1);
                     expect(h.p._ambiguousWindows.has(0)).to.equal(true);
 
-                    expect(await h.p._attemptTakeover(0)).to.equal(false);
+                    expect(await h.p.attemptTakeover(0)).to.equal(false);
                     expect(h.p.getStats().takeoverDeferred).to.equal(1);
                 });
 
@@ -887,7 +887,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                     h.signer.coSignedAt = () => Date.now();
 
                     expect(h.p.getStats().takeoverAmbiguousCooldownMs).to.equal(0);
-                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(await h.p.attemptTakeover(1)).to.equal(true);
                     expect(h.broadcasts).to.have.length(1);
                 });
 
@@ -896,14 +896,14 @@ describe('OraclePublisher PRICE batch rail', function () {
                     await h.p._assembleWindow(1);
                     delete h.signer.coSignedAt;
 
-                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(await h.p.attemptTakeover(1)).to.equal(true);
                     expect(h.broadcasts).to.have.length(1);
                 });
 
                 it('never CONSTRUCTS a signer just to answer the ambiguity question', async function () {
                     let h = await followerOf({ landed: 99 });
                     h.hub.oracleBatchSigner = null;
-                    expect(h.p._takeoverAmbiguityAt(1, 6, 11)).to.equal(null);
+                    expect(h.p.takeoverAmbiguityAt(1, 6, 11)).to.equal(null);
                     expect(h.p._ownedBatchSigner).to.equal(null);
                 });
             });
@@ -986,7 +986,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             expect(h.broadcasts).to.have.length(1);
             let after = h.signer.calls.length;
 
-            for (let i = 0; i < 6; i++) h.p._sweepBufferCatchup();
+            for (let i = 0; i < 6; i++) h.p.sweepBufferCatchup();
             await h.p._windowChain;
             expect(h.signer.calls).to.have.length(after);
             expect(h.broadcasts).to.have.length(1);
@@ -998,7 +998,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
             h.p._buffer.set(6, bufferedFixture(6));
 
-            expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
+            expect(h.p.pendingCatchupWindows()).to.deep.equal([0]);
         });
 
         it('re-proposes at most four windows per sweep, oldest first, and says how many are waiting', async function () {
@@ -1007,8 +1007,8 @@ describe('OraclePublisher PRICE batch rail', function () {
             // Ten closed windows plus one still open (window 10 is missing round 65).
             for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            expect(h.p._pendingCatchupWindows()).to.have.length(10);
-            expect(h.p._sweepBufferCatchup()).to.equal(4);
+            expect(h.p.pendingCatchupWindows()).to.have.length(10);
+            expect(h.p.sweepBufferCatchup()).to.equal(4);
             await h.p._windowChain;
 
             let asked = h.signer.calls.map(c => c.first);
@@ -1024,10 +1024,10 @@ describe('OraclePublisher PRICE batch rail', function () {
             // Windows 0..5 were followed or published earlier in this process. Counting
             // them against the per-sweep cap would spend every slot on windows that need
             // nothing and never reach the one that timed out.
-            for (let w = 0; w <= 5; w++) h.p._noteAssembled(w);
+            for (let w = 0; w <= 5; w++) h.p.noteAssembled(w);
 
-            expect(h.p._pendingCatchupWindows()).to.deep.equal([6, 7, 8, 9]);
-            h.p._sweepBufferCatchup();
+            expect(h.p.pendingCatchupWindows()).to.deep.equal([6, 7, 8, 9]);
+            h.p.sweepBufferCatchup();
             await h.p._windowChain;
             expect(h.signer.calls.map(c => c.first)).to.deep.equal([36, 42, 48, 54]);
         });
@@ -1043,7 +1043,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             expect(h.p.getStats().batchWindowsAwaitingRetry).to.equal(1);
             expect(h.p.getStats().batchCatchupSweeps).to.equal(0);
 
-            h.p._sweepBufferCatchup();
+            h.p.sweepBufferCatchup();
             await h.p._windowChain;
             expect(h.p.getStats().batchWindowsAwaitingRetry).to.equal(0);
             expect(h.p.getStats().batchCatchupSweeps).to.equal(1);
@@ -1072,12 +1072,12 @@ describe('OraclePublisher PRICE batch rail', function () {
                 let h = makePublisher({ signerOpts: { met: false } });
                 await h.p.start();
                 for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
-                expect(h.p._pendingCatchupWindows()).to.have.length(10);
+                expect(h.p.pendingCatchupWindows()).to.have.length(10);
 
                 let sweeps = [];
                 for (let i = 0; i < 3; i++) {
                     let before = h.signer.calls.length;
-                    h.p._sweepBufferCatchup();
+                    h.p.sweepBufferCatchup();
                     await h.p._windowChain;
                     sweeps.push(h.signer.calls.slice(before).map(c => c.first));
                 }
@@ -1098,12 +1098,12 @@ describe('OraclePublisher PRICE batch rail', function () {
                 // window that is simply never reached behind one that is retired.
                 for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                for (let i = 0; i < 3; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 3; i++) { h.p.sweepBufferCatchup(); await h.p._windowChain; }
 
                 expect(h.signer.calls.map(c => c.first), 'proposed twice, then retired')
                     .to.deep.equal([0, 0]);
                 expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(1);
-                expect(h.p._pendingCatchupWindows(), 'no longer holds a slot').to.deep.equal([]);
+                expect(h.p.pendingCatchupWindows(), 'no longer holds a slot').to.deep.equal([]);
                 expect(logs.warn.join('\n')).to.match(
                     /window \[0,5\] has failed 2 batch-signing round\(s\).*retired from the catch-up sweep/);
                 // Retiring is a memo entry, never a deletion: the rounds are still here.
@@ -1117,11 +1117,11 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 5; i++) { h.p.sweepBufferCatchup(); await h.p._windowChain; }
 
                 expect(h.signer.calls.map(c => c.first)).to.deep.equal([0, 0, 0, 0, 0]);
                 expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0]);
             });
 
             it('never retires when retirement is switched off', async function () {
@@ -1130,7 +1130,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 5; i++) { h.p.sweepBufferCatchup(); await h.p._windowChain; }
 
                 expect(h.signer.calls).to.have.length(5);
                 expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
@@ -1143,9 +1143,9 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                h.p._sweepBufferCatchup();          // attempt 1: misses quorum
+                h.p.sweepBufferCatchup();          // attempt 1: misses quorum
                 await h.p._windowChain;
-                h.p._sweepBufferCatchup();          // attempt 2: lands
+                h.p.sweepBufferCatchup();          // attempt 2: lands
                 await h.p._windowChain;
 
                 expect(h.broadcasts).to.have.length(1);
@@ -1163,13 +1163,13 @@ describe('OraclePublisher PRICE batch rail', function () {
                                                ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
                 await h.p.start();
                 for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
-                expect(h.p._pendingCatchupWindows()).to.have.length(20);
+                expect(h.p.pendingCatchupWindows()).to.have.length(20);
 
-                await h.p._runCatchupSweepTick();
+                await h.p.runCatchupSweepTick();
                 // Four per sweep is unchanged; what changed is that the next sweep is
                 // seconds away while a backlog remains, not an hour.
                 expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
-                await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
+                await waitUntil(() => h.p.pendingCatchupWindows().length <= 4, 3000);
                 expect(h.broadcasts.length).to.be.at.least(16);
             });
 
@@ -1189,8 +1189,8 @@ describe('OraclePublisher PRICE batch rail', function () {
                     try { return await real(w, o); } finally { inFlight--; }
                 });
 
-                await h.p._runCatchupSweepTick();
-                await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
+                await h.p.runCatchupSweepTick();
+                await waitUntil(() => h.p.pendingCatchupWindows().length <= 4, 3000);
                 expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
             });
 
@@ -1202,7 +1202,7 @@ describe('OraclePublisher PRICE batch rail', function () {
 
                 let armed = [];
                 sinon.stub(h.p, '_armCatchupSweep').callsFake((ms) => armed.push(ms));
-                await h.p._runCatchupSweepTick();
+                await h.p.runCatchupSweepTick();
 
                 expect(h.broadcasts).to.have.length(2);
                 expect(armed, 'nothing left to catch up on: wait the full interval')
@@ -1215,7 +1215,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                let tick = h.p._runCatchupSweepTick();
+                let tick = h.p.runCatchupSweepTick();
                 h.p.stop();
                 await tick;
                 expect(h.p._catchupSweepTimer).to.equal(null);
@@ -1274,10 +1274,10 @@ describe('OraclePublisher PRICE batch rail', function () {
             let h = makePublisher();
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
-            expect(h.p._pendingCatchupWindows(), 'window 0 is complete').to.deep.equal([0]);
+            expect(h.p.pendingCatchupWindows(), 'window 0 is complete').to.deep.equal([0]);
 
             h.p._buffer.set(6, bufferedFixture(6));
-            expect(h.p._pendingCatchupWindows(), 'window 1 holds one round and may still fill')
+            expect(h.p.pendingCatchupWindows(), 'window 1 holds one round and may still fill')
                 .to.deep.equal([0]);
         });
 
@@ -1289,8 +1289,8 @@ describe('OraclePublisher PRICE batch rail', function () {
             for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
 
             expect(h.p._windows.get(0).timer, 'the live timer owns window 0').to.not.equal(null);
-            expect(h.p._pendingCatchupWindows()).to.deep.equal([]);
-            expect(h.p._sweepBufferCatchup()).to.equal(0);
+            expect(h.p.pendingCatchupWindows()).to.deep.equal([]);
+            expect(h.p.sweepBufferCatchup()).to.equal(0);
             expect(h.signer.calls).to.have.length(0);
         });
 
@@ -1397,7 +1397,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'split' + r) }));
             }
             // The premise: a six-round wire really does overflow at this size.
-            let whole = h.p._emitWire(0, 5, 800005, h.p._bufferedRange(0, 5), sigsOf(3));
+            let whole = h.p._emitWire(0, 5, 800005, h.p.bufferedRange(0, 5), sigsOf(3));
             expect(whole.bytes).to.be.greaterThan(PRICE_WIRE_MAX_BYTES);
 
             // Hold the publish pass so the enqueued wires stay readable on disk; a
@@ -1432,9 +1432,9 @@ describe('OraclePublisher PRICE batch rail', function () {
             // Neither proposed range straddles: the signer's receiving-side twin would
             // silently refuse one that did, and nothing would ever publish.
             for (let c of h.signer.calls) {
-                let range = h.p._bufferedRange(c.first, c.last);
-                expect(h.p._flagDayKey(range[0].btcBlockHeight))
-                    .to.equal(h.p._flagDayKey(range[range.length - 1].btcBlockHeight));
+                let range = h.p.bufferedRange(c.first, c.last);
+                expect(h.p.flagDayKey(range[0].btcBlockHeight))
+                    .to.equal(h.p.flagDayKey(range[range.length - 1].btcBlockHeight));
             }
         });
 
@@ -1721,7 +1721,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             await h.p.start();
             h.p._buffer.set(0, bufferedFixture(0, { pairs: pairsOf(1200, 'huge') }));
             // The premise, measured rather than assumed: it fits neither bound.
-            expect(h.p._wireFits(h.p._emitWire(0, 0, 800000, h.p._bufferedRange(0, 0), sigsOf(3))))
+            expect(h.p._wireFits(h.p._emitWire(0, 0, 800000, h.p.bufferedRange(0, 0), sigsOf(3))))
                 .to.equal(false);
 
             await h.p._assembleWindow(0);
@@ -2036,8 +2036,8 @@ describe('OraclePublisher PRICE batch rail', function () {
                 let h = makePublisher();
                 await h.p.start();
                 for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));
-                h.p._rewriteBufferFile(h.p._bufferedRange(-Infinity, Infinity));
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0, 1]);
+                h.p.rewriteBufferFile(h.p.bufferedRange(-Infinity, Infinity));
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0, 1]);
 
                 expect(h.p.noteBatchLanded(0, 5, { sourceChain: 'DOGE', actionIndex: 270 })).to.equal(6);
 
@@ -2047,7 +2047,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 expect(readJsonl(h.bufferPath).map(e => e.round), 'the durable copy is shed too, or a restart brings the window back')
                     .to.deep.equal([6, 7, 8, 9, 10, 11, 12]);
                 expect(h.p._assembledWindows.has(0)).to.equal(true);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([1]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([1]);
                 expect(h.p.getStats().landedBatchPrunedRounds).to.equal(6);
 
                 // A hub that has not buffered the range sheds nothing and stays quiet.
@@ -2064,7 +2064,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 expect(h.p.noteBatchLanded(6, 8)).to.equal(3);
 
                 expect(h.p._assembledWindows.has(1), 'not memoized: rounds 9..11 still need a wire').to.equal(false);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([1]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([1]);
                 await h.p._assembleWindow(1);
                 expect(h.signer.calls).to.have.length(1);
                 expect(h.signer.calls[0].rounds).to.deep.equal([9, 10, 11]);
@@ -2092,18 +2092,18 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 // Windows 0..3 closed, window 4 open (round 24 only).
                 for (let r = 0; r < 25; r++) h.p._buffer.set(r, bufferedFixture(r));
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0, 1, 2, 3]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0, 1, 2, 3]);
                 let rpc = hubWithIndexer(h, [{ first_round: 0, last_round: 5, action_index: 10 },
                                              { first_round: 12, last_round: 17, action_index: 11 }]);
 
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(12);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(12);
 
                 expect(rpc.calledOnce).to.equal(true);
                 expect(rpc.firstCall.args[0]).to.equal('http://doge-indexer:3114');
                 expect(rpc.firstCall.args[1]).to.equal('fed-key');
                 expect(rpc.firstCall.args[2]).to.equal('getpricebatches');
                 expect(rpc.firstCall.args[3]).to.deep.equal({ first_round: 0, last_round: 23, limit: 500 });
-                expect(h.p._pendingCatchupWindows(), 'only the windows the chain lacks remain').to.deep.equal([1, 3]);
+                expect(h.p.pendingCatchupWindows(), 'only the windows the chain lacks remain').to.deep.equal([1, 3]);
                 let stats = h.p.getStats();
                 expect(stats.chainReconcileRuns).to.equal(1);
                 expect(stats.chainReconcilePrunedRounds).to.equal(12);
@@ -2117,7 +2117,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 25; r++) h.p._buffer.set(r, bufferedFixture(r));
                 hubWithIndexer(h, [{ first_round: 0, last_round: 5 }, { first_round: 12, last_round: 17 }]);
 
-                expect(await h.p._reconcileThenSweep()).to.equal(2);
+                expect(await h.p.reconcileThenSweep()).to.equal(2);
                 await h.p._windowChain;
 
                 expect(h.signer.calls.map(c => c.first), 'windows 1 and 3, never 0 or 2').to.deep.equal([6, 18]);
@@ -2132,10 +2132,10 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));
                 hubWithIndexer(h, [{ first_round: 2, last_round: 3 }, { first_round: 4, last_round: 9 }]);
 
-                await h.p._reconcileBacklogAgainstChain();
+                await h.p.reconcileBacklogAgainstChain();
 
                 expect(Array.from(h.p._buffer.keys()).sort((a, b) => a - b)).to.deep.equal([0, 1, 10, 11, 12]);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0, 1]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0, 1]);
             });
 
             it('fails OPEN when no indexer URL is configured: the sweep runs as before and the miss is counted', async function () {
@@ -2144,12 +2144,12 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 25; r++) h.p._buffer.set(r, bufferedFixture(r));
                 hubWithIndexer(h, [], { url: null });
 
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(0);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
                 expect(h.p.getStats().chainReconcileFailures).to.equal(1);
                 expect(h.p.getStats().chainReconcileRuns).to.equal(0);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0, 1, 2, 3]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0, 1, 2, 3]);
 
-                expect(await h.p._reconcileThenSweep()).to.equal(4);
+                expect(await h.p.reconcileThenSweep()).to.equal(4);
                 await h.p._windowChain;
                 expect(h.signer.calls.map(c => c.first)).to.deep.equal([0, 6, 12, 18]);
             });
@@ -2160,8 +2160,8 @@ describe('OraclePublisher PRICE batch rail', function () {
                 for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));
                 let rpc = hubWithIndexer(h, [], { reject: 'indexer RPC error: {"code":-32601,"message":"Method not found"}' });
 
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(0);
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(0);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
 
                 let mine = logs.warn.filter(l => /cannot check the buffered backlog/.test(l));
                 expect(mine, 'one line per distinct reason, not one per sweep').to.have.length(1);
@@ -2172,7 +2172,7 @@ describe('OraclePublisher PRICE batch rail', function () {
 
                 // An answer without a batch list (an indexer that returns an error object) is a miss too.
                 rpc.resolves({ error: 'indexer database not ready' });
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(0);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
                 expect(h.p.getStats().chainReconcileFailures).to.equal(3);
             });
 
@@ -2180,7 +2180,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 let h = makePublisher();
                 await h.p.start();
                 let rpc = hubWithIndexer(h, []);
-                expect(await h.p._reconcileBacklogAgainstChain()).to.equal(0);
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
                 expect(rpc.called).to.equal(false);
             });
         });
@@ -2216,7 +2216,7 @@ describe('OraclePublisher PRICE batch rail', function () {
                 await h.p.start();
                 for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
                 h.p.noteBatchLanded(0, 5);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([]);
 
                 await h.p.clearPublishedMarkers([0, 1, 2, 3, 4, 5]);
 
@@ -2228,10 +2228,10 @@ describe('OraclePublisher PRICE batch rail', function () {
                 // the grace clock (minutes) rather than waiting for the hourly sweep; the
                 // sweep leaves a window alone while its timer owns it.
                 expect(h.p._windows.get(0) && !!h.p._windows.get(0).timer).to.equal(true);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([]);
                 clearTimeout(h.p._windows.get(0).timer);
                 h.p._windows.delete(0);
-                expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
+                expect(h.p.pendingCatchupWindows()).to.deep.equal([0]);
                 await h.p._assembleWindow(0);
                 expect(h.signer.calls).to.have.length(1);
                 expect(h.signer.calls[0].rounds).to.deep.equal([0, 1, 2, 3, 4, 5]);

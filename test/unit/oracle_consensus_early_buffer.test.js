@@ -150,7 +150,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         digest = oc._digest(ROUND, aggregated);
         oc._handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, digest));
 
-        oc._proposeRound(ROUND, subs, false, 1000, 1700000000, null, 2);
+        oc.proposeRound(ROUND, subs, false, 1000, 1700000000, null, 2);
 
         let pending = oc.pendingRounds.get(ROUND);
         expect(pending).to.exist;

@@ -129,7 +129,7 @@ class OracleBatchSigner {
 
     // ------------------------------------------------- the co-signature memo
 
-    _noteCoSigned(first, last){
+    noteCoSigned(first, last){
         let key = first + ':' + last;
         this._coSigned.delete(key);          // re-insert so the memo stays LRU-ordered
         this._coSigned.set(key, Date.now());
@@ -199,7 +199,7 @@ class OracleBatchSigner {
         // quorum the chain then rejects, spending a DOGE fee for an invalid action.
         let signingSet;
         try {
-            signingSet = await this._resolvePriceSet(anchor);
+            signingSet = await this.resolvePriceSet(anchor);
         } catch(e){
             console.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
                          ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
@@ -338,7 +338,7 @@ class OracleBatchSigner {
 
         let mine;
         try {
-            mine = await this._deriveWindow(first, last);
+            mine = await this.deriveWindow(first, last);
         } catch(e){
             this.refuse(first, last, 'local price_snapshots unreadable (' + (e && e.message) + ')');
             return;
@@ -376,7 +376,7 @@ class OracleBatchSigner {
         // (spec section 5.4): a batch resolves the sig-tally and stake-weighted gates
         // ONCE on the batch anchor, so signing a straddling window would judge its
         // earlier rounds under a rule set they never finalized under.
-        if(this._straddlesArmedOracleFlagDay(firstAnchor, myAnchor)){
+        if(this.straddlesArmedOracleFlagDay(firstAnchor, myAnchor)){
             this.refuse(first, last, 'window straddles an armed oracle flag day (anchors ' +
                          firstAnchor + '..' + myAnchor + ')');
             return;
@@ -386,7 +386,7 @@ class OracleBatchSigner {
         // drops this signature from the tally and it is dead weight on the wire.
         let signingSet;
         try {
-            signingSet = await this._resolvePriceSet(myAnchor);
+            signingSet = await this.resolvePriceSet(myAnchor);
         } catch(e){
             this.refuse(first, last, 'price capability set unresolvable at anchor ' + myAnchor);
             return;
@@ -421,7 +421,7 @@ class OracleBatchSigner {
             // fix. Never dump the pair lists themselves - a 37-pair round would put
             // kilobytes per refusal into the log.
             this.refuse(first, last, 'proposal does not match this hub\'s own finalized rounds (' +
-                         this._describeMismatch(d, mine, myAnchor) + ')');
+                         this.describeMismatch(d, mine, myAnchor) + ')');
             return;
         }
 
@@ -429,7 +429,7 @@ class OracleBatchSigner {
         // Note the co-signature BEFORE it goes out: from here on the leader can
         // broadcast at any moment, and a takeover armed against this window must
         // treat "not on chain" as ambiguous rather than as leader silence.
-        this._noteCoSigned(first, last);
+        this.noteCoSigned(first, last);
         this.peerManager.broadcast(XPRICEB_SIGN, {
             first_round: first,
             last_round:  last,
@@ -464,7 +464,7 @@ class OracleBatchSigner {
     // Deliberately shallow. It reports the first differing round and the first
     // differing field within it, never a full diff, so a hub refusing an entire window
     // every ten minutes cannot flood its own log.
-    _describeMismatch(proposal, mine, myAnchor){
+    describeMismatch(proposal, mine, myAnchor){
         let parts = [];
         let theirAnchor = parseInt(proposal.btc_block_height);
         if(Number.isFinite(theirAnchor) && theirAnchor !== myAnchor)
@@ -487,7 +487,7 @@ class OracleBatchSigner {
             let t = theirByRound.get(n);
             if(!t) continue;
             let m    = mineByRound.get(n);
-            let diff = this._firstRoundFieldDiff(n, t, m);
+            let diff = this.firstRoundFieldDiff(n, t, m);
             if(diff){ parts.push(diff); break; }
         }
         return parts.length ? parts.join('; ') : 'no field-level difference found, so the two sides ' +
@@ -496,7 +496,7 @@ class OracleBatchSigner {
 
     // The first differing field of one round, or null when the two agree. Pair sets
     // are compared by name and price; only the first offending pair is named.
-    _firstRoundFieldDiff(round, theirs, mine){
+    firstRoundFieldDiff(round, theirs, mine){
         let at = 'round ' + round + ' ';
         if(parseInt(theirs.btcBlockHeight != null ? theirs.btcBlockHeight : theirs.btc_block_height) !== mine.btcBlockHeight)
             return at + 'anchor proposed ' +
@@ -556,7 +556,7 @@ class OracleBatchSigner {
     // PriceAggregator.retractFromActionIndex use). It matters here because a
     // batch-sourced row's reference_block is the LANDING chain's height, not the
     // round's BTC anchor, so reading it as an anchor invents a number.
-    async _deriveWindow(firstRound, lastRound){
+    async deriveWindow(firstRound, lastRound){
         let rows = await this.db.findPriceSnapshotsByRoundNumber(firstRound, lastRound, 'finalized');
 
         let byRound = new Map();
@@ -597,7 +597,7 @@ class OracleBatchSigner {
     // admission map era-keyed on its own anchor, and the ruling is that every round in a
     // batch sits in one era, so a window straddling it splits at the boundary exactly as
     // it does at the other two.
-    _straddlesArmedOracleFlagDay(firstAnchor, lastAnchor){
+    straddlesArmedOracleFlagDay(firstAnchor, lastAnchor){
         if(swq.isStakeWeightedQuorumActive(firstAnchor, this.network) !==
            swq.isStakeWeightedQuorumActive(lastAnchor, this.network)) return true;
         if(pst.isPriceSigTallyVerifyFirstActive(firstAnchor, this.network) !==
@@ -611,7 +611,7 @@ class OracleBatchSigner {
     // resolves it for a v0 round (:513-518): the deterministic on-chain capability
     // snapshot, weight-keyed at/above STAKE_WEIGHTED_QUORUM and count-keyed below,
     // so leader and followers size the same quorum from the same source.
-    async _resolvePriceSet(btcBlockHeight){
+    async resolvePriceSet(btcBlockHeight){
         if(!this.capSnapshot) return [];
         let block = Number(btcBlockHeight);
         if(swq.isStakeWeightedQuorumActive(block, this.network)){

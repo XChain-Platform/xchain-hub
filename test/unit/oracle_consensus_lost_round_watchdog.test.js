@@ -74,7 +74,7 @@ describe('OracleConsensus: a lost round is durably recorded on every hub', funct
     // Advance past every timer the round arms (leader timeout, fallback grace,
     // finalization timeout, watchdog grace) and let the async skip store settle.
     async function abandonRound() {
-        await clock.tickAsync(oc._roundAbandonMs() + 1000);
+        await clock.tickAsync(oc.roundAbandonMs() + 1000);
         await Promise.resolve();
     }
 
@@ -138,7 +138,7 @@ describe('OracleConsensus: a lost round is durably recorded on every hub', funct
             signatures: new Map(), prices: PRICES,
             btcBlockHeight: HEIGHT, btcBlockTime: TIME, finalized: true
         });
-        await oc._finalizeCommittedRound(ROUND);
+        await oc.finalizeCommittedRound(ROUND);
 
         await abandonRound();
 

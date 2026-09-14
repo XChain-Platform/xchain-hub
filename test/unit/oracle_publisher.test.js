@@ -237,7 +237,7 @@ describe('OraclePublisher', function () {
                 { coinPair: 'LTC/USD', price: '80' },
                 { coinPair: 'BTC/USD', price: '100000' }
             ];
-            let payload = JSON.parse(pub._buildSignablePayload(42, 1700000000, prices, 850010));
+            let payload = JSON.parse(pub.buildSignablePayload(42, 1700000000, prices, 850010));
             expect(payload.round).to.equal(42);
             expect(payload.timestamp).to.equal(1700000000);
             expect(payload.btc_block_height).to.equal(850010);  // #4232: round BTC anchor in signed payload
@@ -250,8 +250,8 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             let prices = [{ coinPair: 'BTC/USD', price: '50000' }];
-            let p1 = pub._buildSignablePayload(1, 100, prices);
-            let p2 = pub._buildSignablePayload(1, 100, prices);
+            let p1 = pub.buildSignablePayload(1, 100, prices);
+            let p2 = pub.buildSignablePayload(1, 100, prices);
             expect(p1).to.equal(p2);
         });
     });
@@ -263,14 +263,14 @@ describe('OraclePublisher', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             pub.identity = null;
-            let sigs = pub._buildLocalSigOnly({ round: 1, btcBlockTime: 0, prices: [] });
+            let sigs = pub.buildLocalSigOnly({ round: 1, btcBlockTime: 0, prices: [] });
             expect(sigs).to.deep.equal([]);
         });
 
         it('builds a single-validator sig with pubkey and sig fields', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let sigs = pub._buildLocalSigOnly({
+            let sigs = pub.buildLocalSigOnly({
                 round: 1, btcBlockTime: 1700000000,
                 prices: [{ coinPair: 'BTC/USD', price: '100000' }]
             });
@@ -284,7 +284,7 @@ describe('OraclePublisher', function () {
             let pub = new OraclePublisher(hub);
             // Make identity.sign throw
             pub.identity.sign = sinon.stub().throws(new Error('sign failed'));
-            let sigs = pub._buildLocalSigOnly({ round: 1, btcBlockTime: 0, prices: [] });
+            let sigs = pub.buildLocalSigOnly({ round: 1, btcBlockTime: 0, prices: [] });
             expect(sigs).to.deep.equal([]);
         });
     });
@@ -1325,7 +1325,7 @@ describe('OraclePublisher', function () {
             let db  = makeDb(seedMarkers());
             let pub = new OraclePublisher(makeHub({ db: db, p2pConfig: { [ENV_KEY]: '100' } }));
 
-            let deleted = await pub._prunePublishedRounds(1000);   // cutoff 900
+            let deleted = await pub.prunePublishedRounds(1000);   // cutoff 900
 
             expect(deleted).to.equal(2);                    // only the confirmed rounds 10 and 12
             expect(db.markers[10]).to.be.undefined;
@@ -1339,7 +1339,7 @@ describe('OraclePublisher', function () {
             let db  = makeDb(seedMarkers());
             let pub = new OraclePublisher(makeHub({ db: db, p2pConfig: { [ENV_KEY]: '100' } }));
 
-            await pub._prunePublishedRounds(1000);
+            await pub.prunePublishedRounds(1000);
 
             let del = db.doQuery.getCalls().find(c => /^\s*DELETE/i.test(c.args[0]));
             expect(del, 'no DELETE was issued').to.not.be.undefined;
@@ -1352,16 +1352,16 @@ describe('OraclePublisher', function () {
         it('issues no DELETE when pruning is disabled, no DB is wired, or the cutoff is not yet positive', async function () {
             let dbOff = makeDb(seedMarkers());
             let off   = new OraclePublisher(makeHub({ db: dbOff, p2pConfig: { [ENV_KEY]: '0' } }));
-            expect(await off._prunePublishedRounds(1000000)).to.equal(0);
+            expect(await off.prunePublishedRounds(1000000)).to.equal(0);
             expect(dbOff.doQuery.called).to.be.false;
 
             let noDb = new OraclePublisher(makeHub({ p2pConfig: { [ENV_KEY]: '10' } }));
-            expect(await noDb._prunePublishedRounds(1000000)).to.equal(0);
+            expect(await noDb.prunePublishedRounds(1000000)).to.equal(0);
 
             // Young chain: the window has not been filled yet, so nothing is old enough.
             let dbYoung = makeDb(seedMarkers());
             let young   = new OraclePublisher(makeHub({ db: dbYoung, p2pConfig: { [ENV_KEY]: '12960' } }));
-            expect(await young._prunePublishedRounds(50)).to.equal(0);
+            expect(await young.prunePublishedRounds(50)).to.equal(0);
             expect(dbYoung.doQuery.called).to.be.false;
         });
 
@@ -1374,7 +1374,7 @@ describe('OraclePublisher', function () {
             let db  = makeDb(seedMarkers());
             let pub = new OraclePublisher(makeHub({ db: db, p2pConfig: { [ENV_KEY]: '100' } }));
 
-            let deleted = await pub._prunePublishedRounds(1000);
+            let deleted = await pub.prunePublishedRounds(1000);
 
             expect(deleted).to.equal(0);
             expect(db.markers[10]).to.not.be.undefined;
