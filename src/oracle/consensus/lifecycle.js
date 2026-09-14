@@ -12,20 +12,17 @@
  *
  **********************************************************************
  *
- * XChain Hub - Oracle Consensus: start, stop and round outcomes
+ * XChain Hub - Oracle Consensus: stop and round outcomes
  *
- * Bringing the engine up and down: the validator set, the clamp-reference seed and its
- * reseed timer, the gossip subscription, and the two markers that record a round as
- * finalized or as locally skipped.
+ * Around the engine start() in consensus.js: the validator set, the clamp-reference seed,
+ * teardown, and the two markers that record a round as finalized or as locally skipped.
  *
  ********************************************************************/
 
 'use strict';
 
 const { canonicalValidatorOrder } = require('../../rollcall/validator_order.js');
-const { positiveIntConfig } = require('../../lib/config_int.js');
 const { noteRoundLost } = require('../../consensus/diagnostics');
-const hubConfig = require('../../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -40,47 +37,6 @@ module.exports = {
     // See validator_order.js.
     setValidatorSet(validators) {
         this.validatorSet = canonicalValidatorOrder(validators);
-    },
-
-    async start() {
-        // Seed the in-memory last-finalized-price cache from price_snapshots so a
-        // cold-started hub applies the same historical-deviation co-sign band a
-        // warm hub does (seq 4382). Without this, getLastFinalizedPrice returns
-        // null on every pair until the hub itself stores a round, so a freshly
-        // restarted hub would co-sign a Byzantine price for any pair it does not
-        // locally submit that a long-running hub would withhold on. Local accept-
-        // gate only: no signed bytes change, no reindex.
-        await this.seedLastFinalizedPrices();
-
-        // Re-run the seed on a timer so the clamp reference tracks the DATABASE, not
-        // this process's own finalize history (item 5834). The cache had exactly two
-        // writers, the start-time seed and _storeSnapshot, so every round this hub sat
-        // out (co-sign reject before pendingRounds.set, commit-quorum timeout eviction,
-        // a below-minSubmissions skip) left it clamping against an ever-older reference
-        // while its peers moved on. The seed is idempotent, fail-soft and monotonic, so
-        // re-running it can only carry the reference FORWARD to rows this hub already
-        // holds. It bounds the staleness window rather than closing it: a round-aligned
-        // re-read on the consensus path is a separate, deliberate change.
-        // Cadence only, NOT a federation-uniform value: it decides how promptly a hub
-        // catches up to rows it already holds, never what any hub clamps to. A longer
-        // interval degrades toward the pre-fix staleness, a shorter one costs one
-        // indexed query. So it needs no flag day and no regtest-only gate.
-        this._reseedIntervalMs = positiveIntConfig(hubConfig.ORACLE_CLAMP_RESEED_MS, 60000,
-            'ORACLE_CLAMP_RESEED_MS');
-        this._reseedTimer = setInterval(() => {
-            // In-flight guard, the convention XChainHub.refreshTransportSignerSet uses:
-            // the query is an unbounded round trip and a bare setInterval stacks passes.
-            if (this._reseedRunning) return;
-            this._reseedRunning = true;
-            this.seedLastFinalizedPrices({ quiet: true })
-                .catch(() => { /* seedLastFinalizedPrices never rejects; belt and braces */ })
-                .then(() => { this._reseedRunning = false; });
-        }, this._reseedIntervalMs);
-        if (this._reseedTimer.unref) this._reseedTimer.unref();
-
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
-        this.peerManager.on('message', this._messageHandler);
-        logger.info('Oracle consensus engine started');
     },
 
     // Populate _lastFinalizedPrices with the most-recently-finalized price per

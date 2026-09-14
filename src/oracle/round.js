@@ -28,7 +28,9 @@
  * writing oracleRound.<method>() and no caller knows which file it is in.
  * What stays HERE is construction and the round's own identity: the two
  * collaborators tests stub through this module (PriceFetcher and
- * XchainPriceSource), the cadence constants, and the derived-pair gate.
+ * XchainPriceSource), the cadence constants, the derived-pair gate, and start(),
+ * which registers the PeerManager message handler and so stays in the file whose
+ * exported class the listener-ceiling roster names.
  *
  ********************************************************************/
 
@@ -38,6 +40,8 @@ const { isXchainPriceActive, roundStartSeconds } = require('../xchain_price_acti
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('../constants.js');
 const { formatXchainPriceMeta } = require('./round/xchain_price_meta.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // One part per behaviour, installed on the prototype below. Spelled out rather
 // than read off the directory so a missing or extra part is a visible diff.
@@ -158,6 +162,45 @@ class OracleRound {
         return this.submissions.get(round || this.currentRound);
     }
 
+
+    // Start the oracle round system
+    async start() {
+        // Idempotent: a second start() without an intervening stop() would install
+        // a duplicate round loop (and leak the first). If any scheduling timer is
+        // already live, this instance is running; do nothing.
+        if (this.initialRoundTimer || this.boundaryTimer || this.roundTimer) {
+            return;
+        }
+
+        // Rehydrate freshness counters from the durable record before the timer
+        // begins, so a restart reflects the real feed state instead of a clean slate.
+        await this.hydrateFreshnessCounters();
+
+        // Subscribe to gossip messages
+        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this.peerManager.on('message', this._messageHandler);
+
+        // Reset the stall gauges only when a round actually finalizes (reaches
+        // commit quorum), not merely when this hub broadcast its own submission.
+        // During a consensus/quorum stall the local price fetch keeps succeeding, so
+        // stamping freshness on submission would hide the stall from the dashboard's
+        // early-stall gauge. Finalization is the real success signal, and it matches
+        // the semantic hydrateFreshnessCounters rebuilds from the durable record.
+        if (this.oracleConsensus && typeof this.oracleConsensus.on === 'function') {
+            this._finalizedHandler = () => this.markRoundFinalized();
+            this.oracleConsensus.on('round:finalized', this._finalizedHandler);
+            // Symmetric wiring for the increment: the streak advances on the same
+            // durable event the reset does, so the live gauge and the hydrated value
+            // share one semantic (item 4942).
+            this._skippedHandler = () => this.noteRoundSkipped();
+            this.oracleConsensus.on('round:skipped', this._skippedHandler);
+        }
+
+        // Start the round timer; it handles both the first run and the aligned cadence
+        this.startRoundTimer();
+
+        logger.info('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
+    }
 }
 
 // The round's own live state: which round is running, the timers that drive it,
