@@ -90,11 +90,11 @@ describe('attestation_responses holds every provider body the on-chain path hold
     describe('runMigrations (what a deployed hub gets)', function () {
         it('widens both provider-byte columns to utf8mb4', async function () {
             const { db } = makeDb();
-            sinon.stub(db, '_migrateUniqueKey').resolves();
-            sinon.stub(db, '_migrateIndex').resolves();
-            sinon.stub(db, '_migrateEnumColumn').resolves();
+            sinon.stub(db, 'migrateUniqueKey').resolves();
+            sinon.stub(db, 'migrateIndex').resolves();
+            sinon.stub(db, 'migrateEnumColumn').resolves();
             sinon.stub(db, '_migrateColumnType').resolves();
-            const widen = sinon.stub(db, '_migrateColumnCharset').resolves();
+            const widen = sinon.stub(db, 'migrateColumnCharset').resolves();
 
             await db.runMigrations();
 
@@ -114,11 +114,11 @@ describe('attestation_responses holds every provider body the on-chain path hold
         });
     });
 
-    describe('_migrateColumnCharset', function () {
+    describe('migrateColumnCharset', function () {
         it('issues the MODIFY when the live column is still utf8mb3', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb3' }]).onCall(1).resolves([]);
-            await db._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
+            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
                 'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
             expect(mockConn.query.callCount).to.equal(2);
             expect(mockConn.query.getCall(1).args[0])
@@ -129,7 +129,7 @@ describe('attestation_responses holds every provider body the on-chain path hold
         it('no-ops on a hub already at the target charset', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb4' }]);
-            await db._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
+            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
         });
@@ -137,7 +137,7 @@ describe('attestation_responses holds every provider body the on-chain path hold
         it('no-ops when the table does not exist yet (the CREATE TABLE covers it)', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([]);
-            await db._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
+            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
             expect(mockConn.query.callCount).to.equal(1);
         });
 
@@ -145,7 +145,7 @@ describe('attestation_responses holds every provider body the on-chain path hold
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb3' }])
                           .onCall(1).rejects(new Error('alter failed'));
-            await db._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
+            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
                 'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
             expect(console.error.calledWithMatch(/MIGRATION FAILED: attestation_responses\.meta/)).to.be.true;
             expect(console.error.calledWithMatch(/ALTER TABLE `attestation_responses` MODIFY `meta`/)).to.be.true;

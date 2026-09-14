@@ -310,7 +310,7 @@ class Database {
 
     // Idempotent: safe to run every startup.
     async runMigrations(){
-        await this._migrateUniqueKey(
+        await this.migrateUniqueKey(
             'oracle_submissions',
             'uq_submission',
             '(round_number, coin_pair, validator_pubkey)',
@@ -322,13 +322,13 @@ class Database {
         // reissues, so the four-column key collapsed two genuinely distinct archive
         // anchors into one row. Backfill BEFORE widening: a pre-column archive row left
         // at the DEFAULT 0 falls out of every qualified predicate and reads as absent.
-        await this._migrateUniqueKey(
+        await this.migrateUniqueKey(
             'validator_rewards',
             'uq_reward',
             '(validator_pubkey, round_number, reward_type, round_qualifier)',
             ['validator_pubkey', 'round_number', 'reward_type', 'round_qualifier']
         );
-        await this._backfillArchiveRoundQualifier();
+        await this.backfillArchiveRoundQualifier();
         await this._widenUniqueKey(
             'validator_rewards',
             'uq_reward',
@@ -343,14 +343,14 @@ class Database {
         // drift-reconciled onto prod validator_rewards during the ANCHOR rollout,
         // but its index had to be added by hand on every box. This folds that
         // hand-step into the code-side self-heal.
-        await this._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+        await this.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
         // The capability ENUM gains values as new capability tiers ship (e.g.
         // 'full_node' added for WI-2). alterTableForDrift only adds missing
         // columns and relaxes NULL; it never MODIFYs a column's type. So an
         // already-deployed validator_capabilities keeps the narrower ENUM and
         // rejects the new value (WARN_DATA_TRUNCATED) on the capability self-test
         // INSERT. Widen it in place to match CapabilityRegistry.KNOWN_CAPABILITIES.
-        await this._migrateEnumColumn(
+        await this.migrateEnumColumn(
             'validator_capabilities',
             'capability',
             ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'],
@@ -359,17 +359,17 @@ class Database {
         // Checkpoint split-brain: tighten the state_checkpoints uniqueness from
         // (chain, network, block_index, checkpoint_seq) to (chain, network, checkpoint_seq)
         // so a same-seq race can never seat two divergent rows (and double-anchor DOGE).
-        // _migrateUniqueKey dedups any pre-existing (chain, network, checkpoint_seq)
+        // migrateUniqueKey dedups any pre-existing (chain, network, checkpoint_seq)
         // collisions (keeping the lowest id) before adding the key; the audit the spec
         // asks for is exactly that dedup step. Then retire the now-redundant wider
         // indexes so fresh installs and migrated nodes carry the same index set.
-        await this._migrateUniqueKey(
+        await this.migrateUniqueKey(
             'state_checkpoints',
             'uq_chain_seq',
             '(chain, network, checkpoint_seq)',
             ['chain', 'network', 'checkpoint_seq']
         );
-        await this._migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
+        await this.migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
         await this.dropIndexIfExists('state_checkpoints', 'chain_block_seq');
         await this.dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
         // Widen capability_snapshots.uq_cap_snap to add `source`. At/above
@@ -377,7 +377,7 @@ class Database {
         // one row per (source, pubkey); the old 3-column key collapsed them on
         // INSERT IGNORE and silently dropped the second source, understating stake for
         // any mirror-reading verifier. alterTableForDrift only reconciles columns and
-        // _migrateUniqueKey no-ops once the index NAME exists, so neither widens an
+        // migrateUniqueKey no-ops once the index NAME exists, so neither widens an
         // existing key: this reconciles the column set in place. Monotonically safe (a
         // strict superset of an already-enforced UNIQUE key can only relax it, so no
         // pre-dedup is needed).
@@ -412,9 +412,9 @@ class Database {
         // never reaches any indexer and the request it answers expires unresolved.
         // alterTableForDrift adds a missing column and never restates an existing one, so the
         // DDL edit in src/sql/attestation_responses.sql alone reaches only fresh installs.
-        await this._migrateColumnCharset('attestation_responses', 'response_payload', 'utf8mb4',
+        await this.migrateColumnCharset('attestation_responses', 'response_payload', 'utf8mb4',
             'MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
-        await this._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
+        await this.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
             'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
         // re-key price_ingest_watermarks from (source_chain) to
         // (network, source_chain). alterTableForDrift adds the `network` column on an
@@ -563,7 +563,7 @@ class Database {
     // rows rather than converting them. A widen rewrites no stored value: utf8mb3 is a
     // strict subset of utf8mb4, and utf8mb4_general_ci orders BMP characters exactly as
     // utf8_general_ci does.
-    async _migrateColumnCharset(table, column, targetCharset, columnDef){
+    async migrateColumnCharset(table, column, targetCharset, columnDef){
         let db = await this.getConnection();
         try {
             let rows = await db.query(
@@ -649,7 +649,7 @@ class Database {
         }
     }
 
-    async _migrateUniqueKey(table, indexName, indexColumns, columnList){
+    async migrateUniqueKey(table, indexName, indexColumns, columnList){
         let db = await this.getConnection();
         try {
             let existing = await db.query(
@@ -810,7 +810,7 @@ class Database {
     // existed. block_index IS the archive leg's snapshot_block at both writers, so the
     // value is recoverable in place. Scoped to anchor_archive, so no other reward type's
     // key can move, and idempotent (a stamped row no longer matches round_qualifier = 0).
-    async _backfillArchiveRoundQualifier(){
+    async backfillArchiveRoundQualifier(){
         let db = await this.getConnection();
         try {
             let result = await db.query(
@@ -827,8 +827,8 @@ class Database {
         }
     }
 
-    // Mirrors _migrateUniqueKey without the dedup step; idempotent once the index exists.
-    async _migrateIndex(table, indexName, indexColumns){
+    // Mirrors migrateUniqueKey without the dedup step; idempotent once the index exists.
+    async migrateIndex(table, indexName, indexColumns){
         let db = await this.getConnection();
         try {
             let existing = await db.query(
@@ -852,7 +852,7 @@ class Database {
     // no-op on fresh installs (which get the full set from the CREATE TABLE) and
     // on already-migrated nodes. It rolls out new capability tiers without a
     // manual ALTER on every deployed hub.
-    async _migrateEnumColumn(table, column, enumValues, nullClause){
+    async migrateEnumColumn(table, column, enumValues, nullClause){
         let db = await this.getConnection();
         try {
             let rows = await db.query(

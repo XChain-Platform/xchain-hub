@@ -218,14 +218,14 @@ describe('Database: extended coverage', function () {
     });
 
     // -----------------------------------------------------------------
-    // runMigrations() / _migrateUniqueKey()
+    // runMigrations() / migrateUniqueKey()
     // -----------------------------------------------------------------
 
-    describe('runMigrations() / _migrateUniqueKey()', function () {
+    describe('runMigrations() / migrateUniqueKey()', function () {
         it('skips the migration when the unique key already exists', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ c: 1 }]); // index already present
-            await db._migrateUniqueKey('t', 'uq', '(a)', ['a']);
+            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']);
             // only the existence SELECT runs; no DELETE / ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
@@ -237,7 +237,7 @@ describe('Database: extended coverage', function () {
                 .onCall(0).resolves([{ c: 0 }])              // not present
                 .onCall(1).resolves({ affectedRows: 2 })     // DELETE dupes
                 .onCall(2).resolves([]);                     // ALTER ADD UNIQUE
-            await db._migrateUniqueKey('mytable', 'uq_x', '(a, b)', ['a', 'b']);
+            await db.migrateUniqueKey('mytable', 'uq_x', '(a, b)', ['a', 'b']);
             const del = mockConn.query.getCall(1).args[0];
             const add = mockConn.query.getCall(2).args[0];
             expect(del).to.include('DELETE t1 FROM mytable t1');
@@ -252,7 +252,7 @@ describe('Database: extended coverage', function () {
                 .onCall(0).resolves([{ c: 0 }]) // not present
                 .onCall(1).resolves({})         // DELETE -> no affectedRows
                 .onCall(2).resolves([]);        // ALTER ADD UNIQUE
-            await db._migrateUniqueKey('t', 'uq', '(a)', ['a']);
+            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']);
             expect(mockConn.query.getCall(2).args[0]).to.include('ADD UNIQUE KEY uq');
             expect(console.log.calledWithMatch(/duplicate/)).to.be.false;
         });
@@ -260,16 +260,16 @@ describe('Database: extended coverage', function () {
         it('catches and logs a migration error, still releasing the connection', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ c: 0 }]).onCall(1).rejects(new Error('alter failed'));
-            await db._migrateUniqueKey('t', 'uq', '(a)', ['a']); // must not throw
+            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']); // must not throw
             expect(console.error.calledWithMatch(/Migration error on t/)).to.be.true;
             expect(mockConn.release.called).to.be.true;
         });
 
         it('runMigrations migrates unique keys, the batch index, and the capability ENUM', async function () {
             const { db } = makeDb();
-            const mig = sinon.stub(db, '_migrateUniqueKey').resolves();
-            const idx = sinon.stub(db, '_migrateIndex').resolves();
-            const en  = sinon.stub(db, '_migrateEnumColumn').resolves();
+            const mig = sinon.stub(db, 'migrateUniqueKey').resolves();
+            const idx = sinon.stub(db, 'migrateIndex').resolves();
+            const en  = sinon.stub(db, 'migrateEnumColumn').resolves();
             sinon.stub(db, '_migrateColumnType').resolves();
             await db.runMigrations();
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
@@ -283,16 +283,16 @@ describe('Database: extended coverage', function () {
 
         // The archive-leg qualifier reaches an AGED hub only through runMigrations:
         // alterTableForDrift adds the column (it carries a DEFAULT) but never touches an
-        // index, and _migrateUniqueKey no-ops as soon as the index NAME exists. The
+        // index, and migrateUniqueKey no-ops as soon as the index NAME exists. The
         // backfill must run BEFORE the widen, or a pre-column archive row keeps qualifier
         // 0 and falls out of every qualified predicate as though it were absent.
         it('runMigrations backfills the archive round qualifier, then widens uq_reward', async function () {
             const { db } = makeDb();
-            sinon.stub(db, '_migrateUniqueKey').resolves();
-            sinon.stub(db, '_migrateIndex').resolves();
-            sinon.stub(db, '_migrateEnumColumn').resolves();
+            sinon.stub(db, 'migrateUniqueKey').resolves();
+            sinon.stub(db, 'migrateIndex').resolves();
+            sinon.stub(db, 'migrateEnumColumn').resolves();
             sinon.stub(db, '_migrateColumnType').resolves();
-            const back = sinon.stub(db, '_backfillArchiveRoundQualifier').resolves();
+            const back = sinon.stub(db, 'backfillArchiveRoundQualifier').resolves();
             const wide = sinon.stub(db, '_widenUniqueKey').resolves();
             await db.runMigrations();
             expect(back.calledOnce).to.be.true;
@@ -307,7 +307,7 @@ describe('Database: extended coverage', function () {
         it('the archive qualifier backfill touches only anchor_archive rows still at 0', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves({ affectedRows: 2 });
-            await db._backfillArchiveRoundQualifier();
+            await db.backfillArchiveRoundQualifier();
             const [sql, args] = mockConn.query.getCall(0).args;
             expect(sql).to.include('UPDATE validator_rewards SET round_qualifier = block_index');
             expect(sql).to.include('reward_type = ?');
@@ -322,9 +322,9 @@ describe('Database: extended coverage', function () {
         // being wired is therefore part of the fix, not a detail of it.
         it('runMigrations converts both governance voting deadline columns to DATETIME', async function () {
             const { db } = makeDb();
-            sinon.stub(db, '_migrateUniqueKey').resolves();
-            sinon.stub(db, '_migrateIndex').resolves();
-            sinon.stub(db, '_migrateEnumColumn').resolves();
+            sinon.stub(db, 'migrateUniqueKey').resolves();
+            sinon.stub(db, 'migrateIndex').resolves();
+            sinon.stub(db, 'migrateEnumColumn').resolves();
             const col = sinon.stub(db, '_migrateColumnType').resolves();
             await db.runMigrations();
             for (const column of ['voting_start', 'voting_end']) {
@@ -391,16 +391,16 @@ describe('Database: extended coverage', function () {
     });
 
     // -----------------------------------------------------------------
-    // _migrateEnumColumn()
+    // migrateEnumColumn()
     // -----------------------------------------------------------------
 
-    describe('_migrateEnumColumn()', function () {
+    describe('migrateEnumColumn()', function () {
         const TARGET = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
 
         it('skips when the live column already covers every target value', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation','full_node')" }]);
-            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
             // only the COLUMN_TYPE SELECT runs; no ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
@@ -411,7 +411,7 @@ describe('Database: extended coverage', function () {
             mockConn.query
                 .onCall(0).resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation')" }])
                 .onCall(1).resolves([]); // ALTER MODIFY
-            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
             const alter = mockConn.query.getCall(1).args[0];
             expect(alter).to.include('ALTER TABLE `validator_capabilities` MODIFY `capability`');
             expect(alter).to.include("'full_node'");
@@ -422,7 +422,7 @@ describe('Database: extended coverage', function () {
         it('is a no-op when the table/column is absent (fresh install)', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([]); // information_schema returns no row
-            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
             expect(mockConn.query.callCount).to.equal(1); // no ALTER
         });
 
@@ -431,21 +431,21 @@ describe('Database: extended coverage', function () {
             mockConn.query
                 .onCall(0).resolves([{ COLUMN_TYPE: "enum('price')" }])
                 .onCall(1).rejects(new Error('alter failed'));
-            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
             expect(console.error.calledWithMatch(/Migration error widening validator_capabilities\.capability/)).to.be.true;
             expect(mockConn.release.called).to.be.true;
         });
     });
 
     // -----------------------------------------------------------------
-    // _migrateIndex()
+    // migrateIndex()
     // -----------------------------------------------------------------
 
-    describe('_migrateIndex()', function () {
+    describe('migrateIndex()', function () {
         it('skips the ALTER when the index already exists', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ c: 1 }]); // index already present
-            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
             // only the existence SELECT runs; no ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
@@ -456,7 +456,7 @@ describe('Database: extended coverage', function () {
             mockConn.query
                 .onCall(0).resolves([{ c: 0 }]) // not present
                 .onCall(1).resolves([]);        // ALTER ADD INDEX
-            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
             // exactly two queries: the existence check + the ALTER (no DELETE dedup)
             expect(mockConn.query.callCount).to.equal(2);
             const add = mockConn.query.getCall(1).args[0];
@@ -468,7 +468,7 @@ describe('Database: extended coverage', function () {
         it('catches and logs a migration error, still releasing the connection', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ c: 0 }]).onCall(1).rejects(new Error('alter failed'));
-            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)'); // must not throw
+            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)'); // must not throw
             expect(console.error.calledWithMatch(/Migration error on validator_rewards/)).to.be.true;
             expect(mockConn.release.called).to.be.true;
         });
