@@ -47,7 +47,58 @@ function row(type, block){
              amount: '10.00000000', block_index: block, batch_seq: null };
 }
 
+// A fake that actually executes the statement: it honours the bound thresholds,
+// the ORDER BY and the LIMIT. A fake that ignored them could not go red here.
+function mkSelector(network, rows, maxBatch, hits){
+    const identity = new ValidatorIdentity('11'.repeat(32));
+    const pub = new StateAnchorPublisher({
+        db: { ...DB_METHODS,
+            async doQuery(sql, params){
+                hits.push({ sql, params });
+                if(sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') === -1) return [];
+                let p = (params || []).slice();
+                let limit = p.pop();
+                let out = rows.slice();
+                while(p.length){
+                    // Each NOT clause is (types..., threshold); the archive clause
+                    // carries exactly one type.
+                    let threshold = null, types = [];
+                    while(p.length && typeof p[0] === 'string') types.push(p.shift());
+                    threshold = p.shift();
+                    out = out.filter(r => !(types.indexOf(r.reward_type) !== -1 &&
+                                            Number(r.block_index) >= Number(threshold)));
+                }
+                // CASE-INSENSITIVE, because the column's collation is: under
+                // MariaDB's default 'anchor_archive' sorts BEFORE 'anchor_LTC',
+                // and a case-sensitive JS compare puts them the other way round,
+                // which would make the starvation case below unable to go red.
+                out.sort((a, b) => {
+                    let x = String(a.reward_type).toLowerCase();
+                    let y = String(b.reward_type).toLowerCase();
+                    return x < y ? -1 : x > y ? 1 : a.round_number - b.round_number;
+                });
+                return out.slice(0, limit);
+            }
+        },
+        network, p2pConfig: {},
+        getIdentity: () => identity,
+        getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
+        _resolveBtcLatestBlock: async () => BLOCK
+    });
+    pub.maxBatch = maxBatch;
+    const me = identity.getPubkeyHex().toLowerCase();
+    pub._getActiveOraclePublishPubkeys = async () => [me];
+    return pub;
+}
+
 describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', () => {
+
+    registerDerivedRewardClassificationTests();
+    registerDerivedRewardRoundTests();
+    registerDerivedRewardPageTests();
+});
+
+function registerDerivedRewardClassificationTests() {
 
     describe('_isChainDerivedReward', () => {
         it('marks every anchor reward type derived at/above its flag-day (regtest activates at 0)', () => {
@@ -75,6 +126,9 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
             expect(unscoped._isChainDerivedReward(row('anchor_archive', 5))).to.equal(false);
         });
     });
+}
+
+function registerDerivedRewardRoundTests() {
 
     describe('_startArchiveRound', () => {
         it('answers none, and never reaches the checkpoint wrapper, when only derived rows are pending', async () => {
@@ -98,6 +152,9 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
                 'a below-flag-day row must reach the checkpoint wrapper selection').to.equal(true);
         });
     });
+}
+
+function registerDerivedRewardPageTests() {
 
     // Derived rows are NEVER stamped with a batch_seq, so they stay eligible for the
     // pending-reward SELECT forever and their number grows by one on every archive
@@ -105,50 +162,6 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
     // them owned the page permanently and the below-flag-day rows sorted behind them
     // stopped being reachable at all, losing their only recovery transport.
     describe('the pending-reward page is narrowed before its LIMIT', () => {
-
-        // A fake that actually executes the statement: it honours the bound thresholds,
-        // the ORDER BY and the LIMIT. A fake that ignored them could not go red here.
-        function mkSelector(network, rows, maxBatch, hits){
-            const identity = new ValidatorIdentity('11'.repeat(32));
-            const pub = new StateAnchorPublisher({
-                db: { ...DB_METHODS,
-                    async doQuery(sql, params){
-                        hits.push({ sql, params });
-                        if(sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') === -1) return [];
-                        let p = (params || []).slice();
-                        let limit = p.pop();
-                        let out = rows.slice();
-                        while(p.length){
-                            // Each NOT clause is (types..., threshold); the archive clause
-                            // carries exactly one type.
-                            let threshold = null, types = [];
-                            while(p.length && typeof p[0] === 'string') types.push(p.shift());
-                            threshold = p.shift();
-                            out = out.filter(r => !(types.indexOf(r.reward_type) !== -1 &&
-                                                    Number(r.block_index) >= Number(threshold)));
-                        }
-                        // CASE-INSENSITIVE, because the column's collation is: under
-                        // MariaDB's default 'anchor_archive' sorts BEFORE 'anchor_LTC',
-                        // and a case-sensitive JS compare puts them the other way round,
-                        // which would make the starvation case below unable to go red.
-                        out.sort((a, b) => {
-                            let x = String(a.reward_type).toLowerCase();
-                            let y = String(b.reward_type).toLowerCase();
-                            return x < y ? -1 : x > y ? 1 : a.round_number - b.round_number;
-                        });
-                        return out.slice(0, limit);
-                    }
-                },
-                network, p2pConfig: {},
-                getIdentity: () => identity,
-                getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
-                _resolveBtcLatestBlock: async () => BLOCK
-            });
-            pub.maxBatch = maxBatch;
-            const me = identity.getPubkeyHex().toLowerCase();
-            pub._getActiveOraclePublishPubkeys = async () => [me];
-            return pub;
-        }
 
         it('reaches a legacy reward sitting behind a full page of never-archivable rows', async () => {
             const hits = [];
@@ -198,4 +211,4 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
                 'nothing on regtest is archive cargo, so no wrapper is selected').to.equal(false);
         });
     });
-});
+}
