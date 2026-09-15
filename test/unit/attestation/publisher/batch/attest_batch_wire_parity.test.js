@@ -60,6 +60,25 @@ function listParts(dir){
     return names.filter((n) => n.endsWith('.js')).sort();
 }
 
+// The whole parts directory: at or above the floor, the same part SET on both sides (a
+// part on one side only is wire code one service runs and the other cannot), and every
+// part byte for byte, each failure naming the part. It runs inside the entry's
+// byte-identity case rather than as one case per part, because the hub's suite-title
+// pin freezes this suite's titles.
+function expectPartsIdentical(){
+    const parts = listParts(LOCAL_PARTS);
+    expect(parts.length, 'expected at least ' + PARTS_FLOOR + ' parts under src/lib/attest_batch_wire/')
+        .to.be.at.least(PARTS_FLOOR);
+    expect(parts).to.deep.equal(listParts(TWIN_PARTS),
+        'the hub and indexer disagree about which attest_batch_wire parts exist; a part on one ' +
+        'side only is wire code one service runs and the other cannot');
+    for (const part of parts) {
+        expect(fs.readFileSync(path.join(LOCAL_PARTS, part), 'utf8'))
+            .to.equal(fs.readFileSync(path.join(TWIN_PARTS, part), 'utf8'),
+                'attest_batch_wire/' + part + ' has drifted from the indexer twin; re-vendor every part');
+    }
+}
+
 // A window built to exercise everything the canonical normalizes: a null field, a
 // number and a string spelling of the same integer column, and rows in an order the
 // codec must preserve rather than re-sort.
@@ -99,20 +118,7 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
                 .to.equal(fs.readFileSync(TWIN_PATH, 'utf8'),
                     'the hub copy has drifted from the indexer twin; the hub builds this wire and ' +
                     'the indexer parses it, so a one-sided edit publishes batches the fleet refuses');
-            // The parts ride inside this case rather than one case per part: the hub's
-            // suite-title pin freezes this suite's titles, and every part is still
-            // compared byte for byte with a failure that names it.
-            const parts = listParts(LOCAL_PARTS);
-            expect(parts.length, 'expected at least ' + PARTS_FLOOR + ' parts under src/lib/attest_batch_wire/')
-                .to.be.at.least(PARTS_FLOOR);
-            expect(parts).to.deep.equal(listParts(TWIN_PARTS),
-                'the hub and indexer disagree about which attest_batch_wire parts exist; a part on one ' +
-                'side only is wire code one service runs and the other cannot');
-            for (const part of parts) {
-                expect(fs.readFileSync(path.join(LOCAL_PARTS, part), 'utf8'))
-                    .to.equal(fs.readFileSync(path.join(TWIN_PARTS, part), 'utf8'),
-                        'attest_batch_wire/' + part + ' has drifted from the indexer twin; re-vendor every part');
-            }
+            expectPartsIdentical();   // in this case, not one per part: the title pin holds the titles
         });
 
         it('produces identical wires and an identical canonical from identical input', function () {
