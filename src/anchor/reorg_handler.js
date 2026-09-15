@@ -94,8 +94,8 @@ class ReorgHandler extends EventEmitter {
         this.indexers = {};
         for (let coin of coins.ALLOWED_COINS) {
             this.indexers[coin] = {
-                url: process.env[coin + '_INDEXER_URL'] || cfg[coin + '_INDEXER_URL'] || '',
-                key: process.env[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
+                url: hubConfig.env()[coin + '_INDEXER_URL'] || cfg[coin + '_INDEXER_URL'] || '',
+                key: hubConfig.env()[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
             };
         }
 
