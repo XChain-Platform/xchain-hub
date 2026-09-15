@@ -52,10 +52,7 @@ describe('positiveIntConfig', function () {
     });
 });
 
-describe('ring caps reject a negative operator value', function () {
-
-    afterEach(function () { sinon.restore(); });
-
+function registerFinalizedRingTests() {
     it('AttestationConsensus finalized + non-ok rings hold their defaults', function () {
         sinon.stub(console, 'warn');
         let hub = createMockHub();
@@ -91,7 +88,9 @@ describe('ring caps reject a negative operator value', function () {
         ac.markTornDown('rid-1');
         expect(ac.tornDown.has('rid-1')).to.be.true;
     });
+}
 
+function registerEarlyMessageCapTests() {
     // The early-message buffers, which the ring-cap pass above left on the raw idiom.
     // These are not merely ring caps: a negative MAX_BYTES INVERTS the `sz > max` size
     // gate, so every pre-round envelope is dropped and PBFT vote buffering is off.
@@ -124,7 +123,9 @@ describe('ring caps reject a negative operator value', function () {
         expect(dex.earlyMessages.get('match-1'), 'match-1 must survive the distinct-id eviction').to.have.lengthOf(1);
         expect(dex.earlyMessages.get('match-2')).to.have.lengthOf(1);
     });
+}
 
+function registerRemainingRingCapTests() {
     // The severe member of the family: this cap feeds a `while (size >= max)` eviction
     // loop rather than an `if`, so a negative value never terminates (at size 0 the
     // condition still holds, `keys().next().value` is undefined, and `delete(undefined)`
@@ -159,4 +160,12 @@ describe('ring caps reject a negative operator value', function () {
         expect(pm.seenIds.has('msg-1')).to.be.true;
         expect(pm.seenIds.has('msg-2')).to.be.true;
     });
+}
+
+describe('ring caps reject a negative operator value', function () {
+
+    afterEach(function () { sinon.restore(); });
+    registerFinalizedRingTests();
+    registerEarlyMessageCapTests();
+    registerRemainingRingCapTests();
 });
