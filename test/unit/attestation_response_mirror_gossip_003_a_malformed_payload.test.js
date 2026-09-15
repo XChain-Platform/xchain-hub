@@ -245,67 +245,32 @@ const hookAt10730 = function () {
         sinon.restore();
     };
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('gossips exactly one ATTEST_RESULT after a NEW local insert', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
+const CASES = {
+            'a request id that is not 64-hex':      { request_id: 'nope' },
+            'a non-terminal status':                { status: 'no_quorum' },
+            'a null effective_time':                { effective_time: null },
+            'an empty-string effective_time':       { effective_time: '' },
+            'a fractional effective_time':          { effective_time: 1.5 },
+            'a response_hash that is not 64-hex':   { response_hash: 'zz' },
+            'a signatures column that is not JSON': { signatures: '{' },
+            'an empty signature array':             { signatures: '[]' },
+            'a signature entry of the wrong shape': { signatures: JSON.stringify([{ pubkey: 'aa', sig: 'bb' }]) },
+            'no provider id':                       { provider_id: '' }
+        };
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
+// ── structural rejection, before anything is spent ───────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('a malformed payload', function () { Object.keys(CASES).forEach(name => {
+            it('rejects ' + name + ' without any indexer lookup', async function () {
+                let hub    = makeHub();
+                let mirror = new AttestationResponseMirror(hub);
+                let post   = stubRequestLookup([localRequest()]);
+                await mirror.start();
 
-            let calls = hub.peerManager.broadcast.getCalls();
-            expect(calls).to.have.length(1);
-            expect(calls[0].args[0]).to.equal(ATTEST_RESULT);
-            expect(mirror.stats.gossiped).to.equal(1);
-        }); }); });
+                await mirror._handleResult({ type: ATTEST_RESULT, data: Object.assign(gossipPayload(), CASES[name]) });
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('carries every mirrored column except finalized_at, which is the receiver\'s own stamp', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-
-            let data = hub.peerManager.broadcast.getCall(0).args[1];
-            expect(Object.keys(data).sort()).to.deep.equal(GOSSIP_COLUMNS.slice().sort());
-            expect(GOSSIP_COLUMNS).to.not.include('finalized_at');
-            // batch_action_index is the other non-artifact column: the DOGE batch landing
-            // sets it hours later, and it reaches hubs through the chain-to-hub push.
-            expect(GOSSIP_COLUMNS).to.not.include('batch_action_index');
-            // The derived wire set must stay the mirrored set minus those two columns,
-            // or a schema addition would silently stop travelling.
-            expect(GOSSIP_COLUMNS.length).to.equal(MIRROR_COLUMNS.length - 2);
-            expect(data.request_id).to.equal(RID);
-            expect(data.effective_time).to.equal(EFFECTIVE_TIME);
-        }); }); });
-
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip again when the same round re-finalizes (INSERT IGNORE absorbed it)', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-
-            expect(hub.peerManager.broadcast.callCount).to.equal(1);
-        }); }); });
-
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip a round the mirror declines to write', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent({ status: 'no_quorum' }));
-            await settle();
-
-            expect(hub.peerManager.broadcast.callCount).to.equal(0);
-            expect(hub.db.table).to.have.length(0);
+                expect(hub.db.table).to.have.length(0);
+                expect(post.callCount).to.equal(0);
+                expect(mirror.stats.rejected).to.equal(1);
+            });
         }); }); });
 }

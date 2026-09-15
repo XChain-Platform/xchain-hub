@@ -245,67 +245,105 @@ const hookAt10730 = function () {
         sinon.restore();
     };
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('gossips exactly one ATTEST_RESULT after a NEW local insert', async function () {
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('parks the row instead of writing or dropping it', async function () {
             let hub    = makeHub();
             let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([]);                       // the v0 is not indexed yet
             await mirror.start();
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
-            let calls = hub.peerManager.broadcast.getCalls();
-            expect(calls).to.have.length(1);
-            expect(calls[0].args[0]).to.equal(ATTEST_RESULT);
-            expect(mirror.stats.gossiped).to.equal(1);
+            expect(hub.db.table).to.have.length(0);
+            expect(mirror._parked.size).to.equal(1);
+            expect(mirror.stats.parked).to.equal(1);
+            expect(mirror.stats.dropped).to.equal(0);
         }); }); });
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('carries every mirrored column except finalized_at, which is the receiver\'s own stamp', async function () {
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('applies the row when the retry cycle finds the request', async function () {
             let hub    = makeHub();
             let mirror = new AttestationResponseMirror(hub);
+            let post   = stubRequestLookup([]);
             await mirror.start();
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            expect(mirror._parked.size).to.equal(1);
 
-            let data = hub.peerManager.broadcast.getCall(0).args[1];
-            expect(Object.keys(data).sort()).to.deep.equal(GOSSIP_COLUMNS.slice().sort());
-            expect(GOSSIP_COLUMNS).to.not.include('finalized_at');
-            // batch_action_index is the other non-artifact column: the DOGE batch landing
-            // sets it hours later, and it reaches hubs through the chain-to-hub push.
-            expect(GOSSIP_COLUMNS).to.not.include('batch_action_index');
-            // The derived wire set must stay the mirrored set minus those two columns,
-            // or a schema addition would silently stop travelling.
-            expect(GOSSIP_COLUMNS.length).to.equal(MIRROR_COLUMNS.length - 2);
-            expect(data.request_id).to.equal(RID);
-            expect(data.effective_time).to.equal(EFFECTIVE_TIME);
+            // The indexer catches up between cycles.
+            post.resolves({ data: { result: { latest_block_index: LATEST_BLOCK, count: 1, requests: [localRequest()] } } });
+            await mirror.drainParked();
+
+            expect(hub.db.table).to.have.length(1);
+            expect(mirror._parked.size).to.equal(0);
         }); }); });
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip again when the same round re-finalizes (INSERT IGNORE absorbed it)', async function () {
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('drops the row after exactly one retry, and never re-parks it', async function () {
             let hub    = makeHub();
             let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([]);
             await mirror.start();
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.drainParked();
 
-            expect(hub.peerManager.broadcast.callCount).to.equal(1);
+            expect(hub.db.table).to.have.length(0);
+            expect(mirror._parked.size).to.equal(0);
+            expect(mirror.stats.dropped).to.equal(1);
+
+            // A second cycle has nothing left to do: the row is gone, not re-parked.
+            await mirror.drainParked();
+            expect(mirror.stats.dropped).to.equal(1);
         }); }); });
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip a round the mirror declines to write', async function () {
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('buys one retry per logical row however many peers gossip it', async function () {
             let hub    = makeHub();
             let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([]);
             await mirror.start();
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent({ status: 'no_quorum' }));
-            await settle();
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
-            expect(hub.peerManager.broadcast.callCount).to.equal(0);
+            expect(mirror._parked.size).to.equal(1);
+            expect(mirror.stats.parked).to.equal(1);
+        }); }); });
+
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('bounds the park set and evicts the oldest entry first', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([]);
+            await mirror.start();
+
+            let firstRid = null;
+            for(let i = 0; i < PARK_MAX + 5; i++){
+                let rid = crypto.createHash('sha256').update('rid' + i).digest('hex');
+                if(i === 0) firstRid = rid;
+                await mirror._handleResult({
+                    type: ATTEST_RESULT,
+                    data: gossipPayload({ requestId: rid, signCanonical: canonicalFor({ requestId: rid }) })
+                });
+            }
+
+            expect(mirror._parked.size).to.equal(PARK_MAX);
+            expect(mirror._parked.has('regtest|' + firstRid)).to.equal(false);
+            expect(mirror.stats.dropped).to.equal(5);
+        }); }); });
+
+// ── park one cycle, retry once, then drop ───────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('an unknown request', function () { it('parks rather than drops when the local indexer cannot be reached at all', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'));
+            await mirror.start();
+
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+
+            expect(mirror._parked.size).to.equal(1);
             expect(hub.db.table).to.have.length(0);
         }); }); });
 }

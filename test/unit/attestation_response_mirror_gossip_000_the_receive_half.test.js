@@ -245,67 +245,122 @@ const hookAt10730 = function () {
         sinon.restore();
     };
 
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('gossips exactly one ATTEST_RESULT after a NEW local insert', async function () {
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('inserts a valid row and streams it to WS subscribers without re-gossiping it', async function () {
             let hub    = makeHub();
             let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
-            let calls = hub.peerManager.broadcast.getCalls();
-            expect(calls).to.have.length(1);
-            expect(calls[0].args[0]).to.equal(ATTEST_RESULT);
-            expect(mirror.stats.gossiped).to.equal(1);
-        }); }); });
-
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('carries every mirrored column except finalized_at, which is the receiver\'s own stamp', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-
-            let data = hub.peerManager.broadcast.getCall(0).args[1];
-            expect(Object.keys(data).sort()).to.deep.equal(GOSSIP_COLUMNS.slice().sort());
-            expect(GOSSIP_COLUMNS).to.not.include('finalized_at');
-            // batch_action_index is the other non-artifact column: the DOGE batch landing
-            // sets it hours later, and it reaches hubs through the chain-to-hub push.
-            expect(GOSSIP_COLUMNS).to.not.include('batch_action_index');
-            // The derived wire set must stay the mirrored set minus those two columns,
-            // or a schema addition would silently stop travelling.
-            expect(GOSSIP_COLUMNS.length).to.equal(MIRROR_COLUMNS.length - 2);
-            expect(data.request_id).to.equal(RID);
-            expect(data.effective_time).to.equal(EFFECTIVE_TIME);
-        }); }); });
-
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip again when the same round re-finalizes (INSERT IGNORE absorbed it)', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent());
-            await settle();
-
-            expect(hub.peerManager.broadcast.callCount).to.equal(1);
-        }); }); });
-
-// ── send ────────────────────────────────────────────────────────────────
-describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the send half', function () { it('does not gossip a round the mirror declines to write', async function () {
-            let hub    = makeHub();
-            let mirror = new AttestationResponseMirror(hub);
-            await mirror.start();
-
-            hub.attestationConsensus.emit('request:finalized', finalizedEvent({ status: 'no_quorum' }));
-            await settle();
-
+            expect(hub.db.table).to.have.length(1);
+            expect(hub.db.table[0].request_id).to.equal(RID);
+            expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(1);
+            expect(hub.hubDbBroadcaster.broadcastRow.getCall(0).args[0].table).to.equal('attestation_responses');
+            // The received artifact must not travel on: every hub is already one hop
+            // from every producer, so a forward is pure amplification.
             expect(hub.peerManager.broadcast.callCount).to.equal(0);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('stamps its OWN finalized_at and re-states the informational columns from the local request', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+            sinon.stub(mirror, '_nowSeconds').returns(1780000000);
+
+            // The wire claims a different position; the local request row wins.
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({ requestAction: REQUEST_ACTION }) });
+
+            let stored = hub.db.table[0];
+            expect(Number(stored.finalized_at)).to.equal(1780000000);
+            expect(Number(stored.request_block_index)).to.equal(REQUEST_BLOCK);
+            expect(Number(stored.request_action_index)).to.equal(REQUEST_ACTION);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('admits a quorum drawn from the ranked responsible slice', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            await mirror._handleResult({
+                type: ATTEST_RESULT,
+                data: gossipPayload({ signWith: responsibleSplit().responsible })
+            });
+
+            expect(hub.db.table).to.have.length(1);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('rejects a quorum of CAPABLE validators that the ranking did not make responsible', async function () {
+            // The same count of real signatures over the same real canonical from keys
+            // the same capability snapshot holds. Only the deterministic hash ranking
+            // separates these two cases, so this is what proves the responsible filter
+            // is doing work rather than membership alone carrying the row.
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            await mirror._handleResult({
+                type: ATTEST_RESULT,
+                data: gossipPayload({ signWith: responsibleSplit().outsiders })
+            });
+
+            expect(hub.db.table).to.have.length(0);
+            expect(mirror.stats.rejected).to.equal(1);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('drops a row whose responsible-set signatures do not verify, and writes nothing', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            // Real keys, real Ed25519, over the WRONG canonical: a one-second drift in
+            // the signed effective_time, which is exactly the field the applying block
+            // is a pure function of.
+            let payload = gossipPayload({ signCanonical: canonicalFor({ effectiveTime: EFFECTIVE_TIME + 1 }) });
+            await mirror._handleResult({ type: ATTEST_RESULT, data: payload });
+
+            expect(hub.db.table).to.have.length(0);
+            expect(hub.db.inserts()).to.have.length(0);
+            expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
+            expect(mirror.stats.rejected).to.equal(1);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('drops a row signed by keys outside the capability snapshot', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            // The snapshot holds nobody this row was signed by.
+            hub.capabilitySnapshot.getWeightSnapshot.resolves({
+                validators: [{ pubkey: 'ab'.repeat(32), source: 'other', weight: '100000' }]
+            });
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+
+            expect(hub.db.table).to.have.length(0);
+        }); }); });
+
+// ── receive ─────────────────────────────────────────────────────────────
+describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterEach(hookAt10730); describe('the receive half', function () { it('drops a row whose body does not reproduce the signed hash', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            let payload = gossipPayload();
+            payload.response_payload = 'a different body';
+            await mirror._handleResult({ type: ATTEST_RESULT, data: payload });
+
             expect(hub.db.table).to.have.length(0);
         }); }); });
 }
