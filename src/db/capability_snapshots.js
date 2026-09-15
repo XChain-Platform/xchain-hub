@@ -82,5 +82,45 @@ module.exports = {
             'INSERT IGNORE INTO ' + TABLE + ' ' + COLUMNS + ' VALUES ' +
             rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', '),
             args);
+    },
+
+    // The four stale-range prune statements, moved here from src/validators/capability_snapshot_prune.js.
+    // `where` is that tool's buildWhere ({ clause, args }): the clause holds only ?
+    // placeholders, so every operator-supplied value stays bound.
+
+    // Reads the per-block groups of a stale range with their write times, lowest block first.
+    async findStaleCapabilitySnapshotBlocks(where, limit) {
+        return this.doQuery(
+            'SELECT snapshot_block, capability, COUNT(*) AS rows_count, ' +
+            'MIN(created_at) AS min_created, MAX(created_at) AS max_created ' +
+            'FROM ' + TABLE + ' WHERE ' + where.clause +
+            ' GROUP BY snapshot_block, capability ORDER BY snapshot_block ASC LIMIT ?',
+            where.args.concat([limit]));
+    },
+
+    // Reads a stale range's row counts, block span and write times, one row per capability.
+    async findStaleCapabilitySnapshotSummary(where) {
+        return this.doQuery(
+            'SELECT capability, COUNT(*) AS rows_count, MIN(snapshot_block) AS min_block, ' +
+            'MAX(snapshot_block) AS max_block, COUNT(DISTINCT snapshot_block) AS block_count, ' +
+            'MIN(created_at) AS min_created, MAX(created_at) AS max_created ' +
+            'FROM ' + TABLE + ' WHERE ' + where.clause + ' GROUP BY capability ORDER BY capability ASC',
+            where.args);
+    },
+
+    // Counts the distinct blocks in a stale range across every capability; the
+    // per-capability counts overlap, so they cannot be summed instead.
+    async getStaleCapabilitySnapshotBlockCount(where) {
+        return this.doQuery(
+            'SELECT COUNT(DISTINCT snapshot_block) AS block_count FROM ' + TABLE + ' WHERE ' + where.clause,
+            where.args);
+    },
+
+    // Deletes at most `limit` rows of a stale range in one statement; the caller
+    // loops until a short batch, so no single statement holds a long row lock.
+    async deleteStaleCapabilitySnapshots(where, limit) {
+        return this.doQuery(
+            'DELETE FROM ' + TABLE + ' WHERE ' + where.clause + ' LIMIT ?',
+            where.args.concat([limit]));
     }
 };

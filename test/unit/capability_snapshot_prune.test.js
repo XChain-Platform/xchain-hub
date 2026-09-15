@@ -12,6 +12,7 @@
 
 const { expect } = require('chai');
 const prune = require('../../src/lib/capability_snapshot_prune.js');
+const capabilitySnapshotQueries = require('../../src/db/capability_snapshots.js');
 
 // Minimal stand-in for src/db.js: it records the SQL it is handed and serves
 // rows out of an in-memory capability_snapshots table, so the tests exercise
@@ -86,6 +87,11 @@ class FakeDb {
 
     async close(){}
 }
+
+// The prune statements are named methods on the capability_snapshots db mixin;
+// install them here exactly as src/db/index.js installs them on Database, so the
+// SQL they hand doQuery is the real text.
+Object.assign(FakeDb.prototype, capabilitySnapshotQueries);
 
 // A dead chain incarnation left cross_chain snapshots across
 // blocks 131-487, and the live chain has since written its own rows down at the

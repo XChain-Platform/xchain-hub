@@ -148,13 +148,7 @@ async function listStaleBlocks(db, opts, limit){
     if(!isWholeNumber(cap) || cap < 1)
         throw new Error('limit must be a positive integer');
 
-    let rows = await db.doQuery(
-        'SELECT snapshot_block, capability, COUNT(*) AS rows_count, ' +
-        'MIN(created_at) AS min_created, MAX(created_at) AS max_created ' +
-        'FROM ' + TABLE + ' WHERE ' + where.clause +
-        ' GROUP BY snapshot_block, capability ORDER BY snapshot_block ASC LIMIT ?',
-        where.args.concat([cap])
-    );
+    let rows = await db.findStaleCapabilitySnapshotBlocks(where, cap);
 
     return (rows || []).map(r => ({
         snapshotBlock: Number(r.snapshot_block),
@@ -176,13 +170,7 @@ async function summarizeStale(db, opts){
     let range = normalizeRange(opts);
     let where = buildWhere(range);
 
-    let rows = await db.doQuery(
-        'SELECT capability, COUNT(*) AS rows_count, MIN(snapshot_block) AS min_block, ' +
-        'MAX(snapshot_block) AS max_block, COUNT(DISTINCT snapshot_block) AS block_count, ' +
-        'MIN(created_at) AS min_created, MAX(created_at) AS max_created ' +
-        'FROM ' + TABLE + ' WHERE ' + where.clause + ' GROUP BY capability ORDER BY capability ASC',
-        where.args
-    );
+    let rows = await db.findStaleCapabilitySnapshotSummary(where);
 
     // created_at is what separates a dead incarnation's rows from live ones once
     // the new chain has mined back through the same heights: block numbers alone
@@ -205,10 +193,7 @@ async function summarizeStale(db, opts){
     // block counts overlap and must not be summed.
     let blocks = 0;
     if(total > 0){
-        let b = await db.doQuery(
-            'SELECT COUNT(DISTINCT snapshot_block) AS block_count FROM ' + TABLE + ' WHERE ' + where.clause,
-            where.args
-        );
+        let b = await db.getStaleCapabilitySnapshotBlockCount(where);
         blocks = (b && b.length && b[0].block_count != null) ? Number(b[0].block_count) : 0;
     }
 
@@ -236,10 +221,7 @@ async function pruneStale(db, opts){
     let batches = 0;
 
     for(;;){
-        let res = await db.doQuery(
-            'DELETE FROM ' + TABLE + ' WHERE ' + where.clause + ' LIMIT ?',
-            where.args.concat([batchSize])
-        );
+        let res = await db.deleteStaleCapabilitySnapshots(where, batchSize);
         let n = Number((res && res.affectedRows) || 0);
         deleted += n;
         batches++;
