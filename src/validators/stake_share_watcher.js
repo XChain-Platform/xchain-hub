@@ -41,7 +41,7 @@
 const axios = require('axios');
 const coins = require('../coins');
 const hubConfig = require('../config');
-const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('../lib/stake_share_monitor.js');
+const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('./stake_share_monitor.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 

@@ -24,7 +24,7 @@ const {
 const {
   StakeShareMonitor,
   evaluateStakeShare
-} = require('../../src/lib/stake_share_monitor.js');
+} = require('../../src/validators/stake_share_monitor.js');
 const {
   installObservability
 } = require('../../src/observability');

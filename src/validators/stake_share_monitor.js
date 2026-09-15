@@ -58,9 +58,9 @@ const logger = getLogger();
 // level taxonomy, the evaluation and the margin score. This file keeps the alarm
 // surface and re-exports the arithmetic under its original names.
 const { LEVELS, LEVEL_RANK, DEFAULT_WARN_AT_STAKES, DEFAULT_CRITICAL_AT_STAKES,
-        normalizeSources, emptyResult, isAlertLevel } = require('../validators/stake_share/levels.js');
-const { evaluateStakeShare } = require('../validators/stake_share/evaluate.js');
-const { projectCompetingStake } = require('../validators/stake_share/margin.js');
+        normalizeSources, emptyResult, isAlertLevel } = require('./stake_share/levels.js');
+const { evaluateStakeShare } = require('./stake_share/evaluate.js');
+const { projectCompetingStake } = require('./stake_share/margin.js');
 
 // One loud line per (chain, capability) per window. Five minutes matches the
 // watcher's default poll cadence, so a standing alert costs one line per poll

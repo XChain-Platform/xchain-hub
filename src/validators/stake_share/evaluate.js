@@ -17,7 +17,7 @@
  * Measures the operator's share of one capability's active stake against the
  * STAKE_WEIGHTED_QUORUM commit gate as ordered steps: the total, the operator's
  * sources, the size of one new stake, then the margin score. The module header of
- * src/lib/stake_share_monitor.js explains why the margin is counted in stakes.
+ * src/validators/stake_share_monitor.js explains why the margin is counted in stakes.
  *
  ********************************************************************/
 

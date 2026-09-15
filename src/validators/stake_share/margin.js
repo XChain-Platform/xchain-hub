@@ -16,7 +16,7 @@
  *
  * The gate test, the headroom and the severity for one holding, and the projection
  * of a live reading against a hypothetical competing stake, both scored by the same
- * code. src/lib/stake_share_monitor.js re-exports projectCompetingStake.
+ * code. src/validators/stake_share_monitor.js re-exports projectCompetingStake.
  *
  ********************************************************************/
 

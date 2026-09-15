@@ -16,7 +16,7 @@
  *
  * The severity taxonomy, the margin defaults and the small helpers the stake-share
  * evaluation, the margin score and StakeShareMonitor all read. Pure: no logger and
- * no network. src/lib/stake_share_monitor.js re-exports the public names.
+ * no network. src/validators/stake_share_monitor.js re-exports the public names.
  *
  ********************************************************************/
 
