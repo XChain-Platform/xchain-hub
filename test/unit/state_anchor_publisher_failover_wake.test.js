@@ -96,9 +96,10 @@ function archiveRound(wantLeader) {
     return { pub, me, peer, published };
 }
 
+let saved;
+
 describe('StateAnchorPublisher: failover wake', function () {
 
-    let saved;
     before(function () {
         saved = {};
         for (const k of ENV_KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
@@ -109,6 +110,15 @@ describe('StateAnchorPublisher: failover wake', function () {
             else process.env[k] = saved[k];
         }
     });
+
+    registerWakeCadenceTests();
+    registerLeaderWakeTests();
+    registerBackupWakeTests();
+    registerRankZeroTests();
+    registerWakeTimerTests();
+});
+
+function registerWakeCadenceTests() {
 
     describe('the wake cadence sits inside the ladder ordering', function () {
 
@@ -135,6 +145,9 @@ describe('StateAnchorPublisher: failover wake', function () {
             }
         });
     });
+}
+
+function registerLeaderWakeTests() {
 
     describe('failover-only mode leaves the leader alone', function () {
 
@@ -150,6 +163,9 @@ describe('StateAnchorPublisher: failover wake', function () {
             expect(published.length, 'no extra DOGE archive on the wake cadence').to.equal(0);
         });
     });
+}
+
+function registerBackupWakeTests() {
 
     describe('failover-only mode is what wakes a backup', function () {
 
@@ -178,6 +194,9 @@ describe('StateAnchorPublisher: failover wake', function () {
             expect(pub._rankUnlocked(order, me, pub.electionToleranceBlocks), 'unlocked one step later').to.equal(true);
         });
     });
+}
+
+function registerRankZeroTests() {
 
     describe('_isRankZero', function () {
 
@@ -189,6 +208,9 @@ describe('StateAnchorPublisher: failover wake', function () {
             expect(pub._isRankZero(null)).to.equal(false);
         });
     });
+}
+
+function registerWakeTimerTests() {
 
     describe('timer lifecycle', function () {
 
@@ -202,4 +224,4 @@ describe('StateAnchorPublisher: failover wake', function () {
             expect(pub._rankWakeTimer, 'wake released').to.equal(null);
         });
     });
-});
+}
