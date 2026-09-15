@@ -58,9 +58,32 @@ function archiveHead(version, chunk0Len, wrapperSigs, attestSigs){
     return parts.join('|');
 }
 
+// The compiled push costs 3 bytes more than the raw text
+// (xchain-encoder/src/validator.js), so the raw budget is 8192 - 3.
+const BUNDLE_BUDGET = MAX_ACTION_DATA_LENGTH - 3;
+
+// A worst-case mainnet-height section: 7-digit block_index, 6-digit seq and
+// snapshot block, a 4-character chain name, both roots present. Narrower fields
+// only ever leave MORE room, so a capacity proved here holds in production.
+function section(chain, signers){
+    return {
+        chain: chain, network: 'mainnet', block_index: 9625000,
+        block_hash: hex(64), ledger_hash: hex(64), actions_hash: hex(64), contract_hash: hex(64),
+        checkpoint_seq: 962500, snapshot_block: 962500,
+        state_root: hex(64), state_root_version: 1,
+        block_merkle_root: hex(64), block_merkle_version: 1,
+        validator_signatures: JSON.stringify(Array.from({ length: signers }, (_, i) => ({
+            pubkey: String(i % 10).repeat(64), sig: String(i % 10).repeat(128)
+        })))
+    };
+}
+const CHAINS = ['AAAA', 'BBBB', 'CCCC', 'DDDD', 'EEEE', 'FFFF', 'GGGG', 'HHHH'];
+const sections = (n, signers) => CHAINS.slice(0, n).map(c => section(c, signers));
+
+let saved;
+
 describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 
-    let saved;
     before(function () {
         saved = {};
         for(const k of ENV_KEYS){ saved[k] = process.env[k]; delete process.env[k]; }
@@ -72,6 +95,15 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
         }
     });
 
+    registerAnchorDefaultTests();
+    registerAnchorChunkTests();
+    registerAnchorElectionTests();
+    registerAnchorBundleTests();
+    registerAnchorBatchTests();
+});
+
+function registerAnchorDefaultTests() {
+
     it('carries the documented defaults', function () {
         const pub = mkPub();
         expect(pub.chunkMaxBytes).to.equal(6000);
@@ -81,6 +113,9 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
         expect(pub.intervalMs).to.equal(86400000);
         expect(pub.roundTimeoutMs).to.equal(120000);
     });
+}
+
+function registerAnchorChunkTests() {
 
     describe('ANCHOR_CHUNK_MAX_BYTES: head room under MAX_ACTION_DATA_LENGTH', function () {
 
@@ -126,6 +161,9 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(chunks[2].length).to.equal(17);
         });
     });
+}
+
+function registerAnchorElectionTests() {
 
     describe('ANCHOR_ELECTION_TOLERANCE_BLOCKS: the failover ladder ordering', function () {
 
@@ -161,6 +199,9 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(toleranceMs).to.be.below(pub.intervalMs);
         });
     });
+}
+
+function registerAnchorBundleTests() {
 
     // The ANCHOR v7 bundle budget (D10). Same ceiling, different producer: the bundle
     // packs N checkpoint SECTIONS plus one attestation tail into one action, so the
@@ -168,30 +209,13 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
     // Overflow is SPLIT chain-ascending, never dropped, because the decoder discards an
     // oversize action silently.
     describe('ANCHOR_BUNDLE_MAX_BYTES: how many chains fit at what signer count', function () {
+        registerAnchorBundleSizeTests();
+        registerAnchorBundleSplitTests();
+    });
+}
 
-        // The compiled push costs 3 bytes more than the raw text
-        // (xchain-encoder/src/validator.js), so the raw budget is 8192 - 3.
-        const BUNDLE_BUDGET = MAX_ACTION_DATA_LENGTH - 3;
-
-        // A worst-case mainnet-height section: 7-digit block_index, 6-digit seq and
-        // snapshot block, a 4-character chain name, both roots present. Narrower fields
-        // only ever leave MORE room, so a capacity proved here holds in production.
-        function section(chain, signers){
-            return {
-                chain: chain, network: 'mainnet', block_index: 9625000,
-                block_hash: hex(64), ledger_hash: hex(64), actions_hash: hex(64), contract_hash: hex(64),
-                checkpoint_seq: 962500, snapshot_block: 962500,
-                state_root: hex(64), state_root_version: 1,
-                block_merkle_root: hex(64), block_merkle_version: 1,
-                validator_signatures: JSON.stringify(Array.from({ length: signers }, (_, i) => ({
-                    pubkey: String(i % 10).repeat(64), sig: String(i % 10).repeat(128)
-                })))
-            };
-        }
-        const CHAINS = ['AAAA', 'BBBB', 'CCCC', 'DDDD', 'EEEE', 'FFFF', 'GGGG', 'HHHH'];
-        const sections = (n, signers) => CHAINS.slice(0, n).map(c => section(c, signers));
-
-        it('the budget is the on-chain ceiling less the push prefix', function () {
+function registerAnchorBundleSizeTests() {
+    it('the budget is the on-chain ceiling less the push prefix', function () {
             expect(BUNDLE_BUDGET).to.equal(8189);
         });
 
@@ -221,6 +245,9 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
                     signers + ' signers, ' + (chains + 1) + ' chains overflows').to.be.above(BUNDLE_BUDGET);
             }
         });
+}
+
+function registerAnchorBundleSplitTests() {
 
         // AT8: the split itself, not just the arithmetic.
         it('AT8: a 7-signer 4-chain bundle splits into two, chain-ascending, each under the budget', function () {
@@ -274,7 +301,9 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(split.bundles[0].map(x => x.chain)).to.deep.equal(['AAAA', 'BBBB', 'CCCC']);
             expect(split.oversize).to.deep.equal([]);
         });
-    });
+}
+
+function registerAnchorBatchTests() {
 
     describe('ANCHOR_MAX_BATCH: the per-cycle DOGE spend bound', function () {
 
@@ -292,4 +321,4 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(pub.batchSize).to.be.below(pub.maxBatch);
         });
     });
-});
+}
