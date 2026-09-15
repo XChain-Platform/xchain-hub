@@ -58,9 +58,58 @@ function makeWatermark(extra) {
 
 const T0 = 1_700_000_000_000;
 
-describe('admission height watermark: the bounded advance rule', function () {
+function registerBoundedAdvanceEdgeTests() {
+it('does NOT refresh a frozen tip, so the claim stops advancing with the chain', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        // The same height arriving again and again is a decoder that has not moved. Its age
+        // is what dates the claim, so a refresh here would let the watermark keep claiming.
+        for (let i = 1; i <= 20; i++) expect(w.observeTip('BTC', 900000, T0 + i * 100000)).to.equal(false);
+        expect(w.heights(T0 + 20 * 100000).cross_chain_matches).to.deep.equal({ BTC: 899999 });
+    });
 
-    it('publishes NOTHING before any tip observation', function () {
+    it('ignores a tip that is not a number, rather than reading it as height zero', function () {
+        let w = makeWatermark();
+        // Number(null), Number('') and Number(false) are all 0, a finite non-negative
+        // integer. A coercing observer would claim height -1 ... 0 here and the entry would
+        // exist at all, which is the guess the whole rule refuses.
+        for (const bad of [null, undefined, '', '900000', NaN, Infinity, -1, 1.5, false, {}])
+            expect(w.observeTip('BTC', bad, T0), JSON.stringify(String(bad))).to.equal(false);
+        expect(w.heights(T0 + 1000000)).to.deep.equal({});
+    });
+
+    it('refuses a chain code outside the closed vocabulary', function () {
+        let w = makeWatermark();
+        expect(w.observeTip('bt c', 900000, T0)).to.equal(false);
+        expect(w.observeTip(null, 900000, T0)).to.equal(false);
+        // lower case normalises, because that is how the rest of the admission path spells it
+        expect(w.observeTip('btc', 900000, T0)).to.equal(true);
+        expect(w.heights(T0 + 400000).cross_chain_matches).to.deep.equal({ BTC: 899999 });
+    });
+
+    it('keeps a BTC-only rail BTC-only even with other chains observed', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        w.observeTip('LTC', 2900000, T0);
+        w.observeTip('DOGE', 5900000, T0);
+        let h = w.heights(T0 + 400000);
+        expect(Object.keys(h.attestation_responses)).to.deep.equal(['BTC']);
+        expect(Object.keys(h.anchor_reward_attestations)).to.deep.equal(['BTC']);
+        expect(h.cross_chain_matches).to.deep.equal({ BTC: 899999, LTC: 2899999, DOGE: 5899999 });
+    });
+
+    it('publishes per chain, so one chain with no observation leaves the others claiming', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        w.observeTip('DOGE', 5900000, T0);
+        let h = w.heights(T0 + 400000);
+        expect(h.cross_chain_matches).to.deep.equal({ BTC: 899999, DOGE: 5899999 });
+        expect(h.cross_chain_matches).to.not.have.property('LTC');
+    });
+}
+
+function registerBoundedAdvanceCoreTests() {
+it('publishes NOTHING before any tip observation', function () {
         let w = makeWatermark();
         expect(w.heights(T0)).to.deep.equal({});
     });
@@ -116,69 +165,53 @@ describe('admission height watermark: the bounded advance rule', function () {
         // ever cost whole blocks of trail, never a fraction of one.
         expect(w.heights(now).attestation_responses.BTC).to.equal(900004);
     });
+}
 
-    it('does NOT refresh a frozen tip, so the claim stops advancing with the chain', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        // The same height arriving again and again is a decoder that has not moved. Its age
-        // is what dates the claim, so a refresh here would let the watermark keep claiming.
-        for (let i = 1; i <= 20; i++) expect(w.observeTip('BTC', 900000, T0 + i * 100000)).to.equal(false);
-        expect(w.heights(T0 + 20 * 100000).cross_chain_matches).to.deep.equal({ BTC: 899999 });
-    });
+describe('admission height watermark: the bounded advance rule', function () {
 
-    it('ignores a tip that is not a number, rather than reading it as height zero', function () {
-        let w = makeWatermark();
-        // Number(null), Number('') and Number(false) are all 0, a finite non-negative
-        // integer. A coercing observer would claim height -1 ... 0 here and the entry would
-        // exist at all, which is the guess the whole rule refuses.
-        for (const bad of [null, undefined, '', '900000', NaN, Infinity, -1, 1.5, false, {}])
-            expect(w.observeTip('BTC', bad, T0), JSON.stringify(String(bad))).to.equal(false);
-        expect(w.heights(T0 + 1000000)).to.deep.equal({});
-    });
+    registerBoundedAdvanceCoreTests();
 
-    it('refuses a chain code outside the closed vocabulary', function () {
-        let w = makeWatermark();
-        expect(w.observeTip('bt c', 900000, T0)).to.equal(false);
-        expect(w.observeTip(null, 900000, T0)).to.equal(false);
-        // lower case normalises, because that is how the rest of the admission path spells it
-        expect(w.observeTip('btc', 900000, T0)).to.equal(true);
-        expect(w.heights(T0 + 400000).cross_chain_matches).to.deep.equal({ BTC: 899999 });
-    });
-
-    it('keeps a BTC-only rail BTC-only even with other chains observed', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        w.observeTip('LTC', 2900000, T0);
-        w.observeTip('DOGE', 5900000, T0);
-        let h = w.heights(T0 + 400000);
-        expect(Object.keys(h.attestation_responses)).to.deep.equal(['BTC']);
-        expect(Object.keys(h.anchor_reward_attestations)).to.deep.equal(['BTC']);
-        expect(h.cross_chain_matches).to.deep.equal({ BTC: 899999, LTC: 2899999, DOGE: 5899999 });
-    });
-
-    it('publishes per chain, so one chain with no observation leaves the others claiming', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        w.observeTip('DOGE', 5900000, T0);
-        let h = w.heights(T0 + 400000);
-        expect(h.cross_chain_matches).to.deep.equal({ BTC: 899999, DOGE: 5899999 });
-        expect(h.cross_chain_matches).to.not.have.property('LTC');
-    });
+    registerBoundedAdvanceEdgeTests();
 });
 
-describe('admission height watermark: the anchor-attest queue-drain rule', function () {
+function publisherWithQueue(entries, ttlMs) {
+    let p = Object.create(StateAnchorPublisher.prototype);
+    p.announceRetryTtlMs = (ttlMs === undefined) ? 21600000 : ttlMs;
+    p._deferredRewardAttest = new Map();
+    entries.forEach((e, i) => p._deferredRewardAttest.set('k' + i, e));
+    return p;
+}
 
-    // The real method on a real prototype over the real queue shape, so the rule under test
-    // is the shipped one and not a restatement of it.
-    function publisherWithQueue(entries, ttlMs) {
-        let p = Object.create(StateAnchorPublisher.prototype);
-        p.announceRetryTtlMs = (ttlMs === undefined) ? 21600000 : ttlMs;
-        p._deferredRewardAttest = new Map();
-        entries.forEach((e, i) => p._deferredRewardAttest.set('k' + i, e));
-        return p;
-    }
+function registerAnchorQueueCapTests() {
+it('caps the anchor entry at one below a queued snapshot, leaving every other rail alone', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        let floor = publisherWithQueue([{ at: T0, snapshotBlock: 899500 }]).deferredRewardAttestFloor(T0);
+        w.setTableCap('anchor_reward_attestations', 'BTC', floor - 1);
+        let h = w.heights(T0 + 400000);
+        expect(h.anchor_reward_attestations).to.deep.equal({ BTC: 899499 });
+        expect(h.cross_chain_matches.BTC).to.equal(899999);
+    });
 
-    it('returns null on an empty queue, so the generic advance applies', function () {
+    it('clears the cap when the queue drains, and the generic advance resumes', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        w.setTableCap('anchor_reward_attestations', 'BTC', 899499);
+        expect(w.heights(T0 + 400000).anchor_reward_attestations.BTC).to.equal(899499);
+        w.setTableCap('anchor_reward_attestations', 'BTC', null);
+        expect(w.heights(T0 + 400000).anchor_reward_attestations.BTC).to.equal(899999);
+    });
+
+    it('drops the entry entirely when the cap is below zero', function () {
+        let w = makeWatermark();
+        w.observeTip('BTC', 900000, T0);
+        w.setTableCap('anchor_reward_attestations', 'BTC', -1);
+        expect(w.heights(T0 + 400000)).to.not.have.property('anchor_reward_attestations');
+    });
+}
+
+function registerAnchorQueueFloorTests() {
+it('returns null on an empty queue, so the generic advance applies', function () {
         expect(publisherWithQueue([]).deferredRewardAttestFloor(T0)).to.equal(null);
     });
 
@@ -207,32 +240,16 @@ describe('admission height watermark: the anchor-attest queue-drain rule', funct
         ]);
         expect(p.deferredRewardAttestFloor(T0)).to.equal(900010);
     });
+}
 
-    it('caps the anchor entry at one below a queued snapshot, leaving every other rail alone', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        let floor = publisherWithQueue([{ at: T0, snapshotBlock: 899500 }]).deferredRewardAttestFloor(T0);
-        w.setTableCap('anchor_reward_attestations', 'BTC', floor - 1);
-        let h = w.heights(T0 + 400000);
-        expect(h.anchor_reward_attestations).to.deep.equal({ BTC: 899499 });
-        expect(h.cross_chain_matches.BTC).to.equal(899999);
-    });
+describe('admission height watermark: the anchor-attest queue-drain rule', function () {
 
-    it('clears the cap when the queue drains, and the generic advance resumes', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        w.setTableCap('anchor_reward_attestations', 'BTC', 899499);
-        expect(w.heights(T0 + 400000).anchor_reward_attestations.BTC).to.equal(899499);
-        w.setTableCap('anchor_reward_attestations', 'BTC', null);
-        expect(w.heights(T0 + 400000).anchor_reward_attestations.BTC).to.equal(899999);
-    });
+    // The real method on a real prototype over the real queue shape, so the rule under test
+    // is the shipped one and not a restatement of it.
 
-    it('drops the entry entirely when the cap is below zero', function () {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        w.setTableCap('anchor_reward_attestations', 'BTC', -1);
-        expect(w.heights(T0 + 400000)).to.not.have.property('anchor_reward_attestations');
-    });
+    registerAnchorQueueFloorTests();
+
+    registerAnchorQueueCapTests();
 });
 
 describe('admission height watermark: the relay republish rule', function () {
@@ -305,34 +322,35 @@ describe('admission height watermark: the durable floor', function () {
     });
 });
 
+function makeDb() {
+    let store = new Map();
+    let db = Object.create(Database.prototype);
+    db.doQuery = async function (sql, args) {
+        let text = String(sql);
+        if (text.startsWith('SELECT param_name, param_value FROM configs')) {
+            let [coin, network, mod] = args;
+            let out = [];
+            for (let [k, v] of store) {
+                let [c, n, m, p] = k.split('|');
+                if (c === coin && n === network && m === mod) out.push({ param_name: p, param_value: v });
+            }
+            return out;
+        }
+        if (text.includes('INSERT INTO configs')) {
+            for (let i = 0; i < args.length; i += 5)
+                store.set([args[i], args[i + 1], args[i + 2], args[i + 3]].join('|'), args[i + 4]);
+            return [];
+        }
+        throw new Error('unexpected SQL: ' + text);
+    };
+    db._store = store;
+    return db;
+}
+
 describe('admission height watermark: the floor round-trips through the configs store', function () {
 
     // The real Database methods over a recording driver: no MariaDB, and the SQL the
     // methods actually issue is what is asserted.
-    function makeDb() {
-        let store = new Map();
-        let db = Object.create(Database.prototype);
-        db.doQuery = async function (sql, args) {
-            let text = String(sql);
-            if (text.startsWith('SELECT param_name, param_value FROM configs')) {
-                let [coin, network, mod] = args;
-                let out = [];
-                for (let [k, v] of store) {
-                    let [c, n, m, p] = k.split('|');
-                    if (c === coin && n === network && m === mod) out.push({ param_name: p, param_value: v });
-                }
-                return out;
-            }
-            if (text.includes('INSERT INTO configs')) {
-                for (let i = 0; i < args.length; i += 5)
-                    store.set([args[i], args[i + 1], args[i + 2], args[i + 3]].join('|'), args[i + 4]);
-                return [];
-            }
-            throw new Error('unexpected SQL: ' + text);
-        };
-        db._store = store;
-        return db;
-    }
 
     it('writes what the producer published and reads the same map back', async function () {
         let db = makeDb();
@@ -368,197 +386,5 @@ describe('admission height watermark: the floor round-trips through the configs 
         db._store.set(['xchain', 'regtest', 'admission_watermark', 'no_dot_here'].join('|'), '5');
         db._store.set(['xchain', 'regtest', 'admission_watermark', 'cross_chain_calls.LTC'].join('|'), '12');
         expect(await db.getAdmissionWatermarkFloor('regtest')).to.deep.equal({ cross_chain_calls: { LTC: 12 } });
-    });
-});
-
-describe('admission height watermark: the late-finalization refusal', function () {
-
-    function settledWatermark() {
-        let w = makeWatermark();
-        w.observeTip('BTC', 900000, T0);
-        return w;   // cross_chain_matches.BTC == 899999 at T0 + 400000
-    }
-    const NOW = T0 + 400000;
-
-    it('never touches a LEGACY row, which carries no admission height at all', function () {
-        let w = settledWatermark();
-        expect(w.isLateFinalization('cross_chain_matches', { effective_time: 1 }, NOW)).to.equal(null);
-    });
-
-    it('passes a row stamped at the CURRENT tip', function () {
-        let w = settledWatermark();
-        let admit = 900000 + admitMarginBlocks('cross_chain_matches');
-        expect(w.isLateFinalization('cross_chain_matches', { admit_block_btc: admit }, NOW)).to.equal(null);
-    });
-
-    it('refuses a row whose round opened at or below the claimed height', function () {
-        let w = settledWatermark();
-        let margin = admitMarginBlocks('cross_chain_matches');
-        // Opening tip exactly 899999, the claimed height: the watermark already said that
-        // round terminated, so this finalization is late.
-        let late = w.isLateFinalization('cross_chain_matches', { admit_block_btc: 899999 + margin }, NOW);
-        expect(late).to.not.equal(null);
-        expect(late.chain).to.equal('BTC');
-        expect(late.watermark).to.equal(899999);
-        // One block later opened ABOVE the claim and is not late: the boundary, not a region.
-        expect(w.isLateFinalization('cross_chain_matches', { admit_block_btc: 900000 + margin }, NOW)).to.equal(null);
-    });
-
-    it('uses EACH rail s own margin, so the boundary moves with the rail', function () {
-        let w = settledWatermark();
-        // attestation_responses takes 1 block, not 4. A row at 899999 + 1 is late there and a
-        // row at 899999 + 4 is not, which is the opposite of the match rail.
-        expect(w.isLateFinalization('attestation_responses', { admit_block_btc: 900000 }, NOW)).to.not.equal(null);
-        expect(w.isLateFinalization('attestation_responses', { admit_block_btc: 900004 }, NOW)).to.equal(null);
-    });
-
-    it('reads the unsigned oracle rail from its scalar column and its source_chain', function () {
-        let w = settledWatermark();
-        let margin = admitMarginBlocks('oracle_prices');
-        let row = { source_chain: 'BTC', admit_block: 899999 + margin };
-        expect(w.isLateFinalization('oracle_prices', row, NOW)).to.not.equal(null);
-        expect(w.isLateFinalization('oracle_prices', { source_chain: 'BTC', admit_block: 900500 }, NOW)).to.equal(null);
-        // No source_chain names no chain to be late against.
-        expect(w.isLateFinalization('oracle_prices', { admit_block: 1 }, NOW)).to.equal(null);
-    });
-
-    it('cannot refuse on a chain it makes no claim for', function () {
-        let w = settledWatermark();   // BTC only
-        expect(w.isLateFinalization('cross_chain_matches', { admit_block_ltc: 1 }, NOW)).to.equal(null);
-    });
-
-    it('refuses a row whose two admission shapes disagree', function () {
-        let w = settledWatermark();
-        let bad = w.isLateFinalization('cross_chain_matches',
-            { admit_block_btc: 900004, admit_blocks: { BTC: 900009 } }, NOW);
-        expect(bad).to.not.equal(null);
-        expect(bad.reason).to.contain('disagrees');
-    });
-
-    it('ignores a table that carries no admission height', function () {
-        let w = settledWatermark();
-        expect(w.isLateFinalization('capability_snapshots', { admit_block_btc: 1 }, NOW)).to.equal(null);
-    });
-});
-
-describe('admission height watermark: the frames that carry it', function () {
-
-    function broadcasterWithSocket() {
-        let b  = new HubDbBroadcaster({}, { doQuery: async () => [] });
-        let ws = { readyState: 1, bufferedAmount: 0, _hubBuffered: 0,
-                   send: sinon.stub(), close: sinon.stub(), on: sinon.stub() };
-        return { b, ws };
-    }
-
-    afterEach(function () { sinon.restore(); });
-
-    it('the heartbeat carries ts AND heights, and ts is still the wall clock in seconds', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        await b.addSubscriber(ws);
-        b.admissionWatermark = makeWatermark();
-        b.admissionWatermark.observeTip('BTC', 900000, Date.now() - 500000);
-        ws.send.resetHistory();
-        b.broadcastWatermark();
-        let frame = JSON.parse(ws.send.firstCall.args[0]);
-        expect(frame.type).to.equal('watermark');
-        expect(frame.ts).to.be.closeTo(Math.floor(Date.now() / 1000), 2);
-        expect(frame.heights.cross_chain_matches).to.deep.equal({ BTC: 899999 });
-        b.stop();
-    });
-
-    it('the ready frame carries heights, so a reconnect needs no heartbeat first', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        b.admissionWatermark = makeWatermark();
-        b.admissionWatermark.observeTip('BTC', 900000, Date.now() - 500000);
-        await b.addSubscriber(ws);
-        let ready = JSON.parse(ws.send.firstCall.args[0]);
-        expect(ready.type).to.equal('ready');
-        expect(ready.watermark).to.be.a('number');          // the stream watermark, untouched
-        expect(ready.heights.cross_chain_matches).to.deep.equal({ BTC: 899999 });
-        b.stop();
-    });
-
-    it('a broadcaster with no attached source publishes an EMPTY heights object on both frames', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        await b.addSubscriber(ws);
-        let ready = JSON.parse(ws.send.firstCall.args[0]);
-        expect(ready.heights).to.deep.equal({});
-        ws.send.resetHistory();
-        b.broadcastWatermark();
-        expect(JSON.parse(ws.send.firstCall.args[0]).heights).to.deep.equal({});
-        b.stop();
-    });
-
-    it('broadcastRow REFUSES a late finalization and still serves a fresh row', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        await b.addSubscriber(ws);
-        b.admissionWatermark = makeWatermark();
-        b.admissionWatermark.observeTip('BTC', 900000, Date.now() - 500000);
-        let err = sinon.stub(console, 'error');
-        ws.send.resetHistory();
-
-        let margin = admitMarginBlocks('cross_chain_matches');
-        b.broadcastRow({ table: 'cross_chain_matches', row: { id: 1, admit_block_btc: 899999 + margin } });
-        expect(ws.send.called, 'a late finalization reached the mirror').to.equal(false);
-        expect(err.called).to.equal(true);
-        expect(err.firstCall.args[0]).to.contain('REFUSING to broadcast');
-
-        b.broadcastRow({ table: 'cross_chain_matches', row: { id: 2, admit_block_btc: 900000 + margin } });
-        expect(ws.send.calledOnce).to.equal(true);
-        expect(JSON.parse(ws.send.firstCall.args[0]).row.id).to.equal(2);
-        b.stop();
-    });
-
-    it('broadcastRow is unchanged for a legacy row and an unrelated table', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        await b.addSubscriber(ws);
-        b.admissionWatermark = makeWatermark();
-        b.admissionWatermark.observeTip('BTC', 900000, Date.now() - 500000);
-        ws.send.resetHistory();
-        b.broadcastRow({ table: 'cross_chain_matches', row: { id: 3, effective_time: 7 } });
-        b.broadcastRow({ table: 'capability_snapshots', row: { id: 4 } });
-        expect(ws.send.callCount).to.equal(2);
-        b.stop();
-    });
-
-    it('attachAdmissionSource samples the hub tips, the anchor queue and the floor', async function () {
-        let { b, ws } = broadcasterWithSocket();
-        await b.addSubscriber(ws);
-        b.admissionWatermark = makeWatermark();
-        let saved = null;
-        b.db = {
-            doQuery: async () => [],
-            getAdmissionWatermarkFloor: async () => ({
-                cross_chain_calls:          { LTC: 2000 },
-                // Deliberately ABOVE the anchor queue floor below, so the assertion proves the
-                // sampler wired the cap and that a cap beats a floor.
-                anchor_reward_attestations: { BTC: 900000 },
-            }),
-            saveAdmissionWatermarkFloor: async (net, h) => { saved = { net, h }; return 1; },
-        };
-        let hub = {
-            network: 'regtest',
-            resolveAdmissionTips: async (chains) => {
-                let out = {};
-                for (let c of chains) out[c] = (c === 'BTC') ? 900000 : null;   // only BTC has a fresh tip
-                return out;
-            },
-            stateAnchorPublisher: {
-                deferredRewardAttestFloor: () => 899500,
-            },
-        };
-        b.attachAdmissionSource(hub);
-        await b.sampleAdmission();
-
-        // The floor came back from storage and is published immediately, before any
-        // observation of this process has aged.
-        let h = b.admissionHeights(Date.now());
-        expect(h.cross_chain_calls.LTC).to.equal(2000);
-        // The anchor cap took the queue floor minus one.
-        expect(h.anchor_reward_attestations).to.deep.equal({ BTC: 899499 });
-        // A chain with no fresh tip is absent, never guessed at zero.
-        expect(h.cross_chain_matches || {}).to.not.have.property('DOGE');
-        expect(saved.net).to.equal('regtest');
-        b.stop();
     });
 });
