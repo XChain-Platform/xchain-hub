@@ -24,9 +24,9 @@
 //   - a full set of legitimate subscribers is silent while one extra listener
 //     still warns, so the ceiling is sized rather than switched off.
 //
-// The roster counts LISTENERS, not source files, and those stopped being the same
-// number when the bridge engine landed: CrossChainDexConsensus is a parameterized
-// PBFT channel and one file now boots several instances of it, each with its own
+// The roster counts LISTENERS, not source files, and the two listener counts differ from
+// each other in this design because CrossChainDexConsensus is a parameterized PBFT
+// channel whose source file boots several instances of it, each with its own
 // handler. So the roster carries one `<module>:<channel>` entry per extra channel
 // and the derivation below compares MODULES for parity while checking each extra
 // entry against a real construction site, which is what stops the ceiling from
@@ -57,7 +57,7 @@ function sourceFiles(dir) {
 }
 
 // The roster names a subscriber by the class its file exports, because a file
-// name inside a feature directory (attestation/round.js) no longer says which
+// name inside a feature directory (attestation/round.js) does not say which
 // engine it holds. A file that exports no class is named by its basename.
 function moduleNameOf(file, text) {
     const exported = /^module\.exports\s*=\s*(?:Object\.assign\(\s*)?([A-Z][\w$]*)/m.exec(text);
@@ -216,6 +216,10 @@ describe('PeerManager: message listener ceiling', function () {
         expect(pm.listenerCount('message')).to.equal(PeerManager.MESSAGE_SUBSCRIBERS.length);
     });
 
+});
+
+describe('PeerManager: message listener ceiling', function () {
+
     it('one listener past the roster still warns, which is the leak signal', async function () {
         const pm = makePeerManager();
         for (const name of PeerManager.MESSAGE_SUBSCRIBERS) pm.on('message', function () { return name; });
@@ -263,6 +267,10 @@ describe('PeerManager: message listener ceiling', function () {
             'more entries than instances is an inflated ceiling, not a bigger federation');
     });
 
+});
+
+describe('PeerManager: message listener ceiling', function () {
+
     // The padding above is BARE, so the default-channel check catches it on its own
     // and the entry-count check never gets a turn. Copies of a channel the sources
     // really construct are the case only the count check sees: a copy is not bare,
@@ -284,4 +292,5 @@ describe('PeerManager: message listener ceiling', function () {
         expect(rosterChannelProblems(padded)).to.not.deep.equal([],
             'a roster claiming more instances of a real channel than the sources construct is an inflated ceiling');
     });
+
 });
