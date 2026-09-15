@@ -22,9 +22,19 @@ const PeerManager = require('../../src/peers/manager');
 
 const SELF_ADDR = 'ws://self-validator:10001';
 
-describe('Fuzz: PeerManager', function () {
 
-    let pm, dbStub;
+
+let pm, dbStub;
+
+function mockWs() {
+    return {
+        _peerAddr:  null,
+        readyState: 1, // WebSocket.OPEN
+        close:      sinon.stub(),
+        send:       sinon.stub()
+    };
+}
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         dbStub = { doQuery: sinon.stub().resolves([]) };
@@ -41,26 +51,17 @@ describe('Fuzz: PeerManager', function () {
         pm.seenIds = new Map();
         pm.peers = new Map();
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         pm.removeAllListeners();
         sinon.restore();
     });
+}
 
-    function mockWs() {
-        return {
-            _peerAddr:  null,
-            readyState: 1, // WebSocket.OPEN
-            close:      sinon.stub(),
-            send:       sinon.stub()
-        };
-    }
-
-    // -----------------------------------------------------------------
-    // handleInbound(): structural robustness
-    // -----------------------------------------------------------------
-
-    describe('handleInbound() robustness', function () {
+function registerHandleInboundRobustnessTestCases1() {
 
         it('arbitrary JSON objects never crash handleInbound', function () {
             // handleInbound does JSON.parse then accesses envelope.type etc.
@@ -98,6 +99,9 @@ describe('Fuzz: PeerManager', function () {
                 }
             ), { numRuns: 300 });
         });
+}
+
+function registerHandleInboundRobustnessTestCases2() {
 
         it('malformed envelopes are always silently dropped (no message emitted)', function () {
             // Note: handleInbound does JSON.parse then accesses envelope.type.
@@ -145,6 +149,9 @@ describe('Fuzz: PeerManager', function () {
                 pm.removeAllListeners('message');
             }), { numRuns: 10 });
         });
+}
+
+function registerHandleInboundRobustnessTestCases3() {
 
         it('valid envelope from non-self sender is emitted exactly once', function () {
             fc.assert(fc.property(gen.fc_p2pEnvelope(SELF_ADDR), function (envelope) {
@@ -182,6 +189,9 @@ describe('Fuzz: PeerManager', function () {
                 pm.removeAllListeners('message');
             }), { numRuns: 200 });
         });
+}
+
+function registerHandleInboundRobustnessTestCases4() {
 
         it('envelope from self address is never emitted', function () {
             fc.assert(fc.property(
@@ -227,7 +237,24 @@ describe('Fuzz: PeerManager', function () {
                 }
             ), { numRuns: 100 });
         });
+
+}
+
+function registerHandleInboundRobustnessTests() {
+
+    // -----------------------------------------------------------------
+    // handleInbound(): structural robustness
+    // -----------------------------------------------------------------
+
+    describe('handleInbound() robustness', function () {
+        registerHandleInboundRobustnessTestCases1();
+        registerHandleInboundRobustnessTestCases2();
+        registerHandleInboundRobustnessTestCases3();
+        registerHandleInboundRobustnessTestCases4();
     });
+}
+
+function registerBuildEnvelopeTests() {
 
     // -----------------------------------------------------------------
     // buildEnvelope()
@@ -250,6 +277,9 @@ describe('Fuzz: PeerManager', function () {
             ), { numRuns: 200 });
         });
     });
+}
+
+function registerMakeIdTests() {
 
     // -----------------------------------------------------------------
     // makeId()
@@ -264,4 +294,11 @@ describe('Fuzz: PeerManager', function () {
             }), { numRuns: 50 });
         });
     });
+}
+describe('Fuzz: PeerManager', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerHandleInboundRobustnessTests();
+    registerBuildEnvelopeTests();
+    registerMakeIdTests();
 });
