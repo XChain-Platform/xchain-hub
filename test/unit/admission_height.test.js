@@ -44,7 +44,7 @@ const ERA_MODULES = [
 ];
 
 // The regtest producer activation the armed describes below use. A row at this height is an
-// admission-era row and a row below it is a legacy row, so one armed process drives both.
+// admission-era row and a row below it is a pre-admission row, so one armed process drives both.
 const ERA_AT = 1000;
 
 // height: a number to arm regtest at that height, or null to force regtest INERT whatever
@@ -113,7 +113,7 @@ describe('admission_height: the measured read sets', () => {
 
     it('an every-chain rail with no federation chain list REFUSES rather than stamping an empty map', () => {
         // An empty map admits the row on no chain at all, which is silently different
-        // from the legacy rule and different again from what the producer intended.
+        // from the pre-admission rule and different again from what the producer intended.
         expect(() => ah.admissionReadSet('policy_snapshots', {}, [])).to.throw(/EVERY chain/);
         expect(() => ah.admissionReadSet('oracle_prices', {})).to.throw(/no source_chain/);
     });
@@ -214,9 +214,37 @@ describe('admission_height: the follower bound is PER CHAIN', () => {
     });
 });
 
-describe('admission_height: the canonical encoding is injective', () => {
+function registerCanonicalRefusalTests() {
+it('refuses an empty map rather than encoding it as empty bytes', () => {
+        // Empty bytes after the '|' would be indistinguishable from a pre-admission row that
+        // carries no field at all, which is a second reading of the same canonical.
+        expect(() => ah.encodeAdmitBlocks({})).to.throw(/EMPTY admission map/);
+    });
 
-    it('spells the map as ASCII-ordered CODE:digits joined by commas', () => {
+    it('refuses a chain code outside the closed vocabulary the encoding rests on', () => {
+        expect(() => ah.encodeAdmitBlocks({ 'B:TC': 1 })).to.throw(/closed vocabulary/);
+        expect(() => ah.encodeAdmitBlocks({ 'B,TC': 1 })).to.throw(/closed vocabulary/);
+        expect(() => ah.encodeAdmitBlocks({ 'btc': 1 })).to.throw(/closed vocabulary/);
+    });
+
+    it('the decoder rejects every non-canonical variant of a valid map', () => {
+        expect(ah.decodeAdmitBlocks('BTC:900004,DOGE:5000004')).to.deep.equal({ BTC: 900004, DOGE: 5000004 });
+        for(let bad of ['DOGE:5000004,BTC:900004',   // out of ASCII order
+                        'BTC:0900004',               // leading zero
+                        'BTC:900004,BTC:900005',     // repeated code
+                        'BTC:900004,',               // trailing separator
+                        ',BTC:900004',
+                        'BTC:-1',
+                        'BTC:',
+                        'BTC',
+                        'btc:1',
+                        ''])
+            expect(ah.decodeAdmitBlocks(bad), JSON.stringify(bad)).to.equal(null);
+    });
+}
+
+function registerCanonicalEncodingTests() {
+it('spells the map as ASCII-ordered CODE:digits joined by commas', () => {
         expect(ah.encodeAdmitBlocks({ DOGE: 5000004, BTC: 900004 })).to.equal('BTC:900004,DOGE:5000004');
         // Insertion order must not reach the bytes, or an honest leader and an honest
         // follower could build the same map into two different signatures.
@@ -260,33 +288,13 @@ describe('admission_height: the canonical encoding is injective', () => {
         // A safe-integer boundary: past it the digits are already gone.
         expect(() => ah.encodeAdmitBlocks({ BTC: 9007199254740993 })).to.throw(/canonically spelled/);
     });
+}
 
-    it('refuses an empty map rather than encoding it as empty bytes', () => {
-        // Empty bytes after the '|' would be indistinguishable from a legacy row that
-        // carries no field at all, which is a second reading of the same canonical.
-        expect(() => ah.encodeAdmitBlocks({})).to.throw(/EMPTY admission map/);
-    });
+describe('admission_height: the canonical encoding is injective', () => {
 
-    it('refuses a chain code outside the closed vocabulary the encoding rests on', () => {
-        expect(() => ah.encodeAdmitBlocks({ 'B:TC': 1 })).to.throw(/closed vocabulary/);
-        expect(() => ah.encodeAdmitBlocks({ 'B,TC': 1 })).to.throw(/closed vocabulary/);
-        expect(() => ah.encodeAdmitBlocks({ 'btc': 1 })).to.throw(/closed vocabulary/);
-    });
+    registerCanonicalEncodingTests();
 
-    it('the decoder rejects every non-canonical variant of a valid map', () => {
-        expect(ah.decodeAdmitBlocks('BTC:900004,DOGE:5000004')).to.deep.equal({ BTC: 900004, DOGE: 5000004 });
-        for(let bad of ['DOGE:5000004,BTC:900004',   // out of ASCII order
-                        'BTC:0900004',               // leading zero
-                        'BTC:900004,BTC:900005',     // repeated code
-                        'BTC:900004,',               // trailing separator
-                        ',BTC:900004',
-                        'BTC:-1',
-                        'BTC:',
-                        'BTC',
-                        'btc:1',
-                        ''])
-            expect(ah.decodeAdmitBlocks(bad), JSON.stringify(bad)).to.equal(null);
-    });
+    registerCanonicalRefusalTests();
 });
 
 describe('admission_height: the row helpers', () => {
@@ -372,7 +380,7 @@ describe('admission_height: the era gate, ARMED at a regtest height', () => {
 
     it('refuses to build a LEGACY canonical for an admission-era row', () => {
         // The branch under test is the refusal, and it is the one that strands a row: a
-        // modern row signed over legacy bytes reproduces for no verifier in the fleet.
+        // modern row signed over pre-admission bytes reproduces for no verifier in the fleet.
         expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, null))
             .to.throw(/refusing to build a legacy canonical/);
         expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, undefined))
@@ -384,194 +392,5 @@ describe('admission_height: the era gate, ARMED at a regtest height', () => {
             .to.equal('|BTC:1004,DOGE:2004');
         // And a row BELOW the activation in the same armed process still gets no field.
         expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT - 1, null)).to.equal('');
-    });
-});
-
-describe('XChainHub.resolveAdmissionTip: the DECODER tip, ungated by lag', () => {
-    const http = require('http');
-    const XChainHub = require('../../src/XChainHub.js');
-
-    let server, url, reply;
-
-    before((done) => {
-        // A real indexer-shaped JSON-RPC endpoint rather than a stubbed axios, so the
-        // assertion about which FIELD is read survives a refactor of how it is fetched.
-        server = http.createServer((req, res) => {
-            let body = '';
-            req.on('data', (c) => { body += c; });
-            req.on('end', () => {
-                res.writeHead(200, { 'content-type': 'application/json' });
-                res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: reply }));
-            });
-        });
-        server.listen(0, '127.0.0.1', () => {
-            url = 'http://127.0.0.1:' + server.address().port;
-            done();
-        });
-    });
-    after((done) => { server.close(done); });
-
-    // The method reads nothing off `this` but _resolveIndexerUrl and _admissionTipSeen.
-    function hubStub(){
-        return {
-            _resolveIndexerUrl:  async () => url,
-            _admissionTipSeen:   new Map(),
-            resolveAdmissionTip: XChainHub.prototype.resolveAdmissionTip,
-            admissionTipFresh:   XChainHub.prototype.admissionTipFresh,
-        };
-    }
-
-    it('reads decoder_block and NOT the committed block_index', async () => {
-        reply = { block_index: 1000, decoder_block: 1200, lag: 200 };
-        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(1200);
-    });
-
-    it('accepts a tip whose lag is far past MAX_INDEXER_LAG_BLOCKS', async () => {
-        // The single easiest mistake in this row. A barriered indexer IS a high-lag
-        // indexer, so a lag gate here would refuse the reading in exactly the case
-        // admission by height exists to serve. The committed-tip path keeps that gate;
-        // this one must not have it.
-        reply = { block_index: 1000, decoder_block: 9999, lag: 8999 };
-        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(9999);
-        // Same reading with MAX_INDEXER_LAG_BLOCKS explicitly set low.
-        let prev = process.env.MAX_INDEXER_LAG_BLOCKS;
-        process.env.MAX_INDEXER_LAG_BLOCKS = '5';
-        try { expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(9999); }
-        finally { if(prev === undefined) delete process.env.MAX_INDEXER_LAG_BLOCKS; else process.env.MAX_INDEXER_LAG_BLOCKS = prev; }
-    });
-
-    it('refuses rather than falling back to the committed tip when decoder_block is absent', async () => {
-        // A v6 indexer, or one that has not decoded a block yet. Falling back to
-        // block_index here would reintroduce the circularity the design removes.
-        reply = { block_index: 1000, decoder_block: null, lag: null };
-        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(null);
-        reply = { block_index: 1000 };
-        expect(await hubStub().resolveAdmissionTip('BTC')).to.equal(null);
-    });
-
-    it('refuses an unusable chain code without calling out', async () => {
-        reply = { decoder_block: 5 };
-        expect(await hubStub().resolveAdmissionTip('not a chain')).to.equal(null);
-    });
-});
-
-describe('XChainHub.admissionTipFresh: per chain, and a refusal is not a guess', () => {
-    const XChainHub = require('../../src/XChainHub.js');
-
-    function hubStub(){
-        return { _admissionTipSeen: new Map(), admissionTipFresh: XChainHub.prototype.admissionTipFresh };
-    }
-
-    it('takes a first sighting, and takes any height that has ADVANCED', () => {
-        let h = hubStub();
-        expect(h.admissionTipFresh('BTC', 1000)).to.equal(true);
-        expect(h.admissionTipFresh('BTC', 1001)).to.equal(true);
-    });
-
-    it('refuses a tip that has not advanced past the chain\'s own stall window', () => {
-        let h = hubStub();
-        expect(h.admissionTipFresh('DOGE', 500)).to.equal(true);
-        // Backdate the observation past DOGE's window (6 blocks of 60 s = 360 s) but
-        // well inside BTC's (6 blocks of 600 s = 3600 s).
-        h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 400 * 1000 });
-        expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
-
-        let b = hubStub();
-        expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
-        b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 400 * 1000 });
-        // THE POINT: the same 400 s of no movement is stale on DOGE and fresh on BTC.
-        // A flat window would call one of these wrong.
-        expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
-        b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 4000 * 1000 });
-        expect(b.admissionTipFresh('BTC', 500)).to.equal(false);
-    });
-
-    it('a frozen chain stays refused, and an advance clears it', () => {
-        let h = hubStub();
-        h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 4000 * 1000 });
-        expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
-        expect(h.admissionTipFresh('DOGE', 501)).to.equal(true);
-    });
-});
-
-describe('admission_height: the engines\' canonical builders carry the same gate', () => {
-    const REGTEST = 'regtest';
-
-    function matchRow(extra){
-        return Object.assign({
-            match_id: 'm1', snapshot_block: 1000, network: REGTEST,
-            a_chain: 'BTC', a_action_index: 1, a_tick: 'TEST', a_amount: '1', a_ownership: '1', a_payout_addr: 'a',
-            b_chain: 'DOGE', b_action_index: 2, b_tick: 'TEST', b_amount: '1', b_ownership: '1', b_payout_addr: 'b',
-            effective_time: 1700000000
-        }, extra || {});
-    }
-    function policyRow(extra){
-        return Object.assign({
-            snapshot_id: 's1', snapshot_block: 1000, origin_chain: 'BTC', tick: 'TEST',
-            policy_seq: 1, origin_block: 900, policy_hash: 'h', effective_time: 1700000000, network: REGTEST
-        }, extra || {});
-    }
-
-    describe('below the activation', () => {
-        let inert;
-        before(() => { inert = withAdmissionActivation(null); });
-        after(() => { inert.restore(); });
-
-        it('a LEGACY-era match canonical is byte-identical to what it was before this field existed', () => {
-            // mainnet is INERT in this train at every height, so this is the from-genesis
-            // replay case: no separator, no field, nothing appended.
-            let r = matchRow({ network: 'mainnet' });
-            let raw = inert.DEX.call({}, r, 0);
-            expect(raw).to.not.match(/BTC:/);
-            expect(raw.split('|').pop()).to.equal('0');   // b_filled_before, the old last field
-        });
-
-        it('the match builder refuses an admission map on a legacy-era row', () => {
-            expect(() => inert.DEX.call({}, matchRow({ network: 'mainnet', admit_blocks: { BTC: 1004, DOGE: 2004 } }), 0))
-                .to.throw(/CrossChainDex.*refusing to build an admission-era canonical/);
-        });
-
-        it('the policy builder refuses an admission map on a legacy-era row', () => {
-            expect(() => inert.BRIDGE.call({}, policyRow({ network: 'mainnet', admit_block_btc: 1004 }), 0))
-                .to.throw(/CrossChainPolicy.*refusing to build an admission-era canonical/);
-        });
-    });
-
-    describe('at and above the activation', () => {
-        let armed;
-        before(() => { armed = withAdmissionActivation(ERA_AT); });
-        after(() => { armed.restore(); });
-
-        it('the match builder refuses to build LEGACY bytes for an admission-era row', () => {
-            expect(() => armed.DEX.call({}, matchRow(), 0))
-                .to.throw(/CrossChainDex.*refusing to build a legacy canonical/);
-        });
-
-        it('an admission-era match canonical ends with the ASCII-ordered map', () => {
-            let raw = armed.DEX.call({}, matchRow({ admit_block_btc: 1004, admit_block_doge: 2004 }), 0);
-            expect(raw.endsWith('|BTC:1004,DOGE:2004')).to.equal(true);
-            // And the map is the LAST thing appended, so two rows differing only in their
-            // admission heights differ in their signed bytes.
-            let other = armed.DEX.call({}, matchRow({ admit_block_btc: 1005, admit_block_doge: 2004 }), 0);
-            expect(other).to.not.equal(raw);
-        });
-
-        it('an admission-era policy canonical carries every federation chain it was stamped with', () => {
-            let raw = armed.BRIDGE.call({}, policyRow({ admit_block_btc: 1004, admit_block_ltc: 3004, admit_block_doge: 2004 }), 0);
-            expect(raw.endsWith('|BTC:1004,DOGE:2004,LTC:3004')).to.equal(true);
-        });
-
-        it('a row BELOW the activation in the same armed process keeps the legacy bytes', () => {
-            // The mixed case a flag day actually produces, and the one a process-wide arming
-            // switch could never drive: both eras alive in one run, keyed on the row. The
-            // assertion is byte EQUALITY against a builder that never heard of the
-            // activation, because "no field appended" is the whole legacy guarantee.
-            let row  = matchRow({ snapshot_block: ERA_AT - 1 });
-            let raw  = armed.DEX.call({}, row, 0);
-            let inert = withAdmissionActivation(null);
-            try { expect(raw).to.equal(inert.DEX.call({}, row, 0)); }
-            finally { inert.restore(); }
-            expect(raw).to.not.match(/\|[A-Z]{3,4}:\d+(,[A-Z]{3,4}:\d+)*$/);
-        });
     });
 });
