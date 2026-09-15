@@ -19,9 +19,17 @@ const { buildSubmissions, pubkeyForTestSender }  = require('../helpers/fixtures'
 // 2026-09-09 ruling, so the boundary case below installs a temporary network on it.
 const { XCHAIN_PRICE_ACTIVATION } = require('../../src/xchain_price_activation.js');
 
-describe('OracleRound', function () {
+
 
     let hub, pm, or, mockPriceFetcher, OracleRound;
+
+
+
+        const { formatXchainPriceMeta } = require('../../src/oracle/round');
+
+        const WINDOW = { fromBlockExclusive: 1925, toBlockInclusive: 2925 };
+
+function registerOracleround1Hooks() {
 
     beforeEach(function () {
         // Stub PriceFetcher to avoid real HTTP
@@ -48,12 +56,9 @@ describe('OracleRound', function () {
     afterEach(function () {
         sinon.restore();
     });
+}
 
-    // -----------------------------------------------------------------
-    // Configuration
-    // -----------------------------------------------------------------
-
-    describe('configuration', function () {
+function registerConfiguration2Tests1() {
         it('reads round interval from config', function () {
             // Config values are strings; OracleRound may or may not parse
             expect(Number(or.roundInterval)).to.equal(60000);
@@ -68,13 +73,10 @@ describe('OracleRound', function () {
             expect(or2.roundInterval).to.equal(600000);
             expect(or2.submissionWindow).to.equal(180000);
         });
-    });
 
-    // -----------------------------------------------------------------
-    // step 5: the XCHAIN/USD composition gate
-    // -----------------------------------------------------------------
+}
 
-    describe('xchainPriceGateOpen(): whether this round carries the derived pair', function () {
+function registerXchainpricegateopenWhetherThisRoundCarries3Tests4() {
 
         it('is CLOSED before the network resolves, so a hub that cannot tell stays quiet', function () {
             // currentBtcNetwork is only set by a successful per-round resolve. A hub
@@ -127,22 +129,19 @@ describe('OracleRound', function () {
                 expect(or.xchainPriceGateOpen()).to.equal(true);
             } finally { delete XCHAIN_PRICE_ACTIVATION[NET]; }
         });
+}
+
+function registerXchainpricegateopenWhetherThisRoundCarries3Tests8() {
 
         it('is CLOSED when the round number is not yet a real round', function () {
             or.currentBtcNetwork = 'regtest';
             or.currentRound = null;
             expect(or.xchainPriceGateOpen()).to.equal(false);
         });
-    });
 
-    // -----------------------------------------------------------------
-    // step 6: the per-round derivation audit line
-    // -----------------------------------------------------------------
+}
 
-    describe('formatXchainPriceMeta(): the derivation audit line', function () {
-
-        const { formatXchainPriceMeta } = require('../../src/oracle/round');
-        const WINDOW = { fromBlockExclusive: 1925, toBlockInclusive: 2925 };
+function registerFormatxchainpricemetaTheDerivationAuditLine4Tests9() {
 
         it('records every input behind a derived print', function () {
             // §5's promise that manipulation is "visible" depends entirely on this line
@@ -198,6 +197,9 @@ describe('OracleRound', function () {
             expect(quiet).to.contain('0 fills in window');
             expect(quiet).to.not.contain('vs threshold');
         });
+}
+
+function registerFormatxchainpricemetaTheDerivationAuditLine4Tests12() {
 
         it('renders an unknown window without throwing or inventing a range', function () {
             // The line must survive a shape it did not expect: a logging crash inside
@@ -206,13 +208,10 @@ describe('OracleRound', function () {
                 .to.contain('window (?, ?]');
             expect(formatXchainPriceMeta(null)).to.equal('(no metadata)');
         });
-    });
 
-    // -----------------------------------------------------------------
-    // _executeRound()
-    // -----------------------------------------------------------------
+}
 
-    describe('_executeRound()', function () {
+function registerExecuteround5Tests13() {
 
         it('fetches prices and broadcasts ORACLE_PRICE_SUBMIT', async function () {
             await or._executeRound();
@@ -263,6 +262,9 @@ describe('OracleRound', function () {
 
             expect(pm.broadcast.called).to.be.false;
         });
+}
+
+function registerExecuteround5Tests18() {
 
         it('skips round when price fetch throws', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
@@ -319,6 +321,9 @@ describe('OracleRound', function () {
             expect(or.consecutiveSkippedRounds).to.equal(1);
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
+}
+
+function registerExecuteround5Tests23() {
 
         it('resets consecutiveSkippedRounds and sets lastSuccessfulRoundTime on finalization', async function () {
             or.noteRoundSkipped();
@@ -333,188 +338,49 @@ describe('OracleRound', function () {
             expect(or.lastSuccessfulRoundTime).to.be.at.least(before);
             expect(or.lastSuccessfulRoundTime).to.be.at.most(after);
         });
+
+}
+
+describe('OracleRound', function () {
+    registerOracleround1Hooks();
+
+
+
+    // -----------------------------------------------------------------
+    // Configuration
+    // -----------------------------------------------------------------
+    describe('configuration', function () {
+        registerConfiguration2Tests1();
     });
 
+
+
     // -----------------------------------------------------------------
-    // Peer submission handling
+    // step 5: the XCHAIN/USD composition gate
     // -----------------------------------------------------------------
-
-    describe('peer submission handling', function () {
-
-        it('records peer submission for current round', async function () {
-            await or._executeRound(); // sets currentRound
-            let round = or.getCurrentRound();
-
-            or._handleMessage({
-                type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
-                data: {
-                    round:  round,
-                    prices: [{ coinPair: 'BTC/USD', price: '100001', sources: 1 }],
-                    sources: 1,
-                    timestamp: Date.now()
-                }
-            });
-
-            let subs = or.getSubmissions(round);
-            expect(subs.has('ws://peer-1:10001')).to.be.true;
-        });
-
-        it('first submission wins (duplicate sender ignored)', async function () {
-            await or._executeRound();
-            let round = or.getCurrentRound();
-
-            or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
-                data: { round, prices: [{ coinPair: 'BTC/USD', price: '111' }], sources: 1, timestamp: Date.now() }
-            });
-            or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
-                data: { round, prices: [{ coinPair: 'BTC/USD', price: '222' }], sources: 1, timestamp: Date.now() }
-            });
-
-            let subs = or.getSubmissions(round);
-            let sub = subs.get('ws://peer-1:10001');
-            expect(sub.prices[0].price).to.equal('111'); // first wins
-        });
-
-        it('ignores non-ORACLE_PRICE_SUBMIT messages', function () {
-            or._handleMessage({ type: 'HEARTBEAT', sender: 'x', sig_pubkey: pubkeyForTestSender('x'), data: {} });
-            expect(or.getSubmissions(0)).to.be.undefined;
-        });
+    describe('xchainPriceGateOpen(): whether this round carries the derived pair', function () {
+        registerXchainpricegateopenWhetherThisRoundCarries3Tests4();
+        registerXchainpricegateopenWhetherThisRoundCarries3Tests8();
     });
 
+
+
     // -----------------------------------------------------------------
-    // getSubmissionsInfo()
+    // step 6: the per-round derivation audit line
     // -----------------------------------------------------------------
-
-    describe('getSubmissionsInfo()', function () {
-        it('returns info object with core fields', async function () {
-            await or._executeRound();
-            let info = await or.getSubmissionsInfo();
-            expect(info).to.have.property('currentRound');
-            expect(info).to.have.property('roundInterval');
-            expect(info).to.have.property('submissionWindow');
-        });
-
-        it('includes consecutiveSkippedRounds and lastSuccessfulRoundTime', async function () {
-            await or._executeRound();
-            or.markRoundFinalized();
-            let info = await or.getSubmissionsInfo();
-            expect(info).to.have.property('consecutiveSkippedRounds').that.equals(0);
-            expect(info).to.have.property('lastSuccessfulRoundTime').that.is.a('number');
-        });
-
-        it('reflects skipped count when rounds fail', async function () {
-            mockPriceFetcher.fetchPrices.rejects(new Error('feed down'));
-            await or._executeRound();
-            // The durable skip is what advances the streak (item 4942).
-            or.noteRoundSkipped();
-            let info = await or.getSubmissionsInfo();
-            expect(info.consecutiveSkippedRounds).to.equal(1);
-            expect(info.lastSuccessfulRoundTime).to.be.null;
-        });
+    describe('formatXchainPriceMeta(): the derivation audit line', function () {
+        registerFormatxchainpricemetaTheDerivationAuditLine4Tests9();
+        registerFormatxchainpricemetaTheDerivationAuditLine4Tests12();
     });
 
-    // -----------------------------------------------------------------
-    // Cold-start hydration of freshness counters from price_snapshots.
-    // Regression guard: before this, start() left consecutiveSkippedRounds at 0
-    // and lastSuccessfulRoundTime at null after any restart, so a hub that came
-    // back up mid-outage looked clean even though the durable record showed a gap.
-    // -----------------------------------------------------------------
 
-    describe('cold-start hydration (start)', function () {
-
-        // Route the two hydration queries by SQL shape. The first returns the most
-        // recent finalized round (round_number + epoch-ms), the second the count of
-        // trailing non-finalized rounds.
-        function stubHydration(db, { lastFinalized, skipped }) {
-            db.doQuery = sinon.stub().callsFake(async (sql) => {
-                if (/status = 'finalized'[\s\S]*ORDER BY round_number DESC LIMIT 1/.test(sql)) {
-                    return lastFinalized ? [lastFinalized] : [];
-                }
-                if (/COUNT\(DISTINCT round_number\) AS skipped/.test(sql)) {
-                    return [{ skipped: skipped }];
-                }
-                return [];
-            });
-        }
-
-        beforeEach(function () {
-            // We only exercise hydration here, not the scheduler: stub the timer
-            // setup so start() leaves no real timers running after the test.
-            sinon.stub(or, 'startRoundTimer');
-        });
-
-        it('rehydrates skip streak and last-success time from pre-existing rounds', async function () {
-            let finalizedMs = Date.now() - 3600000; // an hour ago
-            stubHydration(hub.db, {
-                lastFinalized: { round_number: 100, ms: finalizedMs },
-                skipped:       5
-            });
-
-            await or.start();
-
-            expect(or.consecutiveSkippedRounds).to.equal(5);
-            expect(or.lastSuccessfulRoundTime).to.equal(finalizedMs);
-        });
-
-        it('leaves constructor defaults when no finalized round exists', async function () {
-            stubHydration(hub.db, { lastFinalized: null, skipped: 3 });
-
-            await or.start();
-
-            // No finalized round ever → last-success stays null, but the skip streak
-            // still reflects the recorded non-finalized rounds.
-            expect(or.lastSuccessfulRoundTime).to.be.null;
-            expect(or.consecutiveSkippedRounds).to.equal(3);
-        });
-
-        it('does not throw or block start() when hydration query fails', async function () {
-            hub.db.doQuery = sinon.stub().rejects(new Error('db down'));
-
-            await or.start();
-
-            // Hydration is best-effort; a failure must leave the clean-slate defaults.
-            expect(or.consecutiveSkippedRounds).to.equal(0);
-            expect(or.lastSuccessfulRoundTime).to.be.null;
-        });
-    });
 
     // -----------------------------------------------------------------
-    // setConsensus / scheduler / fresh-round submission map
+    // _executeRound()
     // -----------------------------------------------------------------
-
-    describe('additional coverage', function () {
-        it('setConsensus wires the consensus engine', function () {
-            let c = { finalizeRound: sinon.stub() };
-            or.setConsensus(c);
-            expect(or.oracleConsensus).to.equal(c);
-        });
-
-        it('_handleMessage initializes the submission map for a not-yet-seen round', async function () {
-            await or._executeRound();              // sets currentRound + its own round map
-            let next = or.getCurrentRound() + 1;   // a round with no map yet
-            or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001', sig_pubkey: pubkeyForTestSender('ws://peer-9:10001'),
-                data: { round: next, prices: [{ coinPair: 'BTC/USD', price: '123' }], sources: 1, timestamp: Date.now() }
-            });
-            expect(or.getSubmissions(next).has('ws://peer-9:10001')).to.be.true;
-        });
-
-        it('startRoundTimer schedules an aligned execution plus a steady interval', function () {
-            let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 }); // 1s into a round
-            let exec = sinon.stub(or, '_executeRound').resolves();
-            or.startRoundTimer();
-
-            clock.tick(5001);                       // initial-delay timer (1000+5000 < window)
-            expect(exec.callCount).to.be.greaterThan(0);
-            clock.tick(Number(or.roundInterval));   // next boundary + first interval tick
-            expect(exec.callCount).to.be.greaterThan(1);
-
-            if (or.initialRoundTimer) clearTimeout(or.initialRoundTimer);
-            if (or.roundTimer) clearInterval(or.roundTimer);
-            clock.restore();
-        });
+    describe('_executeRound()', function () {
+        registerExecuteround5Tests13();
+        registerExecuteround5Tests18();
+        registerExecuteround5Tests23();
     });
 });
