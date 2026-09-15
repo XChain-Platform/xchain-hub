@@ -21,30 +21,30 @@ const proxyquire = require('proxyquire');
 const { MAX_RANGE } = require('../../src/lib/oracle_round_presence.js');
 const { DB_METHODS } = require('../helpers/mockHub');
 
-describe('XChainHub.getOracleRoundPresence', function () {
+let mockDb, XChainHub, hub;
 
-    let mockDb, XChainHub, hub;
+function rows(entries) {
+    return entries.map(([round, status]) => ({
+        round_number: round, coin_pair: 'BTC/USD', status: status,
+        reference_block: 900 + round, block_timestamp: 1700000000 + round
+    }));
+}
+
+// doQuery answers the MAX(round_number) probe and the range read separately.
+function seed(maxRound, snapshotRows) {
+    mockDb.doQuery = sinon.stub();
+    mockDb.doQuery.withArgs(sinon.match(/MAX\(round_number\)/)).resolves(
+        [{ max_round: maxRound }]);
+    mockDb.doQuery.withArgs(sinon.match(/BETWEEN/)).resolves(snapshotRows || []);
+    return mockDb.doQuery;
+}
+
+describe('XChainHub.getOracleRoundPresence', function () {
 
     before(function () {
         this.timeout(30000);
         XChainHub = proxyquire('../../src/XChainHub', { './db': function () { return mockDb; } });
     });
-
-    function rows(entries) {
-        return entries.map(([round, status]) => ({
-            round_number: round, coin_pair: 'BTC/USD', status: status,
-            reference_block: 900 + round, block_timestamp: 1700000000 + round
-        }));
-    }
-
-    // doQuery answers the MAX(round_number) probe and the range read separately.
-    function seed(maxRound, snapshotRows) {
-        mockDb.doQuery = sinon.stub();
-        mockDb.doQuery.withArgs(sinon.match(/MAX\(round_number\)/)).resolves(
-            [{ max_round: maxRound }]);
-        mockDb.doQuery.withArgs(sinon.match(/BETWEEN/)).resolves(snapshotRows || []);
-        return mockDb.doQuery;
-    }
 
     beforeEach(function () {
         // Spread first: getOracleRoundPresence now calls db.getPriceSnapshotsMaxRoundNumber()
@@ -57,6 +57,12 @@ describe('XChainHub.getOracleRoundPresence', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+
+    registerRoundPresenceRangeTests();
+    registerRoundPresenceBoundTests();
+});
+
+function registerRoundPresenceRangeTests() {
 
     it('reports a lost round as missing over an explicit range', function () {
         seed(27, rows([[25, 'finalized']]));
@@ -83,6 +89,9 @@ describe('XChainHub.getOracleRoundPresence', function () {
         let res = await hub.getOracleRoundPresence();
         expect(res).to.deep.equal({ from_round: null, to_round: null, rounds: [], missing: [], digest: null });
     });
+}
+
+function registerRoundPresenceBoundTests() {
 
     it('honours an explicit from_round and clamps the span to MAX_RANGE', async function () {
         let q = seed(999999, []);
@@ -118,4 +127,4 @@ describe('XChainHub.getOracleRoundPresence', function () {
         expect(rangeCall.args[0]).to.not.match(/SELECT \*/);
         expect(rangeCall.args[0]).to.match(/round_number, coin_pair, status/);
     });
-});
+}
