@@ -37,6 +37,14 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../src/price_pair_activation
 
 describe('XCHAIN/USD composition gate @regression', function () {
 
+    registerActivationMapTests();
+    registerRolloutOrderingTests();
+    registerActivationPredicateTests();
+    registerRoundStartTests();
+});
+
+function registerActivationMapTests() {
+
     describe('the activation map', function () {
         it('is ARMED at genesis on mainnet by the 2026-09-09 ruling', function () {
             // 0 PRICE actions have ever been indexed on any mainnet chain (measured
@@ -59,6 +67,9 @@ describe('XCHAIN/USD composition gate @regression', function () {
                 .to.deep.equal(Object.keys(PRICE_PAIR_WIDEN_ACTIVATION).sort());
         });
     });
+}
+
+function registerRolloutOrderingTests() {
 
     describe('the rollout ordering invariant', function () {
         it('widens the wire format at or before composition begins, on every network', function () {
@@ -77,6 +88,9 @@ describe('XCHAIN/USD composition gate @regression', function () {
             }
         });
     });
+}
+
+function registerActivationPredicateTests() {
 
     describe('isXchainPriceActive()', function () {
         it('is inclusive at the threshold instant', function () {
@@ -114,6 +128,9 @@ describe('XCHAIN/USD composition gate @regression', function () {
             }
         });
     });
+}
+
+function registerRoundStartTests() {
 
     describe('roundStartSeconds(): the key the gate reads', function () {
         const EPOCH = 1785000000000;   // ms
@@ -166,4 +183,4 @@ describe('XCHAIN/USD composition gate @regression', function () {
             }
         });
     });
-});
+}
