@@ -22,9 +22,20 @@ const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
-describe('SlashDetector clamped-round band (item 5833)', function () {
+let hub, pm, sd, oc;
 
-    let hub, pm, sd, oc;
+// Put the engine in the state _storeSnapshot leaves it in for `round`: the clamp
+// basis retained, the cache already moved on to the round just stored.
+function withClampBasis(round, pair, lastFinalized) {
+    oc.updateLastFinalizedPrices([{ coinPair: pair, price: lastFinalized }], round - 1);
+    oc._clampReference = { round: round, prices: new Map(oc._lastFinalizedPrices) };
+}
+
+function insertedProposals() {
+    return hub.db.doQuery.getCalls().filter(c => String(c.args[0]).includes('slash_proposals'));
+}
+
+describe('SlashDetector clamped-round band (item 5833)', function () {
 
     beforeEach(function () {
         hub = createMockHub();
@@ -39,16 +50,12 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
         sinon.restore();
     });
 
-    // Put the engine in the state _storeSnapshot leaves it in for `round`: the clamp
-    // basis retained, the cache already moved on to the round just stored.
-    function withClampBasis(round, pair, lastFinalized) {
-        oc.updateLastFinalizedPrices([{ coinPair: pair, price: lastFinalized }], round - 1);
-        oc._clampReference = { round: round, prices: new Map(oc._lastFinalizedPrices) };
-    }
+    registerClampedBandCoreTests();
+    registerClampedBandPairTests();
+    registerClampedBandEdgeTests();
+});
 
-    function insertedProposals() {
-        return hub.db.doQuery.getCalls().filter(c => String(c.args[0]).includes('slash_proposals'));
-    }
+function registerClampedBandCoreTests() {
 
     it('a clamped XCHAIN/USD round does not slash the honest submitters', async function () {
         // Genuine +20% move: every hub submits 1.20*L, the median is 1.20*L, and the
@@ -83,6 +90,9 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
         let evidence = JSON.parse(calls[0].args[1][3]);
         expect(evidence.pairs[0].finalized).to.equal(1.1);
     });
+}
+
+function registerClampedBandPairTests() {
 
     it('an UNCLAMPED round keeps the tight band', async function () {
         // Published price sits inside the bounds, so nothing is widened.
@@ -119,6 +129,9 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
         let evidence = JSON.parse(calls[0].args[1][3]);
         expect(evidence.pairs.map(p => p.coinPair)).to.deep.equal(['BTC/USD']);
     });
+}
+
+function registerClampedBandEdgeTests() {
 
     it('a round with no retained basis behaves exactly as before', async function () {
         // The engine holds a basis for round 9 only; round 10 gets the tight band.
@@ -172,4 +185,4 @@ describe('SlashDetector clamped-round band (item 5833)', function () {
         expect(bare.db.doQuery.getCalls().filter(c => String(c.args[0]).includes('slash_proposals')))
             .to.have.length(1);
     });
-});
+}
