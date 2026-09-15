@@ -27,10 +27,10 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const RollcallRound     = require('../../src/rollcall/round.js');
-const ValidatorIdentity = require('../../src/validators/identity.js');
+const RollcallRound     = require('../../../src/rollcall/round.js');
+const ValidatorIdentity = require('../../../src/validators/identity.js');
 
-const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
+const VECTOR_PATH = path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation',
                               'protocol', 'test-vectors', 'rollcall_canonical.json');
 
 // A bare canonical/wire builder: these two methods read only `this.network`, and
@@ -57,7 +57,7 @@ function builder(network) {
         // and ENGINE_TAGS.ROLLCALL is where the tag comes from. Assert the pieces
         // are really in the built string, so a hand-rolled template that happened
         // to match today cannot pass tomorrow.
-        const eq  = require('../../src/equivocation_header.js');
+        const eq  = require('../../../src/equivocation_header.js');
         const eng = builder('regtest');
         const out = eng._canonical(30, V.canonical.ledger_hash);
         assert.ok(out.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.ROLLCALL, '30', 0))));
@@ -186,7 +186,7 @@ function builder(network) {
         // The commitment is sha256 of the field EXACTLY as carried, and the vector
         // states it separately so a helper that hashed a normalised list would fail
         // here rather than at an eviction a year later.
-        const rc = require('../../src/rollcall/rollcall_canonical.js');
+        const rc = require('../../../src/rollcall/rollcall_canonical.js');
         assert.strictEqual(rc.gatesHash(V1.gates), V1.gates_hash);
         assert.ok(V1.expected.endsWith('|' + V1.gates_hash));
         assert.strictEqual(Buffer.byteLength(V1.gates, 'utf8'), V1.gates_bytes);
@@ -267,7 +267,7 @@ function builder(network) {
         // The LIVE list is not frozen: a gate appended to SHARED_GATES lengthens it
         // and must shrink the cap on its own. Assert the formula, and that a longer
         // list really does buy fewer pairs, rather than today's number.
-        const live = require('../../src/consensus_rules_digest.js').knownGateKeys().join(',');
+        const live = require('../../../src/consensus_rules_digest.js').knownGateKeys().join(',');
         assert.strictEqual(
             RollcallRound.maxPairsForGates(live),
             Math.floor((B.max_data_bytes - RollcallRound.v1HeaderBytes(live)) / B.bytes_per_pair));
@@ -284,7 +284,7 @@ function builder(network) {
 
     function aFullCapV1ActionFitsTest18() {
         const eng   = builder('mainnet');
-        const gates = require('../../src/consensus_rules_digest.js').knownGateKeys().join(',');
+        const gates = require('../../../src/consensus_rules_digest.js').knownGateKeys().join(',');
         const cap   = RollcallRound.maxPairsForGates(gates);
         assert.ok(cap > 0);
         const mk = n => Array.from({ length: n }, (_, i) => ({

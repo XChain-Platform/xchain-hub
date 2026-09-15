@@ -20,10 +20,10 @@
 
 const assert = require('assert');
 
-const RollcallRound = require('../../src/rollcall/round.js');
-const rca           = require('../../src/rollcall_activation.js');
-const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
-const { turnsUntil, settleFlag } = require('../helpers/microtask_turns');
+const RollcallRound = require('../../../src/rollcall/round.js');
+const rca           = require('../../../src/rollcall_activation.js');
+const { CANONICAL_REORG_BUFFER } = require('../../../src/snapshot_reorg_buffer.js');
+const { turnsUntil, settleFlag } = require('../../helpers/microtask_turns');
 
 const NETWORKS = ['mainnet', 'testnet', 'regtest'];
 
@@ -145,10 +145,10 @@ const REQUIRED_SWEEPERS = 3;
     function theThreeTunablesHaveADocumentedTest7() {
         const fs   = require('fs');
         const path = require('path');
-        const doc  = fs.readFileSync(path.join(__dirname, '..', '..', 'CONFIGURATION.md'), 'utf8');
+        const doc  = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'CONFIGURATION.md'), 'utf8');
         // Read the names out of the engine rather than restating them, so a rename
         // cannot pass by renaming the assertion with it.
-        const src  = fs.readFileSync(path.join(__dirname, '../../src/rollcall/round.js'), 'utf8');
+        const src  = fs.readFileSync(path.join(__dirname, '../../../src/rollcall/round.js'), 'utf8');
         const used = new Set();
         // Two read forms: the named read, spelled hubConfig.NAME since the config
         // home took over the environment (process.env.NAME before that, and still

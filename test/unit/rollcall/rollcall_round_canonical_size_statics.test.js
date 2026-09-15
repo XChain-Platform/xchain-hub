@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 
-const RollcallRound = require('../../src/rollcall/round.js');
-const wirePart      = require('../../src/rollcall/round/wire.js');
+const RollcallRound = require('../../../src/rollcall/round.js');
+const wirePart      = require('../../../src/rollcall/round/wire.js');
 
 // The size statics are reached as RollcallRound.<static>, inside maxPairsForGates
 // and from the publish path, so a static reassigned on the class (a double, a patch)

@@ -26,11 +26,11 @@ const path         = require('path');
 const proxyquire   = require('proxyquire');
 const EventEmitter = require('events');
 
-const ValidatorIdentity    = require('../../src/validators/identity.js');
-const StateAnchorPublisher = require('../../src/anchor/publisher.js');
-const rca                  = require('../../src/rollcall_activation.js');
-const rga                  = require('../../src/rollcall_gates_activation.js');
-const { knownGateKeys }    = require('../../src/consensus_rules_digest.js');
+const ValidatorIdentity    = require('../../../src/validators/identity.js');
+const StateAnchorPublisher = require('../../../src/anchor/publisher.js');
+const rca                  = require('../../../src/rollcall_activation.js');
+const rga                  = require('../../../src/rollcall_gates_activation.js');
+const { knownGateKeys }    = require('../../../src/consensus_rules_digest.js');
 
 const BTC_URL  = 'http://btc-indexer.test';
 const DOGE_URL = 'http://doge-indexer.test';
@@ -54,7 +54,7 @@ let axiosStub, RollcallRound, tmpDir, savedEnv;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    RollcallRound = proxyquire('../../src/rollcall/round.js', { axios: axiosStub });
+    RollcallRound = proxyquire('../../../src/rollcall/round.js', { axios: axiosStub });
 }
 
 // Indexer dispatcher: the BTC indexer answers getblockhashes (tip and per-block

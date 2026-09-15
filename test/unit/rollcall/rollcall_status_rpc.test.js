@@ -25,9 +25,9 @@ const assert     = require('assert');
 const fs         = require('fs');
 const path       = require('path');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
+const { waitUntil } = require('../../helpers/waitUntil');
 
-const API_SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8');
+const API_SRC = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'api.js'), 'utf8');
 
 // Boot src/api.js with everything heavy stubbed and capture the JSON-RPC
 // controller object the router is handed, plus the middlewares registered.
@@ -68,7 +68,7 @@ async function bootApi(env, hubOverrides) {
     }, env);
 
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),
@@ -165,7 +165,7 @@ describe('capabilities/oracle_publish broadcast presence check', function () {
                                       doge_wallet: '/path/to/wallet' } };
 
     function load(loadSignerHooks) {
-        return proxyquire('../../src/capabilities/oracle_publish', {
+        return proxyquire('../../../src/capabilities/oracle_publish', {
             '../lib/signer_loader.js': { loadSignerHooks }
         });
     }
