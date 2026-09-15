@@ -18,118 +18,43 @@ const { callRpc }       = require('./helpers/rpcClient');
 const { waitUntil }     = require('../helpers/waitUntil');
 const { assertPriceSnapshot, assertAttestationStored } = require('./helpers/dbAssertions');
 
-describe('E2E: Multi-Node Cluster', function () {
+let cluster;
 
-    let cluster;
+function consumerFallbackSuite() {
 
-    before(async function () {
-        this.timeout(15000);
-        try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable: skipping E2E multi-node tests');
-            return;
-        }
-        priceMocks.setup();
-    });
-
-    after(async function () {
-        this.timeout(10000);
-        priceMocks.teardown();
-        await testDb.teardown();
-    });
-
-    beforeEach(async function () {
-        this.timeout(30000);
-        if (!testDb.isAvailable()) return this.skip();
-        await testDb.truncateAll();
-        priceMocks.reset();
-    });
-
-    afterEach(async function () {
-        this.timeout(30000);
-        if (cluster) {
-            await cluster.stop();
-            cluster = null;
-        }
-    });
-
-    // E2E-MULTI-001: 3-node cluster oracle round with PBFT consensus
-    describe('E2E-MULTI-001: 3-node oracle PBFT consensus', function () {
-
-        it('all nodes submit prices and finalize via PBFT', async function () {
+        it('data accessible from any node when another is unavailable', async function () {
             this.timeout(30000);
-
-            priceMocks.mockCoinGeckoSuccess({
-                bitcoin: { usd: 100000 }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 }
-            });
 
             cluster = createCluster(3);
             await cluster.start();
-            // cluster.start() already polls the peer sockets until the mesh is up, so
-            // there is nothing left to wait for here.
 
-            // Trigger oracle round on all nodes simultaneously
-            await cluster.triggerAllOracleRounds();
-
-            // Get the round number from the leader
-            let round = cluster.getHub(0).oracle.getCurrentRound();
-
-            // Submission writes are fire-and-forget: wait for all three rows.
-            await waitUntil(async () => {
-                let rows = await cluster.getDb().doQuery(
-                    'SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
-                return rows.length >= 3;
-            }, { timeoutMs: 15000, label: 'every node submission row to land' });
-
-            // Trigger finalization from the leader
-            // The leader is determined by: validatorSet[round % validatorSet.length]
-            // Since validator set is sorted by pubkey, try triggering from all nodes
-            // (only the leader will actually propose; non-leaders return early)
-            for (let i = 0; i < 3; i++) {
-                await cluster.triggerOracleFinalization(i, round).catch(() => {});
-            }
-
-            // Wait for the PBFT round to persist its snapshots. The assertions below are
-            // conditional on consensus having completed, so a round that never finalizes
-            // must not become a timeout failure here: poll for it, then move on.
+            // Insert test data
             let db = cluster.getDb();
-            await waitUntil(async () => {
-                let rows = await db.doQuery(
-                    "SELECT 1 FROM price_snapshots WHERE round_number = ? AND status = 'finalized'", [round]);
-                return rows.length > 0;
-            }, { timeoutMs: 10000, label: 'the PBFT round to persist its finalized snapshots' })
-                .catch(() => {});
-            let snapshots = await db.doQuery(
-                "SELECT * FROM price_snapshots WHERE round_number = ? AND status = 'finalized'",
-                [round]
+            await db.doQuery(
+                `INSERT INTO price_snapshots
+                    (round_number, coin_pair, price, reference_block, reference_chain,
+                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
+                 VALUES (1, 'BTC/USD', '50000.00000000', 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+                [Date.now()]
             );
 
-            // If consensus succeeded, we should have finalized snapshots
-            if (snapshots.length > 0) {
-                expect(snapshots.length).to.equal(3);  // BTC, LTC, DOGE
-                let btcSnap = snapshots.find(s => s.coin_pair === 'BTC/USD');
-                expect(btcSnap).to.exist;
-                expect(btcSnap.price).to.equal('100000.00000000');
-                // With 3 validators, validator_count should reflect participation
-                expect(btcSnap.validator_count).to.be.at.least(1);
-            }
+            // Verify all nodes can serve the data
+            let port0 = cluster.getPort(0);
+            let port1 = cluster.getPort(1);
+            let port2 = cluster.getPort(2);
 
-            // All nodes should serve the same data (shared DB)
-            for (let i = 0; i < 3; i++) {
-                let port = cluster.getPort(i);
-                let btc = await callRpc(port, 'getprice', { coin_pair: 'BTC/USD' });
-                // Either we have price data (consensus succeeded) or no data
-                // All nodes should agree
-                if (snapshots.length > 0) {
-                    expect(btc.result.price).to.equal('100000.00000000');
-                }
-            }
+            let res0 = await callRpc(port0, 'getprice', { coin_pair: 'BTC/USD' });
+            let res1 = await callRpc(port1, 'getprice', { coin_pair: 'BTC/USD' });
+            let res2 = await callRpc(port2, 'getprice', { coin_pair: 'BTC/USD' });
+
+            expect(res0.result.price).to.equal('50000.00000000');
+            expect(res1.result.price).to.equal('50000.00000000');
+            expect(res2.result.price).to.equal('50000.00000000');
         });
-    });
+    }
 
-    // E2E-MULTI-002: Config update via shared DB across 3 nodes
-    describe('E2E-MULTI-002: 3-node config consistency via shared DB', function () {
-
-        it('config written by one node is visible to all via shared DB', async function () {
+function dataConsistencySuiteTests1() {
+it('all nodes return identical config data', async function () {
             this.timeout(30000);
 
             cluster = createCluster(3);
@@ -137,24 +62,85 @@ describe('E2E: Multi-Node Cluster', function () {
             // cluster.start() already polls the peer sockets until the mesh is up, so
             // there is nothing left to wait for here.
 
-            // Write config directly via DB to avoid PBFT leader routing
+            // Write config directly via DB
             let db = cluster.getDb();
             await db.doQuery(
                 "INSERT INTO configs (coin, network, module, param_name, param_value) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE param_value = ?",
-                ['BTC', 'mainnet', 'decoder', 'host', 'multi-test.local', 'multi-test.local']
+                ['BTC', 'mainnet', 'decoder', 'host', 'consistent.local', 'consistent.local']
             );
 
-            // All nodes should see the config via shared DB
+            // All nodes should return the same config (shared DB)
+            let results = [];
             for (let i = 0; i < 3; i++) {
-                let readRes = await callRpc(cluster.getPort(i), 'getallconfigs');
-                expect(readRes.result.configs.BTC).to.exist;
-                expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('multi-test.local');
+                let res = await callRpc(cluster.getPort(i), 'getallconfigs');
+                results.push(res.result);
+            }
+
+            expect(results[0]).to.deep.equal(results[1]);
+            expect(results[1]).to.deep.equal(results[2]);
+            expect(results[0].configs.BTC).to.exist;
+            expect(results[0].configs.BTC.mainnet.decoder.host).to.equal('consistent.local');
+        });
+
+        it('all nodes return identical validator list', async function () {
+            this.timeout(30000);
+
+            cluster = createCluster(3);
+            await cluster.start();
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
+
+            let results = [];
+            for (let i = 0; i < 3; i++) {
+                let res = await callRpc(cluster.getPort(i), 'getvalidators');
+                results.push(res.result);
+            }
+
+            // All should have the same validator list (3 validators registered by cluster.start())
+            expect(results[0].length).to.equal(3);
+            expect(results[0].length).to.equal(results[1].length);
+            expect(results[1].length).to.equal(results[2].length);
+
+            // Sort by pubkey for deterministic comparison
+            let sorted = results.map(r => r.map(v => v.signing_pubkey).sort());
+            expect(sorted[0]).to.deep.equal(sorted[1]);
+            expect(sorted[1]).to.deep.equal(sorted[2]);
+        });
+}
+
+function dataConsistencySuiteTests2() {
+it('all nodes return identical price data from shared DB', async function () {
+            this.timeout(30000);
+
+            cluster = createCluster(3);
+            await cluster.start();
+
+            // Insert price snapshot directly in DB
+            let db = cluster.getDb();
+            await db.doQuery(
+                `INSERT INTO price_snapshots
+                    (round_number, coin_pair, price, reference_block, reference_chain,
+                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
+                 VALUES (1, 'BTC/USD', '99999.00000000', 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+                [Date.now()]
+            );
+
+            // All nodes should return the same price
+            for (let i = 0; i < 3; i++) {
+                let res = await callRpc(cluster.getPort(i), 'getprice', { coin_pair: 'BTC/USD' });
+                expect(res.result.price).to.equal('99999.00000000');
             }
         });
-    });
+}
 
-    // E2E-MULTI-003: Cross-chain attestation via PBFT across 3 nodes
-    describe('E2E-MULTI-003: 3-node attestation PBFT', function () {
+function dataConsistencySuite() {
+
+        dataConsistencySuiteTests1();
+
+        dataConsistencySuiteTests2();
+    }
+
+function attestationPbftSuite() {
 
         it('attestation reaches consensus across 3 validators', async function () {
             this.timeout(30000);
@@ -207,12 +193,11 @@ describe('E2E: Multi-Node Cluster', function () {
                 }
             }
         });
-    });
+    }
 
-    // E2E-MULTI-004: All instances serve identical data
-    describe('E2E-MULTI-004: Cross-instance data consistency', function () {
+function configConsistencySuite() {
 
-        it('all nodes return identical config data', async function () {
+        it('config written by one node is visible to all via shared DB', async function () {
             this.timeout(30000);
 
             cluster = createCluster(3);
@@ -220,106 +205,151 @@ describe('E2E: Multi-Node Cluster', function () {
             // cluster.start() already polls the peer sockets until the mesh is up, so
             // there is nothing left to wait for here.
 
-            // Write config directly via DB
+            // Write config directly via DB to avoid PBFT leader routing
             let db = cluster.getDb();
             await db.doQuery(
                 "INSERT INTO configs (coin, network, module, param_name, param_value) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE param_value = ?",
-                ['BTC', 'mainnet', 'decoder', 'host', 'consistent.local', 'consistent.local']
+                ['BTC', 'mainnet', 'decoder', 'host', 'multi-test.local', 'multi-test.local']
             );
 
-            // All nodes should return the same config (shared DB)
-            let results = [];
+            // All nodes should see the config via shared DB
             for (let i = 0; i < 3; i++) {
-                let res = await callRpc(cluster.getPort(i), 'getallconfigs');
-                results.push(res.result);
+                let readRes = await callRpc(cluster.getPort(i), 'getallconfigs');
+                expect(readRes.result.configs.BTC).to.exist;
+                expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('multi-test.local');
             }
-
-            expect(results[0]).to.deep.equal(results[1]);
-            expect(results[1]).to.deep.equal(results[2]);
-            expect(results[0].configs.BTC).to.exist;
-            expect(results[0].configs.BTC.mainnet.decoder.host).to.equal('consistent.local');
         });
+    }
 
-        it('all nodes return identical validator list', async function () {
+function oraclePbftSuiteTests1() {
+it('all nodes submit prices and finalize via PBFT', async function () {
             this.timeout(30000);
+
+            priceMocks.mockCoinGeckoSuccess({
+                bitcoin: { usd: 100000 }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 }
+            });
 
             cluster = createCluster(3);
             await cluster.start();
             // cluster.start() already polls the peer sockets until the mesh is up, so
             // there is nothing left to wait for here.
 
-            let results = [];
-            for (let i = 0; i < 3; i++) {
-                let res = await callRpc(cluster.getPort(i), 'getvalidators');
-                results.push(res.result);
-            }
+            // Trigger oracle round on all nodes simultaneously
+            await cluster.triggerAllOracleRounds();
 
-            // All should have the same validator list (3 validators registered by cluster.start())
-            expect(results[0].length).to.equal(3);
-            expect(results[0].length).to.equal(results[1].length);
-            expect(results[1].length).to.equal(results[2].length);
+            // Get the round number from the leader
+            let round = cluster.getHub(0).oracle.getCurrentRound();
 
-            // Sort by pubkey for deterministic comparison
-            let sorted = results.map(r => r.map(v => v.signing_pubkey).sort());
-            expect(sorted[0]).to.deep.equal(sorted[1]);
-            expect(sorted[1]).to.deep.equal(sorted[2]);
+            let snapshots = await finalizeOracleRound(round);
+            await assertOracleResponses(snapshots);
         });
+}
 
-        it('all nodes return identical price data from shared DB', async function () {
-            this.timeout(30000);
+async function finalizeOracleRound(round) {
+    // Submission writes are fire-and-forget: wait for all three rows.
+    await waitUntil(async () => {
+        let rows = await cluster.getDb().doQuery(
+            'SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+        return rows.length >= 3;
+    }, { timeoutMs: 15000, label: 'every node submission row to land' });
+    // Trigger finalization from the leader
+    // The leader is determined by: validatorSet[round % validatorSet.length]
+    // Since validator set is sorted by pubkey, try triggering from all nodes
+    // (only the leader will actually propose; non-leaders return early)
+    for (let i = 0; i < 3; i++) {
+        await cluster.triggerOracleFinalization(i, round).catch(() => {});
+    }
+    // Wait for the PBFT round to persist its snapshots. The assertions below are
+    // conditional on consensus having completed, so a round that never finalizes
+    // must not become a timeout failure here: poll for it, then move on.
+    let db = cluster.getDb();
+    await waitUntil(async () => {
+        let rows = await db.doQuery(
+            "SELECT 1 FROM price_snapshots WHERE round_number = ? AND status = 'finalized'", [round]);
+        return rows.length > 0;
+    }, { timeoutMs: 10000, label: 'the PBFT round to persist its finalized snapshots' })
+        .catch(() => {});
+    return db.doQuery(
+        "SELECT * FROM price_snapshots WHERE round_number = ? AND status = 'finalized'",
+        [round]
+    );
+}
 
-            cluster = createCluster(3);
-            await cluster.start();
+async function assertOracleResponses(snapshots) {
+    // If consensus succeeded, we should have finalized snapshots
+    if (snapshots.length > 0) {
+        expect(snapshots.length).to.equal(3);  // BTC, LTC, DOGE
+        let btcSnap = snapshots.find(s => s.coin_pair === 'BTC/USD');
+        expect(btcSnap).to.exist;
+        expect(btcSnap.price).to.equal('100000.00000000');
+        // With 3 validators, validator_count should reflect participation
+        expect(btcSnap.validator_count).to.be.at.least(1);
+    }
+    // All nodes should serve the same data (shared DB)
+    for (let i = 0; i < 3; i++) {
+        let port = cluster.getPort(i);
+        let btc = await callRpc(port, 'getprice', { coin_pair: 'BTC/USD' });
+        // Either we have price data (consensus succeeded) or no data
+        // All nodes should agree
+        if (snapshots.length > 0) {
+            expect(btc.result.price).to.equal('100000.00000000');
+        }
+    }
+}
 
-            // Insert price snapshot directly in DB
-            let db = cluster.getDb();
-            await db.doQuery(
-                `INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain,
-                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                 VALUES (1, 'BTC/USD', '99999.00000000', 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
-                [Date.now()]
-            );
+function oraclePbftSuite() {
 
-            // All nodes should return the same price
-            for (let i = 0; i < 3; i++) {
-                let res = await callRpc(cluster.getPort(i), 'getprice', { coin_pair: 'BTC/USD' });
-                expect(res.result.price).to.equal('99999.00000000');
-            }
-        });
+        oraclePbftSuiteTests1();
+    }
+
+function multiNodeClusterSuite() {
+
+
+
+    before(async function () {
+        this.timeout(15000);
+        try { await testDb.setup(); } catch (e) {
+            console.warn('MariaDB unavailable: skipping E2E multi-node tests');
+            return;
+        }
+        priceMocks.setup();
     });
+
+    after(async function () {
+        this.timeout(10000);
+        priceMocks.teardown();
+        await testDb.teardown();
+    });
+
+    beforeEach(async function () {
+        this.timeout(30000);
+        if (!testDb.isAvailable()) return this.skip();
+        await testDb.truncateAll();
+        priceMocks.reset();
+    });
+
+    afterEach(async function () {
+        this.timeout(30000);
+        if (cluster) {
+            await cluster.stop();
+            cluster = null;
+        }
+    });
+
+    // E2E-MULTI-001: 3-node cluster oracle round with PBFT consensus
+    describe('E2E-MULTI-001: 3-node oracle PBFT consensus', oraclePbftSuite);
+
+    // E2E-MULTI-002: Config update via shared DB across 3 nodes
+    describe('E2E-MULTI-002: 3-node config consistency via shared DB', configConsistencySuite);
+
+    // E2E-MULTI-003: Cross-chain attestation via PBFT across 3 nodes
+    describe('E2E-MULTI-003: 3-node attestation PBFT', attestationPbftSuite);
+
+    // E2E-MULTI-004: All instances serve identical data
+    describe('E2E-MULTI-004: Cross-instance data consistency', dataConsistencySuite);
 
     // E2E-MULTI: Consumer fallback pattern
-    describe('E2E-MULTI: Consumer fallback pattern', function () {
+    describe('E2E-MULTI: Consumer fallback pattern', consumerFallbackSuite);
+}
 
-        it('data accessible from any node when another is unavailable', async function () {
-            this.timeout(30000);
-
-            cluster = createCluster(3);
-            await cluster.start();
-
-            // Insert test data
-            let db = cluster.getDb();
-            await db.doQuery(
-                `INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain,
-                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                 VALUES (1, 'BTC/USD', '50000.00000000', 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
-                [Date.now()]
-            );
-
-            // Verify all nodes can serve the data
-            let port0 = cluster.getPort(0);
-            let port1 = cluster.getPort(1);
-            let port2 = cluster.getPort(2);
-
-            let res0 = await callRpc(port0, 'getprice', { coin_pair: 'BTC/USD' });
-            let res1 = await callRpc(port1, 'getprice', { coin_pair: 'BTC/USD' });
-            let res2 = await callRpc(port2, 'getprice', { coin_pair: 'BTC/USD' });
-
-            expect(res0.result.price).to.equal('50000.00000000');
-            expect(res1.result.price).to.equal('50000.00000000');
-            expect(res2.result.price).to.equal('50000.00000000');
-        });
-    });
-});
+describe('E2E: Multi-Node Cluster', multiNodeClusterSuite);
