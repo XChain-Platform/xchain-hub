@@ -26,7 +26,7 @@ const KEY = 'test-hub-key';
 // middlewares registered via app.use(); returns a driver that runs a fake
 // request through the auth middleware (identified behaviorally: the only
 // use() middleware that inspects req.body.method).
-async function bootApi(env) {
+function apiDoubles() {
     const useCalls = [];
     const mockApp = {
         use:  sinon.stub().callsFake((fn) => { useCalls.push(fn); }),
@@ -49,6 +49,11 @@ async function bootApi(env) {
         }
     });
 
+    return { useCalls, mockApp, mockServer, mockExpress, mockHub };
+}
+
+function loadApi(env, doubles) {
+    const { mockServer, mockExpress, mockHub } = doubles;
     const saved = {};
     for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_CONFIG_SECRETS_API_KEY',
                      'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
@@ -81,32 +86,28 @@ async function bootApi(env) {
             else process.env[k] = v;
         }
     }
-    // server.listen() is the last step of the async boot IIFE, so it is the
-    // signal that every app.use() middleware has been registered; poll for it
-    // rather than guessing how long the boot takes on this box.
-    await waitUntil(() => mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
+}
 
-    // The auth middleware is the app.use() function that 401s an unkeyed
-    // write when a key is configured (or, keyless boot, the one that calls
-    // next() for a write without touching res). Identify it by probing.
-    function drive(mw, methodOrMethods, apiKey, params) {
-        const res = {
-            statusCode: 200,
-            status(code) { this.statusCode = code; return this; },
-            json(body) { this.body = body; return this; }
-        };
-        // An array of methods drives a JSON-RPC batch (array body); a string
-        // drives a single call (object body). `params` rides on the single-call
-        // form, which is how the credential tier (getallconfigs with
-        // include_secrets) is exercised.
-        const body = Array.isArray(methodOrMethods)
-            ? methodOrMethods.map((m, i) => ({ method: m, id: i + 1 }))
-            : { method: methodOrMethods, id: 1, params: params };
-        let nexted = false;
-        mw({ body, headers: apiKey ? { 'x-api-key': apiKey } : {} },
-           res, () => { nexted = true; });
-        return { nexted, res };
-    }
+function drive(mw, methodOrMethods, apiKey, params) {
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+    // An array of methods drives a JSON-RPC batch (array body); a string
+    // drives a single call (object body). `params` rides on the single-call
+    // form, which is how the credential tier (getallconfigs with
+    // include_secrets) is exercised.
+    const body = Array.isArray(methodOrMethods)
+        ? methodOrMethods.map((m, i) => ({ method: m, id: i + 1 }))
+        : { method: methodOrMethods, id: 1, params: params };
+    let nexted = false;
+    mw({ body, headers: apiKey ? { 'x-api-key': apiKey } : {} },
+       res, () => { nexted = true; });
+    return { nexted, res };
+}
+
+function findAuthMiddleware(useCalls) {
     const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3);
     let authMw = null;
     for (const fn of candidates) {
@@ -117,6 +118,21 @@ async function bootApi(env) {
         } catch (_) { /* not the auth middleware */ }
     }
     expect(authMw, 'auth middleware not found among app.use() calls').to.not.equal(null);
+    return authMw;
+}
+
+async function bootApi(env) {
+    const doubles = apiDoubles();
+    loadApi(env, doubles);
+    // server.listen() is the last step of the async boot IIFE, so it is the
+    // signal that every app.use() middleware has been registered; poll for it
+    // rather than guessing how long the boot takes on this box.
+    await waitUntil(() => doubles.mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
+
+    // The auth middleware is the app.use() function that 401s an unkeyed
+    // write when a key is configured (or, keyless boot, the one that calls
+    // next() for a write without touching res). Identify it by probing.
+    const authMw = findAuthMiddleware(doubles.useCalls);
     return {
         request:      (method, apiKey, params) => drive(authMw, method, apiKey, params),
         requestBatch: (methods, apiKey)        => drive(authMw, methods, apiKey)
@@ -126,6 +142,15 @@ async function bootApi(env) {
 describe('hub API-key tiers (writes + sensitive reads vs public reads)', function () {
 
     afterEach(function () { sinon.restore(); });
+
+    registerBulkKeyTierTests();
+    registerSensitiveReadEscapeTests();
+    registerSecretsCredentialTests();
+    registerKeylessHubTests();
+    registerReorgKeyTierTests();
+});
+
+function registerBulkKeyTierTests() {
 
     describe('HUB_API_KEY set (enforcing)', function () {
         let api;
@@ -172,6 +197,9 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
             expect(api.requestBatch(['ping', 'getproposals'], undefined).nexted).to.equal(true);
         });
     });
+}
+
+function registerSensitiveReadEscapeTests() {
 
     describe('HUB_SENSITIVE_READ_AUTH=0 escape hatch', function () {
         it('getallconfigs passes without key; writes stay keyed', async function () {
@@ -210,12 +238,22 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
             expect(api.request('getallconfigs', KEY, { include_secrets: true }).nexted).to.equal(true);
         });
     });
+}
+
+function registerSecretsCredentialTests() {
 
     // Credential tier: getallconfigs redacts rpc/DB passwords unless the call
     // sets include_secrets, and THAT request is authorized on its own.
     describe('include_secrets credential tier', function () {
+        registerBulkSecretsKeyTests();
+        registerSplitSecretsKeyTests();
+        registerLoneSecretsKeyTests();
+        registerFullyKeylessSecretsTest();
+    });
+}
 
-        describe('no HUB_CONFIG_SECRETS_API_KEY (bulk key authorizes credentials)', function () {
+function registerBulkSecretsKeyTests() {
+    describe('no HUB_CONFIG_SECRETS_API_KEY (bulk key authorizes credentials)', function () {
             let api;
             before(async function () { api = await bootApi({ HUB_API_KEY: KEY }); });
 
@@ -232,8 +270,10 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
                 expect(api.request('getallconfigs', KEY).nexted).to.equal(true);
             });
         });
+}
 
-        describe('HUB_CONFIG_SECRETS_API_KEY set (credentials split off the bulk key)', function () {
+function registerSplitSecretsKeyTests() {
+    describe('HUB_CONFIG_SECRETS_API_KEY set (credentials split off the bulk key)', function () {
             const SKEY = 'test-config-secrets-key';
             let api;
             before(async function () {
@@ -258,8 +298,10 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
                 expect(api.request('pushchaintip', SKEY).res.statusCode).to.equal(401);
             });
         });
+}
 
-        describe('a secrets key on an otherwise keyless hub', function () {
+function registerLoneSecretsKeyTests() {
+    describe('a secrets key on an otherwise keyless hub', function () {
             const SKEY = 'lone-secrets-key';
             let api;
             before(async function () {
@@ -279,14 +321,18 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
                     expect(api.request(m, undefined).nexted).to.equal(true, m);
             });
         });
+}
 
-        describe('fully keyless hub (regtest)', function () {
+function registerFullyKeylessSecretsTest() {
+    describe('fully keyless hub (regtest)', function () {
             it('serves credentials as before: nothing on this hub is authenticated', async function () {
                 const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
                 expect(api.request('getallconfigs', undefined, { include_secrets: true }).nexted).to.equal(true);
             });
         });
-    });
+}
+
+function registerKeylessHubTests() {
 
     // Keyless is still a supported posture, but it has to be
     // DECLARED: a boot with neither a key nor the declaration refuses (proved in
@@ -299,6 +345,9 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
                 expect(api.request(m, undefined).nexted).to.equal(true, m);
         });
     });
+}
+
+function registerReorgKeyTierTests() {
 
     // interim credential scoping: with HUB_REORG_API_KEY set, the
     // retraction rails (push*reorg) answer ONLY to it - the bulk key no longer
@@ -342,4 +391,4 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
             expect(reorgOnly.request('pushchaintip', undefined).nexted).to.equal(true);
         });
     });
-});
+}
