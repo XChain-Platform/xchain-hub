@@ -107,8 +107,7 @@ async function driveFiatRound(db) {
     return rows[0];
 }
 
-describe('Integration: Fiat oracle round -> FIAT dispenser consumption (C3)', function () {
-
+function registerFiatHooks() {
     useSingleValidatorOracleEnv();
 
     before(async function () {
@@ -129,6 +128,10 @@ describe('Integration: Fiat oracle round -> FIAT dispenser consumption (C3)', fu
     });
 
     afterEach(function () { sinon.restore(); });
+}
+
+describe('Integration: Fiat oracle round -> FIAT dispenser consumption (C3)', function () {
+    registerFiatHooks();
 
     it('a real round finalizes a BTC/USD snapshot that a FIAT dispenser consumes', async function () {
         const db = testDb.getDb();
