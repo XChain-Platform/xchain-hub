@@ -35,8 +35,10 @@ function snapshotOf(validators, blockIndex) {
     };
 }
 
-describe('OracleConsensus: single-source rounds are counted, not only logged', function () {
+{
+
     let hub, pm, oc, oracleRound, warn;
+
     const ROUND = 2;
 
     function submissionsWithSources(n) {
@@ -46,53 +48,34 @@ describe('OracleConsensus: single-source rounds are counted, not only logged', f
         ]);
     }
 
-    beforeEach(function () {
-        hub = createMockHub();
-        pm  = hub._peerManager;
-        pm.validatorAddr = VALIDATORS_3[0].addr;
-        pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
-        hub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
-        hub.capabilitySnapshot = {
-            getSnapshot:       sinon.stub().resolves(snapshotOf(VALIDATORS_3.slice(0, 2), 100)),
-            getWeightSnapshot: sinon.stub().resolves(null),
-            getQuorum:         sinon.stub().returns(2)
-        };
-        oracleRound = { getSubmissions: sinon.stub().returns(new Map()), priceFetcher: null };
-        oc = new OracleConsensus(hub, oracleRound);
-        oc.setValidatorSet(VALIDATORS_3);
-        warn = sinon.stub(console, 'warn');
-    });
-
-    afterEach(function () { sinon.restore(); });
-
-    it('starts at zero with no last round recorded', function () {
+    function startsAtZeroWithNoLastTest2() {
         expect(oc._singleSourceRounds).to.equal(0);
         expect(oc._lastSingleSourceRound).to.equal(null);
-    });
+    }
 
-    it('counts a round that finalized on one uncorrelated source, and names it', async function () {
+    async function countsARoundThatFinalizedOnTest3() {
         oracleRound.getSubmissions.returns(submissionsWithSources(1));
         await oc.finalizeRound(ROUND, 100, 1700000000);
         expect(oc._singleSourceRounds).to.equal(1);
         expect(oc._lastSingleSourceRound).to.equal(ROUND);
-    });
+    }
 
-    it('leaves the round outcome untouched: it still proposes and is still signed', async function () {
+    async function leavesTheRoundOutcomeUntouchedItTest4() {
         oracleRound.getSubmissions.returns(submissionsWithSources(1));
         await oc.finalizeRound(ROUND, 100, 1700000000);
         expect(pm.broadcast.calledOnce).to.be.true;
         expect(pm.broadcast.firstCall.args[0]).to.equal('ORACLE_PROPOSE');
-    });
+    }
 
-    it('stays flat for a healthy multi-source round', async function () {
+    async function staysFlatForAHealthyMultiTest5() {
         oracleRound.getSubmissions.returns(submissionsWithSources(2));
         await oc.finalizeRound(ROUND, 100, 1700000000);
         expect(oc._singleSourceRounds).to.equal(0);
         expect(oc._lastSingleSourceRound).to.equal(null);
         expect(warn.called).to.be.false;
-    });
+    }
 
-    it('does not count a round it cannot assess (no per-pair source counts)', async function () {
+    async function doesNotCountARoundItTest6() {
         // _minRoundSources returns Infinity when no submission carries a count. An
         // unassessable round is not a degraded one, and counting it would make the
         // series fire on every round from any hub running an older submitter.
@@ -102,16 +85,45 @@ describe('OracleConsensus: single-source rounds are counted, not only logged', f
         ]));
         await oc.finalizeRound(ROUND, 100, 1700000000);
         expect(oc._singleSourceRounds).to.equal(0);
-    });
+    }
 
-    it('is monotonic across rounds rather than a per-round flag', async function () {
+    async function isMonotonicAcrossRoundsRatherThanTest7() {
         oracleRound.getSubmissions.returns(submissionsWithSources(1));
         await oc.finalizeRound(2, 100, 1700000000);
         await oc.finalizeRound(4, 100, 1700000000);
         expect(oc._singleSourceRounds).to.equal(2);
         expect(oc._lastSingleSourceRound).to.equal(4);
-    });
-});
+    }
+
+    function oracleconsensusSingleSourceRoundsAreCountedSuite1() {
+        beforeEach(function () {
+            hub = createMockHub();
+            pm  = hub._peerManager;
+            pm.validatorAddr = VALIDATORS_3[0].addr;
+            pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
+            hub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
+            hub.capabilitySnapshot = {
+                getSnapshot:       sinon.stub().resolves(snapshotOf(VALIDATORS_3.slice(0, 2), 100)),
+                getWeightSnapshot: sinon.stub().resolves(null),
+                getQuorum:         sinon.stub().returns(2)
+            };
+            oracleRound = { getSubmissions: sinon.stub().returns(new Map()), priceFetcher: null };
+            oc = new OracleConsensus(hub, oracleRound);
+            oc.setValidatorSet(VALIDATORS_3);
+            warn = sinon.stub(console, 'warn');
+        });
+        afterEach(function () { sinon.restore(); });
+        it('starts at zero with no last round recorded', startsAtZeroWithNoLastTest2);
+        it('counts a round that finalized on one uncorrelated source, and names it', countsARoundThatFinalizedOnTest3);
+        it('leaves the round outcome untouched: it still proposes and is still signed', leavesTheRoundOutcomeUntouchedItTest4);
+        it('stays flat for a healthy multi-source round', staysFlatForAHealthyMultiTest5);
+        it('does not count a round it cannot assess (no per-pair source counts)', doesNotCountARoundItTest6);
+        it('is monotonic across rounds rather than a per-round flag', isMonotonicAcrossRoundsRatherThanTest7);
+    }
+
+    describe('OracleConsensus: single-source rounds are counted, not only logged', oracleconsensusSingleSourceRoundsAreCountedSuite1);
+
+}
 
 describe('OracleRound.getSubmissionsInfo exports the diversity counter', function () {
     function roundWith(consensus) {
