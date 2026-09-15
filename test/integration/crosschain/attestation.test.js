@@ -41,8 +41,14 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
     });
     afterEach(function () { sinon.restore(); });
 
-    // SC-4.1: Single-node attestation (quorum=0)
-    describe('SC-4.1: Single-node attestation', function () {
+    describe('SC-4.1: Single-node attestation', registerSingleNodeAttestationTests);
+    describe('SC-4.2: Attestation to SWAP progression', registerSwapProgressionTests);
+    describe('SC-4.3: Multi-validator attestation', registerMultiValidatorAttestationTests);
+    describe('SC-4.4: Concurrent attestations', registerConcurrentAttestationTests);
+});
+
+// SC-4.1: Single-node attestation (quorum=0)
+function registerSingleNodeAttestationTests() {
         it('stores attestation directly without consensus', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -93,10 +99,15 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
             await engine.stop();
         });
-    });
+}
 
-    // SC-4.2: Attestation triggers SWAP progression
-    describe('SC-4.2: Attestation to SWAP progression', function () {
+// SC-4.2: Attestation triggers SWAP progression
+function registerSwapProgressionTests() {
+    registerAutoProgressionTest();
+    registerNoDuplicateSwapTest();
+}
+
+function registerAutoProgressionTest() {
         it('auto-progresses swap from initiated to attested', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -133,7 +144,9 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             swapTracker.stop(engine);
             await engine.stop();
         });
+}
 
+function registerNoDuplicateSwapTest() {
         it('does not create duplicate swap records', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -160,28 +173,13 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             swapTracker.stop(engine);
             await engine.stop();
         });
-    });
+}
 
-    // SC-4.3: Multi-validator attestation with PBFT
-    describe('SC-4.3: Multi-validator attestation', function () {
+// SC-4.3: Multi-validator attestation with PBFT
+function registerMultiValidatorAttestationTests() {
         it('finalizes attestation after PREPARE and COMMIT quorum', async function () {
             let db = testDb.getDb();
-            // This node must BE the leader the engine elects, or requestAttestation
-            // refuses. The rotation is set[seq % N] and the first request runs at
-            // seq 1, so the leader is index 1, not index 0.
-            let leaderIdx = 1 % VALIDATORS_4.length;
-            let peerIdxs  = VALIDATORS_4.map((_, i) => i).filter(i => i !== leaderIdx).slice(0, 2);
-            // CrossChainEngine._resolveQuorum fails CLOSED for a federated hub with no
-            // deterministic cross_chain snapshot, so a validator set alone is not
-            // enough fixture: it needs a snapshot at a real block height too.
-            let hub = createTestHub(db, VALIDATORS_4[leaderIdx].addr, {
-                btcLatestBlock:      800000,
-                capabilitySnapshot:  createCapabilitySnapshotStub(VALIDATORS_4)
-            });
-
-            let engine = new CrossChainEngine(hub);
-            engine.setValidatorSet(VALIDATORS_4);
-            await engine.start();
+            let { hub, engine, peerIdxs } = await createMultiValidatorEngine(db);
 
             // Track finalization
             let finalizedAtt = null;
@@ -198,22 +196,12 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             expect(pending).to.exist;
 
             // Inject PREPARE from the two non-leader validators (quorum 3 of N=4)
-            for (let i of peerIdxs) {
-                hub._peerManager.emit('message', buildEnvelope('XCHAIN_ATTEST_PREPARE', {
-                    attestationId: attestationId,
-                    digest: pending.digest
-                }, VALIDATORS_4[i].addr));
-            }
+            emitAttestationVotes(hub, peerIdxs, 'XCHAIN_ATTEST_PREPARE', attestationId, pending.digest);
 
             await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
 
             // Inject COMMIT from the same two
-            for (let i of peerIdxs) {
-                hub._peerManager.emit('message', buildEnvelope('XCHAIN_ATTEST_COMMIT', {
-                    attestationId: attestationId,
-                    digest: pending.digest
-                }, VALIDATORS_4[i].addr));
-            }
+            emitAttestationVotes(hub, peerIdxs, 'XCHAIN_ATTEST_COMMIT', attestationId, pending.digest);
 
             let result = await attestPromise;
 
@@ -228,10 +216,37 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
             await engine.stop();
         });
-    });
+}
 
-    // SC-4.4: Concurrent attestations for different chain pairs
-    describe('SC-4.4: Concurrent attestations', function () {
+async function createMultiValidatorEngine(db) {
+    // This node must BE the leader the engine elects, or requestAttestation
+    // refuses. The rotation is set[seq % N] and the first request runs at
+    // seq 1, so the leader is index 1, not index 0.
+    let leaderIdx = 1 % VALIDATORS_4.length;
+    let peerIdxs  = VALIDATORS_4.map((_, i) => i).filter(i => i !== leaderIdx).slice(0, 2);
+    // CrossChainEngine._resolveQuorum fails CLOSED for a federated hub with no
+    // deterministic cross_chain snapshot, so a validator set alone is not
+    // enough fixture: it needs a snapshot at a real block height too.
+    let hub = createTestHub(db, VALIDATORS_4[leaderIdx].addr, {
+        btcLatestBlock:      800000,
+        capabilitySnapshot:  createCapabilitySnapshotStub(VALIDATORS_4)
+    });
+    let engine = new CrossChainEngine(hub);
+    engine.setValidatorSet(VALIDATORS_4);
+    await engine.start();
+    return { hub, engine, peerIdxs };
+}
+
+function emitAttestationVotes(hub, peerIdxs, type, attestationId, digest) {
+    for (let i of peerIdxs) {
+        hub._peerManager.emit('message', buildEnvelope(type, {
+            attestationId: attestationId, digest: digest
+        }, VALIDATORS_4[i].addr));
+    }
+}
+
+// SC-4.4: Concurrent attestations for different chain pairs
+function registerConcurrentAttestationTests() {
         it('handles two independent attestations simultaneously', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -255,5 +270,4 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
             await engine.stop();
         });
-    });
-});
+}
