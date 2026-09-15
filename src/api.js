@@ -38,12 +38,13 @@ installCrashHandlers({ service: 'xchain-hub' });
 
 const { resolveSecretEnv } = require('./secret_env');
 const { requireDbSecret, refuseUnsafeAuthPosture, refuseInvalidNetwork } = require('./api/boot_guard');
+const hubConfig = require('./config');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
 const { getLogger } = require('./observability');
 const logger = getLogger();
 for(const key of REQUIRED_ENV){
-    if(!process.env[key]){
+    if(!hubConfig.env()[key]){
         logger.error('Missing required environment variable: ' + key);
         process.exit(1);
     }
@@ -82,7 +83,6 @@ const { mountTelemetryRoutes } = require('./api/rest/telemetry');
 const { mountRegistryRoutes } = require('./api/rest/registry');
 const { startServer } = require('./api/server');
 
-const hubConfig = require('./config');
 const HUB_PORT = hubConfig.HUB_PORT;
 const HUB_HOST = hubConfig.HUB_HOST || '0.0.0.0';
 const HUB_DB_KEEPALIVE_INTERVAL = parseInt(hubConfig.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
