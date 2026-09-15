@@ -150,7 +150,7 @@ module.exports = {
 
 
     // Columns a live index actually covers, lowercased, in key order. [] when the
-    // index is absent. Read back after every DDL step in _widenUniqueKey, because a
+    // index is absent. Read back after every DDL step in widenUniqueKey, because a
     // statement that did not throw is not proof that the key is there.
     async liveIndexColumns(db, table, indexName){
         let rows = await db.query(
@@ -194,7 +194,7 @@ module.exports = {
     // sequence ever ends with no such key at all, the error thrown here takes hub boot
     // down with it, because serving an unconstrained table is the worse outcome.
     // Widening only (add a column), so no row dedup is required.
-    async _widenUniqueKey(table, indexName, requiredColumn, indexColumns){
+    async widenUniqueKey(table, indexName, requiredColumn, indexColumns){
         const tempName = indexName + '_widening';
         const byHand   = 'ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns;
         let db = await this.getConnection();

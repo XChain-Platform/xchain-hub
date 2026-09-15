@@ -12,7 +12,7 @@
 //
 // Extended coverage for src/db.js: exercises the schema/migration/drift
 // machinery and config helpers not covered by db.test.js (verifyDatabase,
-// createDatabase, verifyTables, runMigrations, _createTableFromFile,
+// createDatabase, verifyTables, runMigrations, createTableFromFile,
 // stripSqlLineComments, parseExpectedColumns, alterTableForDrift, the
 // getConnection retry/backoff tail, chain-tip helpers, the getAllConfigs
 // cursor branch, and getConfigWatermark). DB is fully mocked via proxyquire.
@@ -70,14 +70,14 @@ function registerDatabaseHooks() {
 
 function registerCreateTableFromFileTests() {
     // -----------------------------------------------------------------
-    // _createTableFromFile()
+    // createTableFromFile()
     // -----------------------------------------------------------------
 
-    describe('_createTableFromFile()', function () {
+    describe('createTableFromFile()', function () {
         it('splits the SQL file on ; and runs each non-empty statement', async function () {
             const sql = 'CREATE TABLE configs (id INT);\n\n  ;\nINSERT INTO configs VALUES (1);';
             const { db, mockConn } = makeDb({ readFileSync: sinon.stub().returns(sql) });
-            await db._createTableFromFile('configs.sql');
+            await db.createTableFromFile('configs.sql');
             const ran = mockConn.query.getCalls().map(c => c.args[0]);
             expect(ran).to.include('CREATE TABLE configs (id INT)');
             expect(ran).to.include('INSERT INTO configs VALUES (1)');

@@ -74,7 +74,7 @@ module.exports = {
     // per column. A table with NO columns is one this node has not created yet; the CREATE
     // TABLE from src/sql covers it, so this returns rather than failing the boot.
     //
-    // A failure is logged and swallowed, as _migrateColumnType's is and for the same
+    // A failure is logged and swallowed, as migrateColumnType's is and for the same
     // reason: runMigrations is one sequential pass, so a throw here takes every migration
     // after it and the hub boot down with it. The consequence of the column being absent is
     // bounded and stated: this hub cannot stamp admission heights, so above the activation
@@ -128,7 +128,7 @@ module.exports = {
             await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
             logger.info('Migration: widened ' + table + '.' + column + ' ' + liveCharset + ' -> ' + targetCharset);
         } catch(e){
-            // Swallowed loudly, as _migrateColumnType is and for the same reason: runMigrations
+            // Swallowed loudly, as migrateColumnType is and for the same reason: runMigrations
             // is one sequential pass at startup, and a throw takes the remaining migrations and
             // the hub boot with it. A narrow column stores every BMP body exactly as it does
             // now, so booting is the better trade - but the line has to name what stays broken
@@ -152,7 +152,7 @@ module.exports = {
     // literal, so the conversion preserves the instant only under a UTC session. It is one:
     // the pool pins timezone 'Z' and the driver issues SET time_zone='+00:00' per connection
     // (connectionPoolParams), so no host's local zone can shift a stored value here.
-    async _migrateColumnType(table, column, targetType, columnDef){
+    async migrateColumnType(table, column, targetType, columnDef){
         let db = await this.getConnection();
         try {
             let rows = await db.query(

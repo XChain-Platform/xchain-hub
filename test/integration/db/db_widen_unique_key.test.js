@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration: _widenUniqueKey against a real MariaDB.
+// Integration: widenUniqueKey against a real MariaDB.
 //
 // The unit tier models the DDL; this tier runs it. That distinction is the whole
 // point of the defect being fixed: the failing statement was a real
@@ -59,7 +59,7 @@ async function insertRow(db, source) {
 
 let db;
 
-describe('Integration: _widenUniqueKey on a real MariaDB', function () {
+describe('Integration: widenUniqueKey on a real MariaDB', function () {
     registerWidenHooks();
     registerWidenTests();
 });
@@ -106,7 +106,7 @@ function registerWidenTests() {
 // the server really does answer errno 1072. The old sequence left this table with
 // zero indexes and accepted the duplicate below.
 async function testMissingColumn() {
-    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
     expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
         ['snapshot_block', 'capability', 'signing_pubkey']);
@@ -121,7 +121,7 @@ async function testMissingColumn() {
 
 async function testWidenedKey() {
     await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
     expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
         ['snapshot_block', 'capability', 'signing_pubkey', 'source']);
@@ -137,8 +137,8 @@ async function testWidenedKey() {
 
 async function testSecondRun() {
     await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
-    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
     expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
     expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
@@ -152,7 +152,7 @@ async function testInterruptedWiden() {
     await db.doQuery('ALTER TABLE `' + TABLE + '` ADD UNIQUE KEY `' + KEY + '_widening` ' + WIDE);
     await db.doQuery('ALTER TABLE `' + TABLE + '` DROP INDEX `' + KEY + '`');
 
-    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
     expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
     expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);

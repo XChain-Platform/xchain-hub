@@ -12,7 +12,7 @@
 //
 // Extended coverage for src/db.js: exercises the schema/migration/drift
 // machinery and config helpers not covered by db.test.js (verifyDatabase,
-// createDatabase, verifyTables, runMigrations, _createTableFromFile,
+// createDatabase, verifyTables, runMigrations, createTableFromFile,
 // stripSqlLineComments, parseExpectedColumns, alterTableForDrift, the
 // getConnection retry/backoff tail, chain-tip helpers, the getAllConfigs
 // cursor branch, and getConfigWatermark). DB is fully mocked via proxyquire.

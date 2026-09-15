@@ -12,7 +12,7 @@
 //
 // Extended coverage for src/db.js: exercises the schema/migration/drift
 // machinery and config helpers not covered by db.test.js (verifyDatabase,
-// createDatabase, verifyTables, runMigrations, _createTableFromFile,
+// createDatabase, verifyTables, runMigrations, createTableFromFile,
 // stripSqlLineComments, parseExpectedColumns, alterTableForDrift, the
 // getConnection retry/backoff tail, chain-tip helpers, the getAllConfigs
 // cursor branch, and getConfigWatermark). DB is fully mocked via proxyquire.
@@ -186,7 +186,7 @@ function registerVerifyTablesTests() {
         it('creates a table that does not yet exist', async function () {
             const { db, mockConn } = makeDb({ readdirSync: sinon.stub().returns(['configs.sql']) });
             mockConn.query.resolves([]); // information_schema.tables -> not found
-            const create = sinon.stub(db, '_createTableFromFile').resolves();
+            const create = sinon.stub(db, 'createTableFromFile').resolves();
             const alter  = sinon.stub(db, 'alterTableForDrift').resolves();
             expect(await db.verifyTables()).to.be.true;
             expect(create.calledWith('configs.sql')).to.be.true;
@@ -197,7 +197,7 @@ function registerVerifyTablesTests() {
         it('reconciles drift on an existing table', async function () {
             const { db, mockConn } = makeDb({ readdirSync: sinon.stub().returns(['configs.sql']) });
             mockConn.query.resolves([{ table_name: 'configs' }]); // found
-            const create = sinon.stub(db, '_createTableFromFile').resolves();
+            const create = sinon.stub(db, 'createTableFromFile').resolves();
             const alter  = sinon.stub(db, 'alterTableForDrift').resolves();
             await db.verifyTables();
             expect(alter.calledWith('configs.sql')).to.be.true;
@@ -206,7 +206,7 @@ function registerVerifyTablesTests() {
 
         it('ignores non-.sql files in the schema directory', async function () {
             const { db, mockConn } = makeDb({ readdirSync: sinon.stub().returns(['README.md', 'notes.txt']) });
-            const create = sinon.stub(db, '_createTableFromFile').resolves();
+            const create = sinon.stub(db, 'createTableFromFile').resolves();
             await db.verifyTables();
             expect(mockConn.query.called).to.be.false;
             expect(create.called).to.be.false;
@@ -277,7 +277,7 @@ function registerRunMigrationSequenceTests() {
             const mig = sinon.stub(db, 'migrateUniqueKey').resolves();
             const idx = sinon.stub(db, 'migrateIndex').resolves();
             const en  = sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, '_migrateColumnType').resolves();
+            sinon.stub(db, 'migrateColumnType').resolves();
             await db.runMigrations();
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
             expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
@@ -298,9 +298,9 @@ function registerRunMigrationSequenceTests() {
             sinon.stub(db, 'migrateUniqueKey').resolves();
             sinon.stub(db, 'migrateIndex').resolves();
             sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, '_migrateColumnType').resolves();
+            sinon.stub(db, 'migrateColumnType').resolves();
             const back = sinon.stub(db, 'backfillArchiveRoundQualifier').resolves();
-            const wide = sinon.stub(db, '_widenUniqueKey').resolves();
+            const wide = sinon.stub(db, 'widenUniqueKey').resolves();
             await db.runMigrations();
             expect(back.calledOnce).to.be.true;
             const widen = wide.getCalls().find(c => c.args[0] === 'validator_rewards');
@@ -334,7 +334,7 @@ function registerMigrationBackfillTests() {
             sinon.stub(db, 'migrateUniqueKey').resolves();
             sinon.stub(db, 'migrateIndex').resolves();
             sinon.stub(db, 'migrateEnumColumn').resolves();
-            const col = sinon.stub(db, '_migrateColumnType').resolves();
+            const col = sinon.stub(db, 'migrateColumnType').resolves();
             await db.runMigrations();
             for (const column of ['voting_start', 'voting_end']) {
                 const call = col.getCalls().find(c => c.args[1] === column);

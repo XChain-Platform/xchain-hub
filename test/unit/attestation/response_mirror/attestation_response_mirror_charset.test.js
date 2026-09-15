@@ -113,7 +113,7 @@ describe('runMigrations (what a deployed hub gets)', function () {
             sinon.stub(db, 'migrateUniqueKey').resolves();
             sinon.stub(db, 'migrateIndex').resolves();
             sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, '_migrateColumnType').resolves();
+            sinon.stub(db, 'migrateColumnType').resolves();
             const widen = sinon.stub(db, 'migrateColumnCharset').resolves();
 
             await db.runMigrations();

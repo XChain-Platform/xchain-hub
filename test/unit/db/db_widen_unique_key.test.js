@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// _widenUniqueKey: a widen that fails must never leave the table unconstrained.
+// widenUniqueKey: a widen that fails must never leave the table unconstrained.
 //
 // The old sequence dropped the existing UNIQUE key and then added the wider one.
 // That was executed for real: the DROP ran, the ADD failed with errno 1072
@@ -39,7 +39,7 @@ function dbError(code, errno, message) {
 }
 
 // An in-memory table with columns and unique indexes, driven by the same SQL
-// _widenUniqueKey issues. `failOn(sql, callIndex)` returns an Error to make one
+// widenUniqueKey issues. `failOn(sql, callIndex)` returns an Error to make one
 // specific statement fail, which is how each failure point is pinned below.
 function makeCatalogue(spec) {
     const columns = new Set((spec.columns || []).map(c => c.toLowerCase()));
@@ -119,7 +119,7 @@ function registerWidenOrderingTests() {
             columns: [...NARROW, 'source', 'id'],
             indexes: { uq_cap_snap: NARROW }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect([...catalogue.indexes.keys()]).to.deep.equal(['uq_cap_snap']);
         expect(catalogue.indexes.get('uq_cap_snap')).to.include('source');
     });
@@ -129,7 +129,7 @@ function registerWidenOrderingTests() {
             columns: [...NARROW, 'source', 'id'],
             indexes: { uq_cap_snap: NARROW }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         const ddl      = catalogue.sqlLog.filter(s => /^ALTER TABLE/i.test(s));
         const firstAdd = ddl.findIndex(s => /ADD UNIQUE KEY/i.test(s));
         const firstDrop = ddl.findIndex(s => /DROP INDEX/i.test(s));
@@ -146,7 +146,7 @@ function registerWidenOrderingTests() {
             columns: [...NARROW, 'id'],                 // no `source` column
             indexes: { uq_cap_snap: NARROW }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect(catalogue.indexes.has('uq_cap_snap'), 'the original key was dropped').to.be.true;
         expect(catalogue.indexes.get('uq_cap_snap')).to.deep.equal(NARROW);
         expect(enforcedOver(catalogue, NARROW)).to.be.true;
@@ -156,7 +156,7 @@ function registerWidenOrderingTests() {
 function registerWidenFailureTests() {
     it('names the table, the index and the repair statement when it skips the widen', async function () {
         const { db } = makeDb({ columns: [...NARROW, 'id'], indexes: { uq_cap_snap: NARROW } });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         const line = console.error.getCalls().map(c => String(c.args[0])).join('\n');
         expect(line).to.match(/capability_snapshots/);
         expect(line).to.match(/uq_cap_snap/);
@@ -175,7 +175,7 @@ function registerWidenFailureTests() {
                 ? dbError('ER_KEY_COLUMN_DOES_NOT_EXITS', 1072, "Key column 'round_qualifier' doesn't exist in table")
                 : null)
         });
-        await db._widenUniqueKey('validator_rewards', 'uq_reward', 'round_qualifier',
+        await db.widenUniqueKey('validator_rewards', 'uq_reward', 'round_qualifier',
             '(validator_pubkey, round_number, reward_type, round_qualifier)');
         expect(catalogue.indexes.has('uq_reward')).to.be.true;
         expect(catalogue.indexes.get('uq_reward')).to.deep.equal(
@@ -191,7 +191,7 @@ function registerWidenFailureTests() {
             failOn: (sql) => (/DROP INDEX uq_cap_snap$/i.test(sql)
                 ? dbError('ER_LOCK_WAIT_TIMEOUT', 1205, 'Lock wait timeout exceeded') : null)
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect(enforcedOver(catalogue, [...NARROW, 'source'])).to.be.true;
         expect(catalogue.indexes.has('uq_cap_snap')).to.be.true;
     });
@@ -211,7 +211,7 @@ function registerInterruptedWidenTests() {
                 return (++seenAdds >= 1) ? dbError('ER_LOCK_WAIT_TIMEOUT', 1205, 'Lock wait timeout exceeded') : null;
             }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect(catalogue.indexes.has('uq_cap_snap_widening'), 'nothing is enforcing uniqueness').to.be.true;
         expect(enforcedOver(catalogue, [...NARROW, 'source'])).to.be.true;
     });
@@ -224,7 +224,7 @@ function registerInterruptedWidenTests() {
             columns: [...NARROW, 'source', 'id'],
             indexes: { uq_cap_snap_widening: [...NARROW, 'source'] }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect([...catalogue.indexes.keys()]).to.deep.equal(['uq_cap_snap']);
         expect(catalogue.indexes.get('uq_cap_snap')).to.include('source');
     });
@@ -251,7 +251,7 @@ function registerUnconstrainedTableTest() {
 
         let thrown = null;
         try {
-            await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+            await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         } catch (e) { thrown = e; }
 
         expect(thrown, 'the hub started with an unconstrained table').to.be.an('error');
@@ -297,12 +297,12 @@ function registerUniqueKeyGuardTests() {
             columns: [...NARROW, 'source', 'id'],
             indexes: { uq_cap_snap: [...NARROW, 'source'] }
         });
-        await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
+        await db.widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect(catalogue.sqlLog.some(s => /^ALTER TABLE/i.test(s)), 'DDL ran on an already-wide key').to.be.false;
     });
 }
 
-describe('Database._widenUniqueKey: a failed widen never unconstrains the table', function () {
+describe('Database.widenUniqueKey: a failed widen never unconstrains the table', function () {
     beforeEach(function () {
         sinon.stub(console, 'log');
         sinon.stub(console, 'error');

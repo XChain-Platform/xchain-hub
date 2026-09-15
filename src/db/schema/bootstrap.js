@@ -132,7 +132,7 @@ module.exports = {
                 try {
                     let results = await db.query("SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ?", [this.dbName, table]);
                     if(results.length === 0){
-                        await this._createTableFromFile(file);
+                        await this.createTableFromFile(file);
                         created++;
                     } else
                         // Existing table: reconcile column drift against the SQL
@@ -152,7 +152,7 @@ module.exports = {
     },
 
 
-    async _createTableFromFile(file){
+    async createTableFromFile(file){
         // src/sql/, resolved by src/db/index.js (see verifyTables).
         const { fs, sqlDir } = this.constructor.io;
         let dir     = sqlDir;

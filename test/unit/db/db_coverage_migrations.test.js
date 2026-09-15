@@ -12,7 +12,7 @@
 //
 // Extended coverage for src/db.js: exercises the schema/migration/drift
 // machinery and config helpers not covered by db.test.js (verifyDatabase,
-// createDatabase, verifyTables, runMigrations, _createTableFromFile,
+// createDatabase, verifyTables, runMigrations, createTableFromFile,
 // stripSqlLineComments, parseExpectedColumns, alterTableForDrift, the
 // getConnection retry/backoff tail, chain-tip helpers, the getAllConfigs
 // cursor branch, and getConfigWatermark). DB is fully mocked via proxyquire.
@@ -70,15 +70,15 @@ function registerDatabaseHooks() {
 
 function registerMigrateColumnTypeTests() {
     // -----------------------------------------------------------------
-    // _migrateColumnType()   (#4315)
+    // migrateColumnType()   (#4315)
     // -----------------------------------------------------------------
 
-    describe('_migrateColumnType()', function () {
+    describe('migrateColumnType()', function () {
 
         it('skips when the live DATA_TYPE already matches the target', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ DATA_TYPE: 'datetime' }]);
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
             // only the information_schema SELECT runs; no ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
@@ -89,7 +89,7 @@ function registerMigrateColumnTypeTests() {
             mockConn.query
                 .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
                 .onCall(1).resolves([]); // ALTER MODIFY
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
             const alter = mockConn.query.getCall(1).args[0];
             expect(alter).to.include('ALTER TABLE `governance_proposals` MODIFY `voting_end`');
             expect(alter).to.include('DATETIME NOT NULL');
@@ -100,7 +100,7 @@ function registerMigrateColumnTypeTests() {
         it('is a no-op when the table/column is absent (fresh install)', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([]); // information_schema returns no row
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
             expect(mockConn.query.callCount).to.equal(1); // no ALTER
             expect(mockConn.release.called).to.be.true;
         });
@@ -113,7 +113,7 @@ function registerMigrateColumnTypeTests() {
             mockConn.query
                 .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
                 .onCall(1).rejects(new Error('alter failed'));
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
             expect(console.error.calledWithMatch(/MIGRATION FAILED: governance_proposals\.voting_end/)).to.be.true;
             expect(console.error.calledWithMatch(/2038-01-19/)).to.be.true;
             expect(console.error.calledWithMatch(/ALTER TABLE `governance_proposals` MODIFY `voting_end` DATETIME NOT NULL/)).to.be.true;

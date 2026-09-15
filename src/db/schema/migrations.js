@@ -54,7 +54,7 @@ module.exports = {
             ['validator_pubkey', 'round_number', 'reward_type', 'round_qualifier']
         );
         await this.backfillArchiveRoundQualifier();
-        await this._widenUniqueKey(
+        await this.widenUniqueKey(
             'validator_rewards',
             'uq_reward',
             'round_qualifier',
@@ -111,7 +111,7 @@ module.exports = {
         // existing key: this reconciles the column set in place. Monotonically safe (a
         // strict superset of an already-enforced UNIQUE key can only relax it, so no
         // pre-dedup is needed).
-        await this._widenUniqueKey(
+        await this.widenUniqueKey(
             'capability_snapshots',
             'uq_cap_snap',
             'source',
@@ -122,7 +122,7 @@ module.exports = {
         // (network, request_id) key absorbed the second as a duplicate on some hubs and
         // kept it on others, so no window carrying such a request could reach batch
         // quorum. The stamp joins the key (see the table's SQL); same widen semantics.
-        await this._widenUniqueKey(
+        await this.widenUniqueKey(
             'attestation_responses',
             'uq_attest_response',
             'effective_time',
@@ -138,8 +138,8 @@ module.exports = {
         // FUTURE instant (voting_end is NOW() + GOV_VOTING_PERIOD), so they run out of range
         // one voting period BEFORE every 'now'-recording audit column does. alterTableForDrift
         // never MODIFYs a type, so the DDL edit alone would fix only fresh installs.
-        await this._migrateColumnType('governance_proposals', 'voting_start', 'datetime', 'DATETIME NOT NULL');
-        await this._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+        await this.migrateColumnType('governance_proposals', 'voting_start', 'datetime', 'DATETIME NOT NULL');
+        await this.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
         // attestation_responses.response_payload / meta hold PROVIDER bytes, and the on-chain
         // twins they stand in for (attests.response_payload, attests.meta on the indexer) are
         // utf8mb4. On the table's utf8mb3 tail a 4-byte character fails the mirror INSERT with
