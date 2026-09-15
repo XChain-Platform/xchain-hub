@@ -59,7 +59,7 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-// FAIL CLOSED, LOUDLY. _resolveBtcLatestBlock returns null for an unreachable
+// FAIL CLOSED, LOUDLY. resolveBtcLatestBlock returns null for an unreachable
 // indexer, a stale pushed tip and an over-lagged direct tip alike, and every
 // one of those means this hub cannot know the qualifying set at any height.
 // Deriving from a guessed height would mirror a set nobody can verify.
@@ -278,7 +278,7 @@ module.exports = {
 
         this._priceCapDeriveRunning = true;
         try {
-            let tip = await this.hub._resolveBtcLatestBlock();
+            let tip = await this.hub.resolveBtcLatestBlock();
             let t   = Number(tip);
             if (!Number.isFinite(t) || t <= 0) {
                 warnNoBtcTip();

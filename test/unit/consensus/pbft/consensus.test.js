@@ -35,7 +35,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 function installSuiteHooks1() {
@@ -383,7 +383,7 @@ it('federated follower declines to PREPARE when btcBlockHeight is omitted (fail 
             // must NOT resolve the follower's own BTC tip (which would lock a
             // divergent validator snapshot vs the leader). It must be declined.
             consensus.minValidators = 2;
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus.handlePrePrepare({
@@ -394,7 +394,7 @@ it('federated follower declines to PREPARE when btcBlockHeight is omitted (fail 
             expect(consensus.pendingProposals.has(5)).to.be.false;
             expect(pm.broadcast.called).to.be.false;
             // Critically, the own-tip resolver was never consulted for this message.
-            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+            expect(hub.resolveBtcLatestBlock.called).to.be.false;
         });
 });
 });

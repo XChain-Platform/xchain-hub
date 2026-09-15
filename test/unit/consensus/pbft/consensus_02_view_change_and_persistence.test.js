@@ -28,7 +28,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 
@@ -288,7 +288,7 @@ it('routes PRE_PREPARE and swallows handler errors', async function () {
             // Force lockSnapshot to throw inside the async handler so the
             // dispatch-site .catch is exercised.
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: () => { throw new Error('boom'); }, getQuorum: () => 3 };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
             consensus._handleMessage({
@@ -312,7 +312,7 @@ it('returns the snapshot acquired at the resolved BTC tip', async function () {
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000 }),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let { snapshot, weighted } = await consensus.lockSnapshot();
             expect(snapshot).to.deep.equal({ blockIndex: 800000 });
             expect(weighted).to.equal(false); // hub.network unset → count path
@@ -323,17 +323,17 @@ it('honours an explicit block-height override without resolving the tip', async 
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 42 }),
                 getQuorum: sinon.stub().returns(1)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(999);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(999);
             await consensus.lockSnapshot(42);
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(42)).to.be.true;
-            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+            expect(hub.resolveBtcLatestBlock.called).to.be.false;
         });
 it('returns null snapshot when no capabilitySnapshot is wired', async function () {
             expect((await consensus.lockSnapshot()).snapshot).to.equal(null);
         });
 it('returns null snapshot when no BTC tip can be resolved', async function () {
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: sinon.stub(), getQuorum: sinon.stub() };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
             expect((await consensus.lockSnapshot()).snapshot).to.equal(null);
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
         });
@@ -344,7 +344,7 @@ it('propose() locks the federation snapshot quorum and stamps the block height',
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let promise = consensus.propose({ cfg: 1 });
             await new Promise(r => setImmediate(r));

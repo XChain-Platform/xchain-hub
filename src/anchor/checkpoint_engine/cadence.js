@@ -42,7 +42,7 @@ module.exports = {
 
     // Record a due-but-not-my-slot tick at `btcBlock`. Returns true when the same
     // block has now been seen for at least K consecutive such ticks (frozen tip).
-    // Compare NUMERICALLY: _resolveBtcLatestBlock serves the height from two
+    // Compare NUMERICALLY: resolveBtcLatestBlock serves the height from two
     // sources (the pushed chain_tips row, then a getlatestblock RPC), so the same
     // frozen height can arrive as 14671 on one tick and '14671' on the next. A
     // strict === there would restart the counter every tick and leave the meter

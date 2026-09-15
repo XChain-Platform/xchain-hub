@@ -106,7 +106,7 @@ function createMockHub(overrides = {}) {
         // reading the chain tip to anchor a round; default to mainnet. Tests that
         // exercise chain-tip-fallback behaviour can override this stub.
         resolveBtcNetwork:      sinon.stub().resolves('mainnet'),
-        _resolveBtcLatestBlock:  sinon.stub().resolves(null)
+        resolveBtcLatestBlock:  sinon.stub().resolves(null)
     };
 
     // Expose the raw stubs for easy test access

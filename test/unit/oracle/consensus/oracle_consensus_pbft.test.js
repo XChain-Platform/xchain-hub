@@ -48,7 +48,7 @@ function registerOracleconsensus1Hooks() {
         // now bounds the leader-supplied btcBlockHeight against it before that height
         // can pick the snapshot, the leader or the quorum mode. Same height the honest
         // PROPOSEs in this file carry, so an in-lockstep round is modelled.
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(900000);
         pm  = hub._peerManager;
         oracleRound = {
             getSubmissions: sinon.stub().returns(new Map())

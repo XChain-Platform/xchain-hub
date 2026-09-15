@@ -102,11 +102,11 @@ class StateCheckpointEngine extends EventEmitter {
         // provisioned hub carries no *_INDEXER_URL env var, and the p2pConfig
         // fallback never holds one) via the hub's configs-aware resolver, so this
         // engine reaches the indexer instead of silently producing zero checkpoints.
-        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+        if(this.hub && typeof this.hub.resolveIndexerUrl === 'function'){
             for(const coin of Object.keys(this.indexers || {})){
                 if(this.indexers[coin] && this.indexers[coin].url) continue;
                 try {
-                    const u = await this.hub._resolveIndexerUrl(coin);
+                    const u = await this.hub.resolveIndexerUrl(coin);
                     if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
                 } catch(_){}
             }

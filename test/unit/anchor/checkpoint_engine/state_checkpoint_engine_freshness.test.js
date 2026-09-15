@@ -88,7 +88,7 @@ for (let i = 0; i + 5 < params.length; i += 6) { let [snapshot_block, capability
 // opts.hashesFor(self) : per-node getblockhashes result (default TIP).
 function buildMesh(n, opts) { opts = opts || {}; let bus = { nodes: [] }; let identities = []; for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64))); let validators = identities.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), amount: '1' })); for (let i = 0; i < n; i++) { let identity = identities[i]; let self = { i, identity, pubkey: identity.getPubkeyHex().toLowerCase(), handler: null }; let peerManager = { on(evt, h) { if (evt === 'message') self.handler = h; }, removeListener(evt) { if (evt === 'message') self.handler = null; }, broadcast(type, data) { let env = { type, sender: self.pubkey, data }; for (let other of bus.nodes) { if (other === self) continue; if (opts.drop && opts.drop(self, other, type, data)) continue; if (other.handler) other.handler(env); } } }; let db = memDb(); let hub = { db, p2pConfig: { CHECKPOINT_CHAINS: (opts.chains || ['BTC']).join(','), CHECKPOINT_CONFIRMATIONS: String(opts.confirmations != null ? opts.confirmations : 0), // Left undefined unless a case sets it, so every other mesh keeps
 // resolving the built-in default.
-CHECKPOINT_COSIGN_TOLERANCE_BLOCKS: opts.cosignTolerance, BTC_INDEXER_URL: 'http://stub', LTC_INDEXER_URL: 'http://stub', DOGE_INDEXER_URL: 'http://stub' }, hubDbBroadcaster: { rows: [], broadcastRow(ev) { this.rows.push(ev); } }, capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } }, getPeerManager: () => peerManager, getIdentity: () => identity, _resolveBtcLatestBlock: async () => opts.btcBlock != null ? opts.btcBlock : 100 }; self.db = db; self.hub = hub; self.engine = new StateCheckpointEngine(hub); self.engine._indexerCall = async (coin, method, params) => { let h = opts.hashesFor ? opts.hashesFor(self, params, coin) : TIP; return h ? Object.assign({}, h) : null; }; self.finalized = []; self.engine.on('checkpoint:finalized', ev => self.finalized.push(ev)); bus.nodes.push(self); } buses.push(bus); return bus; }
+CHECKPOINT_COSIGN_TOLERANCE_BLOCKS: opts.cosignTolerance, BTC_INDEXER_URL: 'http://stub', LTC_INDEXER_URL: 'http://stub', DOGE_INDEXER_URL: 'http://stub' }, hubDbBroadcaster: { rows: [], broadcastRow(ev) { this.rows.push(ev); } }, capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } }, getPeerManager: () => peerManager, getIdentity: () => identity, resolveBtcLatestBlock: async () => opts.btcBlock != null ? opts.btcBlock : 100 }; self.db = db; self.hub = hub; self.engine = new StateCheckpointEngine(hub); self.engine._indexerCall = async (coin, method, params) => { let h = opts.hashesFor ? opts.hashesFor(self, params, coin) : TIP; return h ? Object.assign({}, h) : null; }; self.finalized = []; self.engine.on('checkpoint:finalized', ev => self.finalized.push(ev)); bus.nodes.push(self); } buses.push(bus); return bus; }
 function sortedPubkeys(bus) {
   return bus.nodes.map(nd => nd.pubkey).sort();
 }
@@ -171,7 +171,7 @@ function registerSplitSuitePart1() {
       env,
       follower
     } = makeSignReq(bus, SNAP);
-    follower.hub._resolveBtcLatestBlock = async () => SNAP; // exactly fresh
+    follower.hub.resolveBtcLatestBlock = async () => SNAP; // exactly fresh
     let signs = watchCosign(follower);
     await follower.engine.handleSignReq(env);
     expect(signs.length, 'follower co-signed a fresh snapshot_block').to.equal(1);
@@ -187,7 +187,7 @@ function registerSplitSuitePart1() {
       follower
     } = makeSignReq(bus, SNAP);
     // Our tip has moved well past the proposed snapshot_block (> default 144).
-    follower.hub._resolveBtcLatestBlock = async () => SNAP + 200;
+    follower.hub.resolveBtcLatestBlock = async () => SNAP + 200;
     expect(200).to.be.greaterThan(follower.engine.cosignToleranceBlocks);
     let signs = watchCosign(follower);
     await follower.engine.handleSignReq(env);
@@ -205,7 +205,7 @@ function registerSplitSuitePart2() {
       env,
       follower
     } = makeSignReq(bus, SNAP);
-    follower.hub._resolveBtcLatestBlock = async () => null; // no own tip
+    follower.hub.resolveBtcLatestBlock = async () => null; // no own tip
     let signs = watchCosign(follower);
     await follower.engine.handleSignReq(env);
     expect(signs.length, 'missing own tip fails closed').to.equal(0);
@@ -229,7 +229,7 @@ function registerSplitSuitePart2() {
       follower
     } = makeSignReq(bus, SNAP);
     expect(follower.engine.cosignToleranceBlocks, 'a nonnumeric value must not become NaN').to.equal(144);
-    follower.hub._resolveBtcLatestBlock = async () => SNAP + 9900;
+    follower.hub.resolveBtcLatestBlock = async () => SNAP + 9900;
     let signs = watchCosign(follower);
     await follower.engine.handleSignReq(env);
     expect(signs.length, 'a 9,900-block-stale snapshot_block must be declined').to.equal(0);
@@ -248,7 +248,7 @@ function registerSplitSuitePart3() {
       follower
     } = makeSignReq(bus, SNAP);
     expect(follower.engine.cosignToleranceBlocks).to.equal(10);
-    follower.hub._resolveBtcLatestBlock = async () => SNAP + 5; // inside the window
+    follower.hub.resolveBtcLatestBlock = async () => SNAP + 5; // inside the window
     let signs = watchCosign(follower);
     await follower.engine.handleSignReq(env);
     expect(signs.length, 'a value the default would also accept is co-signed').to.equal(1);
@@ -258,7 +258,7 @@ function registerSplitSuitePart3() {
       cosignTolerance: '10'
     });
     let second = makeSignReq(bus2, SNAP);
-    second.follower.hub._resolveBtcLatestBlock = async () => SNAP + 50; // outside 10, inside 144
+    second.follower.hub.resolveBtcLatestBlock = async () => SNAP + 50; // outside 10, inside 144
     let signs2 = watchCosign(second.follower);
     await second.follower.engine.handleSignReq(second.env);
     expect(signs2.length, 'a tightened window is actually enforced').to.equal(0);

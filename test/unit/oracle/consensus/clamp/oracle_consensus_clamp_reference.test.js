@@ -187,7 +187,7 @@ const oracleConsensusTheProposeSideClampReferencSuite2ROUND = 1;
 // wrong reason. The tip defaults to the proposed height (dead centre of the
 // tolerance band) unless a case is about the bound itself.
 function oracleConsensusTheProposeSideClampReferencSuite2Propose(btcBlockHeight, tip) {
-  oracleConsensusTheProposeSideClampReferencSuite2Hub._resolveBtcLatestBlock.resolves(tip === undefined ? btcBlockHeight : tip);
+  oracleConsensusTheProposeSideClampReferencSuite2Hub.resolveBtcLatestBlock.resolves(tip === undefined ? btcBlockHeight : tip);
   const prices = [{
     coinPair: 'BTC/USD',
     price: '100000'

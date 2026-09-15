@@ -54,7 +54,7 @@ function makeEngine(v) {
         getActiveWeightSnapshot:    sinon.stub().resolves(makeFederationSnapshot(VALIDATORS_3, SNAPSHOT_BLOCK)),
         getQuorum:                  sinon.stub().returns(2)
     };
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(SNAPSHOT_BLOCK);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(SNAPSHOT_BLOCK);
     let consensus = new Consensus(hub);
     consensus.setValidatorSet(VALIDATORS_3);
     return { v: v, hub: hub, pm: hub._peerManager, consensus: consensus };

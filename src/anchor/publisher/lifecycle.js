@@ -90,11 +90,11 @@ module.exports = {
     // configs-aware resolver, so anchor on-chain verification reaches the
     // indexer instead of returning 'no-indexer' on a standard hub.
     async resolveMissingIndexerUrls(){
-        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+        if(this.hub && typeof this.hub.resolveIndexerUrl === 'function'){
             for(const coin of Object.keys(this.indexers || {})){
                 if(this.indexers[coin] && this.indexers[coin].url) continue;
                 try {
-                    const u = await this.hub._resolveIndexerUrl(coin);
+                    const u = await this.hub.resolveIndexerUrl(coin);
                     if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
                 } catch(_){}
             }
@@ -356,7 +356,7 @@ module.exports = {
         if(!failoverOnly) this._leaderRetryDue = false;
         try {
             await this.drainDeferredAnnouncements();
-            let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+            let btcBlock = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let signer   = this.resolveSigner();
             let refused  = await this.flushRefusal(signer);
             if(refused) return refused;

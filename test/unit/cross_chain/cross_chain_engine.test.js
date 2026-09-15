@@ -23,7 +23,7 @@ const { waitUntil }      = require('../../helpers/waitUntil');
 // mirrors the live set at call time (quorum is still frozen into pending at round
 // start, so the "locked quorum survives set changes" invariant is unaffected).
 function wireLiveMirrorSnapshot(engine, hub) {
-    hub._resolveBtcLatestBlock = async () => 900000;
+    hub.resolveBtcLatestBlock = async () => 900000;
     hub.capabilitySnapshot = {
         getSnapshot: async () => ({ validators: engine.validatorSet.slice() }),
         getQuorum: (snap) => {
@@ -215,7 +215,7 @@ function registerFeature6requestAttestationPart1() {
     // single node): unilaterally minting an unverified 'attested' row here is
     // the same hazard fixed for the DEX. Must throw, not store.
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
-    rootSuiteHub._resolveBtcLatestBlock = async () => 800000;
+    rootSuiteHub.resolveBtcLatestBlock = async () => 800000;
     rootSuiteHub.capabilitySnapshot = {
       getSnapshot: async () => ({
         validators: [],

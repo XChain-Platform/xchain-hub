@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// _resolveBtcLatestBlock has two paths and only the first one is age-gated.
+// resolveBtcLatestBlock has two paths and only the first one is age-gated.
 // When btcPushedTipFresh rejects a frozen pushed tip, the direct getlatestblock
 // path re-serves the same frozen height, so a halted BTC stack still anchors
 // rounds. `lag` cannot catch it: a halted bitcoind freezes the decoder and the
@@ -89,31 +89,31 @@ function registerDirectTipHealthTests() {
         // bitcoind stopped three hours ago: the pushed tip is frozen, and the direct
         // path re-serves the same height with lag 0 because the decoder froze too.
         const hub = hubWith(tipAged(HEIGHT, 10800), { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(null);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
     });
 
     it('serves a direct height on a healthy chain whose newest block is merely slow', async function () {
         // 1500s past the pushed-tip bound is an ordinary mainnet gap, not a halt.
         const hub = hubWith(tipAged(HEIGHT, 1500), { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
 
     it('serves a direct height that beats the pushed tip however old that tip is', async function () {
         // The push is broken, not the chain; this is the case the direct path exists for.
         const hub = hubWith(tipAged(HEIGHT, 86400), { block_index: HEIGHT + 50, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT + 50);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(HEIGHT + 50);
     });
 
     it('serves a direct height when no pushed tip exists to date it against', async function () {
         // A stack with no pushChainTip leaves chain_tips empty, so there is no
         // block_time anywhere in the hub and nothing to gate on.
         const hub = hubWith(null, { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
 
     it('serves a direct height when the pushed tip carries no block_time', async function () {
         const hub = hubWith({ blockHeight: HEIGHT, blockTime: 0 }, { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
 }
 
@@ -125,12 +125,12 @@ function registerDirectTipBoundTests() {
         process.env.MAX_TIP_AGE_S        = '60';
         process.env.MAX_DIRECT_TIP_AGE_S = '3000';
         const hub = hubWith(tipAged(HEIGHT, 3600), { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(null);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
     });
 
     it('honours a MAX_DIRECT_TIP_AGE_S wider than the default', async function () {
         process.env.MAX_DIRECT_TIP_AGE_S = '86400';
         const hub = hubWith(tipAged(HEIGHT, 10800), { block_index: HEIGHT, lag: 0 });
-        expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
 }

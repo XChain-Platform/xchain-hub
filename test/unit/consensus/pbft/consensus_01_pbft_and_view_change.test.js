@@ -28,7 +28,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 
@@ -62,7 +62,7 @@ function wire(tip) {
                     getActiveWeightSnapshot:    sinon.stub().returns({ blockIndex: 700000, validators: VALIDATORS_4 }),
                     getQuorum: sinon.stub().returns(3)
                 };
-                hub._resolveBtcLatestBlock = sinon.stub().resolves(tip);
+                hub.resolveBtcLatestBlock = sinon.stub().resolves(tip);
             }
 
 async function send(height) {
@@ -100,7 +100,7 @@ it('federated follower PREPAREs a PRE_PREPARE carrying a valid btcBlockHeight', 
             // Our own tip, which BOUNDS the stamped height (freshness guard) and
             // never to substitute for it; deliberately a few blocks off the leader's
             // so the assertion below distinguishes the two.
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800004);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800004);
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus.handlePrePrepare({

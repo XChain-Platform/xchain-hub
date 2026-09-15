@@ -104,7 +104,7 @@ let tipCalls;
             },
             getPeerManager: () => null,
             getIdentity: () => null,
-            _resolveBtcLatestBlock: async () => ERA_BLOCK
+            resolveBtcLatestBlock: async () => ERA_BLOCK
         };
         if (tips !== undefined) {
             hub.resolveAdmissionTips = async (chains) => {

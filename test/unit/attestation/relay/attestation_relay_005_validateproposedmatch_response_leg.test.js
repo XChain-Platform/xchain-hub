@@ -85,8 +85,8 @@ function makeHub(overrides = {}) {
         },
         getPeerManager: () => ({}),
         getIdentity:    () => ({ getPubkeyHex: () => PUBKEY_A, sign: () => SIG_A }),
-        _resolveBtcLatestBlock: sinon.stub().resolves(1000),
-        _resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
+        resolveBtcLatestBlock: sinon.stub().resolves(1000),
+        resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
         ...overrides,
     };
 }
@@ -280,7 +280,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 // ── 4b. Follower re-verification, response leg ─────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('validateProposedMatch, response leg', function () { it('refuses below ATTEST_RELAY_ACTIVATION', async function () {
-            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) },
+            const relay = makeRelay({ network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(962999) },
                 [originRow()], [homeRelayedRow()]);
             expect(await relay.validateProposedMatch(responseRow({
                 network: 'mainnet', snapshot_block: 962999,

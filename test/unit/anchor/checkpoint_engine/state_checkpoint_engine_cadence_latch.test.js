@@ -129,7 +129,7 @@ function buildMesh(n) {
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 getPeerManager: () => peerManager,
                 getIdentity: () => identity,
-                _resolveBtcLatestBlock: async () => bus.btcBlock
+                resolveBtcLatestBlock: async () => bus.btcBlock
             };
             self.db = db; self.hub = hub;
             self.engine = new StateCheckpointEngine(hub);

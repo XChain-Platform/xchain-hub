@@ -295,8 +295,8 @@ module.exports = {
         // tolerance as StateCheckpointEngine's co-sign guard. Federated hubs
         // only, like every other fail-closed guard on this path.
         if (this.getQuorum() > 0) {
-            let myTip = this.hub && this.hub._resolveBtcLatestBlock
-                ? await this.hub._resolveBtcLatestBlock()
+            let myTip = this.hub && this.hub.resolveBtcLatestBlock
+                ? await this.hub.resolveBtcLatestBlock()
                 : null;
             if (!Number.isFinite(Number(myTip))) {
                 logger.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +

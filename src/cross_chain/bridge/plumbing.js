@@ -127,7 +127,7 @@ module.exports = {
     // deterministic override the sibling engines share, so a record and the capability
     // snapshot it is verified against use one anchor.
     async resolveSnapshotBlock(){
-        let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+        let b = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },

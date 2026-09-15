@@ -115,7 +115,7 @@ function registerFeature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1Par
       pubkey: 'pk2',
       addr: 'a2'
     }];
-    const load = sinon.stub(hub, '_loadValidatorSet');
+    const load = sinon.stub(hub, 'loadValidatorSet');
     load.resolves(fresh); // per-round reloads see the current set
     load.onFirstCall().resolves(stale); // startOracle() sees the boot-time set
 
@@ -146,7 +146,7 @@ function registerFeature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1Par
       pubkey: 'pk2',
       addr: 'a2'
     }];
-    const load = sinon.stub(hub, '_loadValidatorSet');
+    const load = sinon.stub(hub, 'loadValidatorSet');
     load.onFirstCall().resolves([{
       pubkey: 'pk1',
       addr: 'a1'
@@ -220,7 +220,7 @@ function registerFeature19startOracleWiresOracleBatchSignerPart1() {
     let hub = new Hub('h', 1, 'd', 'u', 'p', {
       P2P_PORT: 10001
     });
-    sinon.stub(hub, '_loadValidatorSet').resolves([]);
+    sinon.stub(hub, 'loadValidatorSet').resolves([]);
     const handlers = new Map();
     hub.peerManager = {
       on: sinon.stub().callsFake((evt, fn) => handlers.set(evt, fn)),

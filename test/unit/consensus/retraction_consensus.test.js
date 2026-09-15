@@ -58,7 +58,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
             getWeightSnapshot: async () => ({ validators: vset.map(v => ({ pubkey: v.pubkey, source: v.source, weight: v.weight })) }),
             getSnapshot:       async () => ({ validators: vset.map(v => ({ pubkey: v.pubkey, amount: v.weight })) })
         },
-        _resolveBtcLatestBlock: async () => btcBlock
+        resolveBtcLatestBlock: async () => btcBlock
     };
     hub._queries = queries;
     return hub;

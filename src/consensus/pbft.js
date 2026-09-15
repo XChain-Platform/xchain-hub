@@ -249,10 +249,10 @@ class Consensus {
         }
         let blockHeight = blockHeightOverride;
         if (blockHeight === undefined || blockHeight === null) {
-            // _resolveBtcLatestBlock checks hub.db.getChainTip first, then
+            // resolveBtcLatestBlock checks hub.db.getChainTip first, then
             // falls back to a direct getlatestblock call against the BTC
             // indexer. So this works whether or not chain-tip-push is wired.
-            blockHeight = await this.hub._resolveBtcLatestBlock();
+            blockHeight = await this.hub.resolveBtcLatestBlock();
         }
         if (!blockHeight) return { snapshot: null, weighted: false, requestedBlockIndex: null };
         let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);

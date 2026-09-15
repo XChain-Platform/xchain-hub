@@ -232,7 +232,7 @@ module.exports = {
             // could impersonate the sole elected publisher.
             let order = canonicalForms.hashOrder(
                 this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
-            let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+            let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
             if(!this._rankUnlocked(order, sender, since)) return;          // proposer not unlocked
         }

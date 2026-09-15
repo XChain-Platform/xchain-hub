@@ -40,7 +40,7 @@ function wireFederationSnapshot(hub, quorum) {
         getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
         getQuorum:                  sinon.stub().returns(quorum)
     };
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
     return snapshot;
 }
 

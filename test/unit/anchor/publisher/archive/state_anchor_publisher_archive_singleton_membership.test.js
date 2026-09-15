@@ -75,7 +75,7 @@ function buildPub(rows) {
         getPeerManager: () => ({ broadcast() {} }),
         p2pConfig: {},
         rewardTracker: null,
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     };
     return { pub: new StateAnchorPublisher(hub), identity };
 }

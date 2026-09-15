@@ -325,7 +325,7 @@ module.exports = {
     },
 
     async resolveSnapshotBlock(){
-        return this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+        return this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
     }
 
 };

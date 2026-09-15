@@ -219,7 +219,7 @@ function observerHubDoesNotAuthorIntoRoundsItCannotSuite3BuildCheckpointEngine(p
     },
     getPeerManager: () => peerManager,
     getIdentity: () => identity,
-    _resolveBtcLatestBlock: async () => 100
+    resolveBtcLatestBlock: async () => 100
   };
   const engine = new StateCheckpointEngine(hub);
   engine._indexerCall = async (chain, method) => {

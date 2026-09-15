@@ -122,7 +122,7 @@ function registerFixtureHooks() {
         Object.assign(hub, { db, network: 'testnet', capabilitySnapshot: capSnapshot,
             hubDbBroadcaster: broadcaster, oracleConsensus: null });
         hub.getPeerManager = sinon.stub().returns(null);
-        hub['_resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
+        hub['resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
         agg = new PriceAggregator(hub);
     });
     afterEach(function () {
@@ -176,7 +176,7 @@ function registerRowCacheTest() {
     it('spends no second read on a (capability, height) it already covered, and picks up a new tip', async function () {
         await agg.runPriceCapabilityDerivation();
         expect(capSnapshot.getWeightSnapshot.callCount).to.equal(GRID);
-        hub._resolveBtcLatestBlock.resolves(TIP + 1);
+        hub.resolveBtcLatestBlock.resolves(TIP + 1);
         const second = await agg.runPriceCapabilityDerivation();
         // One new height, every capability: nothing already covered is re-read.
         expect(second.written).to.equal(CAPS.length);
@@ -242,7 +242,7 @@ function registerClosedSetTests() {
     });
     it('writes NOTHING when the hub cannot resolve a BTC tip, and says so', async function () {
         const err = sinon.stub(console, 'error');
-        hub._resolveBtcLatestBlock.resolves(null);
+        hub.resolveBtcLatestBlock.resolves(null);
         const res = await agg.runPriceCapabilityDerivation();
         expect(res.ran).to.be.false;
         expect(res.reason).to.equal('no btc tip');

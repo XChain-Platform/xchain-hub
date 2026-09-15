@@ -66,7 +66,7 @@ module.exports = {
     // deterministic override (XDEX_SNAPSHOT_BLOCK) so the match + capability snapshot share
     // a consistent anchor. Production always resolves the live BTC tip (override unset).
     async resolveSnapshotBlock(){
-        let b = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+        let b = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
         if(b != null) return b;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },

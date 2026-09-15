@@ -112,7 +112,7 @@ function buildEngine(weightSnapshot, opts) {
         },
         getPeerManager: () => peerManager,
         getIdentity: () => identity,
-        _resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
+        resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
     };
     let engine = new StateCheckpointEngine(hub);
     engine._indexerCall = async () => Object.assign({}, TIP);

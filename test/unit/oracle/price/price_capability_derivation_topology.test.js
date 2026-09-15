@@ -128,7 +128,7 @@ function registerFixtureHooks() {
         Object.assign(hub, { db, network: 'testnet', capabilitySnapshot: capSnapshot,
             hubDbBroadcaster: broadcaster, oracleConsensus: null });
         hub.getPeerManager = sinon.stub().returns(null);
-        hub['_resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
+        hub['resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
         agg = new PriceAggregator(hub);
     });
     afterEach(function () {
@@ -156,7 +156,7 @@ function registerValidatorTests() {
         const res = await agg.runPriceCapabilityDerivation();
         expect(res.ran).to.be.false;
         expect(res.reason).to.equal('hub runs consensus for every derived capability');
-        expect(hub._resolveBtcLatestBlock.called).to.be.false;
+        expect(hub.resolveBtcLatestBlock.called).to.be.false;
         expect(db.store.size).to.equal(0);
         expect(agg._priceCapDeriveTimer).to.equal(null);
     });
@@ -169,7 +169,7 @@ function registerValidatorTests() {
         hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => 'aa'.repeat(32) });
         const res = await agg.runPriceCapabilityDerivation();
         expect(res.reason).to.equal('hub runs consensus for every derived capability');
-        expect(hub._resolveBtcLatestBlock.called).to.be.false;
+        expect(hub.resolveBtcLatestBlock.called).to.be.false;
     });
 }
 

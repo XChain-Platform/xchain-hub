@@ -318,7 +318,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
 function registerFeature10validateProposedMatchFragment1Part4() {
   it('finalizeMatch stamps a forward margin sized to the slower leg, never the bare clock second', async function () {
     let hub = makeDexHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(100);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(100);
     hub.db.doQuery = sinon.stub().resolves({
       affectedRows: 1
     });

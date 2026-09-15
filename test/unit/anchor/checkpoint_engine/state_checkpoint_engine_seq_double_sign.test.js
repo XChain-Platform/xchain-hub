@@ -144,7 +144,7 @@ function buildMesh(n, opts) {
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 getPeerManager: () => peerManager,
                 getIdentity: () => identity,
-                _resolveBtcLatestBlock: async () => opts.btcBlock
+                resolveBtcLatestBlock: async () => opts.btcBlock
             };
             self.db  = db;
             self.hub = hub;

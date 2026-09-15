@@ -38,7 +38,7 @@ class ChainTips {
     // regtest development among them, so block-boundary snapshotting still works. Null
     // when both paths fail, and null when the direct path only re-serves a height
     // btcDirectTipAcceptable dates as frozen.
-    async _resolveBtcLatestBlock(){
+    async resolveBtcLatestBlock(){
         // A cross-network configs tree makes this throw. Degrade to the documented null
         // rather than crashing the scheduler tick that called it.
         let network;
@@ -138,7 +138,7 @@ class ChainTips {
 
     // ---- the ADMISSION tip, per chain (spec §5.2; C29, F35) ----------------
     //
-    // A SIBLING of _resolveBtcLatestBlock, not a generalization of it. That method
+    // A SIBLING of resolveBtcLatestBlock, not a generalization of it. That method
     // must keep serving the COMMITTED tip, because a validator set anchored on a
     // height the fleet has not committed is the failure its lag and freshness gates
     // exist to prevent. This one answers a different question: which block may a
@@ -165,7 +165,7 @@ class ChainTips {
             logger.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
             return null;
         }
-        let url = await this._resolveIndexerUrl(c);
+        let url = await this.resolveIndexerUrl(c);
         if(!url){
             logger.warn('XChainHub: no ' + c + ' indexer URL configured; no admission tip for ' + c +
                 '. Rows read by ' + c + ' cannot be finalized above the admission activation.');

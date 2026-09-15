@@ -68,7 +68,7 @@ function registerOracleconsensus1Hooks() {
         // now bounds the leader-supplied btcBlockHeight against it before that height
         // can pick the snapshot, the leader or the quorum mode. Same height the honest
         // PROPOSEs in this file carry, so an in-lockstep round is modelled.
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(900000);
         pm  = hub._peerManager;
         oracleRound = {
             getSubmissions: sinon.stub().returns(new Map())
@@ -329,7 +329,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests13() {
         });
 
         it('fails closed when this hub cannot resolve a BTC tip of its own', async function () {
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
             await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
@@ -339,9 +339,9 @@ function registerHandleproposeFollowerFailClosedGuards3Tests13() {
             // nothing to split from, so it keeps the bootstrap path and never pays a
             // tip resolve. Asserted on the resolver, which is the whole cost.
             sinon.stub(oc, 'getQuorum').returns(0);
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
             await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
-            expect(hub._resolveBtcLatestBlock.called).to.equal(false);
+            expect(hub.resolveBtcLatestBlock.called).to.equal(false);
         });
 
 }

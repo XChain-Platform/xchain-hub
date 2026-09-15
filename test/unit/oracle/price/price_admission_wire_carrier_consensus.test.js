@@ -208,7 +208,7 @@ function snapshotFor(V) {
             hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
             // The follower's pre-existing BTC-tip deviation gate reads the committed tip; pin it
             // at the anchor so only the admission bound under test decides the verdict.
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(ADMIT_AT);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(ADMIT_AT);
             // The hub's admission seam, as XChainHub exposes it: this hub's own tips, and
             // the stamp built from them (tip + margin on every chain in the read set).
             hub.resolveAdmissionTips = sinon.stub().callsFake(async (chains) => {

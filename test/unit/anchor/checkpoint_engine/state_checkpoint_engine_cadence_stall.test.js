@@ -117,7 +117,7 @@ function buildEngine(opts) {
             },
             getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
             getIdentity: () => (opts.noIdentity ? null : identity),
-            _resolveBtcLatestBlock: async () => state.btcBlock
+            resolveBtcLatestBlock: async () => state.btcBlock
         };
         const engine = new StateCheckpointEngine(hub);
         engine._indexerCall = async () => (state.btcBlock == null ? null : Object.assign({}, TIP));
@@ -180,7 +180,7 @@ function registerCadenceRecoveryTests() {
     it('meters an unresolvable BTC snapshot block with a null stall block', async function () {
         const { engine, state } = buildEngine();
         state.btcBlock = null;
-        engine.hub._resolveBtcLatestBlock = async () => null;
+        engine.hub.resolveBtcLatestBlock = async () => null;
 
         await engine._tick();
 
@@ -301,7 +301,7 @@ function buildTwoMember(frozenTipTicks) {
             },
             getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
             getIdentity: () => me,
-            _resolveBtcLatestBlock: async () => state.btcBlock
+            resolveBtcLatestBlock: async () => state.btcBlock
         };
         const engine = new StateCheckpointEngine(hub);
         engine._indexerCall = async () => Object.assign({}, TIP);
@@ -377,7 +377,7 @@ function registerFrozenTipRecoveryTests() {
         expect((await engine.getStats()).frozen_tip_stall_ticks).to.equal(60);
     });
 
-    // _resolveBtcLatestBlock serves the height from the pushed chain_tips row OR
+    // resolveBtcLatestBlock serves the height from the pushed chain_tips row OR
     // from a getlatestblock RPC, so the SAME frozen height can arrive typed
     // differently tick to tick. Comparing it strictly would restart the counter
     // every tick and pin the meter at 1 forever: the exact silent failure this

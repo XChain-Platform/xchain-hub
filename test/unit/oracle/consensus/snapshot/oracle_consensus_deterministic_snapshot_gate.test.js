@@ -68,7 +68,7 @@ function oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(round) 
 function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part1() {
   beforeEach(function () {
     oracleConsensusAFederatedRoundNeedsADetermSuite1Hub = createMockHub();
-    oracleConsensusAFederatedRoundNeedsADetermSuite1Hub._resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
+    oracleConsensusAFederatedRoundNeedsADetermSuite1Hub.resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
     oracleConsensusAFederatedRoundNeedsADetermSuite1Pm = oracleConsensusAFederatedRoundNeedsADetermSuite1Hub._peerManager;
     oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorPubkeys = new Set(); // size 0: _isKnownSender accepts any sender
     oracleConsensusAFederatedRoundNeedsADetermSuite1OracleRound = {
@@ -193,7 +193,7 @@ describe('OracleConsensus: a federated follower locks the snapshot quorum from P
   });
   it('carries the snapshot quorum into the pending round', async function () {
     let hub = createMockHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
     hub._peerManager.validatorPubkeys = new Set();
     let oracleRound = {
       getSubmissions: sinon.stub().returns(buildSubmissions(VALIDATORS_3.map(v => ({

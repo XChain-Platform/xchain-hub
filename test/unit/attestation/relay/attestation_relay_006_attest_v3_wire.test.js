@@ -85,8 +85,8 @@ function makeHub(overrides = {}) {
         },
         getPeerManager: () => ({}),
         getIdentity:    () => ({ getPubkeyHex: () => PUBKEY_A, sign: () => SIG_A }),
-        _resolveBtcLatestBlock: sinon.stub().resolves(1000),
-        _resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
+        resolveBtcLatestBlock: sinon.stub().resolves(1000),
+        resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
         ...overrides,
     };
 }

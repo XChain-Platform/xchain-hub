@@ -140,7 +140,7 @@ class Lifecycle {
         if(this._transportSetRefreshRunning) return;
         this._transportSetRefreshRunning = true;
         try {
-            let block = await this._resolveBtcLatestBlock();
+            let block = await this.resolveBtcLatestBlock();
             if(block == null){ this.warnTransportStale('BTC tip unresolved'); return; }
             let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
             if(!snap || !Array.isArray(snap.validators)){ this.warnTransportStale('validator snapshot unavailable'); return; }
@@ -197,7 +197,7 @@ class Lifecycle {
         const { Consensus } = this.constructor.modules;
         this.consensus = new Consensus(this);
 
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         this.consensus.setValidatorSet(validators);
 
         await this.consensus.start();

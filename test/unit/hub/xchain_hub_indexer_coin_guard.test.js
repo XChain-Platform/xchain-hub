@@ -143,11 +143,11 @@ function registerIndexerCoinCacheTests() {
     });
 
     it('the guard does not touch the generic per-coin resolver', async function () {
-        // _resolveIndexerUrl('DOGE') must keep answering for DOGE: the guard is a
+        // resolveIndexerUrl('DOGE') must keep answering for DOGE: the guard is a
         // BTC-identity check, not a ban on other chains' indexers.
         process.env.DOGE_INDEXER_API_URL = 'http://127.0.0.1:3524';
         try {
-            expect(await hub._resolveIndexerUrl('DOGE')).to.equal('http://127.0.0.1:3524');
+            expect(await hub.resolveIndexerUrl('DOGE')).to.equal('http://127.0.0.1:3524');
             expect(axiosStub.post.called).to.equal(false);
         } finally {
             delete process.env.DOGE_INDEXER_API_URL;

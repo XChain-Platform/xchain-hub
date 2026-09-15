@@ -62,7 +62,7 @@ function buildPub(opts) {
       broadcast() {}
     },
     p2pConfig: opts.p2pConfig || {},
-    _resolveBtcLatestBlock: async () => 100
+    resolveBtcLatestBlock: async () => 100
   };
   let pub = new StateAnchorPublisher(hub);
   return {

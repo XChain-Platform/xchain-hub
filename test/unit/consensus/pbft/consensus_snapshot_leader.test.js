@@ -177,7 +177,7 @@ function registerProposeTests() {
             // guard does not fire and the legacy fallback stays reachable.
             consensus.setValidatorSet([VALIDATORS_4[0]]);
             pm.validatorAddr = VALIDATORS_4[0].addr;
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
             consensus.seq = SEQ - 1;
 
             // quorum 0 over a single node applies directly, which is the legacy
@@ -379,7 +379,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
             getQuorum:                  sinon.stub().returns(3)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
         consensus.setValidatorSet(DRIFTED_LIVE_SET);
     });
 

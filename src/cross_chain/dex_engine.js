@@ -126,11 +126,11 @@ class CrossChainDexEngine extends EventEmitter {
         // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
         // configs-aware resolver, then warn loudly for any chain still missing,
         // so this engine cannot silently match nothing forever.
-        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+        if(this.hub && typeof this.hub.resolveIndexerUrl === 'function'){
             for(const coin of Object.keys(this.indexers || {})){
                 if(this.indexers[coin] && this.indexers[coin].url) continue;
                 try {
-                    const u = await this.hub._resolveIndexerUrl(coin);
+                    const u = await this.hub.resolveIndexerUrl(coin);
                     if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
                 } catch(_){}
             }

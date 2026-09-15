@@ -182,7 +182,7 @@ function buildRig(opts){
                 recordAnchorReward: async (type, round, pubkey, blk) => { self.rewards.push({ type, round, pubkey, blk }); },
                 resolveSourceByPubkey: async (pubkey) => 'src_' + String(pubkey).toLowerCase().substring(0, 12)
             },
-            _resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : BLOCK)
+            resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : BLOCK)
         };
         self.db  = db;
         self.pub = new StateAnchorPublisher(hub);

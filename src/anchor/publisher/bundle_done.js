@@ -93,7 +93,7 @@ module.exports = {
         {
             let order = canonicalForms.hashOrder(
                 this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);
-            let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+            let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
             if(!this._rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
         }

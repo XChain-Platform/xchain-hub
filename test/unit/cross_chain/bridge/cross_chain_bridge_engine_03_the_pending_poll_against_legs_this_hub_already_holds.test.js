@@ -93,7 +93,7 @@ function makeEngine(opts){
         },
         getPeerManager: () => null,
         getIdentity:    () => null,
-        _resolveBtcLatestBlock: async () => (opts.btcBlock === undefined ? 150 : opts.btcBlock)
+        resolveBtcLatestBlock: async () => (opts.btcBlock === undefined ? 150 : opts.btcBlock)
     };
     const engine = new CrossChainBridgeEngine(hub);
     // Never gossip or run a real round in a unit test.

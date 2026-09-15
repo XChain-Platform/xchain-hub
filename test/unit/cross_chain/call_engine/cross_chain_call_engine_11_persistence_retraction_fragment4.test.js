@@ -212,7 +212,7 @@ function makeEngine(opts) {
         },
         getPeerManager: () => null,
         getIdentity: () => null,
-        _resolveBtcLatestBlock: async () => 150
+        resolveBtcLatestBlock: async () => 150
     };
     const engine = new CrossChainCallEngine(hub);
     // Never let a unit test gossip or run a real round.

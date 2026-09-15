@@ -30,7 +30,7 @@ class Governance {
         if(!this.peerManager) return;
         const { ReorgHandler } = this.constructor.modules;
         this.reorgHandler = new ReorgHandler(this);
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         this.reorgHandler.setValidatorSet(validators);
         await this.reorgHandler.start();
     }
@@ -49,7 +49,7 @@ class Governance {
         if(!this.peerManager) return;
         const { Governance, SlashGovernance } = this.constructor.modules;
         this.governance = new Governance(this);
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         this.governance.setValidatorSet(validators);
         await this.governance.start();
 

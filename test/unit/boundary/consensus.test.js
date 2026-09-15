@@ -217,7 +217,7 @@ async function testAcceptsValidPREPREPAREWithCorrectDigest() {
         getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
         getQuorum: sinon.stub().returns(3)
     };
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
     await consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
         sig_pubkey: VALIDATORS_4[1].pubkey,

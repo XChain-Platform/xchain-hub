@@ -14,7 +14,7 @@
 // network, so a multi-network configs tree anchored a mainnet round to the
 // regtest tip (OracleRound) and handed regtest indexer URLs to the checkpoint,
 // attestation and cross-chain engines while every consensus gate read mainnet.
-// _indexerCoinMismatch cannot catch that: a regtest BTC indexer reports coin=BTC.
+// indexerCoinMismatch cannot catch that: a regtest BTC indexer reports coin=BTC.
 // Standalone hubs (HUB_NETWORK unset) keep the dev-loop preference order.
 
 const sinon      = require('sinon');
@@ -199,19 +199,19 @@ function registerStandaloneNetworkResolutionTests() {
 
 function registerIndexerUrlResolutionSuite() {
 
-    describe('_resolveIndexerUrl', function () {
+    describe('resolveIndexerUrl', function () {
 
         it('resolves the HUB_NETWORK leg, not the regtest one', async function () {
             const hub = validatorHub('mainnet', MULTI_NETWORK_CONFIGS);
-            expect(await hub._resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
-            expect(await hub._resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
+            expect(await hub.resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
+            expect(await hub.resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
         });
 
         it('returns null rather than another network when its own leg is absent', async function () {
             const hub = validatorHub('mainnet', {
                 bitcoin: { regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } } }
             });
-            expect(await hub._resolveIndexerUrl('BTC')).to.equal(null);
+            expect(await hub.resolveIndexerUrl('BTC')).to.equal(null);
         });
 
         it('returns null when its own leg is present but incomplete', async function () {
@@ -221,24 +221,24 @@ function registerIndexerUrlResolutionSuite() {
                     regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } }
                 }
             });
-            expect(await hub._resolveIndexerUrl('BTC')).to.equal(null);
+            expect(await hub.resolveIndexerUrl('BTC')).to.equal(null);
         });
 
         it('still honours the explicit env override on a validator hub', async function () {
             process.env.BTC_INDEXER_API_URL = 'http://operator-override:3599';
             const hub = validatorHub('mainnet', MULTI_NETWORK_CONFIGS);
-            expect(await hub._resolveIndexerUrl('BTC')).to.equal('http://operator-override:3599');
+            expect(await hub.resolveIndexerUrl('BTC')).to.equal('http://operator-override:3599');
         });
 
         it('keeps the preference order for a standalone hub', async function () {
-            expect(await standaloneHub(MULTI_NETWORK_CONFIGS)._resolveIndexerUrl('BTC'))
+            expect(await standaloneHub(MULTI_NETWORK_CONFIGS).resolveIndexerUrl('BTC'))
                 .to.equal('http://127.0.0.1:3514');
         });
 
         it('resolves the DECLARED network leg on a standalone hub', async function () {
             const hub = scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS);
-            expect(await hub._resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
-            expect(await hub._resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
+            expect(await hub.resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
+            expect(await hub.resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
         });
     });
 }
@@ -246,12 +246,12 @@ function registerIndexerUrlResolutionSuite() {
 function registerCrossNetworkTipTest() {
 
     // The scheduler tick must degrade, not crash, on the fail-closed throw.
-    it('_resolveBtcLatestBlock returns null instead of throwing on a cross-network tree', async function () {
+    it('resolveBtcLatestBlock returns null instead of throwing on a cross-network tree', async function () {
         const hub = validatorHub('mainnet', {
             bitcoin: { regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } } }
         });
         mockDb.getChainTip = sinon.stub().resolves(null);
-        expect(await hub._resolveBtcLatestBlock()).to.equal(null);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
         expect(errorLog.called).to.equal(true);
     });
 }

@@ -126,7 +126,7 @@ module.exports = {
                 applyPushedChainTip.call(this, btcTip);
             } else {
                 let directHeight = null;
-                try { directHeight = await this.hub._resolveBtcLatestBlock(); }
+                try { directHeight = await this.hub.resolveBtcLatestBlock(); }
                 catch (_) { /* resolver failed; fall through to round-number anchor */ }
 
                 if (directHeight) applyDirectHeight.call(this, directHeight);

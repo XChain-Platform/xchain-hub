@@ -147,7 +147,7 @@ function registerFixtureHooks() {
         Object.assign(hub, { db, network: 'testnet', capabilitySnapshot: capSnapshot,
             hubDbBroadcaster: broadcaster, oracleConsensus: null });
         hub.getPeerManager = sinon.stub().returns(null);
-        hub['_resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
+        hub['resolveBtcLatestBlock'] = sinon.stub().resolves(TIP);
         agg = new PriceAggregator(hub);
     });
     afterEach(function () {

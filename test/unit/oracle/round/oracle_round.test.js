@@ -239,7 +239,7 @@ function registerExecuteround5Tests13() {
         // not co-located with a BTC indexer.
         it('anchors on the direct indexer height when no pushed tip exists', async function () {
             // getChainTip stays null (mockHub default); the resolver returns a height.
-            hub._resolveBtcLatestBlock.resolves(952913);
+            hub.resolveBtcLatestBlock.resolves(952913);
             await or._executeRound();
 
             expect(or.currentBtcBlockHeight).to.equal(952913);

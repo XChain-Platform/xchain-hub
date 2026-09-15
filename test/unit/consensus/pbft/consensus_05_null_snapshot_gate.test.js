@@ -28,7 +28,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 
@@ -61,7 +61,7 @@ it('(b) follower declines to PREPARE when minValidators>1 and snapshot is null',
                 getActiveValidatorSnapshot: sinon.stub().returns(null),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
             let digest = consensus._digest(config);
@@ -85,7 +85,7 @@ it('(c) propose()/single-node still applies when minValidators<=1 and snapshot i
                 getActiveValidatorSnapshot: sinon.stub().returns(null),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let result = await consensus.propose({ ok: true });
             expect(result).to.be.true;
@@ -116,7 +116,7 @@ it('(a2) propose() throws over an EMPTY federation snapshot instead of applying 
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let caught = null;
             try {
@@ -137,7 +137,7 @@ it('(b2) follower declines to PREPARE over an EMPTY federation snapshot', async 
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
             let digest = consensus._digest(config);
@@ -166,7 +166,7 @@ it('(c2) single-node (minValidators<=1) still applies over an empty snapshot', a
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let result = await consensus.propose({ ok: true });
             expect(result).to.be.true;
@@ -182,7 +182,7 @@ it('follower still PREPAREs with minValidators>1 when a real snapshot IS present
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 4, validators: VALIDATORS_4 }),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
             let digest = consensus._digest(config);

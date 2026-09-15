@@ -106,7 +106,7 @@ function mkPub(db){
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
         rewardTracker: { anchorReward: '10.00000000', resolveSourceByPubkey: async (pk) => 'src_' + pk.substring(0, 8) },
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     });
     pub.chunkRetryDelayMs     = 1;
     pub.ambiguousPollDelayMs  = 1;
@@ -208,7 +208,7 @@ function registerArchiveMarkerTests() {
 function registerArchiveStartTests() {
 
     describe('startArchiveRound', function () {
-        // flush() hands over whatever hub._resolveBtcLatestBlock() returned, and that is
+        // flush() hands over whatever hub.resolveBtcLatestBlock() returned, and that is
         // null on a stale pushed tip, an over-lag indexer, or a failed RPC. A non-finite
         // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch (the
         // per-hub gossip registry, scoped by its own contract to the coarse sender

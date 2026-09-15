@@ -164,7 +164,7 @@ describe('Regression: Consensus (PBFT)', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
             hub.capabilitySnapshot = buryingSnapshotFake();
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(TIP);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(TIP);
 
             let promise = consensus.propose({ cfg: 1 });
             await new Promise(r => setImmediate(r));
@@ -195,7 +195,7 @@ describe('Regression: Consensus (PBFT)', function () {
       function registerNestedSuite1Part2() {
     it('lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
             hub.capabilitySnapshot = buryingSnapshotFake();
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let { snapshot, requestedBlockIndex } = await consensus.lockSnapshot();
             expect(requestedBlockIndex).to.equal(800000);
             expect(snapshot.blockIndex).to.equal(800000 - BUFFER);

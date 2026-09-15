@@ -83,7 +83,7 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part1() {
     }); // we are val-b (follower)
     // The follower bounds the leader-stamped btcBlockHeight against its own BTC
     // tip, which a real federated hub always has. Same height the PROPOSE carries.
-    oracleConsensusEarlyMessageBufferForF7Suite1Hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
+    oracleConsensusEarlyMessageBufferForF7Suite1Hub.resolveBtcLatestBlock = sinon.stub().resolves(1000);
     oracleConsensusEarlyMessageBufferForF7Suite1Pm = oracleConsensusEarlyMessageBufferForF7Suite1Hub._peerManager;
     oracleConsensusEarlyMessageBufferForF7Suite1OracleRound = {
       getSubmissions: sinon.stub().returns(new Map())

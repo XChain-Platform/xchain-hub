@@ -153,7 +153,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         // A real federated hub always resolves a BTC tip of its own, and the follower
         // now bounds the leader-stamped btcBlockHeight against it, so the fixture has
         // to model one. Same height the PROPOSE carries: an honest round in lockstep.
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(1000);
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         // A federated hub refuses a round with no deterministic capability snapshot, so the
         // harness models one over the same validators: these cases are about something else,

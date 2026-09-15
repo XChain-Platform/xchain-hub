@@ -46,7 +46,7 @@ function buildPub() {
             anchorReward: '10.00000000',
             resolveSourceByPubkey: async (pk) => 'src_' + String(pk).toLowerCase().substring(0, 12)
         },
-        _resolveBtcLatestBlock: async () => MAX_BLOCK
+        resolveBtcLatestBlock: async () => MAX_BLOCK
     };
     return { pub: new StateAnchorPublisher(hub), me: identity.getPubkeyHex().toLowerCase() };
 }

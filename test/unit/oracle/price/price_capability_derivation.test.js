@@ -175,7 +175,7 @@ function registerFixtureHooks() {
         hub.oracleConsensus        = null;
         // A chain-only hub has no peer manager: startP2P never ran.
         hub.getPeerManager         = sinon.stub().returns(null);
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(TIP);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(TIP);
         agg = new PriceAggregator(hub);
     });
     afterEach(function () {

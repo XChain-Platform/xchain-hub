@@ -48,7 +48,7 @@ function mkPub(){
         network: 'regtest', p2pConfig: {},
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     });
     return { pub, identity };
 }

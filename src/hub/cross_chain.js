@@ -30,7 +30,7 @@ class CrossChain {
                 CrossChainBridgeEngine, StateCheckpointEngine, RetractionConsensus,
                 StateAnchorPublisher } = this.constructor.modules;
         this.crossChain = new CrossChainEngine(this);
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         this.crossChain.setValidatorSet(validators);
 
         let chainPairMap = await this.loadChainPairValidators();

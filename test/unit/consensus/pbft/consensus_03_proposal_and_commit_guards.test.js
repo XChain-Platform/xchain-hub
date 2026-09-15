@@ -28,7 +28,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 
@@ -318,7 +318,7 @@ it('handlePrePrepare uses the snapshot quorum when a snapshot is available', asy
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 900000)),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(900000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus.handlePrePrepare({

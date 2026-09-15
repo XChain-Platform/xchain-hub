@@ -327,7 +327,7 @@ function registerFeature20stop() {
 function registerFeature21eventEmitterPart1() {
   it('emits match:finalized when a match is inserted', async function () {
     let hub = makeDexHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(100);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(100);
     // _insertMatchRow reads affectedRows then re-reads the row; consensus single-node finalizes inline.
     hub.db.doQuery = sinon.stub().resolves({
       affectedRows: 1

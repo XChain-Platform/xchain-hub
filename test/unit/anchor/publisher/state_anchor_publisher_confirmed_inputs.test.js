@@ -49,7 +49,7 @@ function buildPub(utxos, extra) {
         getPeerManager: () => ({ broadcast() {}, on() {}, removeListener() {} }),
         p2pConfig: { DOGE_ADDRESS: 'nsTakeTestAddress0000000000000000' },
         rewardTracker: { anchorReward: '10.00000000', resolveSourceByPubkey: async () => 'src' },
-        _resolveBtcLatestBlock: async () => 100,
+        resolveBtcLatestBlock: async () => 100,
         oraclePublisher: { encoder: encoder, walletSignFn: async () => { signed++; return 'deadbeef'; } }
     }, extra || {});
     let pub = new StateAnchorPublisher(hub);

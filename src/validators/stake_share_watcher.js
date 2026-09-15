@@ -70,7 +70,7 @@ function envList(value) {
 class StakeShareWatcher {
 
     /**
-     * @param {object} hub   XChainHub (needs _resolveIndexerUrl, btcIndexerHeaders;
+     * @param {object} hub   XChainHub (needs resolveIndexerUrl, btcIndexerHeaders;
      *                       capabilityRegistry and capabilitySnapshot are used when present).
      * @param {object} [opts] test seams: env, now, log, axios, monitor, pollMs.
      */
@@ -176,7 +176,7 @@ class StakeShareWatcher {
 
     async pollChain(chain, sources) {
         let url;
-        try { url = await this.hub._resolveIndexerUrl(chain); }
+        try { url = await this.hub.resolveIndexerUrl(chain); }
         catch (err) { url = null; }
         if (!url) {
             for (let cap of this.capabilities) {

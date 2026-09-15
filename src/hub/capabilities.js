@@ -108,7 +108,7 @@ class Capabilities {
             throw new Error('capability config must be a JSON object');
         // Validate BEFORE merging so a divergent file is refused whole and a hot-reload
         // leaves the running hub on its previous validated config.
-        if('CAPABILITIES' in parsed) this._assertCanonicalMinStakes(parsed.CAPABILITIES);
+        if('CAPABILITIES' in parsed) this.assertCanonicalMinStakes(parsed.CAPABILITIES);
         // Same for a FULLNODE override: its consensus knobs must come from the pinned
         // coin bundle every service ships, or this hub runs a challenge schedule and
         // reward split its peers reject.

@@ -80,7 +80,7 @@ module.exports = {
     // stop: the fork case is omitting min_stake and letting each indexer apply its
     // own local threshold, and the feed omits nothing. It answers with the canonical
     // floor from the pinned staking bundle, which is the value
-    // XChainHub._assertCanonicalMinStakes refuses to let a configured hub diverge
+    // XChainHub.assertCanonicalMinStakes refuses to let a configured hub diverge
     // from, so the request formed here is the request every peer forms.
     //
     // A configured threshold always wins (this is only reached once the registry

@@ -35,7 +35,7 @@ const BURIED = BLOCK - 6;
 const ROUND  = 4242;
 
 // coins/BTC.js STAKING.CAPABILITIES.price.MIN_STAKE, the floor
-// XChainHub._assertCanonicalMinStakes refuses to let a configured hub diverge from.
+// XChainHub.assertCanonicalMinStakes refuses to let a configured hub diverge from.
 const CANONICAL_PRICE_FLOOR = '1000.00000000';
 
 // The five testnet validators whose frames the public-tier hub receives. Distinct
@@ -124,7 +124,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
         hub.network                = 'testnet';
         hub._resolveBtcIndexerUrl  = async () => 'http://indexer.local/rpc';
         hub.btcIndexerHeaders     = () => ({});
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
         // A live registry with NO configured thresholds: exactly what a hub booted
         // without HUB_CAPABILITY_CONFIG carries.
         hub.capabilityRegistry     = new CapabilityRegistry(hub);

@@ -76,7 +76,7 @@ function makeHub(venue, opts) {
             getMinStake: () => opts.minStake === undefined ? '25000' : opts.minStake
         },
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json', 'x-api-key': 'k' }),
-        _resolveIndexerUrl: async (coin) => (opts.urls === undefined ? 'http://indexer/' + coin : opts.urls[coin] || null)
+        resolveIndexerUrl: async (coin) => (opts.urls === undefined ? 'http://indexer/' + coin : opts.urls[coin] || null)
     };
 }
 

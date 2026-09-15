@@ -208,7 +208,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
             getActiveValidatorSnapshot: sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, BLOCK)),
             getQuorum:                  sinon.stub().returns(3)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
 
         consensus = new Consensus(hub);
         consensus.setValidatorSet(WEIGHTED_VALIDATORS_4);

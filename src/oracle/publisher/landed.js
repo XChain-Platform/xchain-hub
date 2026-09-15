@@ -123,14 +123,14 @@ module.exports = {
     // { batches: [{first_round,last_round}], truncated } from the landing chain's
     // indexer, or null when it cannot be asked. The URL resolves the way every other
     // per-coin indexer read on the hub does (env <COIN>_INDEXER_API_URL, then the hub's
-    // configs table via XChainHub._resolveIndexerUrl); the key is the same per-coin
+    // configs table via XChainHub.resolveIndexerUrl); the key is the same per-coin
     // x-api-key the anchor publisher attaches, because getpricebatches is a
     // federation read on the indexer.
     async fetchLandedBatches(first, last) {
         let url = null;
         try {
-            if (this.hub && typeof this.hub._resolveIndexerUrl === 'function') {
-                url = await this.hub._resolveIndexerUrl(PRICE_LANDING_COIN);
+            if (this.hub && typeof this.hub.resolveIndexerUrl === 'function') {
+                url = await this.hub.resolveIndexerUrl(PRICE_LANDING_COIN);
             } else {
                 // Literal names, deliberately: a computed process.env[expr] read is
                 // invisible to the env-var documentation gate.

@@ -31,7 +31,7 @@
  *
  * The floor served here is the canonical one from the pinned BTC staking bundle
  * (coins/BTC.js STAKING.CAPABILITIES), NOT a local invention: it is the same
- * value XChainHub._assertCanonicalMinStakes requires every configured hub to
+ * value XChainHub.assertCanonicalMinStakes requires every configured hub to
  * carry, refusing boot on a divergence, and the bundle itself is verified
  * against CONSENSUS_CONFIG_PIN before the hub opens its database. So the request
  * this feed lets the hub form is byte-for-byte the request its validators form,
@@ -124,7 +124,7 @@ class StakeWeightFeed {
 
     // Read the floor out of the canonical staking bundle. Staking is BTC-anchored,
     // so BTC is the only bundle that carries thresholds, and the network follows
-    // XChainHub._assertCanonicalMinStakes' own convention (a hub that declared
+    // XChainHub.assertCanonicalMinStakes' own convention (a hub that declared
     // none is asserted against mainnet).
     resolveFloor(capability) {
         let network = (this.hub && this.hub.network) || 'mainnet';

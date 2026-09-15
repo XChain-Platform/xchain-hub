@@ -35,7 +35,7 @@
  *      reorg-able origin request must never be materialized, because the BTC-side
  *      row cannot be retracted.
  *   3. Run a PBFT round over the v3 canonical, pinned at snapshot_block =
- *      hub._resolveBtcLatestBlock(). Each follower re-verifies the origin request
+ *      hub.resolveBtcLatestBlock(). Each follower re-verifies the origin request
  *      against its OWN origin indexer before signing, so a Byzantine leader
  *      cannot get the federation to vouch for a request nobody else can see.
  *   4. The round leader broadcasts ATTEST v3 on BTC carrying the quorum's
@@ -166,11 +166,11 @@ class AttestationRelay {
             return;
         }
 
-        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+        if(this.hub && typeof this.hub.resolveIndexerUrl === 'function'){
             for(const coin of Object.keys(this.indexers)){
                 if(this.indexers[coin].url) continue;
                 try {
-                    const u = await this.hub._resolveIndexerUrl(coin);
+                    const u = await this.hub.resolveIndexerUrl(coin);
                     if(u) this.indexers[coin].url = u;
                 } catch(_){ /* unresolvable: warned below */ }
             }

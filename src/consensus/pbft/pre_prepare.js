@@ -262,8 +262,8 @@ module.exports = {
         if (!this.pendingProposals.has(seq)) {
             if (!stampedHeightUsable(this, seq, envelope, btcBlockHeight)) return;
             if (this.isFederated()) {
-                let myTip = this.hub && this.hub._resolveBtcLatestBlock
-                    ? await this.hub._resolveBtcLatestBlock()
+                let myTip = this.hub && this.hub.resolveBtcLatestBlock
+                    ? await this.hub.resolveBtcLatestBlock()
                     : null;
                 if (!tipBoundOk(this, seq, envelope, btcBlockHeight, myTip)) return;
             }

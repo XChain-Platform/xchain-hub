@@ -14,10 +14,10 @@ const XChainHub = require('../../../../src/XChainHub.js');
 
 let server, url, reply;
 
-// The method reads nothing off `this` but _resolveIndexerUrl and _admissionTipSeen.
+// The method reads nothing off `this` but resolveIndexerUrl and _admissionTipSeen.
 function admissionHubStub(){
     return {
-        _resolveIndexerUrl:  async () => url,
+        resolveIndexerUrl:  async () => url,
         _admissionTipSeen:   new Map(),
         resolveAdmissionTip: XChainHub.prototype.resolveAdmissionTip,
         admissionTipFresh:   XChainHub.prototype.admissionTipFresh,

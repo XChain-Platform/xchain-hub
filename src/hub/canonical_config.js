@@ -98,7 +98,7 @@ class CanonicalConfig {
     // (min_stake_unconfigured) because omitting min_stake would let each indexer apply
     // its OWN threshold and fork the qualified set. Warning once at boot and then
     // failing every round forever is the behaviour this refusal replaces.
-    _assertCanonicalMinStakes(caps){
+    assertCanonicalMinStakes(caps){
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
         if(hubConfig.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
             logger.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +

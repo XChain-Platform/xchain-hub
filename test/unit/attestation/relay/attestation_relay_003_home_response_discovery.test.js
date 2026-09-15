@@ -85,8 +85,8 @@ function makeHub(overrides = {}) {
         },
         getPeerManager: () => ({}),
         getIdentity:    () => ({ getPubkeyHex: () => PUBKEY_A, sign: () => SIG_A }),
-        _resolveBtcLatestBlock: sinon.stub().resolves(1000),
-        _resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
+        resolveBtcLatestBlock: sinon.stub().resolves(1000),
+        resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
         ...overrides,
     };
 }
@@ -252,7 +252,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 // ── 3b. Response-leg discovery ─────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('relays nothing below ATTEST_RELAY_ACTIVATION', async function () {
             const relay = makeRelay(
-                { network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) },
+                { network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(962999) },
                 [originRow()], [homeRelayedRow()]);
             await relay._poll();
             expect(relay.consensus.propose.called).to.equal(false);

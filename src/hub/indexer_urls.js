@@ -32,7 +32,7 @@ class IndexerUrls {
     // nothing else; the configs table only confirms that network has an indexer, and a
     // tree carrying only OTHER networks throws. The old first-found order let a mainnet
     // validator anchor its oracle round to the REGTEST tip while every consensus gate
-    // still read mainnet, and _indexerCoinMismatch cannot see that, because a regtest
+    // still read mainnet, and indexerCoinMismatch cannot see that, because a regtest
     // BTC indexer truthfully reports coin=BTC. A hub with no declared network keeps the
     // regtest>testnet>mainnet order for dev loops, defaulting to mainnet when no configs
     // have loaded yet.
@@ -81,7 +81,7 @@ class IndexerUrls {
         return headers;
     }
 
-    // Resolution order is _resolveIndexerUrl's, below: the explicit BTC_INDEXER_API_URL
+    // Resolution order is resolveIndexerUrl's, below: the explicit BTC_INDEXER_API_URL
     // override, then the BTC_INDEXER_URL alias, then the hub's own configs table, and
     // null when none yields a usable URL. The alias matters most here, since a hub
     // setting only that name falls back to seed-local snapshots and self-signs at
@@ -93,9 +93,9 @@ class IndexerUrls {
     // closed; an unreachable or silent one keeps the legacy behaviour, because
     // "cannot verify" is not evidence of a misconfiguration.
     async _resolveBtcIndexerUrl(){
-        let url = await this._resolveIndexerUrl('BTC');
+        let url = await this.resolveIndexerUrl('BTC');
         if(!url) return null;
-        if(await this._indexerCoinMismatch(url, 'BTC')) return null;
+        if(await this.indexerCoinMismatch(url, 'BTC')) return null;
         return url;
     }
 
@@ -103,7 +103,7 @@ class IndexerUrls {
     // `want`. Unknown, unreachable or no coin field means false, so an unverifiable
     // answer never blocks. Verdicts cache per URL: 'ok' is permanent for the process,
     // a mismatch is re-probed on the TTL so a repointed hub recovers on its own.
-    async _indexerCoinMismatch(url, want){
+    async indexerCoinMismatch(url, want){
         if(hubConfig.INDEXER_COIN_CHECK === '0') return false;
         if(!this._indexerCoinVerdicts) this._indexerCoinVerdicts = new Map();
         const RECHECK_MS = 60000;
@@ -143,7 +143,7 @@ class IndexerUrls {
     // Per-coin indexer JSON-RPC URL: env <COIN>_INDEXER_API_URL, then <COIN>_INDEXER_URL,
     // then the hub's configs table (xchain-node's updateconfig push), so a configs-only
     // hub still reaches its indexers. Returns null when nothing is configured.
-    async _resolveIndexerUrl(coin){
+    async resolveIndexerUrl(coin){
         coin = String(coin || '').toUpperCase();
         const env = hubConfig.env();
         if(env[coin + '_INDEXER_API_URL']) return env[coin + '_INDEXER_API_URL'];

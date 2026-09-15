@@ -23,7 +23,7 @@ const { waitUntil }      = require('../../helpers/waitUntil');
 // mirrors the live set at call time (quorum is still frozen into pending at round
 // start, so the "locked quorum survives set changes" invariant is unaffected).
 function wireLiveMirrorSnapshot(engine, hub) {
-    hub._resolveBtcLatestBlock = async () => 900000;
+    hub.resolveBtcLatestBlock = async () => 900000;
     hub.capabilitySnapshot = {
         getSnapshot: async () => ({ validators: engine.validatorSet.slice() }),
         getQuorum: (snap) => {
@@ -123,7 +123,7 @@ function feature11snapshotGatedPBFTTallyWire() {
   rootSuiteEngine.setValidatorSet(feature11snapshotGatedPBFTTallyMEMBERS);
   rootSuitePm.validatorAddr = feature11snapshotGatedPBFTTallyMEMBERS[0].addr;
   rootSuitePm.validatorPubkeys = new Map([...feature11snapshotGatedPBFTTallyMEMBERS.map(v => [v.addr, v.pubkey]), [feature11snapshotGatedPBFTTallyOUTSIDER.addr, feature11snapshotGatedPBFTTallyOUTSIDER.pubkey], [feature11snapshotGatedPBFTTallyALT_ADDR, feature11snapshotGatedPBFTTallyMEMBERS[1].pubkey]]);
-  rootSuiteHub._resolveBtcLatestBlock = async () => 900000;
+  rootSuiteHub.resolveBtcLatestBlock = async () => 900000;
   rootSuiteHub.capabilitySnapshot = {
     getSnapshot: sinon.stub().resolves({
       validators: feature11snapshotGatedPBFTTallyMEMBERS.slice(),

@@ -42,7 +42,7 @@ function mkPub(nextSeqRow){
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
         rewardTracker: { anchorReward: '10.00000000', resolveSourceByPubkey: async () => 'src' },
-        _resolveBtcLatestBlock: async () => 100
+        resolveBtcLatestBlock: async () => 100
     });
 }
 

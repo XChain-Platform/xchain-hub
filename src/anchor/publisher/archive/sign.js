@@ -47,7 +47,7 @@ module.exports = {
         // BTC tip (anti-spam; the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
         if(!Number.isFinite(electionBlock)) return;
-        let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+        let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;

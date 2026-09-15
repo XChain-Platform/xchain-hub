@@ -242,7 +242,7 @@ class PeerManager extends EventEmitter {
 
     // Blocks a confirmed STAKE waits before it joins the chain-effective signer set.
     // Read from the canonical coins registry (staking is BTC-anchored, the same path
-    // _assertCanonicalMinStakes uses) so an operator-facing hint can never quote a
+    // assertCanonicalMinStakes uses) so an operator-facing hint can never quote a
     // delay the chain does not enforce. Null when the network cannot be resolved;
     // callers then omit the hint rather than print an invented number.
     static stakeActivationBlocks(network) {

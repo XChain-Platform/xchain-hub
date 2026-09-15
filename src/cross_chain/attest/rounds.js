@@ -56,8 +56,8 @@ module.exports = {
         // OracleConsensus). The block height is stamped into the PROPOSE
         // envelope below so followers resolve the identical snapshot. Falls
         // back to the live validator set when the indexer is unreachable.
-        let btcBlockHeight = this.hub._resolveBtcLatestBlock
-            ? await this.hub._resolveBtcLatestBlock()
+        let btcBlockHeight = this.hub.resolveBtcLatestBlock
+            ? await this.hub.resolveBtcLatestBlock()
             : null;
 
         // Single-node fallback

@@ -36,7 +36,7 @@ describe('XChainHub: validator-set propagation (F1)', function () {
     beforeEach(function () {
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
         hub.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
-        sinon.stub(hub, '_loadValidatorSet').resolves(SET);
+        sinon.stub(hub, 'loadValidatorSet').resolves(SET);
         sinon.stub(hub, 'loadValidatorPubkeys').resolves();
         sinon.stub(hub, 'loadChainPairValidators').resolves({ 'BTC-LTC': [] });
 

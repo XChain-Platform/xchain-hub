@@ -347,21 +347,21 @@ function registerFeature12resolveCapabilityValidators() {
   });
 }
 function registerFeature13resolveSnapshotBlockPart1() {
-  it('delegates to hub._resolveBtcLatestBlock', async function () {
+  it('delegates to hub.resolveBtcLatestBlock', async function () {
     let hub = makeDexHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(500);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(500);
     expect(await new CrossChainDexEngine(hub).resolveSnapshotBlock()).to.equal(500);
   });
   it('falls back to XDEX_SNAPSHOT_BLOCK override when BTC tip is null', async function () {
     let hub = makeDexHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
     let eng = new CrossChainDexEngine(hub);
     eng._snapshotBlockOverride = 42;
     expect(await eng.resolveSnapshotBlock()).to.equal(42);
   });
   it('returns null when no BTC tip and no override', async function () {
     let hub = makeDexHub();
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
     let eng = new CrossChainDexEngine(hub);
     eng._snapshotBlockOverride = NaN;
     expect(await eng.resolveSnapshotBlock()).to.be.null;

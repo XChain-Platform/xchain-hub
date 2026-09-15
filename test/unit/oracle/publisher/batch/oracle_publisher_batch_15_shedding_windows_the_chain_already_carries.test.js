@@ -44,7 +44,7 @@ let logs;
 // A hub whose landing-chain indexer answers getpricebatches with `batches`.
 function hubWithIndexer(h, batches, opts) {
             opts = opts || {};
-            h.hub._resolveIndexerUrl = sinon.stub().resolves(opts.url === undefined ? 'http://doge-indexer:3114' : opts.url);
+            h.hub.resolveIndexerUrl = sinon.stub().resolves(opts.url === undefined ? 'http://doge-indexer:3114' : opts.url);
             let rpc = sinon.stub(h.p, 'indexerRpc');
             if (opts.reject) rpc.rejects(new Error(opts.reject));
             else rpc.resolves({ block_index: 67875698, batches: batches, truncated: !!opts.truncated });

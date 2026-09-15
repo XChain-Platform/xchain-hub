@@ -92,7 +92,7 @@ function makeHub(validators) {
                 return { validators: validators.map(v => ({ pubkey: v.pubkey, amount: v.weight })) };
             }
         },
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     };
     return { hub, db, broadcaster };
 }

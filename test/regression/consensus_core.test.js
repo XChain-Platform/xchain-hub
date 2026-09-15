@@ -99,7 +99,7 @@ function registerSuitePart5() {
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             // Only 1 prepare (from PRE_PREPARE sender) + self = 2, need 3
             await consensus.handlePrePrepare({
@@ -292,7 +292,7 @@ function configureFederationSnapshot() {
         getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
         getQuorum: sinon.stub().returns(3)
     };
-    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 }
 
 async function createPendingProposal(config, digest) {

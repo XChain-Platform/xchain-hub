@@ -83,7 +83,7 @@ function buildPub(rows) {
             anchorReward: '10.00000000',
             resolveSourceByPubkey: async (pk) => srcOf(pk)
         },
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     };
     return { pub: new StateAnchorPublisher(hub), identity };
 }

@@ -101,7 +101,7 @@ class Validators {
     // Load the active set once and push it into every running consensus engine, so
     // runtime membership changes reach ALL PBFT subsystems.
     async propagateValidatorSet(){
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         if (this.consensus)       this.consensus.setValidatorSet(validators);
         if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validators);
         if (this.crossChain) {
@@ -133,7 +133,7 @@ class Validators {
         }
     }
 
-    async _loadValidatorSet(){
+    async loadValidatorSet(){
         try {
             let rows = await this.db.findActiveValidators();
             return rows.map(r => ({ pubkey: r.signing_pubkey, addr: r.addr }));

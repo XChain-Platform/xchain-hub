@@ -64,7 +64,7 @@ class Oracle {
         this.oracle = new OracleRound(this);
 
         this.oracleConsensus = new OracleConsensus(this, this.oracle);
-        let validators = await this._loadValidatorSet();
+        let validators = await this.loadValidatorSet();
         this.oracleConsensus.setValidatorSet(validators);
 
         this.oracle.setConsensus(this.oracleConsensus);
@@ -91,7 +91,7 @@ class Oracle {
                 // rotated-in validators escaped slashing and removed ones kept accruing misses.
                 // On a transient load failure fall back to the last-known-good set rather than
                 // skipping the participation check for the round.
-                let currentValidators = await this._loadValidatorSet();
+                let currentValidators = await this.loadValidatorSet();
                 if(currentValidators.length > 0){
                     validators = currentValidators;
                 }

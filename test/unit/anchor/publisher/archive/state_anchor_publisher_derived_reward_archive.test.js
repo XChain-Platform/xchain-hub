@@ -35,7 +35,7 @@ function mkPub(network, rewardRows, hits){
         network, p2pConfig: {},
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     });
     const me = identity.getPubkeyHex().toLowerCase();
     pub._getActiveOraclePublishPubkeys = async () => [me];
@@ -83,7 +83,7 @@ function mkSelector(network, rows, maxBatch, hits){
         network, p2pConfig: {},
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),
-        _resolveBtcLatestBlock: async () => BLOCK
+        resolveBtcLatestBlock: async () => BLOCK
     });
     pub.maxBatch = maxBatch;
     const me = identity.getPubkeyHex().toLowerCase();

@@ -33,7 +33,7 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockTime: now - 60
     });
     let direct = sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null);
-    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub._resolveBtcLatestBlock()).to.equal(800000);
+    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(800000);
     // Fresh tip short-circuits path 1; the direct path is never consulted.
     expect(direct.called).to.equal(false);
   });
@@ -45,7 +45,7 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockTime: now - 7200
     });
     sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null); // direct path unavailable → null
-    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub._resolveBtcLatestBlock()).to.equal(null);
+    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(null);
   });
   it('falls through when the pushed tip has no block_time (unverifiable)', async function () {
     rootSuiteMockDb.getChainTip = sinon.stub().resolves({
@@ -53,11 +53,11 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockTime: 0
     });
     sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null);
-    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub._resolveBtcLatestBlock()).to.equal(null);
+    expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(null);
   });
 }
 function registerFeature14resolveBtcLatestBlockPushedTipFreshness() {
-  describe('_resolveBtcLatestBlock pushed-tip freshness', function () {
+  describe('resolveBtcLatestBlock pushed-tip freshness', function () {
     beforeEach(function () {
       feature14resolveBtcLatestBlockPushedTipFreshnessHub = new rootSuiteXChainHub('h', 1, 'd', 'u', 'p', null);
       feature14resolveBtcLatestBlockPushedTipFreshnessHub.db = rootSuiteMockDb;
@@ -118,7 +118,7 @@ function registerFeature15ownPubkeySignerSetSelfReport() {
       feature15ownPubkeySignerSetSelfReportHub.identity = {
         getPubkeyHex: () => feature15ownPubkeySignerSetSelfReportOWN
       };
-      feature15ownPubkeySignerSetSelfReportHub._resolveBtcLatestBlock = async () => 100;
+      feature15ownPubkeySignerSetSelfReportHub.resolveBtcLatestBlock = async () => 100;
       feature15ownPubkeySignerSetSelfReportWarnings = [];
       feature15ownPubkeySignerSetSelfReportLogs = [];
       sinon.stub(console, 'warn').callsFake(m => feature15ownPubkeySignerSetSelfReportWarnings.push(String(m)));
@@ -162,17 +162,17 @@ function registerFeature16validatorSetLoadersPart1() {
     expect(threw).to.be.true;
     expect(feature16validatorSetLoadersHub.peerManager.setValidatorPubkeys.called).to.be.false;
   });
-  it('_loadValidatorSet maps rows and returns [] on error', async function () {
+  it('loadValidatorSet maps rows and returns [] on error', async function () {
     rootSuiteMockDb.doQuery.resolves([{
       signing_pubkey: 'pk1',
       addr: 'a1'
     }]);
-    expect(await feature16validatorSetLoadersHub._loadValidatorSet()).to.deep.equal([{
+    expect(await feature16validatorSetLoadersHub.loadValidatorSet()).to.deep.equal([{
       pubkey: 'pk1',
       addr: 'a1'
     }]);
     rootSuiteMockDb.doQuery.rejects(new Error('db down'));
-    expect(await feature16validatorSetLoadersHub._loadValidatorSet()).to.deep.equal([]);
+    expect(await feature16validatorSetLoadersHub.loadValidatorSet()).to.deep.equal([]);
   });
 }
 function registerFeature16validatorSetLoadersPart2() {

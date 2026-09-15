@@ -51,7 +51,7 @@ function registerACanonicalCapabilityMissingFromTheConfigEnSuite1Part1() {
   it('refuses at startup on mainnet, naming the capability and that consensus cannot run', function () {
     let err = null;
     try {
-      makeHub('mainnet')._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'));
+      makeHub('mainnet').assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'));
     } catch (e) {
       err = e;
     }
@@ -65,16 +65,16 @@ function registerACanonicalCapabilityMissingFromTheConfigEnSuite1Part1() {
     expect(err.message).to.include(CANONICAL.full_node.MIN_STAKE);
   });
   it('refuses on testnet too', function () {
-    expect(() => makeHub('testnet')._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('attestation'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
+    expect(() => makeHub('testnet').assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('attestation'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
   });
 
   // Unlike a low threshold (deliberate on a test venue), a hole is never
   // deliberate and breaks every round on regtest exactly as it does on mainnet.
   it('refuses on regtest, where a low floor would only warn', function () {
-    expect(() => makeHub('regtest')._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
+    expect(() => makeHub('regtest').assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
   });
   it('refuses in standalone mode (no HUB_NETWORK)', function () {
-    expect(() => makeHub(undefined)._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('price'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
+    expect(() => makeHub(undefined).assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('price'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
   });
   it('names every missing capability in one message', function () {
     let caps = canonicalCaps();
@@ -82,7 +82,7 @@ function registerACanonicalCapabilityMissingFromTheConfigEnSuite1Part1() {
     delete caps.attestation;
     let err = null;
     try {
-      makeHub('mainnet')._assertCanonicalMinStakes(caps);
+      makeHub('mainnet').assertCanonicalMinStakes(caps);
     } catch (e) {
       err = e;
     }
@@ -91,7 +91,7 @@ function registerACanonicalCapabilityMissingFromTheConfigEnSuite1Part1() {
     expect(err.message).to.include('full_node');
   });
   it('refuses an empty CAPABILITIES object (a config that declares none)', function () {
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes({})).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes({})).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
   });
 
   // The snapshot is federation-wide, so a hub that opts out of SERVING a
@@ -103,20 +103,20 @@ function registerACanonicalCapabilityMissingFromTheConfigEnSuite1Part2() {
     hub.p2pConfig = {
       DISABLED_CAPABILITIES: ['full_node']
     };
-    expect(() => hub._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
+    expect(() => hub.assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.throw().with.property('code', 'CAPABILITY_UNCONFIGURED');
   });
   it('surfaces threshold mismatches alongside the refusal', function () {
     let caps = aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node');
     caps.cross_chain.MIN_STAKE = '1000.00000000';
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(caps)).to.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(caps)).to.throw();
     expect(xChainHubAssertCanonicalMinStakesSuite3WarnStub.calledWithMatch(/cross_chain/)).to.equal(true);
   });
   it('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 bypasses the refusal too', function () {
     process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT = '1';
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.not.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(aCanonicalCapabilityMissingFromTheConfigEnSuite1Without('full_node'))).to.not.throw();
   });
   it('accepts a canonical config with every capability present', function () {
-    expect(() => makeHub('regtest')._assertCanonicalMinStakes(canonicalCaps())).to.not.throw();
+    expect(() => makeHub('regtest').assertCanonicalMinStakes(canonicalCaps())).to.not.throw();
   });
 }
 let loadCapabilityConfigFileIntegrationSuite2TmpPath;
@@ -192,19 +192,19 @@ function registerXChainHubAssertCanonicalMinStakesSuite3Part1() {
     delete process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT;
   });
   it('accepts the canonical thresholds on mainnet', function () {
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(canonicalCaps())).to.not.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(canonicalCaps())).to.not.throw();
   });
   it('accepts numerically-equal spellings ("5000" == "5000.00000000")', function () {
     let caps = canonicalCaps();
     caps.cross_chain.MIN_STAKE = '5000';
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(caps)).to.not.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(caps)).to.not.throw();
   });
   it('refuses a divergent floor on mainnet (the ValidatorService 1000-vs-5000 footgun)', function () {
     let caps = canonicalCaps();
     caps.cross_chain.MIN_STAKE = '1000.00000000';
     let err = null;
     try {
-      makeHub('mainnet')._assertCanonicalMinStakes(caps);
+      makeHub('mainnet').assertCanonicalMinStakes(caps);
     } catch (e) {
       err = e;
     }
@@ -216,14 +216,14 @@ function registerXChainHubAssertCanonicalMinStakesSuite3Part1() {
   it('refuses on testnet too', function () {
     let caps = canonicalCaps();
     caps.price.MIN_STAKE = '1';
-    expect(() => makeHub('testnet')._assertCanonicalMinStakes(caps)).to.throw().with.property('code', 'MIN_STAKE_MISMATCH');
+    expect(() => makeHub('testnet').assertCanonicalMinStakes(caps)).to.throw().with.property('code', 'MIN_STAKE_MISMATCH');
   });
   it('treats a missing MIN_STAKE key as a mismatch (would seed a genesis floor of 0)', function () {
     let caps = canonicalCaps();
     delete caps.attestation.MIN_STAKE;
     let err = null;
     try {
-      makeHub('mainnet')._assertCanonicalMinStakes(caps);
+      makeHub('mainnet').assertCanonicalMinStakes(caps);
     } catch (e) {
       err = e;
     }
@@ -234,27 +234,27 @@ function registerXChainHubAssertCanonicalMinStakesSuite3Part1() {
   it('treats a non-numeric MIN_STAKE as a mismatch', function () {
     let caps = canonicalCaps();
     caps.price.MIN_STAKE = 'lots';
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(caps)).to.throw().with.property('code', 'MIN_STAKE_MISMATCH');
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(caps)).to.throw().with.property('code', 'MIN_STAKE_MISMATCH');
   });
 }
 function registerXChainHubAssertCanonicalMinStakesSuite3Part2() {
   it('warns instead of throwing on regtest (venues run deliberately low floors)', function () {
     let caps = canonicalCaps();
     caps.cross_chain.MIN_STAKE = '1000.00000000';
-    expect(() => makeHub('regtest')._assertCanonicalMinStakes(caps)).to.not.throw();
+    expect(() => makeHub('regtest').assertCanonicalMinStakes(caps)).to.not.throw();
     expect(xChainHubAssertCanonicalMinStakesSuite3WarnStub.calledWithMatch(/MIN_STAKE mismatch/)).to.equal(true);
   });
   it('warns instead of throwing in standalone mode (no HUB_NETWORK)', function () {
     let caps = canonicalCaps();
     caps.cross_chain.MIN_STAKE = '1000.00000000';
-    expect(() => makeHub(undefined)._assertCanonicalMinStakes(caps)).to.not.throw();
+    expect(() => makeHub(undefined).assertCanonicalMinStakes(caps)).to.not.throw();
     expect(xChainHubAssertCanonicalMinStakesSuite3WarnStub.calledWithMatch(/MIN_STAKE mismatch/)).to.equal(true);
   });
   it('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 bypasses loudly, even on mainnet', function () {
     process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT = '1';
     let caps = canonicalCaps();
     caps.cross_chain.MIN_STAKE = '1000.00000000';
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(caps)).to.not.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(caps)).to.not.throw();
     expect(xChainHubAssertCanonicalMinStakesSuite3WarnStub.calledWithMatch(/XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT/)).to.equal(true);
   });
   it('ignores capabilities unknown to the canonical registry (warn only)', function () {
@@ -262,14 +262,14 @@ function registerXChainHubAssertCanonicalMinStakesSuite3Part2() {
     caps.custom_thing = {
       MIN_STAKE: '7'
     };
-    expect(() => makeHub('mainnet')._assertCanonicalMinStakes(caps)).to.not.throw();
+    expect(() => makeHub('mainnet').assertCanonicalMinStakes(caps)).to.not.throw();
     expect(xChainHubAssertCanonicalMinStakesSuite3WarnStub.calledWithMatch(/custom_thing/)).to.equal(true);
   });
   it('is a no-op for a missing/invalid CAPABILITIES object', function () {
     let hub = makeHub('mainnet');
-    expect(() => hub._assertCanonicalMinStakes(null)).to.not.throw();
-    expect(() => hub._assertCanonicalMinStakes([])).to.not.throw();
-    expect(() => hub._assertCanonicalMinStakes('nope')).to.not.throw();
+    expect(() => hub.assertCanonicalMinStakes(null)).to.not.throw();
+    expect(() => hub.assertCanonicalMinStakes([])).to.not.throw();
+    expect(() => hub.assertCanonicalMinStakes('nope')).to.not.throw();
   });
 
   // A capability ABSENT from the file was never visited by the
@@ -283,7 +283,7 @@ function registerXChainHubAssertCanonicalMinStakesSuite3Part2() {
     registerLoadCapabilityConfigFileIntegrationSuite2Part1.call(this);
   });
 }
-describe('XChainHub._assertCanonicalMinStakes', function () {
+describe('XChainHub.assertCanonicalMinStakes', function () {
   registerXChainHubAssertCanonicalMinStakesSuite3Part1.call(this);
   registerXChainHubAssertCanonicalMinStakesSuite3Part2.call(this);
 });

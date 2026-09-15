@@ -65,7 +65,7 @@ function makeEngine(opts){
         capabilitySnapshot: opts.capSnapshot || null,
         getPeerManager: () => null,
         getIdentity:    () => null,
-        _resolveBtcLatestBlock: async () => 150
+        resolveBtcLatestBlock: async () => 150
     };
     const engine = new CrossChainBridgeEngine(hub);
     const stub = () => ({ propose: sinon.stub().resolves(), start: sinon.stub(), stop: sinon.stub(),

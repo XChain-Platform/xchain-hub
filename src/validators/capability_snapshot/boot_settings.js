@@ -70,7 +70,7 @@ module.exports = {
     // regtest/standalone warn and accept so test venues can run deliberate
     // depths. XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 is the loud one-off bypass
     // for a coordinated fleet-wide change. Same shape and same reasoning as
-    // XChainHub._assertCanonicalMinStakes, which guards the identical fork
+    // XChainHub.assertCanonicalMinStakes, which guards the identical fork
     // class for MIN_STAKE.
     resolveReorgBuffer() {
         let raw = hubConfig.HUB_SNAPSHOT_REORG_BUFFER;

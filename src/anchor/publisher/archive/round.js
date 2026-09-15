@@ -103,7 +103,7 @@ module.exports = {
     },
 
     // Fail closed on an unresolved BTC tip. flush() passes whatever
-    // hub._resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
+    // hub.resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
     // is stale, the indexer lags past MAX_INDEXER_LAG_BLOCKS, or the RPC fails. A null
     // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch, whose
     // own contract scopes it to the coarse BUNDLE_DONE / FINALIZED sender pre-filter: it

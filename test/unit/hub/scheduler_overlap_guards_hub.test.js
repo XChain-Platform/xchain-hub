@@ -173,7 +173,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
     async function aRefreshFiringOnTopOfTest11() {
         const { gate, release } = makeGate();
         let first = true;
-        hub._resolveBtcLatestBlock = async () => {
+        hub.resolveBtcLatestBlock = async () => {
             if (first) { first = false; await gate; return 100; }
             return 200;
         };
@@ -196,17 +196,17 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
     }
 
     async function aRejectedRefreshDoesNotWedgeTest12() {
-        hub._resolveBtcLatestBlock = async () => { throw new Error('BTC tip lookup failed'); };
+        hub.resolveBtcLatestBlock = async () => { throw new Error('BTC tip lookup failed'); };
         await hub.refreshTransportSignerSet().catch(() => {});
         expect(hub._transportSetRefreshRunning, 'a failed refresh must not wedge the timer').to.equal(false);
 
-        hub._resolveBtcLatestBlock = async () => 200;
+        hub.resolveBtcLatestBlock = async () => 200;
         await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'the next refresh runs normally').to.equal(1);
     }
 
     async function anUnresolvedTipReleasesTheFlagTest13() {
-        hub._resolveBtcLatestBlock = async () => null;
+        hub.resolveBtcLatestBlock = async () => null;
         await hub.refreshTransportSignerSet();
         expect(setEffectiveSignerSet.callCount, 'no set is written on an unresolved tip').to.equal(0);
         expect(hub._transportSetRefreshRunning, 'the early return still clears the flag').to.equal(false);

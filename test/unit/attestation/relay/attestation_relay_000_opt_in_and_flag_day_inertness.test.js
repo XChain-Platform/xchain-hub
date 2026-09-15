@@ -85,8 +85,8 @@ function makeHub(overrides = {}) {
         },
         getPeerManager: () => ({}),
         getIdentity:    () => ({ getPubkeyHex: () => PUBKEY_A, sign: () => SIG_A }),
-        _resolveBtcLatestBlock: sinon.stub().resolves(1000),
-        _resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
+        resolveBtcLatestBlock: sinon.stub().resolves(1000),
+        resolveIndexerUrl:     sinon.stub().resolves('http://127.0.0.1:1/'),
         ...overrides,
     };
 }
@@ -179,18 +179,18 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 // ── 2. Inertness ────────────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('opt-in and flag-day inertness', function () { it('proposes nothing below ATTEST_RELAY_ACTIVATION', async function () {
             // mainnet arms at 963000; a BTC tip below it must relay nothing.
-            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) });
+            const relay = makeRelay({ network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(962999) });
             await relay._poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
 // ── 2. Inertness ────────────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('opt-in and flag-day inertness', function () { it('proposes at the activation height and not one block below it', async function () {
-            const below = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) });
+            const below = makeRelay({ network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(962999) });
             await below._poll();
             expect(below.consensus.propose.called).to.equal(false);
 
-            const at = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(963000) });
+            const at = makeRelay({ network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(963000) });
             await at._poll();
             expect(at.consensus.propose.calledOnce).to.equal(true);
             expect(at.consensus.propose.firstCall.args[1].row.snapshot_block).to.equal(963000);
@@ -198,7 +198,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 // ── 2. Inertness ────────────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('opt-in and flag-day inertness', function () { it('proposes nothing when the BTC tip cannot be resolved', async function () {
-            const relay = makeRelay({ _resolveBtcLatestBlock: sinon.stub().resolves(null) });
+            const relay = makeRelay({ resolveBtcLatestBlock: sinon.stub().resolves(null) });
             await relay._poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });

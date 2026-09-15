@@ -28,7 +28,7 @@ function wireFederationSnapshot(quorum, blockIndex, validators) {
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
             getQuorum:                  sinon.stub().returns(quorum)
         };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        hub.resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
         return snapshot;
     }
 
@@ -165,7 +165,7 @@ it('propose() weighted: proposal carries weighted + source-keyed validators + se
             // real whale snapshot it would clear 3S>2S on its own vote and self-delete.
             const EQUAL = WEIGHTED_VALIDATORS_4.map(v => ({ pubkey: v.pubkey, addr: v.addr, source: v.source, weight: '100' }));
             hub.network = 'testnet';
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(1);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(1);
             hub.capabilitySnapshot = {
                 getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(EQUAL, 1)),
                 getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 1, count: 4, validators: [] }),
@@ -201,7 +201,7 @@ describe('STAKE_WEIGHTED_QUORUM (WI-1)', function () {
 describe('lockSnapshot()', function () {
 it('weighted: locks the source-keyed weight snapshot at/above activation', async function () {
                 hub.network = 'testnet';   // activation height 0
-                hub._resolveBtcLatestBlock = sinon.stub().resolves(1);
+                hub.resolveBtcLatestBlock = sinon.stub().resolves(1);
                 hub.capabilitySnapshot = {
                     getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, 1)),
                     getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 1, count: 4, validators: [] }),
@@ -215,7 +215,7 @@ it('weighted: locks the source-keyed weight snapshot at/above activation', async
             });
 it('count: locks the legacy snapshot below the activation height', async function () {
                 hub.network = 'mainnet';   // activation height 999999999 (placeholder)
-                hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+                hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
                 hub.capabilitySnapshot = {
                     getActiveWeightSnapshot:    sinon.stub().resolves(null),
                     getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 800000, count: 4, validators: [] }),
@@ -345,7 +345,7 @@ it('(a) propose() throws when minValidators>1 and snapshot is null', async funct
                 getActiveValidatorSnapshot: sinon.stub().returns(null),
                 getQuorum: sinon.stub().returns(0)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let caught = null;
             try {
