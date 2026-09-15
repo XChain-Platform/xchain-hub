@@ -18,8 +18,7 @@ const eq = require('../../src/equivocation_header.js');
 // asserts every copy's activation map equals the canonical in
 // xchain-documentation/protocol/constants.js (a drift flips the header on different
 // blocks → guaranteed ledger fork.
-describe('equivocation_header', function () {
-
+function registerActivationTests() {
     describe('isEquivHeaderActive', function () {
         it('regtest activates at genesis (block 0)', function () {
             expect(eq.isEquivHeaderActive(0, 'regtest')).to.equal(true);
@@ -36,7 +35,9 @@ describe('equivocation_header', function () {
             expect(eq.isEquivHeaderActive('xx', 'regtest')).to.equal(false);
         });
     });
+}
 
+function registerCanonicalBuilderTests() {
     describe('buildEquivCanonical / equivPrefix / equivKey', function () {
         it('prefix round-trips even when ROUND_ID contains "|" (checkpoint case)', function () {
             const tag = eq.ENGINE_TAGS.CHECKPOINT;     // XCHECKPOINT
@@ -56,7 +57,9 @@ describe('equivocation_header', function () {
             expect(eq.equivPrefix(k0)).to.not.equal(eq.equivPrefix(k1));
         });
     });
+}
 
+function registerCrossServiceParityTests() {
     // Cross-service activation parity: the hub's LOCAL activation map must equal the
     // canonical map in constants.js AND the indexer's copy, byte-for-byte. These checks
     // resolve the canonical/sibling sources by monorepo-relative path, so they only run
@@ -91,4 +94,10 @@ describe('equivocation_header', function () {
             }
         });
     });
+}
+
+describe('equivocation_header', function () {
+    registerActivationTests();
+    registerCanonicalBuilderTests();
+    registerCrossServiceParityTests();
 });
