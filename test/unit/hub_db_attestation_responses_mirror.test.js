@@ -133,101 +133,122 @@ function waitUntil(pred, label) {
     });
 }
 
+// Every hub method src/api.js reaches during boot and route registration, stubbed
+// inert; the DB is the one real collaborator, so the route's SQL is what is observed.
+function makeMockHub(fakeDb) {
+    return {
+        start: sinon.stub().resolves(),
+        startP2P: sinon.stub().resolves(),
+        startConsensus: sinon.stub().resolves(),
+        startOracle: sinon.stub().resolves(),
+        startCrossChain: sinon.stub().resolves(),
+        startReorgHandler: sinon.stub().resolves(),
+        startGovernance: sinon.stub().resolves(),
+        startAttestation: sinon.stub().resolves(),
+        startCapabilities: sinon.stub().resolves(),
+        getPriceSnapshots: sinon.stub().resolves([]),
+        oracleMaxAgeSeconds: sinon.stub().returns(900),
+        getPrice: sinon.stub().resolves(null),
+        getFeeQuote: sinon.stub().resolves({}),
+        getOracle: sinon.stub().returns(null),
+        getCrossChain: sinon.stub().returns(null),
+        getAllConfigs: sinon.stub().resolves({}),
+        getValidators: sinon.stub().resolves([]),
+        getReorgHistory: sinon.stub().resolves([]),
+        getSwaps: sinon.stub().resolves([]),
+        initiateSwap: sinon.stub().resolves(),
+        getSwap: sinon.stub().resolves({}),
+        requestAttestation: sinon.stub().resolves({}),
+        reportReorg: sinon.stub().resolves(),
+        db: fakeDb
+    };
+}
+
+// Boot src/api.js against the fake DB and resolve its listening http server.
+async function bootSnapshotApi(fakeDb) {
+    let capturedServer = null;
+    let realExpress    = require('express');
+    let passthrough    = () => (req, res, next) => next();
+    let mockHub        = makeMockHub(fakeDb);
+
+    // Real express and a real http server; only the hub, the DB and the
+    // WS/gossip machinery are stood in for.
+    let mockHttp = {
+        createServer: (app) => { capturedServer = http.createServer(app); return capturedServer; }
+    };
+    let mockWsLib = function () {};
+    mockWsLib.Server = function () { return { on: sinon.stub(), close: sinon.stub() }; };
+    mockWsLib.OPEN   = 1;
+
+    let origEnv = {};
+    let envVars = {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass',
+        HUB_PORT: '0', HUB_HOST: '127.0.0.1',
+        // Keyless on purpose: the /hub-db/snapshot middleware is a pass-through
+        // without a key, which is the shape this route has to work under on
+        // regtest and under xchain-node-managed deploys.
+        HUB_API_KEY: '', HUB_ALLOW_UNAUTHENTICATED: 'true',
+        TELEMETRY_ENABLED: 'false'
+    };
+    for (let [k, v] of Object.entries(envVars)) { origEnv[k] = process.env[k]; process.env[k] = v; }
+
+    try {
+        proxyquire('../../src/api', {
+            'dotenv': { config: sinon.stub() },
+            'express': realExpress,
+            'helmet': sinon.stub().callsFake(passthrough),
+            'cors': sinon.stub().callsFake(passthrough),
+            'express-rate-limit': sinon.stub().callsFake(passthrough),
+            'express-json-rpc-router': sinon.stub().callsFake(passthrough),
+            'http': mockHttp,
+            'ws': mockWsLib,
+            'geoip-lite': { lookup: sinon.stub().returns(null) },
+            './XChainHub': function () { return mockHub; }
+        });
+    } finally {
+        for (let [k, v] of Object.entries(origEnv)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+
+    // The listening socket is what "boot finished" means here: every route is
+    // registered before server.listen() is reached.
+    return waitUntil(
+        () => (capturedServer && capturedServer.listening ? capturedServer : null),
+        'api.js to boot and listen');
+}
+
+// The booted route the GET cases share, filled by the hooks below.
+let port, fakeDb, server;
+
+// Boot the route once for a describe and close it after. Called INSIDE the
+// describe so both hooks belong to that suite and never become root hooks.
+function useSnapshotRoute(ids) {
+    before(async function () {
+        fakeDb = makeFakeDb({ [TABLE]: ids.map(makeRow) });
+        server = await bootSnapshotApi(fakeDb);
+        port   = server.address().port;
+    });
+
+    after(function () {
+        if (server) { try { server.close(); } catch (e) { /* already closed */ } }
+        sinon.restore();
+    });
+}
+
 describe('attestation_responses: the hub mirror registration surfaces', function () {
     this.timeout(15000);
 
-    // ── The REST bootstrap route, driven over a real socket ──────────────────
+    registerSnapshotRouteTests();
+    registerReadyFrameTests();
+});
+
+// ── The REST bootstrap route, driven over a real socket ──────────────────
+function registerSnapshotRouteTests() {
     describe('GET /hub-db/snapshot/attestation_responses', function () {
-        let port, fakeDb, server;
-
-        before(async function () {
-            fakeDb = makeFakeDb({ [TABLE]: [1, 2, 3, 4, 5].map(makeRow) });
-
-            let capturedServer = null;
-            let realExpress    = require('express');
-            let passthrough    = () => (req, res, next) => next();
-            let mockHub = {
-                start: sinon.stub().resolves(),
-                startP2P: sinon.stub().resolves(),
-                startConsensus: sinon.stub().resolves(),
-                startOracle: sinon.stub().resolves(),
-                startCrossChain: sinon.stub().resolves(),
-                startReorgHandler: sinon.stub().resolves(),
-                startGovernance: sinon.stub().resolves(),
-                startAttestation: sinon.stub().resolves(),
-                startCapabilities: sinon.stub().resolves(),
-                getPriceSnapshots: sinon.stub().resolves([]),
-                oracleMaxAgeSeconds: sinon.stub().returns(900),
-                getPrice: sinon.stub().resolves(null),
-                getFeeQuote: sinon.stub().resolves({}),
-                getOracle: sinon.stub().returns(null),
-                getCrossChain: sinon.stub().returns(null),
-                getAllConfigs: sinon.stub().resolves({}),
-                getValidators: sinon.stub().resolves([]),
-                getReorgHistory: sinon.stub().resolves([]),
-                getSwaps: sinon.stub().resolves([]),
-                initiateSwap: sinon.stub().resolves(),
-                getSwap: sinon.stub().resolves({}),
-                requestAttestation: sinon.stub().resolves({}),
-                reportReorg: sinon.stub().resolves(),
-                db: fakeDb
-            };
-
-            // Real express and a real http server; only the hub, the DB and the
-            // WS/gossip machinery are stood in for.
-            let mockHttp = {
-                createServer: (app) => { capturedServer = http.createServer(app); return capturedServer; }
-            };
-            let mockWsLib = function () {};
-            mockWsLib.Server = function () { return { on: sinon.stub(), close: sinon.stub() }; };
-            mockWsLib.OPEN   = 1;
-
-            let origEnv = {};
-            let envVars = {
-                HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-                HUB_DB_USER: 'root', HUB_DB_PASS: 'pass',
-                HUB_PORT: '0', HUB_HOST: '127.0.0.1',
-                // Keyless on purpose: the /hub-db/snapshot middleware is a pass-through
-                // without a key, which is the shape this route has to work under on
-                // regtest and under xchain-node-managed deploys.
-                HUB_API_KEY: '', HUB_ALLOW_UNAUTHENTICATED: 'true',
-                TELEMETRY_ENABLED: 'false'
-            };
-            for (let [k, v] of Object.entries(envVars)) { origEnv[k] = process.env[k]; process.env[k] = v; }
-
-            try {
-                proxyquire('../../src/api', {
-                    'dotenv': { config: sinon.stub() },
-                    'express': realExpress,
-                    'helmet': sinon.stub().callsFake(passthrough),
-                    'cors': sinon.stub().callsFake(passthrough),
-                    'express-rate-limit': sinon.stub().callsFake(passthrough),
-                    'express-json-rpc-router': sinon.stub().callsFake(passthrough),
-                    'http': mockHttp,
-                    'ws': mockWsLib,
-                    'geoip-lite': { lookup: sinon.stub().returns(null) },
-                    './XChainHub': function () { return mockHub; }
-                });
-            } finally {
-                for (let [k, v] of Object.entries(origEnv)) {
-                    if (v === undefined) delete process.env[k];
-                    else process.env[k] = v;
-                }
-            }
-
-            // The listening socket is what "boot finished" means here: every route is
-            // registered before server.listen() is reached.
-            server = await waitUntil(
-                () => (capturedServer && capturedServer.listening ? capturedServer : null),
-                'api.js to boot and listen');
-            port = server.address().port;
-        });
-
-        after(function () {
-            if (server) { try { server.close(); } catch (e) { /* already closed */ } }
-            sinon.restore();
-        });
-
+        useSnapshotRoute([1, 2, 3, 4, 5]);
         it('serves the snapshot envelope with every mirrored column', async function () {
             let res = await get(port, '/hub-db/snapshot/' + TABLE);
             expect(res.status).to.equal(200);
@@ -283,8 +304,10 @@ describe('attestation_responses: the hub mirror registration surfaces', function
             });
         });
     });
+}
 
-    // ── The WS ready frame ───────────────────────────────────────────────────
+// ── The WS ready frame ───────────────────────────────────────────────────
+function registerReadyFrameTests() {
     describe('HubDbBroadcaster ready frame', function () {
         let HubDbBroadcaster;
 
@@ -334,4 +357,4 @@ describe('attestation_responses: the hub mirror registration surfaces', function
             expect(frame.max_ids).to.have.property(TABLE, 0);
         });
     });
-});
+}
