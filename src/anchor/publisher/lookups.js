@@ -86,6 +86,12 @@ module.exports = {
                          ' @ ' + cp.block_index + '/' + cp.checkpoint_seq + ': ' + (e && e.message));
             return 'unreachable';
         }
+        return this.anchorActionVerdict(res, cp, want, wantTxid);
+    },
+
+    // The verdict on one getanchoraction answer `res` for our checkpoint row `cp`, under
+    // the binding verifyAnchorOnChain was asked for (`want`, with its lowercased txid).
+    anchorActionVerdict(res, cp, want, wantTxid){
         if(!res || !res.exists){
             // The filtered lookup found nothing. `checkpoint_anchored` says whether ANY
             // anchor exists for this checkpoint: if one does, the announced txid is a

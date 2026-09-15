@@ -78,42 +78,14 @@ module.exports = {
     //     makes when its indexer is unreachable.
     async broadcastWithRetry(broadcaster, payload, attempts, existsCheck){
         attempts = attempts || 5;
-        // flush() checks the pause + per-window
-        // ceiling ONCE, but a single flush broadcasts N times (one per pending
-        // checkpoint plus one per archive chunk), each spending a fee. Gate per
-        // broadcast here so the ceiling and the runtime pause bind every send, not
-        // just the first (fail-closed, like the sibling AttestationPublisher).
-        //
-        // The gate is a RESERVATION, not the old allow()/await/record() pair:
-        // allow() and record() straddle the awaited send, so concurrent flushes all
-        // read the same pre-send budget and all spend, and every exit that did not
-        // reach record() charged nothing even when the transaction had gone out
-        // (a lost ACK spends a real fee). reserve() runs the same gates, consumes
-        // the budget in one synchronous turn and PERSISTS it before the send
-        // (spend_guard.js:259-268); the reservation IS the record, so record() must
-        // never be called on this path or the spend is counted twice.
-        //
-        // Retries of the SAME payload do not re-reserve: one call publishes at most
-        // one transaction, so the reservation is per row/chunk and is settled exactly
-        // once on whichever exit the call takes. commit() on every outcome where the
-        // transaction may have reached the node (including both ambiguous exits:
-        // over-charging a send that never landed fails closed and ages out within one
-        // window), release() only on definitive never-sent exits.
-        let token = this.spendGuard.reserve();
-        if(!token){
-            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
-            err.spendBlocked = true;
-            throw err;
-        }
+        let token = this.reserveBroadcastBudget();
         try {
             let lastErr = null;
             // Explicit attempt counter rather than a `for` step: a rate-limit wait below
             // retries WITHOUT consuming an attempt (the encoder is telling us when to come
             // back, which is not a transient send failure), and `delayMs` carries the wait
             // that branch chose so the loop top never double-sleeps it with the flat delay.
-            let attempt = 0;
-            let delayMs = 0;
-            let rateLimitWaits = 0;
+            let attempt = 0, delayMs = 0, rateLimitWaits = 0;
             while(attempt < attempts){
                 if(delayMs > 0) await this._sleep(delayMs);
                 delayMs = this.chunkRetryDelayMs;
@@ -121,40 +93,9 @@ module.exports = {
                     let found;
                     try { found = await existsCheck(); }
                     catch(e){ found = undefined; }   // undetermined
-                    if(found && found.exists){
-                        logger.info('StateAnchorPublisher: anchor already on-chain (txid ' +
-                                    (found.txid || '?') + '); adopting instead of re-broadcasting');
-                        this.spendGuard.release(token);   // nothing was sent in this call
-                        return found;
-                    }
-                    // Undetermined + a send may already have gone out: never risk it.
-                    if(found === undefined && lastErr && lastErr.anchorAmbiguousSend){
-                        this.spendGuard.commit(token);    // the send may have landed
-                        throw lastErr;
-                    }
+                    if(this.adoptedExistingAnchor(found, lastErr, token)) return found;
                 }
-                // Re-read the operator pause before EVERY attempt. The pause is an
-                // out-of-band runtime toggle (the control RPC flips an in-memory flag),
-                // so the entry reservation cannot see one asserted during the awaited
-                // retry delay or existence check above, and an operator halt has to stop
-                // the sends that have not gone out yet. Only the PAUSE is re-read: the
-                // ceiling stays gated once per row/chunk because a retry of the same
-                // payload consumes no new budget, and re-gating it would refuse
-                // legitimate retries. Same idiom as RollcallRound's per-chunk re-check.
-                if(this.spendGuard.isPaused()){
-                    // An earlier ambiguous attempt keeps its own error: the caller
-                    // withdraws the anchor intent markers for every failure NOT flagged
-                    // anchorAmbiguousSend, and dropping them after a send that may have
-                    // reached the network invites a second anchor for the same payload.
-                    if(lastErr && lastErr.anchorAmbiguousSend){
-                        this.spendGuard.commit(token);
-                        throw lastErr;
-                    }
-                    this.spendGuard.release(token);       // this attempt never went out
-                    let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
-                    err.spendBlocked = true;
-                    throw err;
-                }
+                this.refuseWhilePaused(token, lastErr);
                 try {
                     let sent = await broadcaster(payload);
                     // A fresh broadcast actually spent a fee; keep the reserved budget
@@ -165,51 +106,20 @@ module.exports = {
                 }
                 catch(e){
                     lastErr = e;
-                    // No confirmed input to build from. Pre-send, nothing was signed or
-                    // sent, and a 2.5 s retry cannot confirm an output; surface it as the
-                    // deferral it is instead of burning the attempt budget on it.
-                    if(e && e.anchorNoConfirmedUtxo){
-                        this.spendGuard.release(token);   // pre-send; nothing left the hub
-                        throw e;
-                    }
+                    this.releaseOnUnfundedBuild(e, token);
                     if(e && e.anchorAmbiguousSend){
                         // The send may have been accepted; give the anchor a bounded
                         // window to reach the indexer's mined view, then defer. Either
                         // way the fee is treated as spent.
-                        if(existsCheck){
-                            for(let p = 0; p < this.ambiguousPollAttempts; p++){
-                                await new Promise(r => setTimeout(r, this.ambiguousPollDelayMs));
-                                let found = null;
-                                try { found = await existsCheck(); } catch(_e){ found = null; }
-                                if(found && found.exists){
-                                    logger.info('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
-                                                (found.txid || '?') + '); adopting');
-                                    this.spendGuard.commit(token);   // our send is what landed
-                                    return found;
-                                }
-                            }
-                        }
+                        let found = existsCheck ? await this.pollAmbiguousSend(existsCheck) : null;
                         this.spendGuard.commit(token);
+                        if(found) return found;   // our send is what landed
                         throw e;   // defer to a later flush; never rebuild+re-broadcast
                     }
-                    // Encoder rate limiting. Safe to retry by the shared classifier's own
-                    // rule: a sub-500 response is a definitive refusal, so nothing reached
-                    // the coin node and no double spend is possible. The reservation was
-                    // taken once at method entry and covers the whole call, so a free
-                    // retry here re-charges nothing.
-                    let rlWaitMs = this.rateLimitWaitMs(e);
+                    let rlWaitMs = this.rateLimitRetryDelay(e, rateLimitWaits, token);
                     if(rlWaitMs !== null){
-                        if(rateLimitWaits >= this.rateLimitMaxWaits){
-                            this.spendGuard.release(token);   // definitive refusal; never sent
-                            throw e;
-                        }
                         rateLimitWaits++;
                         delayMs = rlWaitMs;
-                        logger.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
-                                     'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
-                                     this.rateLimitMaxWaitMs + 'ms), ' +
-                                     (this.rateLimitMaxWaits - rateLimitWaits) + ' rate-limit wait(s) left ' +
-                                     'before this anchor defers to a later flush');
                         continue;   // deliberately does NOT consume an attempt
                     }
                     attempt++;
@@ -225,6 +135,129 @@ module.exports = {
             // back rather than leaking a reservation that over-counts the window.
             this.spendGuard.release(token);
         }
+    },
+
+    // flush() checks the pause + per-window
+    // ceiling ONCE, but a single flush broadcasts N times (one per pending
+    // checkpoint plus one per archive chunk), each spending a fee. Gate per
+    // broadcast here so the ceiling and the runtime pause bind every send, not
+    // just the first (fail-closed, like the sibling AttestationPublisher).
+    //
+    // The gate is a RESERVATION, not the old allow()/await/record() pair:
+    // allow() and record() straddle the awaited send, so concurrent flushes all
+    // read the same pre-send budget and all spend, and every exit that did not
+    // reach record() charged nothing even when the transaction had gone out
+    // (a lost ACK spends a real fee). reserve() runs the same gates, consumes
+    // the budget in one synchronous turn and PERSISTS it before the send
+    // (spend_guard.js:259-268); the reservation IS the record, so record() must
+    // never be called on this path or the spend is counted twice.
+    //
+    // Retries of the SAME payload do not re-reserve: one call publishes at most
+    // one transaction, so the reservation is per row/chunk and is settled exactly
+    // once on whichever exit the call takes. commit() on every outcome where the
+    // transaction may have reached the node (including both ambiguous exits:
+    // over-charging a send that never landed fails closed and ages out within one
+    // window), release() only on definitive never-sent exits.
+    reserveBroadcastBudget(){
+        let token = this.spendGuard.reserve();
+        if(!token){
+            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
+            err.spendBlocked = true;
+            throw err;
+        }
+        return token;
+    },
+
+    // The pre-send existence answer `found`, judged: true when the anchor is already
+    // on-chain (the budget is handed back and the caller adopts `found`); throws the
+    // earlier ambiguous error when the answer is undetermined after a send that may
+    // have gone out; false when the attempt may proceed.
+    adoptedExistingAnchor(found, lastErr, token){
+        if(found && found.exists){
+            logger.info('StateAnchorPublisher: anchor already on-chain (txid ' +
+                        (found.txid || '?') + '); adopting instead of re-broadcasting');
+            this.spendGuard.release(token);   // nothing was sent in this call
+            return true;
+        }
+        // Undetermined + a send may already have gone out: never risk it.
+        if(found === undefined && lastErr && lastErr.anchorAmbiguousSend){
+            this.spendGuard.commit(token);    // the send may have landed
+            throw lastErr;
+        }
+        return false;
+    },
+
+    // Re-read the operator pause before EVERY attempt. The pause is an
+    // out-of-band runtime toggle (the control RPC flips an in-memory flag),
+    // so the entry reservation cannot see one asserted during the awaited
+    // retry delay or existence check above, and an operator halt has to stop
+    // the sends that have not gone out yet. Only the PAUSE is re-read: the
+    // ceiling stays gated once per row/chunk because a retry of the same
+    // payload consumes no new budget, and re-gating it would refuse
+    // legitimate retries. Same idiom as RollcallRound's per-chunk re-check.
+    refuseWhilePaused(token, lastErr){
+        if(this.spendGuard.isPaused()){
+            // An earlier ambiguous attempt keeps its own error: the caller
+            // withdraws the anchor intent markers for every failure NOT flagged
+            // anchorAmbiguousSend, and dropping them after a send that may have
+            // reached the network invites a second anchor for the same payload.
+            if(lastErr && lastErr.anchorAmbiguousSend){
+                this.spendGuard.commit(token);
+                throw lastErr;
+            }
+            this.spendGuard.release(token);       // this attempt never went out
+            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
+            err.spendBlocked = true;
+            throw err;
+        }
+    },
+
+    // No confirmed input to build from. Pre-send, nothing was signed or
+    // sent, and a 2.5 s retry cannot confirm an output; surface it as the
+    // deferral it is instead of burning the attempt budget on it.
+    releaseOnUnfundedBuild(e, token){
+        if(e && e.anchorNoConfirmedUtxo){
+            this.spendGuard.release(token);   // pre-send; nothing left the hub
+            throw e;
+        }
+    },
+
+    // After an ambiguous send, poll the caller's existence check a bounded number of
+    // times; the mined anchor when one appears, else null.
+    async pollAmbiguousSend(existsCheck){
+        for(let p = 0; p < this.ambiguousPollAttempts; p++){
+            await new Promise(r => setTimeout(r, this.ambiguousPollDelayMs));
+            let found = null;
+            try { found = await existsCheck(); } catch(_e){ found = null; }
+            if(found && found.exists){
+                logger.info('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
+                            (found.txid || '?') + '); adopting');
+                return found;
+            }
+        }
+        return null;
+    },
+
+    // Encoder rate limiting. Safe to retry by the shared classifier's own
+    // rule: a sub-500 response is a definitive refusal, so nothing reached
+    // the coin node and no double spend is possible. The reservation was
+    // taken once at method entry and covers the whole call, so a free
+    // retry here re-charges nothing.
+    // The wait to honour before the next attempt, null when `e` is not a rate limit;
+    // throws `e` once the per-broadcast wait budget is spent.
+    rateLimitRetryDelay(e, rateLimitWaits, token){
+        let rlWaitMs = this.rateLimitWaitMs(e);
+        if(rlWaitMs === null) return null;
+        if(rateLimitWaits >= this.rateLimitMaxWaits){
+            this.spendGuard.release(token);   // definitive refusal; never sent
+            throw e;
+        }
+        logger.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
+                     'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
+                     this.rateLimitMaxWaitMs + 'ms), ' +
+                     (this.rateLimitMaxWaits - rateLimitWaits - 1) + ' rate-limit wait(s) left ' +
+                     'before this anchor defers to a later flush');
+        return rlWaitMs;
     },
 
     // Sleep indirection so the retry paths above are testable without real waits

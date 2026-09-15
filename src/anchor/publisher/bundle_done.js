@@ -102,16 +102,23 @@ module.exports = {
         // XCHAIN_CONFIRMATIONS_DOGE depth by asking OUR OWN DOGE indexer for the DECODED
         // row of EVERY section (payload hashes must byte-match our own copies), which is
         // also what proves the txid carries the whole announced set rather than one chain.
-        // ABSTAIN (queue) when the indexer is unwired/unreachable or the anchor is
-        // absent/shallow; REJECT on a decoded-invalid status or a hash mismatch.
         let verdicts = [];
         for(let row of rows)
             verdicts.push(await this.verifyAnchorOnChain(row, { txid: String(d.txid), rejectVersions: [1, 2] }));
+        if(this.bundleDoneUnproven(d, sender, network, snapshotBlock, verdicts)) return;
+        await this.applyBundleDone(d, sender, rows);
+    },
+
+    // ABSTAIN (queue) when the indexer is unwired/unreachable or the anchor is
+    // absent/shallow; REJECT on a decoded-invalid status or a hash mismatch.
+    // True when the per-section verdicts stop the stamp here: a rejection is logged and
+    // dropped, anything else short of 'verified' is queued for re-verification.
+    bundleDoneUnproven(d, sender, network, snapshotBlock, verdicts){
         let rejected = verdicts.find(v => String(v).startsWith('rejected'));
         if(rejected){
             logger.warn('StateAnchorPublisher: BUNDLE_DONE for ' + network + ' @ ' + snapshotBlock +
                          ' REJECTED on-chain (' + rejected + '); skipping stamp + reward');
-            return;
+            return true;
         }
         let unproven = verdicts.find(v => v !== 'verified');
         if(unproven){
@@ -123,9 +130,9 @@ module.exports = {
             // the queued entry is re-verified in full before it can stamp anything, so
             // queuing grants no authority.
             this.deferBundleDone(d, sender, unproven);
-            return;
+            return true;
         }
-        await this.applyBundleDone(d, sender, rows);
+        return false;
     },
 
     // Queue an authenticated-but-not-yet-buried BUNDLE_DONE for re-verification. Keyed on

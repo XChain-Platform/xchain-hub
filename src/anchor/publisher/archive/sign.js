@@ -50,84 +50,12 @@ module.exports = {
         let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
-        // Fail CLOSED on an unresolved election set, the same way the LEADER does
-        // at the identical condition (_startArchiveRound: "empty oracle_publish set,
-        // deferring round (fail closed)") and the same way handleFinalized and
-        // handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
-        // every membership tie to the federation, so during an unresolved window a
-        // NON-MEMBER could solicit co-signatures from the historical wrapper set and
-        // assemble a duplicate v1 under a batch_seq of its own choosing: honest CONTENT
-        // (the DB byte-match still holds) but real DOGE burned twice, and two archives
-        // able to claim one seq, which is what the ladder exists to serialize.
-        // The liveness the asymmetry protected is nearly nil: the snapshot_block
-        // signing-set gate a few lines below already returns on an empty answer from THIS
-        // SAME resolver, so an indexer outage that empties the election set almost always
-        // empties the signing set too and this hub was not going to co-sign either way.
-        // The residual case (electionBlock unresolvable while snapshot_block is cached)
-        // costs one co-signature on one round, which the round timeout re-runs.
-        if(electionPubkeys.length === 0) return;
-        {
-            // Same wrapper-anchored key + failover ladder the leader used. Keyed on the
-            // WIRE checkpoint only: the wire batch_seq no longer reaches the key, so a
-            // verifier whose own batch numbering has drifted from the proposer's still
-            // derives the identical rank order.
-            // Accept any sender whose rank has unlocked, not just rank 0, or a
-            // signer-less rank-0 hub stalls archiving federation-wide.
-            // Runs for a single-member set too, so the
-            // sole elected leader cannot be impersonated by a non-member.
-            let order = canonicalForms.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
-            let since = electionBlock - Number(cp.snapshot_block);
-            if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
-        }
-        // AUTHENTICATE THE PROPOSER BEFORE BINDING ANYTHING TO IT. Everything above
-        // this line is derived from the wire: `sender` is the application-level
-        // d.sig_pubkey, NOT the envelope key PeerManager authenticated (that one binds
-        // only the relayer), and the rank ladder is keyed on the wire checkpoint, so any
-        // federation member can put another member's pubkey here and unlock a rank by
-        // choosing cp/batch_seq. The proposer's signature over the archive canonical is
-        // the one thing only the real leader can produce, so it gates the record: without
-        // it, a member could poison _observedArchiveCheckpoints for a future batch_seq
-        // (first observation wins, so the genuine round then resolves no local row and
-        // never co-signs) or flood past _observedArchiveLeadersCap and evict the
-        // in-flight entries every legitimate XANC_FINALIZED is authenticated against.
-        // The canonical is built from wire fields already in hand, so verifying here
-        // costs no extra state and no liveness.
-        let canonical = this.archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
-                                               String(d.batch_crc32), Number(d.total_chunks));
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
-        // Stale-seq convergence, the receiving half. The election key no longer carries a batch_seq, so
-        // a proposer whose seq is stale now reaches us as a correctly-elected leader
-        // asking us to co-sign a seq we already hold as CONSUMED (its rows are archived
-        // in our tables; the proposer missed that back-fill). Co-signing would put a
-        // second v1 head on DOGE under a number that is already taken, which corrupts
-        // chunk reassembly for both batches. Refuse, and say so on the wire so the
-        // proposer can converge instead of re-proposing the same stale seq every flush.
-        //
-        // Placed BEFORE recordObservedArchiveLeader on purpose: recording it would
-        // authorize this leader's FINALIZED to stamp our rows under the stale seq.
-        // Refusing costs no liveness - the proposer re-derives above our seq and comes
-        // back - and a hub that is genuinely BEHIND (its next seq is at or below the
-        // proposal) never takes this branch.
+        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;
+        let canonical = this.verifiedArchiveCanonical(d, cp, sender);
+        if(canonical === null) return;
         let myNextSeq = await this._getNextBatchSeq();
-        if(Number(d.batch_seq) < myNextSeq){
-            let consumed = myNextSeq - 1;
-            logger.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
-                         ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
-                         consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
-                         'behind on the archive back-fill; answering with a stale-seq refusal');
-            this.broadcastSeqRefusal(Number(d.batch_seq), consumed);
-            return;
-        }
-        // The sender has validated as the (rank-unlocked) elected archive leader
-        // for this batch_seq at election_block. Bind it locally BEFORE the
-        // snapshot-set co-sign check below, so an election-set member that will
-        // NOT co-sign (present only at election_block, not at snapshot_block) can
-        // still authenticate this leader's later XANC_FINALIZED and back-fill.
-        // Deliberately still ahead of the local state_checkpoints byte-match below: a
-        // hub lagging on the wrapper checkpoint must keep recording the leader, or it
-        // abstains from the back-fill and the rows re-archive under a fresh seq.
-        if(electionPubkeys.includes(sender))
-            this.recordObservedArchiveLeader(Number(d.batch_seq), sender, cp);
+        if(this.refusedStaleArchiveSeq(d, sender, myNextSeq)) return;
+        this.bindObservedArchiveLeader(d, sender, cp, electionPubkeys);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
         // signer holds oracle_publish AT snapshot_block, so a follower present only
@@ -139,25 +67,12 @@ module.exports = {
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
         let local = await this.db.getStateCheckpointByChainAndNetwork(cp.chain, cp.network, Number(cp.block_index));
-        if(!local || local.length === 0) return;
-        let mine = this.cpFromRow(local[0]);
-        // Rootless compare, deliberately: archiveCanonical nests
-        // rawCanonicalCheckpoint by construction and cpFromRow omits the SPV root
-        // fields, so this guard binds identity fields only. Pinning to
-        // rawCanonicalCheckpoint keeps it immune to the presence-gated root suffix.
-        if(StateCheckpointEngine.rawCanonicalCheckpoint(mine) !== StateCheckpointEngine.rawCanonicalCheckpoint(cp)) return;
+        let mine = this.ownArchiveWrapper(local, cp);
+        if(!mine) return;
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
-        let json;
-        // Bounded decompress: the archive is attacker-supplied bytes decompressed
-        // BEFORE any CRC/quorum check, so an unbounded gunzip is a gzip-bomb DoS.
-        // Mirror the committed indexer cap (anchor.js / recovery.js, 16 MiB).
-        try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url'), { maxOutputLength: 16 * 1024 * 1024 }).toString('utf8'); }
-        catch(e){ return; }
-        if(this.crc32Hex(json) !== String(d.batch_crc32)) return;
-        let archive;
-        try { archive = JSON.parse(json); } catch(e){ return; }
-        if(!archive || !Array.isArray(archive.matches) || archive.matches.length !== Number(d.match_count)) return;
+        let archive = this.decodeArchiveProposal(d);
+        if(!archive) return;
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
         // decides which oracle_publish group the completeness check requires, and `mine`
         // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
@@ -165,10 +80,137 @@ module.exports = {
             logger.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
         }
-        // The body byte-matches our own rows, so its membership is the authority on which
-        // rows this batch may later mark archived. Record it BEFORE co-signing: the
-        // signature about to go out is part of what carries this exact archive to DOGE,
-        // and the FINALIZED that closes the round is checked against it.
+        this.coSignArchive(d, sender, archive, canonical, myPubkey);
+    },
+
+    // Fail CLOSED on an unresolved election set, the same way the LEADER does
+    // at the identical condition (_startArchiveRound: "empty oracle_publish set,
+    // deferring round (fail closed)") and the same way handleFinalized and
+    // handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
+    // every membership tie to the federation, so during an unresolved window a
+    // NON-MEMBER could solicit co-signatures from the historical wrapper set and
+    // assemble a duplicate v1 under a batch_seq of its own choosing: honest CONTENT
+    // (the DB byte-match still holds) but real DOGE burned twice, and two archives
+    // able to claim one seq, which is what the ladder exists to serialize.
+    // The liveness the asymmetry protected is nearly nil: the snapshot_block
+    // signing-set gate in handleSignReq already returns on an empty answer from THIS
+    // SAME resolver, so an indexer outage that empties the election set almost always
+    // empties the signing set too and this hub was not going to co-sign either way.
+    // The residual case (electionBlock unresolvable while snapshot_block is cached)
+    // costs one co-signature on one round, which the round timeout re-runs.
+    archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock){
+        if(electionPubkeys.length === 0) return false;
+        {
+            // Same wrapper-anchored key + failover ladder the leader used. Keyed on the
+            // WIRE checkpoint only: the wire batch_seq no longer reaches the key, so a
+            // verifier whose own batch numbering has drifted from the proposer's still
+            // derives the identical rank order.
+            // Accept any sender whose rank has unlocked, not just rank 0, or a
+            // signer-less rank-0 hub stalls archiving federation-wide.
+            // Runs for a single-member set too, so the
+            // sole elected leader cannot be impersonated by a non-member.
+            let order = canonicalForms.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
+            let since = electionBlock - Number(cp.snapshot_block);
+            if(!this._rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
+        }
+        return true;
+    },
+
+    // AUTHENTICATE THE PROPOSER BEFORE BINDING ANYTHING TO IT. Everything handleSignReq
+    // checked before this is derived from the wire: `sender` is the application-level
+    // d.sig_pubkey, NOT the envelope key PeerManager authenticated (that one binds
+    // only the relayer), and the rank ladder is keyed on the wire checkpoint, so any
+    // federation member can put another member's pubkey here and unlock a rank by
+    // choosing cp/batch_seq. The proposer's signature over the archive canonical is
+    // the one thing only the real leader can produce, so it gates the record: without
+    // it, a member could poison _observedArchiveCheckpoints for a future batch_seq
+    // (first observation wins, so the genuine round then resolves no local row and
+    // never co-signs) or flood past _observedArchiveLeadersCap and evict the
+    // in-flight entries every legitimate XANC_FINALIZED is authenticated against.
+    // The canonical is built from wire fields already in hand, so verifying here
+    // costs no extra state and no liveness.
+    // Hands back the canonical the proposer signed, or null when its signature fails.
+    verifiedArchiveCanonical(d, cp, sender){
+        let canonical = this.archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
+                                               String(d.batch_crc32), Number(d.total_chunks));
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return null;
+        return canonical;
+    },
+
+    // Stale-seq convergence, the receiving half. The election key no longer carries a batch_seq, so
+    // a proposer whose seq is stale now reaches us as a correctly-elected leader
+    // asking us to co-sign a seq we already hold as CONSUMED (its rows are archived
+    // in our tables; the proposer missed that back-fill). Co-signing would put a
+    // second v1 head on DOGE under a number that is already taken, which corrupts
+    // chunk reassembly for both batches. Refuse, and say so on the wire so the
+    // proposer can converge instead of re-proposing the same stale seq every flush.
+    //
+    // Placed BEFORE recordObservedArchiveLeader on purpose: recording it would
+    // authorize this leader's FINALIZED to stamp our rows under the stale seq.
+    // Refusing costs no liveness - the proposer re-derives above our seq and comes
+    // back - and a hub that is genuinely BEHIND (its next seq is at or below the
+    // proposal) never takes this branch.
+    // True when the refusal went out, so handleSignReq stops there.
+    refusedStaleArchiveSeq(d, sender, myNextSeq){
+        if(Number(d.batch_seq) < myNextSeq){
+            let consumed = myNextSeq - 1;
+            logger.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
+                         ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
+                         consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
+                         'behind on the archive back-fill; answering with a stale-seq refusal');
+            this.broadcastSeqRefusal(Number(d.batch_seq), consumed);
+            return true;
+        }
+        return false;
+    },
+
+    // The sender has validated as the (rank-unlocked) elected archive leader
+    // for this batch_seq at election_block. Bind it locally BEFORE the
+    // snapshot-set co-sign check in handleSignReq, so an election-set member that will
+    // NOT co-sign (present only at election_block, not at snapshot_block) can
+    // still authenticate this leader's later XANC_FINALIZED and back-fill.
+    // Deliberately still ahead of the local state_checkpoints byte-match there: a
+    // hub lagging on the wrapper checkpoint must keep recording the leader, or it
+    // abstains from the back-fill and the rows re-archive under a fresh seq.
+    bindObservedArchiveLeader(d, sender, cp, electionPubkeys){
+        if(electionPubkeys.includes(sender))
+            this.recordObservedArchiveLeader(Number(d.batch_seq), sender, cp);
+    },
+
+    // Our own row for the archive's wrapper checkpoint, or null when we hold none or it
+    // names a different checkpoint.
+    ownArchiveWrapper(local, cp){
+        if(!local || local.length === 0) return null;
+        let mine = this.cpFromRow(local[0]);
+        // Rootless compare, deliberately: archiveCanonical nests
+        // rawCanonicalCheckpoint by construction and cpFromRow omits the SPV root
+        // fields, so this guard binds identity fields only. Pinning to
+        // rawCanonicalCheckpoint keeps it immune to the presence-gated root suffix.
+        if(StateCheckpointEngine.rawCanonicalCheckpoint(mine) !== StateCheckpointEngine.rawCanonicalCheckpoint(cp)) return null;
+        return mine;
+    },
+
+    // The proposed archive body, or null when it does not decompress, CRC-match, parse, or
+    // carry the announced match count.
+    decodeArchiveProposal(d){
+        let json;
+        // Bounded decompress: the archive is attacker-supplied bytes decompressed
+        // BEFORE any CRC/quorum check, so an unbounded gunzip is a gzip-bomb DoS.
+        // Mirror the committed indexer cap (anchor.js / recovery.js, 16 MiB).
+        try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url'), { maxOutputLength: 16 * 1024 * 1024 }).toString('utf8'); }
+        catch(e){ return null; }
+        if(this.crc32Hex(json) !== String(d.batch_crc32)) return null;
+        let archive;
+        try { archive = JSON.parse(json); } catch(e){ return null; }
+        if(!archive || !Array.isArray(archive.matches) || archive.matches.length !== Number(d.match_count)) return null;
+        return archive;
+    },
+
+    // The body byte-matches our own rows, so its membership is the authority on which
+    // rows this batch may later mark archived. Record it BEFORE co-signing: the
+    // signature about to go out is part of what carries this exact archive to DOGE,
+    // and the FINALIZED that closes the round is checked against it.
+    coSignArchive(d, sender, archive, canonical, myPubkey){
         this.recordObservedArchiveContent(Number(d.batch_seq), sender, archive);
 
         this.peerManager.broadcast(XANC_SIGN, {

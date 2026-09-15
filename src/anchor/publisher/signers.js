@@ -38,31 +38,13 @@ module.exports = {
             // An empty (unresolved) set means abstain, which the pinned election gates
             // already fail-close on.
             //
-            // Flag-day aware, exactly like _resolveCapabilitySet: at/above
-            // STAKE_WEIGHTED_QUORUM the membership authority is the WEIGHT snapshot
-            // (getstakeweightsbycapability), below it the count snapshot
-            // (getcapabilityvalidators). Those are distinct indexer queries with
-            // distinct membership semantics, and the on-chain verifier picks the same
-            // way (`weighted ? getStakeWeightsByCapability : getValidatorsByCapability`,
-            // xchain-indexer anchor.js). Reading the count snapshot unconditionally made
-            // this gate answer a different question from the leader quorum that judges
-            // the same round: above the flag-day a validator present in the weighted set
-            // (so counted by the indexer, and listed in round.validators) but absent from
-            // the count set returned early and never co-signed, silently starving the
-            // archive / publisher-attestation quorum into a timeout and a degraded,
-            // reward-withholding legacy anchor. Gated on the DEPLOYMENT network, never a
-            // wire-supplied one: on a correctly-scoped hub that IS the record's network,
-            // and an unscoped hub resolves the gate to off, i.e. today's behaviour.
             // Weighted snapshots carry one row per (source, pubkey), so dedupe before
             // returning: this set is used for membership and hash-order election, both of
             // which must see each key exactly once.
             let snapErr = null;
             if(this.hub.capabilitySnapshot){
                 try {
-                    let weighted = swq.isStakeWeightedQuorumActive(Number(blockIndex), this.network);
-                    let snap = weighted
-                        ? await this.hub.capabilitySnapshot.getWeightSnapshot('oracle_publish', blockIndex)
-                        : await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
+                    let snap = await this.oraclePublishSnapshot(blockIndex);
                     if(snap && Array.isArray(snap.validators))
                         return [...new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()))].sort();
                 } catch(e){ snapErr = e; }
@@ -85,16 +67,7 @@ module.exports = {
                         return [...new Set(rows.map(r => String(r.signing_pubkey).toLowerCase()))].sort();
                 } catch(e){ if(!snapErr) snapErr = e; }
             }
-            // Abstaining is still the correct fail-closed outcome (the pinned
-            // election gates treat an empty set as "do not act"), but it must be
-            // loud: an unresolved membership here surfaces as zero broadcasts with
-            // no error anywhere, which reads as a healthy idle publisher.
-            logger.warn('StateAnchorPublisher: oracle_publish membership unresolved at block ' +
-                Number(blockIndex) + ' (capability snapshot unavailable' +
-                (this.network === 'regtest' ? ' and the local capability_snapshots table has no rows'
-                                            : '; the local-table fallback is regtest-only') +
-                (snapErr ? '; last error: ' + snapErr.message : '') +
-                '); abstaining from this pinned election');
+            this.warnMembershipUnresolved(blockIndex, snapErr);
             return [];
         }
         // Unpinned CURRENT-membership query (blockIndex null): the coarse BUNDLE_DONE /
@@ -109,6 +82,43 @@ module.exports = {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
             return pubkeys.map(p => String(p).toLowerCase()).sort();
         } catch(e){ return []; }
+    },
+
+    // Flag-day aware, exactly like _resolveCapabilitySet: at/above
+    // STAKE_WEIGHTED_QUORUM the membership authority is the WEIGHT snapshot
+    // (getstakeweightsbycapability), below it the count snapshot
+    // (getcapabilityvalidators). Those are distinct indexer queries with
+    // distinct membership semantics, and the on-chain verifier picks the same
+    // way (`weighted ? getStakeWeightsByCapability : getValidatorsByCapability`,
+    // xchain-indexer anchor.js). Reading the count snapshot unconditionally made
+    // this gate answer a different question from the leader quorum that judges
+    // the same round: above the flag-day a validator present in the weighted set
+    // (so counted by the indexer, and listed in round.validators) but absent from
+    // the count set returned early and never co-signed, silently starving the
+    // archive / publisher-attestation quorum into a timeout and a degraded,
+    // reward-withholding legacy anchor. Gated on the DEPLOYMENT network, never a
+    // wire-supplied one: on a correctly-scoped hub that IS the record's network,
+    // and an unscoped hub resolves the gate to off, i.e. today's behaviour.
+    // Hands back the snapshot read's own promise, so the pinned query awaits exactly
+    // what it awaited when this read sat inline.
+    oraclePublishSnapshot(blockIndex){
+        let weighted = swq.isStakeWeightedQuorumActive(Number(blockIndex), this.network);
+        return weighted
+            ? this.hub.capabilitySnapshot.getWeightSnapshot('oracle_publish', blockIndex)
+            : this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
+    },
+
+    // Abstaining is still the correct fail-closed outcome (the pinned
+    // election gates treat an empty set as "do not act"), but it must be
+    // loud: an unresolved membership here surfaces as zero broadcasts with
+    // no error anywhere, which reads as a healthy idle publisher.
+    warnMembershipUnresolved(blockIndex, snapErr){
+        logger.warn('StateAnchorPublisher: oracle_publish membership unresolved at block ' +
+            Number(blockIndex) + ' (capability snapshot unavailable' +
+            (this.network === 'regtest' ? ' and the local capability_snapshots table has no rows'
+                                        : '; the local-table fallback is regtest-only') +
+            (snapErr ? '; last error: ' + snapErr.message : '') +
+            '); abstaining from this pinned election');
     },
 
     resolveSigner(){
