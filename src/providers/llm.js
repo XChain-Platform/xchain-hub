@@ -55,7 +55,7 @@
 
 const https = require('https');
 const { resolveLlmVendorAuth } = require('../lib/hub_credentials');
-const { runClaudePrint } = require('../lib/claude_spawn');
+const { runClaudePrint } = require('./llm/claude_spawn');
 const SpendGuard = require('../lib/spend_guard.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');

@@ -11,7 +11,7 @@ WORKDIR /XChainHub
 RUN npm ci --omit=dev
 
 # The llm attestation provider's default transport spawns this CLI by name
-# (src/lib/claude_spawn.js: CLAUDE_BIN, default `claude`), which
+# (src/providers/llm/claude_spawn.js: CLAUDE_BIN, default `claude`), which
 # resolveHubLlmAuth PREFERS over an API key whenever HUB_CLAUDE_CONFIG_DIR is
 # set. It has to live in the image, and it has to live HERE rather than being
 # installed into a running container: the testnet fleet ran for twelve days on a

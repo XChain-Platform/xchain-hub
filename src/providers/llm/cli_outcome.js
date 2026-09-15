@@ -14,18 +14,18 @@
  *
  * XChain Hub - llm provider: how a finished `claude --print` run settles
  *
- * The classification lib/claude_spawn.js applies once the CLI exits: a sound
+ * The classification llm/claude_spawn.js applies once the CLI exits: a sound
  * answer, a vendor-availability failure the judge chain may retry on another
  * model, or a reached-model outcome (refusal, truncation, hard error) that must
  * not be re-asked. Pure functions over the exit code and the captured streams,
- * so the spawn itself stays the only thing lib/claude_spawn.js owns.
+ * so the spawn itself stays the only thing llm/claude_spawn.js owns.
  *
  ********************************************************************/
 
 // A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
 // an outcome the model actually produced. The boundary is the one providers/llm/http.js
 // `isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included);
-// it is restated here rather than imported because it was written in lib/claude_spawn.js,
+// it is restated here rather than imported because it was written in llm/claude_spawn.js,
 // which llm.js requires, where a back-import would be circular. The two definitions are
 // a pair: move one, move the other.
 const AVAILABILITY_STATUS_RE = /\b(429|500|502|503|504|529)\b/;

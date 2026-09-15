@@ -84,7 +84,7 @@ function _withEnv(extra, fn){
 function _reloadProvider(){
     delete require.cache[require.resolve('../../src/providers/llm.js')];
     delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-    delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
+    delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
     return require('../../src/providers/llm.js');
 }
 
@@ -630,7 +630,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     afterEach(function () {
         sinon.restore();
         // Restore any patched cache entry
-        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
+        const spawnKey = require.resolve('../../src/providers/llm/claude_spawn.js');
         if (savedCacheEntry !== undefined) {
             require.cache[spawnKey] = savedCacheEntry;
             savedCacheEntry = undefined;
@@ -642,7 +642,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     // Inject a fake claude-spawn module into the cache, reload llm.js so its
     // destructured binding picks up our stub, then restore after the test.
     function reloadWithSpawnStub(spawnResolveValue) {
-        const spawnKey = require.resolve('../../src/lib/claude_spawn.js');
+        const spawnKey = require.resolve('../../src/providers/llm/claude_spawn.js');
         savedCacheEntry = require.cache[spawnKey];
 
         const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
@@ -1771,7 +1771,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
         // Reload llm.js so it picks up our fake hub-credentials
         delete require.cache[require.resolve('../../src/providers/llm.js')];
-        delete require.cache[require.resolve('../../src/lib/claude_spawn.js')];
+        delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
         const llm = require('../../src/providers/llm.js');
         return { llm, stub: fakeResolve };
     }
