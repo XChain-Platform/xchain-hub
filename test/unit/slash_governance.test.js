@@ -28,9 +28,19 @@ function evidenceRow(over = {}) {
     }, over);
 }
 
-describe('SlashGovernance', function () {
+let hub, sg;
 
-    let hub, sg;
+function finalizedEvent(penalty, rows) {
+    let hash = computeEvidenceHash(rows);
+    return {
+        proposalId: 'gov:x:1',
+        parameter: SLASH_PENALTY_PREFIX + PK + ':' + hash,
+        oldValue: 'pending',
+        newValue: penalty
+    };
+}
+
+describe('SlashGovernance', function () {
 
     beforeEach(function () {
         hub = createMockHub();
@@ -41,6 +51,15 @@ describe('SlashGovernance', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+
+    registerSlashPenaltyParsingTests();
+    registerSlashEvidenceHashTests();
+    registerSlashProposalTests();
+    registerApplyFinalizedSuite();
+    registerSlashGovernanceIntegrationTest();
+});
+
+function registerSlashPenaltyParsingTests() {
 
     // -----------------------------------------------------------------
     // parseSlashPenaltyParam()
@@ -61,6 +80,9 @@ describe('SlashGovernance', function () {
             expect(parseSlashPenaltyParam(null)).to.equal(null);
         });
     });
+}
+
+function registerSlashEvidenceHashTests() {
 
     // -----------------------------------------------------------------
     // computeEvidenceHash()
@@ -86,6 +108,9 @@ describe('SlashGovernance', function () {
             expect(h1).to.not.equal(h2);
         });
     });
+}
+
+function registerSlashProposalTests() {
 
     // -----------------------------------------------------------------
     // proposeSlashPenalty()
@@ -135,23 +160,23 @@ describe('SlashGovernance', function () {
             catch (e) { expect(e.message).to.match(/Governance not active/); }
         });
     });
+}
+
+function registerApplyFinalizedSuite() {
 
     // -----------------------------------------------------------------
     // applyFinalized()
     // -----------------------------------------------------------------
 
     describe('applyFinalized()', function () {
-        function finalizedEvent(penalty, rows) {
-            let hash = computeEvidenceHash(rows);
-            return {
-                proposalId: 'gov:x:1',
-                parameter: SLASH_PENALTY_PREFIX + PK + ':' + hash,
-                oldValue: 'pending',
-                newValue: penalty
-            };
-        }
+        registerApplyFinalizedBasicTests();
+        registerApplyFinalizedSubsetTests();
+        registerApplyFinalizedFailureTests();
+    });
+}
 
-        it('ignores non-SLASH_PENALTY parameters', async function () {
+function registerApplyFinalizedBasicTests() {
+    it('ignores non-SLASH_PENALTY parameters', async function () {
             let res = await sg.applyFinalized({ parameter: 'ORACLE_ROUND_INTERVAL', newValue: '600000' });
             expect(res).to.equal(null);
             expect(hub.db.doQuery.called).to.equal(false);
@@ -186,7 +211,9 @@ describe('SlashGovernance', function () {
             expect(hub.loadValidatorPubkeys.calledOnce).to.equal(true);
             expect(hub.propagateValidatorSet.calledOnce).to.equal(true);
         });
+}
 
+function registerApplyFinalizedSubsetTests() {
         it('dismiss: rejects evidence rows and leaves the validator active', async function () {
             let rows = [evidenceRow()];
             hub.db.doQuery.onCall(0).resolves(rows);
@@ -231,7 +258,9 @@ describe('SlashGovernance', function () {
             expect(hub.db.doQuery.callCount).to.equal(1);
             expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
         });
+}
 
+function registerApplyFinalizedFailureTests() {
         it('suspend on evidence mismatch still suspends the validator but leaves rows pending', async function () {
             let votedRows = [evidenceRow()];
             let driftedRows = [evidenceRow({ evidence: '{"different":true}' })];
@@ -270,7 +299,9 @@ describe('SlashGovernance', function () {
             expect(res.suspended).to.equal(false);
             expect(res.evidenceRowsUpdated).to.equal(0);
         });
-    });
+}
+
+function registerSlashGovernanceIntegrationTest() {
 
     // -----------------------------------------------------------------
     // End-to-end through the real Governance engine (leader tally path)
@@ -321,4 +352,4 @@ describe('SlashGovernance', function () {
             expect(applied).to.deep.equal({ validatorPubkey: PK, penalty: 'suspend', evidenceRowsUpdated: 1, suspended: true });
         });
     });
-});
+}
