@@ -43,18 +43,23 @@ function wireFederationSnapshot(hub, quorum) {
     return snapshot;
 }
 
-describe('Chaos: Validator Churn During Consensus', function () {
-    this.timeout(15000);
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerAddingAValidatorMidRoundDoesTest() {
 
     it('adding a validator mid-round does not disrupt current consensus', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -103,6 +108,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
 
         con.stop();
     });
+}
+
+function registerRemovingAValidatorMidRoundMayTest() {
 
     it('removing a validator mid-round may reduce quorum', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -141,6 +149,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
 
         con.stop();
     });
+}
+
+function registerLeaderRotationReflectsUpdatedValidatorSetTest() {
 
     it('leader rotation reflects updated validator set', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -160,6 +171,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
         // seq=4: validators[(4+0) % 5] = validators[4] = v5
         expect(con._getLeader(4).addr).to.equal(v5.addr);
     });
+}
+
+function registerQuorumCalculationAdjustsWithValidatorSetTest() {
 
     it('quorum calculation adjusts with validator set changes', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -182,6 +196,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
         con.validatorSet = [VALIDATORS_4[0]];
         expect(con.getQuorum()).to.equal(0);
     });
+}
+
+function registerOracleLeaderChangesWhenValidatorSetTest() {
 
     it('oracle leader changes when validator set changes between rounds', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -202,6 +219,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
         // Round 5: leader = validators[5 % 5] = validators[0]
         expect(oracleCon._getLeader(5).addr).to.equal(VALIDATORS_4[0].addr);
     });
+}
+
+function registerNewValidatorCanParticipateInSubsequentTest() {
 
     it('new validator can participate in subsequent round', async function () {
         let v5 = makeValidator(5);
@@ -245,6 +265,9 @@ describe('Chaos: Validator Churn During Consensus', function () {
 
         con.stop();
     });
+}
+
+function registerRapidChurnMultipleAddsRemovesDoTest() {
 
     it('rapid churn: multiple adds/removes do not crash consensus', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -270,4 +293,16 @@ describe('Chaos: Validator Churn During Consensus', function () {
         con.validatorSet = [...VALIDATORS_4];
         expect(con.getQuorum()).to.equal(3);
     });
+}
+describe('Chaos: Validator Churn During Consensus', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerAddingAValidatorMidRoundDoesTest();
+    registerRemovingAValidatorMidRoundMayTest();
+    registerLeaderRotationReflectsUpdatedValidatorSetTest();
+    registerQuorumCalculationAdjustsWithValidatorSetTest();
+    registerOracleLeaderChangesWhenValidatorSetTest();
+    registerNewValidatorCanParticipateInSubsequentTest();
+    registerRapidChurnMultipleAddsRemovesDoTest();
 });
