@@ -19,7 +19,7 @@
  * console patch for the whole run: from that point every assertion about a log
  * line would be reading a formatted, level-gated line instead of what the code
  * under test actually passed. The patch is a production wiring concern and is
- * covered directly in test/unit/observability.test.js, which opts back in.
+ * covered directly in test/unit/observability/observability.test.js, which opts back in.
  *
  ********************************************************************/
 

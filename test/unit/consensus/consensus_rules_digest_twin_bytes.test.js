@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/consensus_rules_digest_twin_bytes.test.js
+ * test/unit/consensus/consensus_rules_digest_twin_bytes.test.js
  *
  * src/consensus_rules_digest.js DECLARES itself a byte-twin of the indexer copy
  * and nothing on the hub side enforced the bytes, so the two could drift
@@ -42,7 +42,7 @@
  * activation helpers are not.
  *
  * SIBLING RESOLUTION: XCHAIN_INDEXER_DIR, then the conventional sibling
- * directory, matching the order test/unit/sibling_coverage.test.js and the
+ * directory, matching the order test/unit/repo_guards/sibling_coverage.test.js and the
  * ATTEST batch wire twin (attest_batch_wire_parity.test.js) already read for
  * this repo's indexer guards. From a lane worktree the conventional path
  * resolves to nothing (a skip) or to a peer's live working tree (not

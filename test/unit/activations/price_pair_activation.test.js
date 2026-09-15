@@ -11,7 +11,7 @@
  * legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/price_pair_activation.test.js
+ * test/unit/activations/price_pair_activation.test.js
  *
  * PRICE v0 pair-name widening flag-day, hub side.
  *

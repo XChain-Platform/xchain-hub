@@ -9,7 +9,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// test/unit/price_scale_activation.test.js
+// test/unit/activations/price_scale_activation.test.js
 //
 // PRICE v0 canonical price-value flag day, hub side.
 //

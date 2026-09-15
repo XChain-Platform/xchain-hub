@@ -93,7 +93,7 @@
 
 // This file keeps the class: construction, the lifecycle and the poll that drives
 // both legs, plus the two methods whose text a structural suite reads from THIS file:
-// defaultBroadcast (test/unit/two_phase_guard.test.js, encoder_utxo_forward.test.js)
+// defaultBroadcast (test/unit/shared/spend/two_phase_guard.test.js, encoder_utxo_forward.test.js)
 // and _persistCapabilitySnapshot (capability_snapshot_write_atomic.test.js). Everything
 // else lives in named parts under ./relay/ and is installed on
 // the prototype below, so `require('./attestation/relay')` and every method name are

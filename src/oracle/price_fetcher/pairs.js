@@ -66,7 +66,7 @@ function krakenResultCandidates(altname) {
 // fiat added here alone is fetched and co-signed but rejected on push, and a coin added
 // to coins/ alone is picked up here automatically while v1 ingest still calls it an
 // invalid coin. Pinned to the v1 fence and to the indexer config by
-// test/unit/constants_conformance.test.js (#7215).
+// test/unit/shared/constants_conformance.test.js (#7215).
 const coins = require('../../coins');
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];

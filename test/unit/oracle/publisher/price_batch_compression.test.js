@@ -11,7 +11,7 @@
  * legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/price_batch_compression.test.js (hub copy of the xchain-indexer canonical)
+ * test/unit/oracle/publisher/price_batch_compression.test.js (hub copy of the xchain-indexer canonical)
  *
  * PRICE v0 wire compression is CONSENSUS: every node must accept or reject the
  * same compressed field identically, and must do so without ever allocating

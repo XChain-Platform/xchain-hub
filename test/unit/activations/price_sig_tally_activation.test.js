@@ -11,7 +11,7 @@
  * legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/price_sig_tally_activation.test.js
+ * test/unit/activations/price_sig_tally_activation.test.js
  *
  * PRICE v0 signature-tally ordering flag-day, hub side.
  *

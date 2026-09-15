@@ -110,7 +110,7 @@ const { MAX_PAIRS_PER_ACTION, ACTION_DATA_CEILING, BYTES_PER_PAIR, XROLLCALL_SIG
 // values that decide what the ledger says.
 //
 // The ordering PUBLISH_DELAY < SELF_PUBLISH < ACCEPT_WINDOW - 24 is the part
-// that binds (pinned by test/unit/rollcall_round_invariants.test.js): the 24 BTC
+// that binds (pinned by test/unit/rollcall/rollcall_round_invariants.test.js): the 24 BTC
 // blocks of margin cover the DOGE landing plus the two-hour miner timestamp
 // slack, so a self-publish issued at the last moment still lands inside the
 // accept window instead of arriving after the chain has stopped counting.

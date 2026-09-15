@@ -51,7 +51,7 @@ const logger = getLogger();
 // instance sees exactly the class it saw before the split. What stays HERE is
 // every site that builds or signs a round's canonical bytes, kept in one file
 // because the era argument they all pass is the thing a new call site is most
-// likely to forget (test/unit/attest_response_canonical_era.test.js reads them).
+// likely to forget (test/unit/attestation/consensus/attest_response_canonical_era.test.js reads them).
 const { ATTEST_PROPOSE, ATTEST_PREPARE, ATTEST_COMMIT } = require('./consensus/constants.js');
 const options       = require('./consensus/options.js');
 const lifecycle     = require('./consensus/lifecycle.js');

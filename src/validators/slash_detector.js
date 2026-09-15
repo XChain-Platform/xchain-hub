@@ -60,7 +60,7 @@ const PROPOSAL_STATUSES = ['pending', 'approved', 'rejected', 'expired'];
 // on a JSON round-trip that silently rewrites number formatting, so the raw
 // stored bytes are hashed. A null evidence hashes as the empty string, same as
 // SlashGovernance. Cross-file drift is pinned by a parity test
-// (test/unit/slash_proposals_rpc.test.js).
+// (test/unit/validators/governance/slash_proposals_rpc.test.js).
 //
 // This is a REPUBLICATION control, not confidentiality: the evidence space is
 // low-entropy (a fixed template with a few numeric fields), so a party who knows

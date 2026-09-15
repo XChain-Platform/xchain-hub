@@ -511,7 +511,7 @@ derivation lives in
 [ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/anchor.md)
 ("Where the publisher constants come from"), mirrored in the `StateAnchorPublisher`
 constructor comment and pinned by
-`test/unit/state_anchor_publisher_constant_derivations.test.js`. In short:
+`test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js`. In short:
 
 - **`ANCHOR_CHUNK_MAX_BYTES` = 6000** reserves head room under the protocol's
   8192-byte `MAX_ACTION_DATA_LENGTH` ceiling, because chunk 0 shares the v1/v6
@@ -678,7 +678,7 @@ different values still produce roll calls each other's indexers accept.
 ### Why those magnitudes (before you retune them)
 
 The ordering is what binds, and
-`test/unit/rollcall_round_invariants.test.js` pins both halves of it for every
+`test/unit/rollcall/rollcall_round_invariants.test.js` pins both halves of it for every
 network's defaults:
 
 - **`PUBLISH_DELAY` < `SELF_PUBLISH` < `ACCEPT_WINDOW - 24`.** The 24 BTC blocks

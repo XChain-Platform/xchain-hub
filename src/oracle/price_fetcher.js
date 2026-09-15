@@ -53,7 +53,7 @@ const BOUND_REJECT_SAMPLE = 5;
 // key, and which pairs it can price. multiSourceCapablePairs() derives the
 // multi-source-capable set from this instead of restating the lineup, which is how
 // nineteen pairs sat outside the single-source health signal for the whole life of the
-// keyless Coinbase source (item 7068). test/unit/price_fetcher.test.js pins it against
+// keyless Coinbase source (item 7068). test/unit/oracle/price/fetcher/price_fetcher.test.js pins it against
 // the fetchers fetchPrices() actually dispatches, so adding or dropping a source on one
 // side reddens rather than silently re-opening the gap.
 //

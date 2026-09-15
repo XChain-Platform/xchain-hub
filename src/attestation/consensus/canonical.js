@@ -58,7 +58,7 @@ module.exports = {
     // hand-built round states. It yields the legacy bytes and skips the assertion.
     // Every in-round call site passes the seventh argument explicitly (null for the
     // legacy era, an integer for the mirror era), which is pinned by
-    // test/unit/attest_response_canonical_era.test.js so a new call site cannot
+    // test/unit/attestation/consensus/attest_response_canonical_era.test.js so a new call site cannot
     // reintroduce a per-code-path era.
     //
     // The EQUIV header wrapper (WI-2 bump 2) is applied after, exactly where it was:

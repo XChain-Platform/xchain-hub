@@ -35,7 +35,7 @@ module.exports = {
         // RELATIONSHIP each number encodes, not the round figure; none of these is
         // consensus data (they are per-hub operator knobs), but two of them have a
         // hard on-chain ceiling behind them. The arithmetic below is pinned by
-        // test/unit/state_anchor_publisher_constant_derivations.test.js, so a retune
+        // test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js, so a retune
         // that breaks a bound fails there instead of on-chain.
         //
         // ANCHOR_CHUNK_MAX_BYTES = 6000 (base64url chars per archive chunk).

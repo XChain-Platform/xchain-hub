@@ -196,7 +196,7 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part3() {
 function registerObservabilityShimTheVendoredCopyParityGateSuite1Part4() {
   describe('the ported suite headers describe the mechanism that exists', function () {
     // Skips per consumer when the sibling is absent, the same way every other
-    // cross-repo guard here does; test/unit/sibling_coverage.test.js is what
+    // cross-repo guard here does; test/unit/repo_guards/sibling_coverage.test.js is what
     // reports which of them could not run.
     //
     // It reports an absent CHECKOUT, not an absent SUITE, so a consumer that

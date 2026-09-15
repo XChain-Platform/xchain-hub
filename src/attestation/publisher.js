@@ -67,7 +67,7 @@
  ********************************************************************/
 
 // This file keeps the class: construction, the operator-facing stats and the
-// lifecycle, plus defaultBroadcast: test/unit/two_phase_guard.test.js and
+// lifecycle, plus defaultBroadcast: test/unit/shared/spend/two_phase_guard.test.js and
 // encoder_utxo_forward.test.js census the fee-bearing pipeline by reading THIS file's
 // text, so the guarded encoder call stays where they look. Everything else lives in named parts under ./publisher/ and is installed
 // on the prototype below, so every require path and method name is exactly what it was.

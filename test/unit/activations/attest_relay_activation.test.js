@@ -11,7 +11,7 @@
  * legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/attest_relay_activation.test.js
+ * test/unit/activations/attest_relay_activation.test.js
  *
  * ATTEST cross-chain relay flag-day, hub side.
  *

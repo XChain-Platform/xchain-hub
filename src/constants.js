@@ -89,7 +89,7 @@ const DEFAULT_ORACLE_SUBMISSION_WINDOW_MS = 180000;
 // into the v0 ingest / PROPOSE co-sign fence. Those are separate literals from these,
 // so a coin or fiat added to one lane alone is accepted there and rejected on the
 // other. All three sources are pinned against each other by
-// test/unit/constants_conformance.test.js (#7215). DERIVED_PAIRS below is the one
+// test/unit/shared/constants_conformance.test.js (#7215). DERIVED_PAIRS below is the one
 // deliberate asymmetry and must NOT join this fence.
 const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];

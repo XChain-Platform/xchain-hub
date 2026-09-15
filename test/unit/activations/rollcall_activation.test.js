@@ -11,7 +11,7 @@
  * legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/rollcall_activation.test.js
+ * test/unit/activations/rollcall_activation.test.js
  *
  * ROLLCALL activation and epoch arithmetic, hub side.
  *
