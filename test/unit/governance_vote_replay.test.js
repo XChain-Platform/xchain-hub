@@ -31,182 +31,208 @@
 // test/integration/governance/voteSeqMonotonic.integration.test.js. These unit
 // tests cover the half that is pure JS: the signed bytes, the seq binding, and
 // the refusal paths.
-
-const sinon        = require('sinon');
-const { expect }   = require('chai');
-const Governance   = require('../../src/validators/governance');
+const sinon = require('sinon');
+const {
+  expect
+} = require('chai');
+const Governance = require('../../src/validators/governance');
 const ValidatorIdentity = require('../../src/validators/identity');
-const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_3 }  = require('../helpers/fixtures');
-
+const {
+  createMockHub
+} = require('../helpers/mockHub');
+const {
+  VALIDATORS_3
+} = require('../helpers/fixtures');
 const PROPOSAL = 'gov:MIN_STAKE:1';
+let governanceGOVVOTEREPLAYSuite1Hub, governanceGOVVOTEREPLAYSuite1Gov, governanceGOVVOTEREPLAYSuite1Kp, governanceGOVVOTEREPLAYSuite1Idn;
+function governanceGOVVOTEREPLAYSuite1Inbound(vote, seq, signWithSeq) {
+  // signWithSeq lets a test sign over one seq and send another, which is
+  // exactly what a payload-stripping attacker would attempt.
+  let signed = signWithSeq === undefined ? seq : signWithSeq;
+  return {
+    sender: 'peer',
+    type: 'GOV_VOTE',
+    data: {
+      proposalId: PROPOSAL,
+      vote,
+      voterPubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      seq,
+      signature: governanceGOVVOTEREPLAYSuite1Idn.sign(Governance.voteSigningPayload(PROPOSAL, vote, governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, signed))
+    }
+  };
+}
+function governanceGOVVOTEREPLAYSuite1UpsertCalls() {
+  return governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.getCalls().filter(c => /INSERT INTO governance_votes/.test(String(c.args[0])));
+}
 
+// ---- the signed bytes -------------------------------------------------
+function registerGovernanceGOVVOTEREPLAYSuite1Part1() {
+  beforeEach(function () {
+    governanceGOVVOTEREPLAYSuite1Hub = createMockHub();
+    governanceGOVVOTEREPLAYSuite1Hub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
+    governanceGOVVOTEREPLAYSuite1Gov = new Governance(governanceGOVVOTEREPLAYSuite1Hub);
+    governanceGOVVOTEREPLAYSuite1Kp = ValidatorIdentity.generate();
+    governanceGOVVOTEREPLAYSuite1Idn = new ValidatorIdentity(governanceGOVVOTEREPLAYSuite1Kp.privkeyHex);
+    governanceGOVVOTEREPLAYSuite1Gov.setValidatorSet([...VALIDATORS_3, {
+      pubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      addr: 'ws://voter:1'
+    }]);
+    // The GOV-LATEVOTE-1 guard needs an open proposal for the vote to survive.
+    governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/)).resolves([{
+      voting_end: new Date(Date.now() + 86400000)
+    }]);
+  });
+  afterEach(function () {
+    if (governanceGOVVOTEREPLAYSuite1Gov._tallyTimer) clearInterval(governanceGOVVOTEREPLAYSuite1Gov._tallyTimer);
+    sinon.restore();
+  });
+  it('carries seq inside the signed payload, in a fixed key order', function () {
+    expect(Governance.voteSigningPayload(PROPOSAL, 'approve', 'AB', 42)).to.equal('{"proposalId":"gov:MIN_STAKE:1","vote":"approve","voter":"AB","seq":42}');
+  });
+  it('binds the signature to seq: the same vote at a different seq will not verify', function () {
+    let sig = governanceGOVVOTEREPLAYSuite1Idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, 1000));
+    expect(ValidatorIdentity.verify(Governance.voteSigningPayload(PROPOSAL, 'approve', governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, 1000), sig, governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex), 'the seq it was signed at verifies').to.equal(true);
+    expect(ValidatorIdentity.verify(Governance.voteSigningPayload(PROPOSAL, 'approve', governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, 1001), sig, governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex), 'a bumped seq does NOT verify, so seq cannot be edited in flight').to.equal(false);
+  });
+  it('refuses a seq that is not a positive safe integer', function () {
+    for (let bad of [undefined, null, 0, -1, 1.5, NaN, Infinity, '1000', {}]) expect(Governance.normalizeVoteSeq(bad), String(bad)).to.equal(0);
+    expect(Governance.normalizeVoteSeq(1)).to.equal(1);
+    expect(Governance.normalizeVoteSeq(Number.MAX_SAFE_INTEGER)).to.equal(Number.MAX_SAFE_INTEGER);
+  });
+
+  // ---- the refusal paths ------------------------------------------------
+}
+function registerGovernanceGOVVOTEREPLAYSuite1Part2() {
+  it('DROPS a validly-signed vote that carries no seq (older peer or a stripped replay)', async function () {
+    let sig = governanceGOVVOTEREPLAYSuite1Idn.sign(JSON.stringify({
+      proposalId: PROPOSAL,
+      vote: 'approve',
+      voter: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex
+    }));
+    await governanceGOVVOTEREPLAYSuite1Gov.handleVote({
+      sender: 'peer',
+      type: 'GOV_VOTE',
+      data: {
+        proposalId: PROPOSAL,
+        vote: 'approve',
+        voterPubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+        signature: sig
+      }
+    });
+    expect(governanceGOVVOTEREPLAYSuite1UpsertCalls().length, 'nothing persisted for a seq-less vote').to.equal(0);
+  });
+  it('DROPS a vote whose seq was edited in flight (signed at one seq, sent at another)', async function () {
+    await governanceGOVVOTEREPLAYSuite1Gov.handleVote(governanceGOVVOTEREPLAYSuite1Inbound('approve', 5000, 1000));
+    expect(governanceGOVVOTEREPLAYSuite1UpsertCalls().length, 'signature no longer matches the rebuilt bytes').to.equal(0);
+  });
+  it('accepts a properly seq-stamped vote and persists it with its seq', async function () {
+    await governanceGOVVOTEREPLAYSuite1Gov.handleVote(governanceGOVVOTEREPLAYSuite1Inbound('approve', 1000));
+    let calls = governanceGOVVOTEREPLAYSuite1UpsertCalls();
+    expect(calls.length, 'one persist').to.equal(1);
+    expect(calls[0].args[1]).to.include(1000);
+  });
+
+  // ---- the guard reaches the sink --------------------------------------
+
+  it('persists through a seq-conditional statement, not a bare last-write-wins upsert', async function () {
+    await governanceGOVVOTEREPLAYSuite1Gov.handleVote(governanceGOVVOTEREPLAYSuite1Inbound('approve', 1000));
+    let sql = String(governanceGOVVOTEREPLAYSuite1UpsertCalls()[0].args[0]).replace(/\s+/g, ' ');
+    expect(sql, 'the overwrite is gated on a strictly greater seq').to.match(/vote\s*=\s*IF\(VALUES\(vote_seq\) > COALESCE\(vote_seq, 0\), VALUES\(vote\), vote\)/);
+    expect(sql, 'the signature is gated by the same comparison').to.match(/signature\s*=\s*IF\(VALUES\(vote_seq\) > COALESCE\(vote_seq, 0\)/);
+    expect(sql, 'the stored seq only ever moves up, so a late loser cannot lower the bar').to.match(/vote_seq\s*=\s*GREATEST\(COALESCE\(vote_seq, 0\), VALUES\(vote_seq\)\)/);
+    // Vacuity guard: the assertions above must be describing the real statement.
+    expect(sql).to.match(/^INSERT INTO governance_votes \(proposal_id, voter_pubkey, vote, signature, vote_seq\)/);
+  });
+  it('does the comparison in ONE statement (no read-compare-write TOCTOU on the gossip path)', async function () {
+    await governanceGOVVOTEREPLAYSuite1Gov.handleVote(governanceGOVVOTEREPLAYSuite1Inbound('approve', 1000));
+    let reads = governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.getCalls().filter(c => /SELECT vote_seq FROM governance_votes/.test(String(c.args[0])));
+    expect(reads.length, 'handleVote must not read the stored seq before writing').to.equal(0);
+  });
+
+  // ---- vote(), the signer ----------------------------------------------
+}
+function registerGovernanceGOVVOTEREPLAYSuite1Part3() {
+  it('vote() stamps a seq that strictly beats the seq already stored for this voter', async function () {
+    // A stored seq far in the future: wall-clock alone would not beat it, and a
+    // tie would be refused as non-increasing, stranding the voter.
+    let stored = Date.now() + 5_000_000;
+    governanceGOVVOTEREPLAYSuite1Hub._identity.getPubkeyHex.returns(governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex);
+    governanceGOVVOTEREPLAYSuite1Gov = new Governance(governanceGOVVOTEREPLAYSuite1Hub);
+    governanceGOVVOTEREPLAYSuite1Gov.setValidatorSet([{
+      pubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      addr: 'ws://voter:1'
+    }]);
+    governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.withArgs(sinon.match(/SELECT \* FROM governance_proposals/)).resolves([{
+      proposal_id: PROPOSAL,
+      voting_end: new Date(Date.now() + 86400000),
+      validator_snapshot: null
+    }]);
+    governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.withArgs(sinon.match(/SELECT vote_seq FROM governance_votes/)).resolves([{
+      vote_seq: stored
+    }]);
+    await governanceGOVVOTEREPLAYSuite1Gov.vote(PROPOSAL, 'reject');
+    let broadcast = governanceGOVVOTEREPLAYSuite1Hub._peerManager.broadcast.getCalls().find(c => c.args[0] === 'GOV_VOTE');
+    expect(broadcast, 'the vote was broadcast').to.exist;
+    expect(broadcast.args[1].seq, 'seq strictly exceeds the stored one').to.be.greaterThan(stored);
+    expect(broadcast.args[1].seq, 'and only by the minimum needed').to.equal(stored + 1);
+  });
+  it('vote() broadcasts the seq it signed, so peers can rebuild the bytes', async function () {
+    governanceGOVVOTEREPLAYSuite1Hub._identity.getPubkeyHex.returns(governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex);
+    governanceGOVVOTEREPLAYSuite1Hub._identity.sign.callsFake(p => governanceGOVVOTEREPLAYSuite1Idn.sign(p));
+    governanceGOVVOTEREPLAYSuite1Gov = new Governance(governanceGOVVOTEREPLAYSuite1Hub);
+    governanceGOVVOTEREPLAYSuite1Gov.setValidatorSet([{
+      pubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      addr: 'ws://voter:1'
+    }]);
+    governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.withArgs(sinon.match(/SELECT \* FROM governance_proposals/)).resolves([{
+      proposal_id: PROPOSAL,
+      voting_end: new Date(Date.now() + 86400000),
+      validator_snapshot: null
+    }]);
+    governanceGOVVOTEREPLAYSuite1Hub.db.doQuery.withArgs(sinon.match(/SELECT vote_seq FROM governance_votes/)).resolves([]);
+    await governanceGOVVOTEREPLAYSuite1Gov.vote(PROPOSAL, 'approve');
+    let sent = governanceGOVVOTEREPLAYSuite1Hub._peerManager.broadcast.getCalls().find(c => c.args[0] === 'GOV_VOTE').args[1];
+    expect(ValidatorIdentity.verify(Governance.voteSigningPayload(PROPOSAL, 'approve', governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, sent.seq), sent.signature, governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex), 'a peer rebuilding the payload from the broadcast fields verifies it').to.equal(true);
+  });
+
+  // ---- GOV_RESULT evidence path ----------------------------------------
+}
+function registerGovernanceGOVVOTEREPLAYSuite1Part4() {
+  it('ingestResultVotes skips evidence with no seq rather than defaulting it', async function () {
+    let electorate = [{
+      pubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex.toLowerCase()
+    }];
+    let sig = governanceGOVVOTEREPLAYSuite1Idn.sign(JSON.stringify({
+      proposalId: PROPOSAL,
+      vote: 'approve',
+      voter: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex
+    }));
+    await governanceGOVVOTEREPLAYSuite1Gov.ingestResultVotes(PROPOSAL, [{
+      voterPubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      vote: 'approve',
+      signature: sig
+    }], electorate);
+    expect(governanceGOVVOTEREPLAYSuite1UpsertCalls().length, 'a leader cannot launder a seq-less vote back in').to.equal(0);
+  });
+  it('ingestResultVotes accepts seq-stamped evidence', async function () {
+    let electorate = [{
+      pubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex.toLowerCase()
+    }];
+    let sig = governanceGOVVOTEREPLAYSuite1Idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex, 2000));
+    await governanceGOVVOTEREPLAYSuite1Gov.ingestResultVotes(PROPOSAL, [{
+      voterPubkey: governanceGOVVOTEREPLAYSuite1Kp.pubkeyHex,
+      vote: 'approve',
+      signature: sig,
+      seq: 2000
+    }], electorate);
+    let calls = governanceGOVVOTEREPLAYSuite1UpsertCalls();
+    expect(calls.length).to.equal(1);
+    expect(calls[0].args[1]).to.include(2000);
+  });
+}
 describe('Governance GOV-VOTE-REPLAY-1', function () {
-
-    let hub, gov, kp, idn;
-
-    beforeEach(function () {
-        hub = createMockHub();
-        hub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);
-        gov = new Governance(hub);
-        kp  = ValidatorIdentity.generate();
-        idn = new ValidatorIdentity(kp.privkeyHex);
-        gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
-        // The GOV-LATEVOTE-1 guard needs an open proposal for the vote to survive.
-        hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
-            .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
-    });
-
-    afterEach(function () {
-        if (gov._tallyTimer) clearInterval(gov._tallyTimer);
-        sinon.restore();
-    });
-
-    function inbound(vote, seq, signWithSeq) {
-        // signWithSeq lets a test sign over one seq and send another, which is
-        // exactly what a payload-stripping attacker would attempt.
-        let signed = signWithSeq === undefined ? seq : signWithSeq;
-        return {
-            sender: 'peer', type: 'GOV_VOTE',
-            data: {
-                proposalId: PROPOSAL, vote, voterPubkey: kp.pubkeyHex, seq,
-                signature: idn.sign(Governance.voteSigningPayload(PROPOSAL, vote, kp.pubkeyHex, signed))
-            }
-        };
-    }
-
-    function upsertCalls() {
-        return hub.db.doQuery.getCalls()
-            .filter(c => /INSERT INTO governance_votes/.test(String(c.args[0])));
-    }
-
-    // ---- the signed bytes -------------------------------------------------
-
-    it('carries seq inside the signed payload, in a fixed key order', function () {
-        expect(Governance.voteSigningPayload(PROPOSAL, 'approve', 'AB', 42))
-            .to.equal('{"proposalId":"gov:MIN_STAKE:1","vote":"approve","voter":"AB","seq":42}');
-    });
-
-    it('binds the signature to seq: the same vote at a different seq will not verify', function () {
-        let sig = idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 1000));
-        expect(ValidatorIdentity.verify(
-            Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 1000), sig, kp.pubkeyHex),
-            'the seq it was signed at verifies').to.equal(true);
-        expect(ValidatorIdentity.verify(
-            Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 1001), sig, kp.pubkeyHex),
-            'a bumped seq does NOT verify, so seq cannot be edited in flight').to.equal(false);
-    });
-
-    it('refuses a seq that is not a positive safe integer', function () {
-        for (let bad of [undefined, null, 0, -1, 1.5, NaN, Infinity, '1000', {}])
-            expect(Governance.normalizeVoteSeq(bad), String(bad)).to.equal(0);
-        expect(Governance.normalizeVoteSeq(1)).to.equal(1);
-        expect(Governance.normalizeVoteSeq(Number.MAX_SAFE_INTEGER)).to.equal(Number.MAX_SAFE_INTEGER);
-    });
-
-    // ---- the refusal paths ------------------------------------------------
-
-    it('DROPS a validly-signed vote that carries no seq (older peer or a stripped replay)', async function () {
-        let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
-        await gov.handleVote({
-            sender: 'peer', type: 'GOV_VOTE',
-            data: { proposalId: PROPOSAL, vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
-        });
-        expect(upsertCalls().length, 'nothing persisted for a seq-less vote').to.equal(0);
-    });
-
-    it('DROPS a vote whose seq was edited in flight (signed at one seq, sent at another)', async function () {
-        await gov.handleVote(inbound('approve', 5000, 1000));
-        expect(upsertCalls().length, 'signature no longer matches the rebuilt bytes').to.equal(0);
-    });
-
-    it('accepts a properly seq-stamped vote and persists it with its seq', async function () {
-        await gov.handleVote(inbound('approve', 1000));
-        let calls = upsertCalls();
-        expect(calls.length, 'one persist').to.equal(1);
-        expect(calls[0].args[1]).to.include(1000);
-    });
-
-    // ---- the guard reaches the sink --------------------------------------
-
-    it('persists through a seq-conditional statement, not a bare last-write-wins upsert', async function () {
-        await gov.handleVote(inbound('approve', 1000));
-        let sql = String(upsertCalls()[0].args[0]).replace(/\s+/g, ' ');
-        expect(sql, 'the overwrite is gated on a strictly greater seq')
-            .to.match(/vote\s*=\s*IF\(VALUES\(vote_seq\) > COALESCE\(vote_seq, 0\), VALUES\(vote\), vote\)/);
-        expect(sql, 'the signature is gated by the same comparison')
-            .to.match(/signature\s*=\s*IF\(VALUES\(vote_seq\) > COALESCE\(vote_seq, 0\)/);
-        expect(sql, 'the stored seq only ever moves up, so a late loser cannot lower the bar')
-            .to.match(/vote_seq\s*=\s*GREATEST\(COALESCE\(vote_seq, 0\), VALUES\(vote_seq\)\)/);
-        // Vacuity guard: the assertions above must be describing the real statement.
-        expect(sql).to.match(/^INSERT INTO governance_votes \(proposal_id, voter_pubkey, vote, signature, vote_seq\)/);
-    });
-
-    it('does the comparison in ONE statement (no read-compare-write TOCTOU on the gossip path)', async function () {
-        await gov.handleVote(inbound('approve', 1000));
-        let reads = hub.db.doQuery.getCalls()
-            .filter(c => /SELECT vote_seq FROM governance_votes/.test(String(c.args[0])));
-        expect(reads.length, 'handleVote must not read the stored seq before writing').to.equal(0);
-    });
-
-    // ---- vote(), the signer ----------------------------------------------
-
-    it('vote() stamps a seq that strictly beats the seq already stored for this voter', async function () {
-        // A stored seq far in the future: wall-clock alone would not beat it, and a
-        // tie would be refused as non-increasing, stranding the voter.
-        let stored = Date.now() + 5_000_000;
-        hub._identity.getPubkeyHex.returns(kp.pubkeyHex);
-        gov = new Governance(hub);
-        gov.setValidatorSet([{ pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
-        hub.db.doQuery.withArgs(sinon.match(/SELECT \* FROM governance_proposals/))
-            .resolves([{ proposal_id: PROPOSAL, voting_end: new Date(Date.now() + 86400000), validator_snapshot: null }]);
-        hub.db.doQuery.withArgs(sinon.match(/SELECT vote_seq FROM governance_votes/))
-            .resolves([{ vote_seq: stored }]);
-
-        await gov.vote(PROPOSAL, 'reject');
-
-        let broadcast = hub._peerManager.broadcast.getCalls()
-            .find(c => c.args[0] === 'GOV_VOTE');
-        expect(broadcast, 'the vote was broadcast').to.exist;
-        expect(broadcast.args[1].seq, 'seq strictly exceeds the stored one').to.be.greaterThan(stored);
-        expect(broadcast.args[1].seq, 'and only by the minimum needed').to.equal(stored + 1);
-    });
-
-    it('vote() broadcasts the seq it signed, so peers can rebuild the bytes', async function () {
-        hub._identity.getPubkeyHex.returns(kp.pubkeyHex);
-        hub._identity.sign.callsFake(p => idn.sign(p));
-        gov = new Governance(hub);
-        gov.setValidatorSet([{ pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
-        hub.db.doQuery.withArgs(sinon.match(/SELECT \* FROM governance_proposals/))
-            .resolves([{ proposal_id: PROPOSAL, voting_end: new Date(Date.now() + 86400000), validator_snapshot: null }]);
-        hub.db.doQuery.withArgs(sinon.match(/SELECT vote_seq FROM governance_votes/)).resolves([]);
-
-        await gov.vote(PROPOSAL, 'approve');
-
-        let sent = hub._peerManager.broadcast.getCalls().find(c => c.args[0] === 'GOV_VOTE').args[1];
-        expect(ValidatorIdentity.verify(
-            Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, sent.seq),
-            sent.signature, kp.pubkeyHex),
-            'a peer rebuilding the payload from the broadcast fields verifies it').to.equal(true);
-    });
-
-    // ---- GOV_RESULT evidence path ----------------------------------------
-
-    it('ingestResultVotes skips evidence with no seq rather than defaulting it', async function () {
-        let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
-        let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
-        await gov.ingestResultVotes(PROPOSAL,
-            [{ voterPubkey: kp.pubkeyHex, vote: 'approve', signature: sig }], electorate);
-        expect(upsertCalls().length, 'a leader cannot launder a seq-less vote back in').to.equal(0);
-    });
-
-    it('ingestResultVotes accepts seq-stamped evidence', async function () {
-        let electorate = [{ pubkey: kp.pubkeyHex.toLowerCase() }];
-        let sig = idn.sign(Governance.voteSigningPayload(PROPOSAL, 'approve', kp.pubkeyHex, 2000));
-        await gov.ingestResultVotes(PROPOSAL,
-            [{ voterPubkey: kp.pubkeyHex, vote: 'approve', signature: sig, seq: 2000 }], electorate);
-        let calls = upsertCalls();
-        expect(calls.length).to.equal(1);
-        expect(calls[0].args[1]).to.include(2000);
-    });
+  registerGovernanceGOVVOTEREPLAYSuite1Part1.call(this);
+  registerGovernanceGOVVOTEREPLAYSuite1Part2.call(this);
+  registerGovernanceGOVVOTEREPLAYSuite1Part3.call(this);
+  registerGovernanceGOVVOTEREPLAYSuite1Part4.call(this);
 });
