@@ -64,8 +64,8 @@ function initRelayPolling(self, cfg){
     self.indexers = {};
     for(let coin of [HOME_CHAIN, ...ORIGIN_CHAINS]){
         self.indexers[coin] = {
-            url: process.env[coin + '_INDEXER_API_URL'] || process.env[coin + '_INDEXER_URL'] || cfg[coin + '_INDEXER_URL'] || '',
-            key: process.env[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
+            url: hubConfig.env()[coin + '_INDEXER_API_URL'] || hubConfig.env()[coin + '_INDEXER_URL'] || cfg[coin + '_INDEXER_URL'] || '',
+            key: hubConfig.env()[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
         };
     }
 }
@@ -103,12 +103,12 @@ function initRelayRails(self, cfg){
     // and is therefore classified NOT ambiguous and stays retryable.
     self.chainRails = {};
     for(let coin of ORIGIN_CHAINS){
-        let url = process.env[coin + '_ENCODER_URL'] || cfg[coin + '_ENCODER_URL'] || '';
-        let key = process.env[coin + '_ENCODER_API_KEY'] || cfg[coin + '_ENCODER_API_KEY'] || '';
+        let url = hubConfig.env()[coin + '_ENCODER_URL'] || cfg[coin + '_ENCODER_URL'] || '';
+        let key = hubConfig.env()[coin + '_ENCODER_API_KEY'] || cfg[coin + '_ENCODER_API_KEY'] || '';
         self.chainRails[coin] = {
             encoder:      url ? new EncoderClient(url, key) : null,
-            address:      process.env[coin + '_ADDRESS']    || cfg[coin + '_ADDRESS']    || '',
-            pubkeyHex:    process.env[coin + '_PUBKEY_HEX'] || cfg[coin + '_PUBKEY_HEX'] || '',
+            address:      hubConfig.env()[coin + '_ADDRESS']    || cfg[coin + '_ADDRESS']    || '',
+            pubkeyHex:    hubConfig.env()[coin + '_PUBKEY_HEX'] || cfg[coin + '_PUBKEY_HEX'] || '',
             broadcastFn:  null,
             walletSignFn: null
         };
