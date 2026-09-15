@@ -14,10 +14,9 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-describe('Regression: Database', function () {
+let mockPool, mockConn, mockMariadb, Database;
 
-    let mockPool, mockConn, mockMariadb, Database;
-
+function registerSuitePart1() {
     beforeEach(function () {
         mockConn = {
             query:   sinon.stub().resolves([]),
@@ -39,13 +38,17 @@ describe('Regression: Database', function () {
             path:    require('path')
         });
     });
+}
 
+function registerSuitePart2() {
     afterEach(function () { sinon.restore(); });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-003: Circuit breaker opens after threshold failures
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-003: Circuit breaker opens after threshold failures
+// -----------------------------------------------------------------
 
+function registerSuitePart3() {
     describe('REG-DB-003: Circuit breaker opens after consecutive failures', function () {
         it('opens after threshold consecutive failures @regression-p1', async function () {
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
@@ -75,11 +78,13 @@ describe('Regression: Database', function () {
             }
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-004: Circuit breaker half-open recovery
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-004: Circuit breaker half-open recovery
+// -----------------------------------------------------------------
 
+function registerSuitePart4() {
     describe('REG-DB-004: Circuit breaker half-open recovery', function () {
         it('transitions to closed after cooldown @regression-p2', async function () {
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
@@ -99,11 +104,13 @@ describe('Regression: Database', function () {
             expect(db.circuitFailures).to.equal(0);
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-005: Parameterized queries prevent SQL injection
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-005: Parameterized queries prevent SQL injection
+// -----------------------------------------------------------------
 
+function registerSuitePart5() {
     describe('REG-DB-005: Parameterized queries', function () {
         it('executes parameterized query and releases connection @regression-p0', async function () {
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
@@ -134,11 +141,13 @@ describe('Regression: Database', function () {
             expect(mockConn.query.getCall(0).args[1][0]).to.equal('{"key":"value"}');
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-002: Config CRUD
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-002: Config CRUD
+// -----------------------------------------------------------------
 
+function registerSuitePart6() {
     describe('REG-DB-002: Config CRUD', function () {
         it('setParam executes upsert query @regression-p1', async function () {
             let db = new Database('h', 3306, 'db', 'u', 'p');
@@ -183,11 +192,13 @@ describe('Regression: Database', function () {
             expect(configs.LTC.testnet.decoder.host).to.equal('dec-host');
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-006 & 007: Pool and timeout
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-006 & 007: Pool and timeout
+// -----------------------------------------------------------------
 
+function registerSuitePart7() {
     describe('REG-DB-006: Connection pool', function () {
         it('creates pool on construction @regression-p2', function () {
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
@@ -195,11 +206,13 @@ describe('Regression: Database', function () {
             expect(db.dbName).to.equal('test_db');
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-DB-008: Transactions
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-DB-008: Transactions
+// -----------------------------------------------------------------
 
+function registerSuitePart8() {
     describe('REG-DB-008: doQuery error handling', function () {
         it('returns empty results for null query @regression-p1', async function () {
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
@@ -221,8 +234,10 @@ describe('Regression: Database', function () {
             expect(mockConn.release.calledOnce).to.be.true;
         });
     });
+}
 
-    // Close
+// Close
+function registerSuitePart9() {
     describe('close()', function () {
         it('closes the pool @regression-p2', async function () {
             let db = new Database('h', 3306, 'db', 'u', 'p');
@@ -230,4 +245,17 @@ describe('Regression: Database', function () {
             expect(mockPool.end.calledOnce).to.be.true;
         });
     });
+}
+
+describe('Regression: Database', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+    registerSuitePart5();
+    registerSuitePart6();
+    registerSuitePart7();
+    registerSuitePart8();
+    registerSuitePart9();
+
 });
