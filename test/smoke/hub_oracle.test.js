@@ -62,19 +62,19 @@ function medianSuite() {
         });
 
         it('median of odd-length array', function () {
-            expect(fetcher._median([100, 200, 300])).to.equal(200);
+            expect(fetcher.computeMedian([100, 200, 300])).to.equal(200);
         });
 
         it('median of even-length array', function () {
-            expect(fetcher._median([10, 20])).to.equal(15);
+            expect(fetcher.computeMedian([10, 20])).to.equal(15);
         });
 
         it('median of single element', function () {
-            expect(fetcher._median([5])).to.equal(5);
+            expect(fetcher.computeMedian([5])).to.equal(5);
         });
 
         it('median of empty array returns 0', function () {
-            expect(fetcher._median([])).to.equal(0);
+            expect(fetcher.computeMedian([])).to.equal(0);
         });
     }
 

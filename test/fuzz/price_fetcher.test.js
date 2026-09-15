@@ -38,21 +38,21 @@ function registerAfterEachHook() {
 function registerMedianTests() {
 
     // -----------------------------------------------------------------
-    // _median()
+    // computeMedian()
     // -----------------------------------------------------------------
 
-    describe('_median()', function () {
+    describe('computeMedian()', function () {
 
         it('output is always a finite number for non-empty arrays of finite numbers', function () {
             fc.assert(fc.property(gen.fc_priceArray(1, 50), function (values) {
-                let result = pf._median(values);
+                let result = pf.computeMedian(values);
                 expect(Number.isFinite(result)).to.be.true;
             }), { numRuns: 300 });
         });
 
         it('result is within the range [min(input), max(input)]', function () {
             fc.assert(fc.property(gen.fc_priceArray(1, 50), function (values) {
-                let result = pf._median(values);
+                let result = pf.computeMedian(values);
                 let sorted = [...values].sort(function (a, b) { return a - b; });
                 expect(result).to.be.at.least(sorted[0] - 1e-10);
                 expect(result).to.be.at.most(sorted[sorted.length - 1] + 1e-10);
@@ -62,24 +62,24 @@ function registerMedianTests() {
         it('does not mutate the input array', function () {
             fc.assert(fc.property(gen.fc_priceArray(1, 20), function (values) {
                 let copy = [...values];
-                pf._median(values);
+                pf.computeMedian(values);
                 expect(values).to.deep.equal(copy);
             }), { numRuns: 200 });
         });
 
         it('single-element array always returns that element', function () {
             fc.assert(fc.property(gen.fc_price(), function (v) {
-                expect(pf._median([v])).to.equal(v);
+                expect(pf.computeMedian([v])).to.equal(v);
             }), { numRuns: 200 });
         });
 
         it('empty array returns 0', function () {
-            expect(pf._median([])).to.equal(0);
+            expect(pf.computeMedian([])).to.equal(0);
         });
 
         it('two-element array returns the arithmetic mean', function () {
             fc.assert(fc.property(gen.fc_price(), gen.fc_price(), function (a, b) {
-                let result = pf._median([a, b]);
+                let result = pf.computeMedian([a, b]);
                 let expected = (a + b) / 2;
                 expect(result).to.be.closeTo(expected, Math.abs(expected) * 1e-10 + 1e-15);
             }), { numRuns: 200 });

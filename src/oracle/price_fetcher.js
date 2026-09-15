@@ -229,7 +229,7 @@ class PriceFetcher {
         for (let pair of COIN_PAIRS) {
             let values = results[pair];
             if (values.length > 0) {
-                let median = this._median(values);   // already an 8dp bignumber string
+                let median = this.computeMedian(values);   // already an 8dp bignumber string
                 prices.push({
                     coinPair: pair,
                     price:    median,
@@ -287,7 +287,7 @@ class PriceFetcher {
     // (mathjs/bcmath per the platform mandate; the even-length midpoint average is
     // done in bignumber so the submitted local price carries no float/.toFixed artifact).
     // Ordering uses a float compare (no consensus arithmetic).
-    _median(values) {
+    computeMedian(values) {
         if (values.length === 0) return bcmath.bcformat('0', 8);
         let sorted = [...values].sort((a, b) => a - b);
         let mid = Math.floor(sorted.length / 2);

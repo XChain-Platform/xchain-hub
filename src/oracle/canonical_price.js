@@ -26,7 +26,7 @@
  * The guard is on the RAW spelling, like lib/canonical_int.js, and for the same
  * reason: coercing first is what hides the spelling under test. It is
  * fail-closed and needs no activation flag - an honest submission already
- * carries bcmath.bcformat(value, 8) output (PriceFetcher._median,
+ * carries bcmath.bcformat(value, 8) output (PriceFetcher.computeMedian,
  * XchainPriceSource.entry), which this accepts unchanged, so an honest round
  * never sees it fire.
  *

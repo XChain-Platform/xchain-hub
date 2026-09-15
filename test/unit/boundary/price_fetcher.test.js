@@ -53,8 +53,8 @@ function registerBoundaryPriceFetcher() {
     describe('source failure scenarios', registerSourceFailureScenarios);
     // Two-source median: prices combined across CoinGecko + CMC
     describe('two-source median calculation', registerTwoSourceMedianCalculation);
-    // _median() direct boundary tests
-    describe('_median() edge cases', registerMedianEdgeCases);
+    // computeMedian() direct boundary tests
+    describe('computeMedian() edge cases', registerMedianEdgeCases);
 }
 
 function registerCoinGeckoPriceValueEdgeCases() {
@@ -292,7 +292,7 @@ function registerMedianEdgeCases() {
     beforeEach(function () {
         fetcher = makeFetcher();
     });
-    // _median returns an 8-decimal bignumber string (mathjs/bcmath mandate)
+    // computeMedian returns an 8-decimal bignumber string (mathjs/bcmath mandate)
     it('empty array → returns 0', testEmptyArrayReturns0);
     it('single value → returns that value', testSingleValueReturnsThatValue);
     it('two values → returns their average', testTwoValuesReturnsTheirAverage);
@@ -305,36 +305,36 @@ function registerMedianEdgeCases() {
     it('large values → no overflow, returns correct average (bignumber, exact)', testLargeValuesNoOverflowReturnsCorrectAverageBignumberExact);
 }
 function testEmptyArrayReturns0() {
-    expect(fetcher._median([])).to.equal('0.00000000');
+    expect(fetcher.computeMedian([])).to.equal('0.00000000');
 }
 function testSingleValueReturnsThatValue() {
-    expect(fetcher._median([42])).to.equal('42.00000000');
+    expect(fetcher.computeMedian([42])).to.equal('42.00000000');
 }
 function testTwoValuesReturnsTheirAverage() {
-    expect(fetcher._median([10, 20])).to.equal('15.00000000');
+    expect(fetcher.computeMedian([10, 20])).to.equal('15.00000000');
 }
 function testTwoIdenticalValuesReturnsThatValue() {
-    expect(fetcher._median([7, 7])).to.equal('7.00000000');
+    expect(fetcher.computeMedian([7, 7])).to.equal('7.00000000');
 }
 function testThreeValuesOddReturnsTheMiddleElement() {
-    expect(fetcher._median([1, 3, 5])).to.equal('3.00000000');
+    expect(fetcher.computeMedian([1, 3, 5])).to.equal('3.00000000');
 }
 function testFourValuesEvenReturnsAverageOfMiddleTwo() {
-    expect(fetcher._median([1, 2, 3, 4])).to.equal('2.50000000');
+    expect(fetcher.computeMedian([1, 2, 3, 4])).to.equal('2.50000000');
 }
 function testUnsortedInputSortsBeforeComputingMedian() {
     // Unsorted: [5, 1, 3] → sorted: [1, 3, 5] → median = 3
-    expect(fetcher._median([5, 1, 3])).to.equal('3.00000000');
+    expect(fetcher.computeMedian([5, 1, 3])).to.equal('3.00000000');
 }
 function testDoesNotMutateTheOriginalArray() {
     let original = [3, 1, 2];
-    fetcher._median(original);
+    fetcher.computeMedian(original);
     expect(original).to.deep.equal([3, 1, 2]);
 }
 function testAllZeroArrayReturns0() {
-    expect(fetcher._median([0, 0, 0])).to.equal('0.00000000');
+    expect(fetcher.computeMedian([0, 0, 0])).to.equal('0.00000000');
 }
 function testLargeValuesNoOverflowReturnsCorrectAverageBignumberExact() {
-    let result = fetcher._median([1e18, 2e18]);
+    let result = fetcher.computeMedian([1e18, 2e18]);
     expect(result).to.equal('1500000000000000000.00000000');
 }

@@ -63,7 +63,7 @@ it('rejects exponent, signed, whitespace and partial spellings', function () {
 
 function registerCanonicalPriceCoreTests() {
 it('accepts what the honest price sources actually emit, unchanged', function () {
-        // Both local sources emit bcmath.bcformat(value, 8): PriceFetcher._median
+        // Both local sources emit bcmath.bcformat(value, 8): PriceFetcher.computeMedian
         // and XchainPriceSource.entry. Anything this rejects, an honest peer's
         // gossiped submission would be dropped for.
         for (const v of ['100000.00000000', '0.00000001', '90', '100001', '0.50000000']) {
