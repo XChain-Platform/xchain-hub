@@ -28,78 +28,86 @@ const { ConsensusInputMonitor } = require('../../src/validators/consensus_input_
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub');
 
-describe('/health hub DB stream heartbeat', function () {
+// Every mock src/api.js needs to boot: express, its server, and a hub whose
+// heavy subsystems are inert stubs. Built per boot so sinon.restore between
+// tests never leaves a stale stub on a shared object.
+function makeApiMocks(broadcaster) {
+    const captured = { methods: null };
+    const mockApp = {
+        use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
+        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
+    };
+    const mockExpress = sinon.stub().returns(mockApp);
+    mockExpress.json = sinon.stub().returns(function expressJson() {});
+    const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
 
-    // Boot src/api.js with everything heavy stubbed and capture its RPC methods.
-    async function bootApi(broadcaster) {
-        const captured = { methods: null };
-        const mockApp = {
-            use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
-            listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
-        };
-        const mockExpress = sinon.stub().returns(mockApp);
-        mockExpress.json = sinon.stub().returns(function expressJson() {});
-        const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
+    const mockHub = {
+        // DB_METHODS supplies getDatabaseLivenessProbe, the ping/health probe,
+        // routed through the doQuery stub beside it.
+        db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
+        capabilitySnapshot: { monitor: new ConsensusInputMonitor({ throttleMs: 60000, log: () => {} }) },
+        stateAnchorPublisher: null,
+        attestationPublisher:  null,
+        hubDbBroadcaster:      broadcaster,
+        start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
+        startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
+        startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
+        on: () => {}
+    };
+    return { captured, mockExpress, mockServer, mockHub };
+}
 
-        const mockHub = {
-            // DB_METHODS supplies getDatabaseLivenessProbe, the ping/health probe,
-            // routed through the doQuery stub beside it.
-            db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
-            capabilitySnapshot: { monitor: new ConsensusInputMonitor({ throttleMs: 60000, log: () => {} }) },
-            stateAnchorPublisher: null,
-            attestationPublisher:  null,
-            hubDbBroadcaster:      broadcaster,
-            start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
-            startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
-            startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
-            on: () => {}
-        };
+// Boot src/api.js with everything heavy stubbed and capture its RPC methods.
+async function bootApi(broadcaster) {
+    const { captured, mockExpress, mockServer, mockHub } = makeApiMocks(broadcaster);
 
-        const saved = {};
-        for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
-                         'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
-                         'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
-            saved[k] = process.env[k];
-            delete process.env[k];
-        }
-        Object.assign(process.env, {
-            HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-            HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9997', HUB_API_KEY: 'k'
+    const saved = {};
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
+                     'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
+        saved[k] = process.env[k];
+        delete process.env[k];
+    }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9997', HUB_API_KEY: 'k'
+    });
+
+    try {
+        proxyquire('../../src/api', {
+            'dotenv': { config: sinon.stub() },
+            'express': mockExpress,
+            'helmet': sinon.stub().returns(function helmetMw() {}),
+            'cors': sinon.stub().returns(function corsMw() {}),
+            'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
+            'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
+            'http': { createServer: sinon.stub().returns(mockServer) },
+            'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+            'geoip-lite': { lookup: sinon.stub().returns(null) },
+            './XChainHub': function () { return mockHub; }
         });
-
-        try {
-            proxyquire('../../src/api', {
-                'dotenv': { config: sinon.stub() },
-                'express': mockExpress,
-                'helmet': sinon.stub().returns(function helmetMw() {}),
-                'cors': sinon.stub().returns(function corsMw() {}),
-                'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
-                'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
-                'http': { createServer: sinon.stub().returns(mockServer) },
-                'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-                'geoip-lite': { lookup: sinon.stub().returns(null) },
-                './XChainHub': function () { return mockHub; }
-            });
-        } finally {
-            for (const [k, v] of Object.entries(saved)) {
-                if (v === undefined) delete process.env[k];
-                else process.env[k] = v;
-            }
+    } finally {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
         }
-        // The boot is an async IIFE, so the RPC methods land some ticks after
-        // proxyquire returns; poll for them rather than guessing a settle.
-        await waitUntil(() => captured.methods,
-            { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
-        return { methods: captured.methods, hub: mockHub };
     }
+    // The boot is an async IIFE, so the RPC methods land some ticks after
+    // proxyquire returns; poll for them rather than guessing a settle.
+    await waitUntil(() => captured.methods,
+        { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
+    return { methods: captured.methods, hub: mockHub };
+}
 
-    function makeRes() {
-        return { statusCode: 200, status(code) { this.statusCode = code; return this; } };
-    }
+function makeRes() {
+    return { statusCode: 200, status(code) { this.statusCode = code; return this; } };
+}
 
-    function makeBroadcaster(stats) {
-        return { getWatermarkStats: sinon.stub().returns(stats) };
-    }
+function makeBroadcaster(stats) {
+    return { getWatermarkStats: sinon.stub().returns(stats) };
+}
+
+describe('/health hub DB stream heartbeat', function () {
 
     afterEach(function () { sinon.restore(); });
 
