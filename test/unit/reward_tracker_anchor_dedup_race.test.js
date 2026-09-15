@@ -71,18 +71,18 @@ function makeTracker() {
     return { rt, rows: () => rows };
 }
 
-describe('RewardTracker #4182 anchor reward dedup is atomic across failover publishers', function () {
+{
 
-    it('CONTROL: the unlocked body still double-mints under the same interleave', async function () {
+    async function controlTheUnlockedBodyStillDoubleTest2() {
         let { rt, rows } = makeTracker();
         await Promise.all([
             rt.recordAnchorRewardLocked(TYPE, ROUND, PK_HIGH, BLOCK, ''),
             rt.recordAnchorRewardLocked(TYPE, ROUND, PK_LOW,  BLOCK, '')
         ]);
         expect(rows().length, 'the original defect must reproduce, or the fixed case proves nothing').to.equal(2);
-    });
+    }
 
-    it('two concurrent failover publishers leave exactly ONE row, the smallest pubkey', async function () {
+    async function twoConcurrentFailoverPublishersLeaveExactlyTest3() {
         let { rt, rows } = makeTracker();
         await Promise.all([
             rt.recordAnchorReward(TYPE, ROUND, PK_HIGH, BLOCK, ''),
@@ -90,9 +90,9 @@ describe('RewardTracker #4182 anchor reward dedup is atomic across failover publ
         ]);
         expect(rows().length).to.equal(1);
         expect(rows()[0].validator_pubkey).to.equal(PK_LOW);
-    });
+    }
 
-    it('holds in the other arrival order too', async function () {
+    async function holdsInTheOtherArrivalOrderTest4() {
         let { rt, rows } = makeTracker();
         await Promise.all([
             rt.recordAnchorReward(TYPE, ROUND, PK_LOW,  BLOCK, ''),
@@ -100,9 +100,9 @@ describe('RewardTracker #4182 anchor reward dedup is atomic across failover publ
         ]);
         expect(rows().length).to.equal(1);
         expect(rows()[0].validator_pubkey).to.equal(PK_LOW);
-    });
+    }
 
-    it('a DIFFERENT logical anchor is not serialized behind it', async function () {
+    async function aDifferentLogicalAnchorIsNotTest5() {
         let { rt, rows } = makeTracker();
         await Promise.all([
             rt.recordAnchorReward(TYPE, ROUND,     PK_LOW,  BLOCK, ''),
@@ -110,30 +110,43 @@ describe('RewardTracker #4182 anchor reward dedup is atomic across failover publ
             rt.recordAnchorReward('anchor_DOGE', ROUND, PK_HIGH, BLOCK, '')
         ]);
         expect(rows().length, 'three distinct anchors, three rows').to.equal(3);
-    });
+    }
 
-    it('replaying the same pubkey stays idempotent', async function () {
+    async function replayingTheSamePubkeyStaysIdempotentTest6() {
         let { rt, rows } = makeTracker();
         await rt.recordAnchorReward(TYPE, ROUND, PK_LOW, BLOCK, '');
         await rt.recordAnchorReward(TYPE, ROUND, PK_LOW, BLOCK, '');
         expect(rows().length).to.equal(1);
-    });
+    }
 
-    it('never displaces a row that already rode an on-chain archive', async function () {
+    async function neverDisplacesARowThatAlreadyTest7() {
         let { rt, rows } = makeTracker();
         await rt.recordAnchorReward(TYPE, ROUND, PK_HIGH, BLOCK, '');
         rows()[0].batch_seq = 3;                                   // archived: immutable, canonical fleet-wide
         await rt.recordAnchorReward(TYPE, ROUND, PK_LOW, BLOCK, '');
         expect(rows().length).to.equal(1);
         expect(rows()[0].validator_pubkey, 'the archived winner stands').to.equal(PK_HIGH);
-    });
+    }
 
-    it('releases the lock map once a key drains', async function () {
+    async function releasesTheLockMapOnceATest8() {
         let { rt } = makeTracker();
         await Promise.all([
             rt.recordAnchorReward(TYPE, ROUND, PK_LOW,  BLOCK, ''),
             rt.recordAnchorReward(TYPE, ROUND, PK_HIGH, BLOCK, '')
         ]);
         expect(rt._anchorLocks.size, 'no unbounded growth on a long-lived hub').to.equal(0);
-    });
-});
+    }
+
+    function rewardtracker4182AnchorRewardDedupIsSuite1() {
+        it('CONTROL: the unlocked body still double-mints under the same interleave', controlTheUnlockedBodyStillDoubleTest2);
+        it('two concurrent failover publishers leave exactly ONE row, the smallest pubkey', twoConcurrentFailoverPublishersLeaveExactlyTest3);
+        it('holds in the other arrival order too', holdsInTheOtherArrivalOrderTest4);
+        it('a DIFFERENT logical anchor is not serialized behind it', aDifferentLogicalAnchorIsNotTest5);
+        it('replaying the same pubkey stays idempotent', replayingTheSamePubkeyStaysIdempotentTest6);
+        it('never displaces a row that already rode an on-chain archive', neverDisplacesARowThatAlreadyTest7);
+        it('releases the lock map once a key drains', releasesTheLockMapOnceATest8);
+    }
+
+    describe('RewardTracker #4182 anchor reward dedup is atomic across failover publishers', rewardtracker4182AnchorRewardDedupIsSuite1);
+
+}
