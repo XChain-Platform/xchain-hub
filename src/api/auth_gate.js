@@ -22,7 +22,7 @@
  ********************************************************************/
 
 const crypto = require('crypto');
-const configRedaction = require('../lib/config_redaction.js');
+const configRedaction = require('./config_redaction.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
@@ -46,7 +46,7 @@ const FEED_RPC_METHODS = new Set([
 // each of those ordinary reads copied plaintext passwords into logs, tickets
 // and transcripts nobody rotates afterwards.
 //
-// So secret-bearing params (src/lib/config_redaction.js keys on the param name)
+// So secret-bearing params (src/api/config_redaction.js keys on the param name)
 // are redacted by DEFAULT, and the real values require an explicit
 // `include_secrets: true` on the call. That request is authorized on its own:
 // with HUB_CONFIG_SECRETS_API_KEY set it answers to THAT key alone (the bulk

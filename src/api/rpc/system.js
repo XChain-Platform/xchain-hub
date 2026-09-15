@@ -21,7 +21,7 @@
  *
  ********************************************************************/
 
-const configRedaction = require('../../lib/config_redaction.js');
+const configRedaction = require('../config_redaction.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
 const { validateChain } = require('../validate');
 

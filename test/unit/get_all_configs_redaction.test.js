@@ -21,7 +21,7 @@ const sinon = require('sinon');
 const {expect} = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 const {waitUntil} = require('../helpers/waitUntil');
-const redaction = require('../../src/lib/config_redaction.js');
+const redaction = require('../../src/api/config_redaction.js');
 
 // The credential-bearing tree xchain-node pushes (HubService.buildHubModuleConfig).
 function configTree() {

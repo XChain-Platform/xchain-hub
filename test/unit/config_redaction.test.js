@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// getallconfigs credential redaction (src/lib/config_redaction.js).
+// getallconfigs credential redaction (src/api/config_redaction.js).
 //
 // The hub's configs table holds real credentials: xchain-node writes the coin
 // node's rpc user/pass and the indexer/decoder/checkpoint DB user/pass into it
@@ -19,7 +19,7 @@
 // These cases pin what may leave the hub without an authorized include_secrets.
 
 const { expect } = require('chai');
-const redaction  = require('../../src/lib/config_redaction.js');
+const redaction  = require('../../src/api/config_redaction.js');
 
 // The shape xchain-node actually pushes (HubService.buildHubModuleConfig /
 // buildCheckpointConfig), so the assertions below are about real params rather
