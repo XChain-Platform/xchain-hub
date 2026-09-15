@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const testDb       = require('../../helpers/testDb');
+const XChainHub    = require('../../../src/XChainHub');
 
 describe('Integration: Price Persistence (SC-3.x)', function () {
 
@@ -29,7 +30,13 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
     });
     afterEach(function () { sinon.restore(); });
 
-    // SC-3.1: Price snapshot SQL precision
+    registerPricePrecisionTests();
+    registerFeeQuoteTests();
+    registerSnapshotOrderingTests();
+});
+
+// SC-3.1: Price snapshot SQL precision
+function registerPricePrecisionTests() {
     describe('SC-3.1: Price precision round-trip', function () {
         it('preserves 8-decimal precision through DB write and read', async function () {
             let db = testDb.getDb();
@@ -70,73 +77,73 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
             expect(rows[0].price).to.equal(price);
         });
     });
+}
 
-    // SC-3.2: Fee quote calculation chain
+// SC-3.2: Fee quote calculation chain
+function registerFeeQuoteTests() {
     describe('SC-3.2: Fee quote calculation', function () {
-        it('computes fee quote using latest price snapshot', async function () {
-            let db = testDb.getDb();
-            let now = Date.now();
-
-            // Insert BTC/USD price
-            await db.doQuery(
-                `INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain,
-                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                 VALUES (?, ?, ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
-                [1, 'BTC/USD', '100000.00000000', now]
-            );
-
-            // ... and the XCHAIN/USD row the quote is denominated in. getFeeQuote
-            // throws without it, which read as a product failure here when it was
-            // a fixture that predated the XCHAIN-denominated fee.
-            await db.doQuery(
-                `INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain,
-                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                 VALUES (?, ?, ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
-                [1, 'XCHAIN/USD', '1.00000000', now]
-            );
-
-            // Use XChainHub.getFeeQuote which reads from DB
-            let XChainHub = require('../../../src/XChainHub');
-            let hub = new XChainHub(
-                process.env.TEST_DB_HOST || '127.0.0.1',
-                parseInt(process.env.TEST_DB_PORT) || 3306,
-                process.env.TEST_DB_NAME || 'xchain_hub_test',
-                process.env.TEST_DB_USER || 'root',
-                process.env.TEST_DB_PASS || ''
-            );
-            hub.db = db;
-
-            let quote = await hub.getFeeQuote('ISSUE', 'BTC');
-
-            expect(quote.action).to.equal('ISSUE');
-            expect(quote.chain).to.equal('BTC');
-            expect(quote.gasCost).to.equal(100000);
-            expect(quote.xchainAmount).to.equal('1.00000000');
-            // coinUsd should be derived from BTC/USD snapshot
-            expect(quote.coinUsd).to.equal('100000.00000000');
-            expect(quote.nativeCoinAmount).to.exist;
-        });
-
-        it('returns error for unknown action', async function () {
-            let db = testDb.getDb();
-            let XChainHub = require('../../../src/XChainHub');
-            let hub = new XChainHub(
-                process.env.TEST_DB_HOST || '127.0.0.1',
-                parseInt(process.env.TEST_DB_PORT) || 3306,
-                process.env.TEST_DB_NAME || 'xchain_hub_test',
-                process.env.TEST_DB_USER || 'root',
-                process.env.TEST_DB_PASS || ''
-            );
-            hub.db = db;
-
-            let quote = await hub.getFeeQuote('NONEXISTENT', 'BTC');
-            expect(quote.error).to.include('unknown action');
-        });
+        it('computes fee quote using latest price snapshot', testFeeQuoteCalculation);
+        it('returns error for unknown action', testUnknownAction);
     });
+}
 
-    // SC-3.3: Price snapshot ordering
+async function testFeeQuoteCalculation() {
+    let db = testDb.getDb();
+    let now = Date.now();
+
+    // Insert BTC/USD price
+    await db.doQuery(
+        `INSERT INTO price_snapshots
+            (round_number, coin_pair, price, reference_block, reference_chain,
+             block_timestamp, validator_count, consensus_round, consensus_proof, status)
+         VALUES (?, ?, ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+        [1, 'BTC/USD', '100000.00000000', now]
+    );
+
+    // ... and the XCHAIN/USD row the quote is denominated in. getFeeQuote
+    // throws without it, which read as a product failure here when it was
+    // a fixture that predated the XCHAIN-denominated fee.
+    await db.doQuery(
+        `INSERT INTO price_snapshots
+            (round_number, coin_pair, price, reference_block, reference_chain,
+             block_timestamp, validator_count, consensus_round, consensus_proof, status)
+         VALUES (?, ?, ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+        [1, 'XCHAIN/USD', '1.00000000', now]
+    );
+
+    // Use XChainHub.getFeeQuote which reads from DB
+    let hub = createHub(db);
+    let quote = await hub.getFeeQuote('ISSUE', 'BTC');
+
+    expect(quote.action).to.equal('ISSUE');
+    expect(quote.chain).to.equal('BTC');
+    expect(quote.gasCost).to.equal(100000);
+    expect(quote.xchainAmount).to.equal('1.00000000');
+    // coinUsd should be derived from BTC/USD snapshot
+    expect(quote.coinUsd).to.equal('100000.00000000');
+    expect(quote.nativeCoinAmount).to.exist;
+}
+
+async function testUnknownAction() {
+    let hub = createHub(testDb.getDb());
+    let quote = await hub.getFeeQuote('NONEXISTENT', 'BTC');
+    expect(quote.error).to.include('unknown action');
+}
+
+function createHub(db) {
+    let hub = new XChainHub(
+        process.env.TEST_DB_HOST || '127.0.0.1',
+        parseInt(process.env.TEST_DB_PORT) || 3306,
+        process.env.TEST_DB_NAME || 'xchain_hub_test',
+        process.env.TEST_DB_USER || 'root',
+        process.env.TEST_DB_PASS || ''
+    );
+    hub.db = db;
+    return hub;
+}
+
+// SC-3.3: Price snapshot ordering
+function registerSnapshotOrderingTests() {
     describe('SC-3.3: Snapshot ordering', function () {
         it('getPrice returns most recent finalized snapshot', async function () {
             let db = testDb.getDb();
@@ -162,15 +169,7 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
                 [6, 'BTC/USD', now + 6]
             );
 
-            let XChainHub = require('../../../src/XChainHub');
-            let hub = new XChainHub(
-                process.env.TEST_DB_HOST || '127.0.0.1',
-                parseInt(process.env.TEST_DB_PORT) || 3306,
-                process.env.TEST_DB_NAME || 'xchain_hub_test',
-                process.env.TEST_DB_USER || 'root',
-                process.env.TEST_DB_PASS || ''
-            );
-            hub.db = db;
+            let hub = createHub(db);
 
             // getPrice should return round 5 (most recent finalized, not skipped round 6)
             let latest = await hub.getPrice('BTC/USD');
@@ -186,4 +185,4 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
             expect(snapshots[2].round_number).to.equal(3);
         });
     });
-});
+}
