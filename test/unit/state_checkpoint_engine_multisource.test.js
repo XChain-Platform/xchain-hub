@@ -121,10 +121,15 @@ function buildEngine(weightSnapshot, opts) {
     return { engine, identity, db, hub, broadcasts, finalized, pubkey: identity.getPubkeyHex().toLowerCase() };
 }
 
-describe('multi-source pubkey (checkpoint/anchor family)', function () {
+let engines = [];
 
-    let engines = [];
+describe('multi-source pubkey (checkpoint/anchor family)', function () {
     afterEach(async function () { for (let e of engines) { try { await e.stop(); } catch (_) {} } engines = []; });
+
+    registerMultiSourcePersistenceTests();
+    registerMultiSourceArchiveTests();
+    registerMultiSourceNetworkTest();
+});
 
     // 2651 + 2647: a single-validator federation whose one key is delegated by TWO
     // sources self-signs and finalizes a checkpoint at an ODD cadence block. Pre-fix the
@@ -132,6 +137,7 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
     // landed on the duplicate's slot and NO hub elected itself leader (2647 skipped
     // round); and even as leader the snapCount<=1 self-sign fast path was lost, stalling
     // on a stake quorum one key can never reach across two sources (2651).
+function registerMultiSourcePersistenceTests() {
     it('single-validator two-source federation self-signs at an odd block (2647 + 2651)', async function () {
         let PK = new ValidatorIdentity('22'.repeat(32)).getPubkeyHex().toLowerCase();
         // Build with THIS pubkey as the sole validator, two sources.
@@ -175,6 +181,7 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
         expect(mirrored.length, 'both rows streamed to the mirror').to.equal(2);
         expect(mirrored.map(b => b.row.source).sort()).to.deep.equal(['srcA', 'srcB']);
     });
+}
 
     // the SAME persist path must write NOTHING when the resolved set overflowed
     // its source cap. `.truncated` is a JS array property with no capability_snapshots
@@ -184,6 +191,7 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
     // rejects the identical set. Zero rows makes the off-BTC read S=0, which fails closed
     // through the same predicate. Paired with the 2650 case above so the guard is pinned
     // as a truncation refusal, not a blanket one.
+function registerMultiSourceArchiveTests() {
     it('a TRUNCATED set persists NO rows and streams nothing to the mirror (#4175)', async function () {
         let PK = new ValidatorIdentity('55'.repeat(32)).getPubkeyHex().toLowerCase();
         let ctx = buildEngine({ validators: [
@@ -235,12 +243,14 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
         let bad = await pub.verifyArchiveAgainstLocal(archive);
         expect(bad, 'a mismatched source is still rejected').to.be.false;
     });
+}
 
     // 2649: an unscoped-network hub (this.network === '') routed through
     // resolveQuorumNetwork reaches the SAME weighted-vs-count verdict as the indexer,
     // which gates on the record's NETWORK (anchor.js: data['NETWORK']). Pre-fix the hub
     // gated on this.network (''), so it declared count quorum where the indexer applied
     // the stake predicate: a live-vs-recovered reward fork.
+function registerMultiSourceNetworkTest() {
     it('an unscoped hub reaches the same quorum verdict as the indexer (2649)', function () {
         const DEPLOY = '';   // unscoped hub
         for (const cp of [ { network: 'mainnet', snapshot_block: 961000 },   // at activation -> weighted
@@ -258,4 +268,4 @@ describe('multi-source pubkey (checkpoint/anchor family)', function () {
         expect(old, 'the unrouted deployment-network gate is the bug').to.equal(false);
         expect(swq.isStakeWeightedQuorumActive(961000, 'mainnet'), 'indexer says weighted').to.equal(true);
     });
-});
+}
