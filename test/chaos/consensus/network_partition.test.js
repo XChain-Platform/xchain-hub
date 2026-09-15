@@ -44,10 +44,10 @@ function wireFederationSnapshot(hub, quorum) {
     return snapshot;
 }
 
-describe('Chaos: Network Partition (NET-3)', function () {
-    this.timeout(15000);
 
-    let hub, pm, consensus;
+
+let hub, pm, consensus;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -63,11 +63,17 @@ describe('Chaos: Network Partition (NET-3)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         consensus.stop();
         sinon.restore();
     });
+}
+
+function registerIsolatedNodeTimesOutAndInitiatesTest() {
 
     it('isolated node times out and initiates view change', async function () {
         consensus.timeout = 200;
@@ -90,6 +96,9 @@ describe('Chaos: Network Partition (NET-3)', function () {
         expect(consensus.view).to.equal(1);
         expect(pm.broadcast.calledWith('PBFT_VIEW_CHANGE')).to.be.true;
     });
+}
+
+function registerMajorityClusterContinuesWhenOneNodeTest() {
 
     it('majority cluster continues when one node is isolated', async function () {
         // Validator-2 as system under test; validator-1 (leader) sends PRE_PREPARE
@@ -135,6 +144,9 @@ describe('Chaos: Network Partition (NET-3)', function () {
 
         consensus2.stop();
     });
+}
+
+function registerSingleNodeFallbackActivatesWhenAllTest() {
 
     it('single-node fallback activates when all peers lost', async function () {
         let hub1 = createMockHub({ validatorAddr: 'ws://lonely:10001' });
@@ -150,6 +162,9 @@ describe('Chaos: Network Partition (NET-3)', function () {
 
         con1.stop();
     });
+}
+
+function registerPartitionHealsLatePREPARECOMMITStillTest() {
 
     it('partition heals: late PREPARE/COMMIT still processed', async function () {
         consensus.timeout = 5000;
@@ -192,6 +207,9 @@ describe('Chaos: Network Partition (NET-3)', function () {
         expect(done).to.be.true;
         expect(hub.applyConfig.calledOnce).to.be.true;
     });
+}
+
+function registerStaleSequenceRejectedAfterPartitionRecoveryTest() {
 
     it('stale sequence rejected after partition recovery', async function () {
         await consensus.start();
@@ -209,4 +227,14 @@ describe('Chaos: Network Partition (NET-3)', function () {
         // Should be rejected; no proposal created
         expect(consensus.pendingProposals.has(5)).to.be.false;
     });
+}
+describe('Chaos: Network Partition (NET-3)', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerIsolatedNodeTimesOutAndInitiatesTest();
+    registerMajorityClusterContinuesWhenOneNodeTest();
+    registerSingleNodeFallbackActivatesWhenAllTest();
+    registerPartitionHealsLatePREPARECOMMITStillTest();
+    registerStaleSequenceRejectedAfterPartitionRecoveryTest();
 });
