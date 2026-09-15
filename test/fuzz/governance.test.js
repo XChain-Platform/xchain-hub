@@ -17,14 +17,18 @@ const Governance = require('../../src/validators/governance');
 const { createMockHub } = require('../helpers/mockHub');
 const gen               = require('./helpers/generators');
 
-describe('Fuzz: Governance', function () {
 
-    let hub, gov;
+
+let hub, gov;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         hub = createMockHub();
         gov = new Governance(hub);
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         if (gov._tallyTimer) {
@@ -33,12 +37,9 @@ describe('Fuzz: Governance', function () {
         }
         sinon.restore();
     });
+}
 
-    // -----------------------------------------------------------------
-    // validateChangeBounds(): normal parameters
-    // -----------------------------------------------------------------
-
-    describe('validateChangeBounds(): normal parameters', function () {
+function registerValidateChangeBoundsNormalParametersTestCases1() {
 
         it('proposed within +50% of current always passes', function () {
             fc.assert(fc.property(
@@ -84,6 +85,9 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 200 });
         });
+}
+
+function registerValidateChangeBoundsNormalParametersTestCases2() {
 
         it('proposed exceeding -34% of current always throws', function () {
             fc.assert(fc.property(
@@ -99,13 +103,22 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 200 });
         });
+
+}
+
+function registerValidateChangeBoundsNormalParametersTests() {
+
+    // -----------------------------------------------------------------
+    // validateChangeBounds(): normal parameters
+    // -----------------------------------------------------------------
+
+    describe('validateChangeBounds(): normal parameters', function () {
+        registerValidateChangeBoundsNormalParametersTestCases1();
+        registerValidateChangeBoundsNormalParametersTestCases2();
     });
+}
 
-    // -----------------------------------------------------------------
-    // validateChangeBounds(): slashing parameters
-    // -----------------------------------------------------------------
-
-    describe('validateChangeBounds(): slashing parameters', function () {
+function registerValidateChangeBoundsSlashingParametersTestCases1() {
 
         it('slash param within +24% always passes', function () {
             fc.assert(fc.property(
@@ -151,6 +164,9 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 200 });
         });
+}
+
+function registerValidateChangeBoundsSlashingParametersTestCases2() {
 
         it('slash param exceeding -21% always throws', function () {
             fc.assert(fc.property(
@@ -166,7 +182,22 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 200 });
         });
+
+}
+
+function registerValidateChangeBoundsSlashingParametersTests() {
+
+    // -----------------------------------------------------------------
+    // validateChangeBounds(): slashing parameters
+    // -----------------------------------------------------------------
+
+    describe('validateChangeBounds(): slashing parameters', function () {
+        registerValidateChangeBoundsSlashingParametersTestCases1();
+        registerValidateChangeBoundsSlashingParametersTestCases2();
     });
+}
+
+function registerValidateChangeBoundsSkipConditionsTests() {
 
     // -----------------------------------------------------------------
     // validateChangeBounds(): skip conditions
@@ -199,12 +230,9 @@ describe('Fuzz: Governance', function () {
             ), { numRuns: 100 });
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // tallyProposal() quorum arithmetic
-    // -----------------------------------------------------------------
-
-    describe('tallyProposal() quorum arithmetic', function () {
+function registerTallyProposalQuorumArithmeticTestCases1() {
 
         it('unanimous approval always passes for any N >= 1', function () {
             return fc.assert(fc.asyncProperty(
@@ -257,6 +285,9 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 20 });
         });
+}
+
+function registerTallyProposalQuorumArithmeticTestCases2() {
 
         it('all-reject votes always fail for any N >= 1', function () {
             return fc.assert(fc.asyncProperty(
@@ -284,5 +315,25 @@ describe('Fuzz: Governance', function () {
                 }
             ), { numRuns: 20 });
         });
+
+}
+
+function registerTallyProposalQuorumArithmeticTests() {
+
+    // -----------------------------------------------------------------
+    // tallyProposal() quorum arithmetic
+    // -----------------------------------------------------------------
+
+    describe('tallyProposal() quorum arithmetic', function () {
+        registerTallyProposalQuorumArithmeticTestCases1();
+        registerTallyProposalQuorumArithmeticTestCases2();
     });
+}
+describe('Fuzz: Governance', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerValidateChangeBoundsNormalParametersTests();
+    registerValidateChangeBoundsSlashingParametersTests();
+    registerValidateChangeBoundsSkipConditionsTests();
+    registerTallyProposalQuorumArithmeticTests();
 });
