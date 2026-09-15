@@ -178,7 +178,8 @@ class RollcallRound {
     resolveTunable(name, defaults){
         let fallback = defaults[this.network];
         if(!Number.isFinite(fallback)) fallback = defaults.mainnet;
-        let raw = process.env[name] !== undefined ? process.env[name] : this.cfg[name];
+        let env = hubConfig.env();
+        let raw = env[name] !== undefined ? env[name] : this.cfg[name];
         if(raw === undefined || raw === null || raw === '') return fallback;
         let n = parseInt(raw, 10);
         if(!Number.isFinite(n) || n < 0){
