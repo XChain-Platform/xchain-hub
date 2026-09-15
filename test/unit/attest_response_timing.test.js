@@ -27,40 +27,10 @@ const {
     resolveAttestResponseForwardS
 } = require('../../src/attestation/attest_response_timing.js');
 
-describe('attest_response_timing: ATTEST_RESPONSE_FORWARD_S and its regtest seam', function () {
+let savedEnv;
 
-    let savedEnv;
-
-    beforeEach(function () {
-        savedEnv = process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
-        delete process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
-    });
-
-    afterEach(function () {
-        if (savedEnv === undefined) delete process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
-        else process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] = savedEnv;
-        sinon.restore();
-    });
-
-    it('is the frozen protocol value of 120 seconds', function () {
-        expect(ATTEST_RESPONSE_FORWARD_S).to.equal(120);
-    });
-
-    it('resolves to the protocol value on every network with no override set', function () {
-        for (let net of ['mainnet', 'testnet', 'regtest', '', undefined])
-            expect(resolveAttestResponseForwardS(net, {})).to.equal(120);
-    });
-
-    it('regtest honours a good override from p2pConfig and from the environment', function () {
-        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 2 })).to.equal(2);
-        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: '0' })).to.equal(0);
-        process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] = '5';
-        expect(resolveAttestResponseForwardS('regtest', {})).to.equal(5);
-        // p2pConfig wins: several hubs share one process in the e2e harness.
-        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 7 })).to.equal(7);
-    });
-
-    it('regtest THROWS an actionable error on a value that is not a non-negative integer', function () {
+function registerResponseTimingOverrideTests() {
+it('regtest THROWS an actionable error on a value that is not a non-negative integer', function () {
         for (let bad of ['abc', '-1', '2.5', '12abc', 'NaN']) {
             let call = () => resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: bad });
             expect(call, 'expected ' + JSON.stringify(bad) + ' to throw').to.throw(/is not a non-negative integer/);
@@ -89,4 +59,43 @@ describe('attest_response_timing: ATTEST_RESPONSE_FORWARD_S and its regtest seam
     it('off regtest, garbage is ignored rather than thrown: the value is inert there', function () {
         expect(resolveAttestResponseForwardS('mainnet', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 'abc' })).to.equal(120);
     });
+}
+
+function registerResponseTimingCoreTests() {
+it('is the frozen protocol value of 120 seconds', function () {
+        expect(ATTEST_RESPONSE_FORWARD_S).to.equal(120);
+    });
+
+    it('resolves to the protocol value on every network with no override set', function () {
+        for (let net of ['mainnet', 'testnet', 'regtest', '', undefined])
+            expect(resolveAttestResponseForwardS(net, {})).to.equal(120);
+    });
+
+    it('regtest honours a good override from p2pConfig and from the environment', function () {
+        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 2 })).to.equal(2);
+        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: '0' })).to.equal(0);
+        process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] = '5';
+        expect(resolveAttestResponseForwardS('regtest', {})).to.equal(5);
+        // p2pConfig wins: several hubs share one process in the e2e harness.
+        expect(resolveAttestResponseForwardS('regtest', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 7 })).to.equal(7);
+    });
+}
+
+describe('attest_response_timing: ATTEST_RESPONSE_FORWARD_S and its regtest seam', function () {
+
+
+    beforeEach(function () {
+        savedEnv = process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
+        delete process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
+    });
+
+    afterEach(function () {
+        if (savedEnv === undefined) delete process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
+        else process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] = savedEnv;
+        sinon.restore();
+    });
+
+    registerResponseTimingCoreTests();
+
+    registerResponseTimingOverrideTests();
 });
