@@ -16,7 +16,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const PeerManager = require('../../src/peers/manager');
+const PeerManager = require('../../../../src/peers/manager');
 
 function makePm() {
     let config = {

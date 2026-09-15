@@ -13,11 +13,11 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const EventEmitter       = require('events');
-const ValidatorIdentity  = require('../../src/validators/identity');
-const PeerManager        = require('../../src/peers/manager');
-const observability      = require('../../src/observability');
-const { waitUntil }      = require('../helpers/waitUntil');
-const { DB_METHODS }     = require('../helpers/mockHub');
+const ValidatorIdentity  = require('../../../../src/validators/identity');
+const PeerManager        = require('../../../../src/peers/manager');
+const observability      = require('../../../../src/observability');
+const { waitUntil }      = require('../../../helpers/waitUntil');
+const { DB_METHODS }     = require('../../../helpers/mockHub');
 
 let rootSuiteConfig, rootSuiteDbStub, rootSuitePm, rootSuiteKeypair;
 let feature5rejectReasonForADroppedInboundMessageIdentity, feature5rejectReasonForADroppedInboundMessageMockWs, feature5rejectReasonForADroppedInboundMessageWarnings, feature5rejectReasonForADroppedInboundMessageSink;

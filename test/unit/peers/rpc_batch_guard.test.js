@@ -34,7 +34,7 @@ const path = require('path');
 const express = require('express');
 const jsonRouter = require('express-json-rpc-router');
 
-const { resolveMaxBatch, makeRpcBatchGuard } = require('../../src/peers/rpc_batch_guard.js');
+const { resolveMaxBatch, makeRpcBatchGuard } = require('../../../src/peers/rpc_batch_guard.js');
 
 const CAP = 20;
 
@@ -139,7 +139,7 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
     }
 
     const srcApiJsMountsTheGuardTest11 = () => {
-        const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
         const guardIdx = src.indexOf('makeRpcBatchGuard(');
         const routerIdx = src.indexOf('jsonRouter({');
         assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from src/api.js');

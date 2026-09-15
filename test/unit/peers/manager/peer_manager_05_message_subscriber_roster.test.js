@@ -13,17 +13,17 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const EventEmitter       = require('events');
-const ValidatorIdentity  = require('../../src/validators/identity');
-const PeerManager        = require('../../src/peers/manager');
-const observability      = require('../../src/observability');
-const { waitUntil }      = require('../helpers/waitUntil');
-const { DB_METHODS }     = require('../helpers/mockHub');
+const ValidatorIdentity  = require('../../../../src/validators/identity');
+const PeerManager        = require('../../../../src/peers/manager');
+const observability      = require('../../../../src/observability');
+const { waitUntil }      = require('../../../helpers/waitUntil');
+const { DB_METHODS }     = require('../../../helpers/mockHub');
 
 let rootSuiteConfig, rootSuiteDbStub, rootSuitePm, rootSuiteKeypair;
-const feature19messageSubscriberRosterRca = require('../../src/rollcall_activation.js');
-const feature19messageSubscriberRosterRollcallRound = require('../../src/rollcall/round.js');
-const feature19messageSubscriberRosterAttestationRelay = require('../../src/attestation/relay.js');
-const feature19messageSubscriberRosterCrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
+const feature19messageSubscriberRosterRca = require('../../../../src/rollcall_activation.js');
+const feature19messageSubscriberRosterRollcallRound = require('../../../../src/rollcall/round.js');
+const feature19messageSubscriberRosterAttestationRelay = require('../../../../src/attestation/relay.js');
+const feature19messageSubscriberRosterCrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
 const {
   spawnSync: feature19messageSubscriberRosterSpawnSync
 } = require('child_process');
@@ -86,7 +86,7 @@ async function feature19messageSubscriberRosterAttachListeners(target, count) {
 function feature19messageSubscriberRosterRegtestRosterWith(armingValue) {
   const env = Object.assign({}, process.env);
   if (armingValue === null) delete env[feature19messageSubscriberRosterRca.ROLLCALL_REGTEST_ENV];else env[feature19messageSubscriberRosterRca.ROLLCALL_REGTEST_ENV] = armingValue;
-  const pmPath = require.resolve('../../src/peers/manager.js');
+  const pmPath = require.resolve('../../../../src/peers/manager.js');
   const out = feature19messageSubscriberRosterSpawnSync(process.execPath, ['-e', 'const PM = require(' + JSON.stringify(pmPath) + ');' + 'const r = PM.messageSubscribers({ HUB_NETWORK: "regtest" }, process.env);' + 'process.stdout.write(JSON.stringify({ n: r.length, rollcall: r.indexOf("RollcallRound") >= 0 }));'], {
     env,
     encoding: 'utf8'

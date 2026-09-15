@@ -24,7 +24,7 @@ const http               = require('http');
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
-const { DB_METHODS }     = require('../helpers/mockHub');
+const { DB_METHODS }     = require('../../../helpers/mockHub');
 
 const TABLE = 'attestation_responses';
 
@@ -194,7 +194,7 @@ async function bootSnapshotApi(fakeDb) {
     for (let [k, v] of Object.entries(envVars)) { origEnv[k] = process.env[k]; process.env[k] = v; }
 
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': realExpress,
             'helmet': sinon.stub().callsFake(passthrough),
@@ -312,7 +312,7 @@ function registerReadyFrameTests() {
         let HubDbBroadcaster;
 
         before(function () {
-            HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster', { ws: { OPEN: 1 } });
+            HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', { ws: { OPEN: 1 } });
         });
 
         function makeMockWs() {

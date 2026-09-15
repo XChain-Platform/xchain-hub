@@ -13,7 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
-const { DB_METHODS }     = require('../helpers/mockHub');
+const { DB_METHODS }     = require('../../../helpers/mockHub');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Load HubDbBroadcaster with WebSocket stubbed
@@ -26,7 +26,7 @@ function loadModule() {
     // WebSocket.OPEN = 1 in the real module
     WS_OPEN = 1;
     const WsMock = { OPEN: WS_OPEN };
-    HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster', { ws: WsMock });
+    HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', { ws: WsMock });
 }
 
 // ────────────────────────────────────────────────────────────────────────────

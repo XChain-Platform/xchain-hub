@@ -23,8 +23,8 @@ const http = require('http');
 const sinon = require('sinon');
 const {expect} = require('chai');
 const proxyquire = require('proxyquire');
-const {waitUntil} = require('../helpers/waitUntil');
-const {DB_METHODS} = require('../helpers/mockHub.js');
+const {waitUntil} = require('../../../helpers/waitUntil');
+const {DB_METHODS} = require('../../../helpers/mockHub.js');
 
 // Every /hub-db/snapshot/* route, and one BigInt-bearing column seeded into
 // its row: any column works to prove the point (the fault was in the
@@ -110,7 +110,7 @@ function registerHubDbSnapshotRoutesBIGINTSerializationMatcSuite1Part2() {
       process.env[k] = v;
     }
     try {
-      proxyquire('../../src/api', {'dotenv':{config:sinon.stub()},'express':realExpress,'helmet':sinon.stub().callsFake(passthrough),'cors':sinon.stub().callsFake(passthrough),'express-rate-limit':sinon.stub().callsFake(passthrough),'express-json-rpc-router':sinon.stub().callsFake(passthrough),'http':mockHttp,'ws':mockWsLib,'geoip-lite':{lookup:sinon.stub().returns(null)},'./XChainHub':function(){return mockHub;}});
+      proxyquire('../../../../src/api', {'dotenv':{config:sinon.stub()},'express':realExpress,'helmet':sinon.stub().callsFake(passthrough),'cors':sinon.stub().callsFake(passthrough),'express-rate-limit':sinon.stub().callsFake(passthrough),'express-json-rpc-router':sinon.stub().callsFake(passthrough),'http':mockHttp,'ws':mockWsLib,'geoip-lite':{lookup:sinon.stub().returns(null)},'./XChainHub':function(){return mockHub;}});
     } finally {
       for (let [k, v] of Object.entries(origEnv)) {
         if (v === undefined) delete process.env[k];else process.env[k] = v;
@@ -145,7 +145,7 @@ function registerHubDbSnapshotRoutesBIGINTSerializationMatcSuite1Part4() {
       // The real WS broadcaster, undoubled: proxyquire only replaces `ws`
       // (never loaded, just needs its OPEN constant) so bigIntReplacer
       // itself is the actual production module-private function.
-      let HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster', {ws:{OPEN:1}});
+      let HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', {ws:{OPEN:1}});
       let broadcaster = new HubDbBroadcaster({}, {...DB_METHODS,doQuery:async()=>[]});
       let ws = {readyState:1,bufferedAmount:0,_hubBuffered:0,send:sinon.stub(),close:sinon.stub(),on:sinon.stub()};
       await broadcaster.addSubscriber(ws);
@@ -178,7 +178,7 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
   // The fault these routes were fixed for is the two feeds disagreeing about a BIGINT.
   // A duplicated one-line replacer would let them drift apart again silently, so the
   // identity is asserted structurally: same function object, not merely same behaviour.
-  const HubDbBroadcaster = require('../../src/peers/hub_db_broadcaster');
+  const HubDbBroadcaster = require('../../../../src/peers/hub_db_broadcaster');
   it('exports the replacer the broadcaster signs its frames with', function () {
     expect(typeof HubDbBroadcaster.bigIntReplacer).to.equal('function');
     expect(JSON.stringify({v:10n}, HubDbBroadcaster.bigIntReplacer)).to.equal('{"v":"10"}');
@@ -188,12 +188,12 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
     // reached through a cycle the import resolved before the property was attached and
     // every snapshot route threw on a real BIGINT while passing in isolation.
     const fs = require('fs');
-    const src = fs.readFileSync(require.resolve('../../src/lib/bigint_replacer.js'), 'utf8');
+    const src = fs.readFileSync(require.resolve('../../../../src/lib/bigint_replacer.js'), 'utf8');
     expect(src).to.not.match(/\brequire\s*\(/);
   });
   it('api.js holds no second copy of it', function () {
     const fs = require('fs');
-    const src = fs.readFileSync(require.resolve('../../src/api.js'), 'utf8');
+    const src = fs.readFileSync(require.resolve('../../../../src/api.js'), 'utf8');
     expect(src).to.not.match(/const\s+bigIntReplacer\s*=/);
     expect(src).to.match(/\{\s*bigIntReplacer\s*\}\s*=\s*require\(/);
   });

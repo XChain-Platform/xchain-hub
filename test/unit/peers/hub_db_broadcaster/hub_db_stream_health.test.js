@@ -24,9 +24,9 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
-const { ConsensusInputMonitor } = require('../../src/validators/consensus_input_monitor.js');
-const { waitUntil } = require('../helpers/waitUntil');
-const { DB_METHODS } = require('../helpers/mockHub');
+const { ConsensusInputMonitor } = require('../../../../src/validators/consensus_input_monitor.js');
+const { waitUntil } = require('../../../helpers/waitUntil');
+const { DB_METHODS } = require('../../../helpers/mockHub');
 
 // Every mock src/api.js needs to boot: express, its server, and a hub whose
 // heavy subsystems are inert stubs. Built per boot so sinon.restore between
@@ -74,7 +74,7 @@ async function bootApi(broadcaster) {
     });
 
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),

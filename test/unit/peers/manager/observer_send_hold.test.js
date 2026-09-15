@@ -27,10 +27,10 @@
 // quiet on a transient set read is a liveness fault far worse than the noise.
 const sinon = require('sinon');
 const {expect} = require('chai');
-const PeerManager = require('../../src/peers/manager');
-const ValidatorIdentity = require('../../src/validators/identity');
-const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
-const {DB_METHODS} = require('../helpers/mockHub.js');
+const PeerManager = require('../../../../src/peers/manager');
+const ValidatorIdentity = require('../../../../src/validators/identity');
+const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine');
+const {DB_METHODS} = require('../../../helpers/mockHub.js');
 const TIP = {
   block_index: 500,
   block_hash: 'c0'.repeat(32),

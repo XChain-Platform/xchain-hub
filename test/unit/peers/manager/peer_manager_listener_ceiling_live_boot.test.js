@@ -28,8 +28,8 @@ const path        = require('path');
 const proxyquire  = require('proxyquire');
 const { expect }  = require('chai');
 
-const PeerManager = require('../../src/peers/manager.js');
-const { DB_METHODS } = require('../helpers/mockHub');
+const PeerManager = require('../../../../src/peers/manager.js');
+const { DB_METHODS } = require('../../../helpers/mockHub');
 
 {
 
@@ -94,7 +94,7 @@ const { DB_METHODS } = require('../helpers/mockHub');
         before(function () {
             // Same swap-only-the-db pattern XChainHub.test.js uses: every other
             // module in the require tree, PeerManager included, is the real one.
-            XChainHub = proxyquire('../../src/XChainHub', {
+            XChainHub = proxyquire('../../../../src/XChainHub', {
                 './db': function () { return mockDb; }
             });
         });

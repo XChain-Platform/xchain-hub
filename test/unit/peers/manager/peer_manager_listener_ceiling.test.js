@@ -37,9 +37,9 @@ const os   = require('os');
 const path = require('path');
 const { expect } = require('chai');
 
-const PeerManager = require('../../src/peers/manager.js');
+const PeerManager = require('../../../../src/peers/manager.js');
 
-const SRC_DIR = path.join(__dirname, '..', '..', 'src');
+const SRC_DIR = path.join(__dirname, '..', '..', '..', '..', 'src');
 
 // Every .js file under `dir`, feature directories included, as paths relative to
 // it. The subscribers live in feature directories, so a top-level listing would

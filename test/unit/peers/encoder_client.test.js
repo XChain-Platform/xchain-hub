@@ -15,7 +15,7 @@ const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 // The real classifier, so the 5xx guard below is pinned against the code that
 // actually decides whether a failed send may be re-broadcast.
-const { isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');
+const { isAmbiguousSendError } = require('../../../src/lib/idempotent_broadcast.js');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Load EncoderClient with axios stubbed
@@ -26,7 +26,7 @@ let EncoderClient;
 
 function loadModule() {
     axiosStub = { post: sinon.stub() };
-    EncoderClient = proxyquire('../../src/peers/encoder_client', { axios: axiosStub });
+    EncoderClient = proxyquire('../../../src/peers/encoder_client', { axios: axiosStub });
 }
 
 function okResponse(result) {
