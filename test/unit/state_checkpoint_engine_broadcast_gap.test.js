@@ -62,9 +62,9 @@ function mkEngine(db, broadcaster) {
     return engine;
 }
 
-describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () {
+let broadcaster;
 
-    let broadcaster;
+describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () {
 
     beforeEach(function () {
         broadcaster = {
@@ -77,6 +77,12 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
     });
 
     afterEach(function () { sinon.restore(); });
+
+    registerBroadcastResyncTests();
+    registerAcceptFinalizedDeliveryTests();
+});
+
+function registerBroadcastResyncTests() {
 
     describe('broadcastRowOrResync', function () {
 
@@ -129,6 +135,9 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
             expect(db.calls, 'no re-read is worth running with nothing to deliver to').to.equal(0);
         });
     });
+}
+
+function registerAcceptFinalizedDeliveryTests() {
 
     describe('acceptFinalized', function () {
 
@@ -169,4 +178,4 @@ describe('StateCheckpointEngine: post-commit mirror broadcast gap', function () 
             expect(emitted).to.not.equal(null);
         });
     });
-});
+}
