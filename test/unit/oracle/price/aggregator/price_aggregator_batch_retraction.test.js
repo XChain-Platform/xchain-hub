@@ -14,7 +14,7 @@
 // spec section 5.7, decisions D8, D13, D14, D23, D28.
 //
 // The canonical payload itself is pinned elsewhere (priceV2PayloadTwinParity.test.js
-// asserts _buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
+// asserts buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
 // twins), so these tests sign whatever that builder emits and pin what INGEST does
 // with a batch: per-round dedupe, column semantics, the block_time-keyed pair flag
 // day, the WS mirror re-emit, the reorg fence and the publisher marker clear.

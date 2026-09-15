@@ -270,7 +270,7 @@ function registerOracleConsensusPriceCapabilitySnapshotMirrSuite1Part4() {
     oracleConsensusPriceCapabilitySnapshotMirrSuite1OracleRound.priceFetcher = null;
     // The single-node branch aggregates locally; stub the aggregate so the test
     // exercises the store path rather than the trimmed-median math.
-    sinon.stub(oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc, '_aggregateAll').returns([{
+    sinon.stub(oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc, 'aggregateAll').returns([{
       coinPair: 'BTC/USD',
       price: '100000'
     }]);

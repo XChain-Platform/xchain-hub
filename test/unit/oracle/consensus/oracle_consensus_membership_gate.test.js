@@ -181,7 +181,7 @@ function registerOracleConsensusSnapshotMembershipGateOraclSuite1Part3() {
   it('records validator_count as the deduped member tally, not the raw prepare set', async function () {
     let twinAddr = 'ws://validator-1-twin:10001';
     oracleConsensusSnapshotMembershipGateOraclSuite1Pm.validatorPubkeys.set(twinAddr, VALIDATORS_3[0].pubkey); // same KEY, second addr
-    let store = sinon.stub(oracleConsensusSnapshotMembershipGateOraclSuite1Oc, '_storeSnapshot').resolves();
+    let store = sinon.stub(oracleConsensusSnapshotMembershipGateOraclSuite1Oc, 'storeSnapshot').resolves();
     oracleConsensusSnapshotMembershipGateOraclSuite1Oc.pendingRounds.set(oracleConsensusSnapshotMembershipGateOraclSuite1ROUND, {
       round: oracleConsensusSnapshotMembershipGateOraclSuite1ROUND,
       weighted: false,

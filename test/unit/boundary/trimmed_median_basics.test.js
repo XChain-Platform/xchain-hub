@@ -69,19 +69,19 @@ function registerTrimThresholdTransitions() {
 }
 function testN1NoTrimReturnsSingleValue() {
     let subs = submissionsForPair([42000]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
 }
 function testN2NoTrimReturnsAverageOfTwo() {
     // Within the 2-source deviation gate (spread 2/300 ~ 0.67% < 5%) so the
     // gate passes and the no-trim mean is returned; the gate itself is
     // covered separately in OracleConsensus.test.js.
     let subs = submissionsForPair([149, 151]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('150.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('150.00000000');
 }
 function testN3TrimCount0NoTrimReturnsMiddleValue() {
     // floor(3 * 0.15) = 0
     let subs = submissionsForPair([10, 20, 30]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('20.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('20.00000000');
 }
 function testN6TrimCount1EvenPostTrimCountMediansTheMiddlePair() {
     // ceil(6 * 0.15) = 1 → after trim: [1002, 1004, 1006, 1008]
@@ -90,20 +90,20 @@ function testN6TrimCount1EvenPostTrimCountMediansTheMiddlePair() {
     // OracleConsensus.test.js.
     let subs = submissionsForPair([1000, 1002, 1004, 1006, 1008, 1010]);
     // Even count: median = (1004+1006)/2 = 1005
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1005.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('1005.00000000');
 }
 function testN7TrimCount1Trims1FromEachEndFirstTrimTransition() {
     // floor(7 * 0.15) = 1
     let subs = submissionsForPair([1, 2, 3, 4, 5, 6, 7]);
     // After trim: [2, 3, 4, 5, 6] → median = 4
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('4.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('4.00000000');
 }
 function testN13TrimCount1StillTrimsOnly1() {
     // floor(13 * 0.15) = 1
     let prices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
     let subs = submissionsForPair(prices);
     // After trim: [2..12] (11 values) → median = 7
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('7.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('7.00000000');
 }
 function testN14TrimCount3Trims3FromEachEndSecondTrimTransition() {
     // ceil(14 * 0.15) = 3
@@ -112,14 +112,14 @@ function testN14TrimCount3Trims3FromEachEndSecondTrimTransition() {
     let prices = Array.from({ length: 14 }, (_, i) => 1000 + i * 2);
     let subs = submissionsForPair(prices);
     // After trim: [1006..1020] (8 values) → median = (1012+1014)/2 = 1013
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1013.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('1013.00000000');
 }
 function testN20TrimCount3Trims3FromEachEnd() {
     // floor(20 * 0.15) = 3
     let prices = Array.from({ length: 20 }, (_, i) => i + 1);
     let subs = submissionsForPair(prices);
     // After trim: [4..17] (14 values) → median = (10+11)/2 = 10.5
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('10.50000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('10.50000000');
 }
 
 function registerOutlierHandling() {
@@ -132,17 +132,17 @@ function testN5NoTrimExtremeOutlierStaysInDatasetIfWithinPrice() {
     // Outlier 9999999 is within 10M bounds so it stays
     let subs = submissionsForPair([100000, 100001, 100002, 100003, 9999999]);
     // Sorted: [100000, 100001, 100002, 100003, 9999999] → median = 100002
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100002.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100002.00000000');
 }
 function testN7Trim1ExtremeOutlierIsTrimmed() {
     let subs = submissionsForPair([100000, 100001, 100002, 100003, 100004, 100005, 9999999]);
     // After trim: [100001, 100002, 100003, 100004, 100005] → median = 100003
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
 }
 function testN7BothLowAndHighOutliersAreTrimmed() {
     let subs = submissionsForPair([1, 100000, 100001, 100002, 100003, 100004, 999999]);
     // After trim: [100000, 100001, 100002, 100003, 100004] → median = 100002
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100002.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100002.00000000');
 }
 
 function registerAllIdenticalValues() {
@@ -152,15 +152,15 @@ function registerAllIdenticalValues() {
 }
 function testN1SingleIdenticalReturnsThatValue() {
     let subs = submissionsForPair([65000]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
 }
 function testN5AllIdenticalNoTrimReturnsThatValue() {
     let subs = submissionsForPair([65000, 65000, 65000, 65000, 65000]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
 }
 function testN10AllIdenticalTrimRemovesSameValuesStillThatValue() {
     let subs = submissionsForPair(Array(10).fill(65000));
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('65000.00000000');
 }
 
 function registerFloatPrecision() {
@@ -171,22 +171,22 @@ function registerFloatPrecision() {
 }
 function testVerySmallPrice8DecimalPlaces() {
     let subs = submissionsForPair([0.00000001]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.00000001');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('0.00000001');
 }
 function testAverageOfTwoCloseFloatsPreservesPrecision() {
     // Relatively-close pair so the 2-source deviation gate passes (spread
     // ~1e-8 << 5%), while the mean still lands exactly on an 8-dp boundary
     // to exercise bignumber precision: (1.00000001 + 1.00000003)/2.
     let subs = submissionsForPair([1.00000001, 1.00000003]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1.00000002');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('1.00000002');
 }
 function testLargePriceValueWithinBounds() {
     let subs = submissionsForPair([9999999]);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('9999999.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('9999999.00000000');
 }
 function testToFixed8OutputFormatIsConsistent() {
     let subs = submissionsForPair([1.5]);
-    let result = oc._aggregate(subs, 'BTC/USD');
+    let result = oc.aggregate(subs, 'BTC/USD');
     expect(result).to.match(/^\d+\.\d{8}$/);
 }
 
@@ -201,11 +201,11 @@ function registerInvalidPriceData() {
     it('handles submission with empty prices array', testHandlesSubmissionWithEmptyPricesArray);
 }
 function testReturnsNullForEmptySubmissions() {
-    expect(oc._aggregate(new Map(), 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(new Map(), 'BTC/USD')).to.be.null;
 }
 function testReturnsNullForUnknownCoinPair() {
     let subs = submissionsForPair([100000]);
-    expect(oc._aggregate(subs, 'ETH/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'ETH/USD')).to.be.null;
 }
 function testFiltersOutZeroPrices() {
     let entries = [
@@ -213,7 +213,7 @@ function testFiltersOutZeroPrices() {
         { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '50000' }] }
     ];
     let subs = buildSubmissions(entries);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
 }
 function testFiltersOutNegativePrices() {
     let entries = [
@@ -221,7 +221,7 @@ function testFiltersOutNegativePrices() {
         { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '50000' }] }
     ];
     let subs = buildSubmissions(entries);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
 }
 function testFiltersOutNaNPrices() {
     let entries = [
@@ -229,7 +229,7 @@ function testFiltersOutNaNPrices() {
         { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '42000' }] }
     ];
     let subs = buildSubmissions(entries);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
 }
 function testReturnsNullWhenALLPricesAreInvalid() {
     let entries = [
@@ -238,16 +238,16 @@ function testReturnsNullWhenALLPricesAreInvalid() {
         { sender: 'v3', prices: [{ coinPair: 'BTC/USD', price: 'NaN' }] }
     ];
     let subs = buildSubmissions(entries);
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }
 function testHandlesSubmissionWithMissingPricesArray() {
     let subs = new Map();
     subs.set('v1', { prices: null, sources: 0, timestamp: Date.now() });
     subs.set('v2', { prices: [{ coinPair: 'BTC/USD', price: '50000' }], sources: 1, timestamp: Date.now() });
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
 }
 function testHandlesSubmissionWithEmptyPricesArray() {
     let subs = new Map();
     subs.set('v1', { prices: [], sources: 0, timestamp: Date.now() });
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }

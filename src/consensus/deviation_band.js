@@ -23,7 +23,7 @@
  * proposed aggregate, the finalized round price, or the 2-source midpoint),
  * never a submitter-local value. Three call sites share this module:
  *
- *   1. Publish-side even-split liveness gate (OracleConsensus._aggregate):
+ *   1. Publish-side even-split liveness gate (OracleConsensus.aggregate):
  *      both middle submissions measured against the 8-decimal median that is
  *      actually published, via `exceedsBand`. Rounds at scale 18 like sites 2
  *      and 3: the pre-helper code used scale 8, which truncated a boundary

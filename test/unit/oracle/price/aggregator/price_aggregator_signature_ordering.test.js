@@ -60,7 +60,7 @@ function makeValidator() {
     // gate also keys on the anchor, so the bytes differ either side of 961000; the
     // payload shape is pinned by the suite above, this block pins tally ordering).
     function roundAt(btcHeight, sigsFor) {
-        let payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
+        let payload = agg.buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
         return {
             round: 5,
             timestamp: 1700000000,

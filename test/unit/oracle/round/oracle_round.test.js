@@ -214,7 +214,7 @@ function registerFormatxchainpricemetaTheDerivationAuditLine4Tests12() {
 function registerExecuteround5Tests13() {
 
         it('fetches prices and broadcasts ORACLE_PRICE_SUBMIT', async function () {
-            await or._executeRound();
+            await or.executeRound();
 
             expect(mockPriceFetcher.fetchPrices.calledOnce).to.be.true;
             expect(pm.broadcast.calledOnce).to.be.true;
@@ -226,7 +226,7 @@ function registerExecuteround5Tests13() {
         });
 
         it('records own submission in local map', async function () {
-            await or._executeRound();
+            await or.executeRound();
 
             let round = or.getCurrentRound();
             let subs = or.getSubmissions(round);
@@ -240,7 +240,7 @@ function registerExecuteround5Tests13() {
         it('anchors on the direct indexer height when no pushed tip exists', async function () {
             // getChainTip stays null (mockHub default); the resolver returns a height.
             hub.resolveBtcLatestBlock.resolves(952913);
-            await or._executeRound();
+            await or.executeRound();
 
             expect(or.currentBtcBlockHeight).to.equal(952913);
             // A real height must clear the fallback so finalization is not suppressed.
@@ -250,7 +250,7 @@ function registerExecuteround5Tests13() {
 
         it('falls back to the round number when both tip sources are empty', async function () {
             // getChainTip null + resolver null (both mockHub defaults).
-            await or._executeRound();
+            await or.executeRound();
 
             expect(or.chainTipFallbackActive).to.be.true;
             expect(or.currentBtcBlockHeight).to.equal(or.getCurrentRound());
@@ -258,7 +258,7 @@ function registerExecuteround5Tests13() {
 
         it('skips round when price fetch returns empty', async function () {
             mockPriceFetcher.fetchPrices.resolves([]);
-            await or._executeRound();
+            await or.executeRound();
 
             expect(pm.broadcast.called).to.be.false;
         });
@@ -268,7 +268,7 @@ function registerExecuteround5Tests18() {
 
         it('skips round when price fetch throws', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
-            await or._executeRound();
+            await or.executeRound();
 
             expect(pm.broadcast.called).to.be.false;
         });
@@ -280,7 +280,7 @@ function registerExecuteround5Tests18() {
         // double-counted a round that went on to hit the chain-tip-fallback skip.
         it('does not advance the skip streak on fetch failure alone', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
-            await or._executeRound();
+            await or.executeRound();
 
             expect(or.consecutiveSkippedRounds).to.equal(0);
             expect(or.lastSuccessfulRoundTime).to.be.null;
@@ -288,7 +288,7 @@ function registerExecuteround5Tests18() {
 
         it('does not advance the skip streak on an empty price set alone', async function () {
             mockPriceFetcher.fetchPrices.resolves([]);
-            await or._executeRound();
+            await or.executeRound();
 
             expect(or.consecutiveSkippedRounds).to.equal(0);
             expect(or.lastSuccessfulRoundTime).to.be.null;
@@ -317,7 +317,7 @@ function registerExecuteround5Tests18() {
             mockPriceFetcher.fetchPrices.resolves([
                 { coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }
             ]);
-            await or._executeRound();
+            await or.executeRound();
             expect(or.consecutiveSkippedRounds).to.equal(1);
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
@@ -376,9 +376,9 @@ describe('OracleRound', function () {
 
 
     // -----------------------------------------------------------------
-    // _executeRound()
+    // executeRound()
     // -----------------------------------------------------------------
-    describe('_executeRound()', function () {
+    describe('executeRound()', function () {
         registerExecuteround5Tests13();
         registerExecuteround5Tests18();
         registerExecuteround5Tests23();

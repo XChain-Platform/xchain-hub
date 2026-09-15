@@ -36,7 +36,7 @@ module.exports = {
     // The price-capable set at the anchor is the upper bound on what can come back, so
     // packing against it never under-splits; the post-signing measurement in
     // signAndSizeRange is the authority either way.
-    async _priceSetSizeHint(anchor, fallback) {
+    async priceSetSizeHint(anchor, fallback) {
         try {
             if (this.hub && this.hub.capabilitySnapshot) {
                 let snap = await this.hub.capabilitySnapshot.getSnapshot('price', anchor);
@@ -52,7 +52,7 @@ module.exports = {
     // the uncompressed form (64-hex pubkey, 128-hex signature), and high-entropy so the
     // COMPRESSED estimate is not flattered: repeating one placeholder would deflate to
     // almost nothing and the packer would then over-fill every wire.
-    _placeholderSigs(count) {
+    placeholderSigs(count) {
         let out = [];
         for (let i = 0; i < count; i++) {
             let a = crypto.createHash('sha256').update('xpriceb-size-pubkey-' + i).digest('hex');
@@ -66,14 +66,14 @@ module.exports = {
     // Largest leading run of `rounds` whose estimated wire fits the ceiling. Returns 0
     // when even the first round overflows; the caller still proposes that single round,
     // so the loud-ceiling path measures a REAL wire rather than an estimate.
-    _packSegment(rounds, sigCount) {
-        let sigs = this._placeholderSigs(sigCount);
+    packSegment(rounds, sigCount) {
+        let sigs = this.placeholderSigs(sigCount);
         let n    = Math.min(rounds.length, PRICE_BATCH_MAX_ROUND_COUNT);
         while (n >= 1) {
             let sub = rounds.slice(0, n);
-            let emitted = this._emitWire(sub[0].round, sub[n - 1].round,
+            let emitted = this.emitWire(sub[0].round, sub[n - 1].round,
                 sub[n - 1].btcBlockHeight, sub, sigs);
-            if (this._wireFits(emitted)) return n;
+            if (this.wireFits(emitted)) return n;
             n--;
         }
         return 0;
@@ -109,8 +109,8 @@ module.exports = {
                 return null;
             }
 
-            let emitted = this._emitWire(first, last, anchor, candidate, result.sigs);
-            if (this._wireFits(emitted)) {
+            let emitted = this.emitWire(first, last, anchor, candidate, result.sigs);
+            if (this.wireFits(emitted)) {
                 return {
                     wire:       emitted.wire,
                     bytes:      emitted.bytes,
@@ -210,7 +210,7 @@ module.exports = {
     // Emit whichever form is smaller. A batch that deflates larger (short bodies, or
     // content deflate cannot exploit) simply rides uncompressed; both forms are equally
     // valid and the reader distinguishes them on the `Z` in the FIRST_ROUND slot.
-    _emitWire(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
+    emitWire(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
         let body  = this.buildPriceBatchBody(firstRound, lastRound, btcBlockHeight, rounds, sigs);
         let plain = 'PRICE|0|' + body;
         let plainBytes = Buffer.byteLength(plain, 'utf8');
@@ -235,7 +235,7 @@ module.exports = {
     // that comfortably fits the encoder can still carry a body every indexer refuses to
     // finish inflating. Compression therefore buys FEE, not round capacity: it relaxes
     // this predicate by the 8 bytes of the `PRICE|0|` prefix and nothing more.
-    _wireFits(emitted) {
+    wireFits(emitted) {
         let max = this.constructor.PRICE_WIRE_MAX_BYTES;
         return emitted.bytes <= max && emitted.bodyBytes <= max;
     },

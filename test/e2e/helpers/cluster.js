@@ -550,7 +550,7 @@ function createCluster(nodeCount, overrides) {
         async triggerOracleRound(index) {
             let hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.oracle) throw new Error('No oracle on node ' + index);
-            await hub.oracle._executeRound();
+            await hub.oracle.executeRound();
         },
 
         /**
@@ -560,7 +560,7 @@ function createCluster(nodeCount, overrides) {
             let promises = [];
             for (let i = 0; i < nodes.length; i++) {
                 if (nodes[i].hub && nodes[i].hub.oracle) {
-                    promises.push(nodes[i].hub.oracle._executeRound());
+                    promises.push(nodes[i].hub.oracle.executeRound());
                 }
             }
             await Promise.all(promises);

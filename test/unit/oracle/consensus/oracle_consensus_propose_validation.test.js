@@ -193,20 +193,20 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests8() {
 
 function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests11() {
 
-    it('_storeSnapshot broadcasts each finalized row to hub-DB mirror subscribers', async function () {
+    it('storeSnapshot broadcasts each finalized row to hub-DB mirror subscribers', async function () {
         hub.hubDbBroadcaster = { broadcastRow: sinon.stub() };
         hub.db.doQuery.callsFake(async (sql) => {
             if (/SELECT \* FROM price_snapshots/i.test(sql)) return [{ round_number: 1, coin_pair: 'BTC/USD', price: '100000' }];
             return [];
         });
-        await oc._storeSnapshot(1, [{ coinPair: 'BTC/USD', price: '100000' }], 3, 'proof', 100, 1700000000);
+        await oc.storeSnapshot(1, [{ coinPair: 'BTC/USD', price: '100000' }], 3, 'proof', 100, 1700000000);
         expect(hub.hubDbBroadcaster.broadcastRow.calledOnce).to.be.true;
         expect(hub.hubDbBroadcaster.broadcastRow.firstCall.args[0].table).to.equal('price_snapshots');
     });
 
     // #3707: a finalized round must be written atomically (one statement) so a
     // getfeequote / getpricesnapshots reader can never observe a torn round.
-    it('_storeSnapshot writes the whole round in a single multi-row INSERT (atomic)', async function () {
+    it('storeSnapshot writes the whole round in a single multi-row INSERT (atomic)', async function () {
         // Pin the configured pair set to exactly the finalized pairs so the
         // per-pair skip-marker write (item #180, covered below) stays quiet here.
         sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD', 'XCHAIN/USD']);
@@ -215,7 +215,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests11() 
             if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
             return [];
         });
-        await oc._storeSnapshot(1, [
+        await oc.storeSnapshot(1, [
             { coinPair: 'BTC/USD', price: '100000' },
             { coinPair: 'XCHAIN/USD', price: '0.50000000' }
         ], 3, 'proof', 100, 1700000000);
@@ -227,14 +227,14 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests11() 
     // Item #180: a pair that drops out of an otherwise-finalizing round must leave
     // a durable per-pair 'skipped' snapshot row (before this, it got neither a
     // finalized nor a skipped row and consumers silently fell back a round).
-    it('_storeSnapshot records durable per-pair skipped rows for configured pairs missing from the round', async function () {
+    it('storeSnapshot records durable per-pair skipped rows for configured pairs missing from the round', async function () {
         sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD', 'XCHAIN/USD', 'LTC/USD']);
         let insertCalls = [];
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
             return [];
         });
-        await oc._storeSnapshot(7, [
+        await oc.storeSnapshot(7, [
             { coinPair: 'BTC/USD', price: '100000' },
             { coinPair: 'XCHAIN/USD', price: '0.50000000' }
         ], 3, 'proof', 100, 1700000000);
@@ -249,14 +249,14 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests11() 
 
 function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests14() {
 
-    it('_storeSnapshot writes no skip markers when every configured pair finalized', async function () {
+    it('storeSnapshot writes no skip markers when every configured pair finalized', async function () {
         sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD']);
         let insertCalls = [];
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
             return [];
         });
-        await oc._storeSnapshot(8, [{ coinPair: 'BTC/USD', price: '100000' }], 3, 'proof', 100, 1700000000);
+        await oc.storeSnapshot(8, [{ coinPair: 'BTC/USD', price: '100000' }], 3, 'proof', 100, 1700000000);
         expect(insertCalls).to.have.length(1);
         expect(insertCalls[0].sql).to.include("'finalized'");
     });

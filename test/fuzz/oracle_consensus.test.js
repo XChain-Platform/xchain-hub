@@ -50,7 +50,7 @@ function registerAggregateTestCases1() {
 
         it('output is always null or a valid 8-decimal string', function () {
             fc.assert(fc.property(gen.fc_submissionMap(1, 20), gen.fc_knownCoinPair(), function (subs, pair) {
-                let result = oc._aggregate(subs, pair);
+                let result = oc.aggregate(subs, pair);
                 if (result === null) return;
                 expect(result).to.match(/^-?\d+\.\d{8}$/);
             }), { numRuns: 200 });
@@ -58,10 +58,10 @@ function registerAggregateTestCases1() {
 
         it('output never contains the string "NaN"', function () {
             fc.assert(fc.property(gen.fc_submissionMap(1, 20), gen.fc_knownCoinPair(), function (subs, pair) {
-                let result = oc._aggregate(subs, pair);
+                let result = oc.aggregate(subs, pair);
                 if (result !== null) {
                     expect(result).to.not.equal('NaN');
-                    // Note: Infinity can leak through _aggregate because parseFloat("Infinity") > 0
+                    // Note: Infinity can leak through aggregate because parseFloat("Infinity") > 0
                     // is true and the filter does not check isFinite(). This is a known gap
                     // documented by this fuzz suite. The generator only produces finite prices,
                     // so this property holds for well-formed input.
@@ -83,7 +83,7 @@ function registerAggregateTestCases1() {
                         prices: [{ coinPair: pair, price: String(p) }]
                     }));
                     let subs = buildSubmissions(entries);
-                    let result = oc._aggregate(subs, pair);
+                    let result = oc.aggregate(subs, pair);
                     if (result !== null) {
                         expect(result).to.not.include('Infinity');
                         expect(result).to.not.equal('NaN');
@@ -98,7 +98,7 @@ function registerAggregateTestCases2() {
         it('output is always positive when not null (with finite inputs)', function () {
             // Note: The generator only produces finite positive prices, so this
             // tests the property under well-formed input. Infinity can leak through
-            // _aggregate because parseFloat("Infinity") > 0 is true. This is a
+            // aggregate because parseFloat("Infinity") > 0 is true. This is a
             // known gap documented in the "never contains Infinity" test below.
             fc.assert(fc.property(
                 fc.array(
@@ -113,7 +113,7 @@ function registerAggregateTestCases2() {
                         prices: [{ coinPair: pair, price: String(p) }]
                     }));
                     let subs = buildSubmissions(entries);
-                    let result = oc._aggregate(subs, pair);
+                    let result = oc.aggregate(subs, pair);
                     if (result !== null) {
                         expect(parseFloat(result)).to.be.greaterThan(0);
                         expect(Number.isFinite(parseFloat(result))).to.be.true;
@@ -123,7 +123,7 @@ function registerAggregateTestCases2() {
         });
 
         it('all-invalid submissions always produce null', function () {
-            // Note: "Infinity" and "-Infinity" are NOT filtered by _aggregate because
+            // Note: "Infinity" and "-Infinity" are NOT filtered by aggregate because
             // parseFloat("Infinity") > 0 is true. This test uses prices that are
             // actually filtered: NaN, <= 0, non-numeric strings.
             let strictlyInvalid = fc.oneof(
@@ -144,7 +144,7 @@ function registerAggregateTestCases2() {
                         prices: [{ coinPair: 'BTC/USD', price: p }]
                     }));
                     let subs = buildSubmissions(entries);
-                    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+                    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
                 }
             ), { numRuns: 200 });
         });
@@ -152,12 +152,12 @@ function registerAggregateTestCases2() {
 
 function registerAggregateTestCases3() {
 
-        it('Infinity is correctly filtered out by _aggregate', function () {
+        it('Infinity is correctly filtered out by aggregate', function () {
             let entries = [
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: 'Infinity' }] }
             ];
             let subs = buildSubmissions(entries);
-            let result = oc._aggregate(subs, 'BTC/USD');
+            let result = oc.aggregate(subs, 'BTC/USD');
             expect(result).to.be.null;
         });
 
@@ -174,7 +174,7 @@ function registerAggregateTestCases3() {
                         prices: [{ coinPair: 'BTC/USD', price: String(p) }]
                     }));
                     let subs = buildSubmissions(entries);
-                    let raw = oc._aggregate(subs, 'BTC/USD');
+                    let raw = oc.aggregate(subs, 'BTC/USD');
                     // A null is a deliberate DROP, not a price: the even-split deviation
                     // gate omits a pair whose published mean would put every submitter
                     // outside the band, and this generator produces such splits freely.
@@ -200,7 +200,7 @@ function registerAggregateTestCases3() {
                         prices: [{ coinPair: 'BTC/USD', price: String(price) }]
                     }));
                     let subs = buildSubmissions(entries);
-                    let result = oc._aggregate(subs, 'BTC/USD');
+                    let result = oc.aggregate(subs, 'BTC/USD');
                     expect(parseFloat(result)).to.be.closeTo(price, price * 1e-7 + 1e-8);
                 }
             ), { numRuns: 200 });
@@ -216,7 +216,7 @@ function registerAggregateTestCases4() {
                     .map(s => s + '/FAKE')
                     .filter(s => !['BTC/USD', 'LTC/USD', 'DOGE/USD'].includes(s)),
                 function (subs, unknownPair) {
-                    expect(oc._aggregate(subs, unknownPair)).to.be.null;
+                    expect(oc.aggregate(subs, unknownPair)).to.be.null;
                 }
             ), { numRuns: 100 });
         });
@@ -226,10 +226,10 @@ function registerAggregateTestCases4() {
 function registerAggregateTests() {
 
     // -----------------------------------------------------------------
-    // _aggregate()
+    // aggregate()
     // -----------------------------------------------------------------
 
-    describe('_aggregate()', function () {
+    describe('aggregate()', function () {
         registerAggregateTestCases1();
         registerAggregateTestCases2();
         registerAggregateTestCases3();
@@ -240,14 +240,14 @@ function registerAggregateTests() {
 function registerAggregateAllTests() {
 
     // -----------------------------------------------------------------
-    // _aggregateAll()
+    // aggregateAll()
     // -----------------------------------------------------------------
 
-    describe('_aggregateAll()', function () {
+    describe('aggregateAll()', function () {
 
         it('result array contains only valid-format price objects', function () {
             fc.assert(fc.property(gen.fc_submissionMap(1, 15), function (subs) {
-                let results = oc._aggregateAll(subs);
+                let results = oc.aggregateAll(subs);
                 expect(Array.isArray(results)).to.be.true;
                 for (let item of results) {
                     expect(item).to.have.property('coinPair').that.is.a('string');
@@ -260,7 +260,7 @@ function registerAggregateAllTests() {
 
         it('result contains no duplicate coinPairs', function () {
             fc.assert(fc.property(gen.fc_submissionMap(1, 15), function (subs) {
-                let results = oc._aggregateAll(subs);
+                let results = oc.aggregateAll(subs);
                 let pairs = results.map(r => r.coinPair);
                 expect(pairs.length).to.equal(new Set(pairs).size);
             }), { numRuns: 200 });

@@ -65,7 +65,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part1() {
     sinon.restore();
   });
   it('drops a submission from an unregistered sender when the registry is populated', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     // Registry populated with only the self validator + one real peer.
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map([[oracleRoundIngestGateStressSweepSuite1Pm.validatorAddr, 'aa'.repeat(32)], ['ws://real-peer:10001', 'bb'.repeat(32)]]);
@@ -78,7 +78,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part1() {
     expect(subs.has('ws://forged-sender-xyz:10001')).to.equal(false);
   });
   it('accepts a submission from a registered sender', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map([[oracleRoundIngestGateStressSweepSuite1Pm.validatorAddr, 'aa'.repeat(32)], ['ws://real-peer:10001', 'bb'.repeat(32)]]);
     oracleRoundIngestGateStressSweepSuite1Submit('ws://real-peer:10001', [{
@@ -90,7 +90,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part1() {
 }
 function registerOracleRoundIngestGateStressSweepSuite1Part2() {
   it('bootstrap (empty registry) still accepts submissions', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map(); // empty => permissive bootstrap
     oracleRoundIngestGateStressSweepSuite1Submit('ws://anyone:10001', [{
@@ -100,7 +100,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part2() {
     expect(oracleRoundIngestGateStressSweepSuite1Or.submissions.get(round).has('ws://anyone:10001')).to.equal(true);
   });
   it('drops a fabricated (non-canonical) coin pair on ingest', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map(); // bootstrap: sender gate open, isolate the pair gate
     oracleRoundIngestGateStressSweepSuite1Submit('ws://peer:10001', [{
@@ -111,7 +111,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part2() {
     expect(oracleRoundIngestGateStressSweepSuite1Or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
   });
   it('drops a price whose spelling parseFloat would admit as a prefix', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map(); // bootstrap: isolate the price gate
     // parseFloat('100junk') is 100 and clears every bound, while bcmath.bcnum
@@ -123,7 +123,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part2() {
     expect(oracleRoundIngestGateStressSweepSuite1Or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
   });
   it('never lets a malformed price reach the persisted audit row', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map([['ws://peer:10001', 'bb'.repeat(32)]]);
     let persist = sinon.spy(oracleRoundIngestGateStressSweepSuite1Or, 'persistSubmissions');
@@ -141,7 +141,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part2() {
 }
 function registerOracleRoundIngestGateStressSweepSuite1Part3() {
   it('drops a non-scalar price a coercing gate would admit', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map();
     // parseFloat(['100']) is 100, so an array-valued price cleared the old gate.
@@ -152,7 +152,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part3() {
     expect(oracleRoundIngestGateStressSweepSuite1Or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
   });
   it('keeps an honest bcformat price spelling byte-identical', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map();
     oracleRoundIngestGateStressSweepSuite1Submit('ws://peer:10001', [{
@@ -164,7 +164,7 @@ function registerOracleRoundIngestGateStressSweepSuite1Part3() {
     expect(sub.prices[0].price).to.equal('100000.00000000');
   });
   it('keeps canonical pairs and strips only the bogus ones from a mixed submission', async function () {
-    await oracleRoundIngestGateStressSweepSuite1Or._executeRound();
+    await oracleRoundIngestGateStressSweepSuite1Or.executeRound();
     let round = oracleRoundIngestGateStressSweepSuite1Or.currentRound;
     oracleRoundIngestGateStressSweepSuite1Pm.validatorPubkeys = new Map();
     oracleRoundIngestGateStressSweepSuite1Submit('ws://peer:10001', [{

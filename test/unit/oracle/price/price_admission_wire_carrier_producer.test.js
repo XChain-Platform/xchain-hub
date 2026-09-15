@@ -27,7 +27,7 @@
  *      map and REFUSED when the identical call omits it.
  *
  *   2. The BATCH rail has no carrier at all, and now fails CLOSED instead of open.
- *      _buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
+ *      buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
  *      round and nothing else, so an admission map cannot ride a batch and could not be
  *      verified against a signature if it did. Before this row an admission-era batch
  *      VERIFIED and stored its rounds as legacy rows, silently, above the very activation

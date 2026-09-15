@@ -139,7 +139,7 @@ function initFinalizedAndEarlyBuffers() {
     // in `finalized`, _handlePropose dropped the real PROPOSE, and handlePrepare
     // /_handleCommit refused to buffer, so the hub permanently held a NULL
     // price_snapshot for a round the rest of the federation finalized. When the
-    // round does reach commit quorum here, _storeSnapshot's ON DUPLICATE KEY
+    // round does reach commit quorum here, storeSnapshot's ON DUPLICATE KEY
     // UPDATE upgrades the 'skipped' rows to 'finalized' and markFinalized moves
     // the round out of this set. Bounded by the same insertion-order ring as
     // `finalized` (round is not attacker-chosen here -- only this hub's own

@@ -89,7 +89,7 @@ function registerStop2Tests1() {
         it('clears the untracked boundary timer so it cannot fire after stop()', async function () {
             let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 });
             try {
-                let ran = sinon.stub(or, '_executeRound').resolves();
+                let ran = sinon.stub(or, 'executeRound').resolves();
                 or.startRoundTimer();
                 // Boundary timer is now scheduled but not yet fired.
                 expect(or.boundaryTimer).to.not.be.null;
@@ -127,7 +127,7 @@ function registerGetcurrentroundGetsubmissions4Tests7() {
         });
 
         it('getSubmissions with no argument uses currentRound', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.currentRound;
             let subs1 = or.getSubmissions(round);
             let subs2 = or.getSubmissions();  // default = currentRound
@@ -139,7 +139,7 @@ function registerGetcurrentroundGetsubmissions4Tests7() {
 function registerExecuteroundBtcChainTipFallback5Tests9() {
         it('uses round number as fallback when getChainTip returns null', async function () {
             hub.db.getChainTip = sinon.stub().resolves(null);
-            await or._executeRound();
+            await or.executeRound();
             expect(or.chainTipFetchFailures).to.equal(1);
             expect(or.chainTipFallbackActive).to.be.true;
             expect(or.currentBtcBlockHeight).to.equal(or.currentRound);
@@ -147,23 +147,23 @@ function registerExecuteroundBtcChainTipFallback5Tests9() {
 
         it('increments chainTipFetchFailures on repeated failures', async function () {
             hub.db.getChainTip = sinon.stub().resolves(null);
-            await or._executeRound();
+            await or.executeRound();
             // Reset idempotency guard
             or.lastExecutedRound = -1;
-            await or._executeRound();
+            await or.executeRound();
             expect(or.chainTipFetchFailures).to.equal(2);
         });
 
         it('uses round number as fallback when getChainTip throws', async function () {
             hub.db.getChainTip = sinon.stub().rejects(new Error('db error'));
-            await or._executeRound();
+            await or.executeRound();
             expect(or.chainTipFetchFailures).to.be.greaterThan(0);
             expect(or.chainTipFallbackActive).to.be.true;
         });
 
         it('uses BTC chain tip values when getChainTip succeeds', async function () {
             hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: 1700000000 });
-            await or._executeRound();
+            await or.executeRound();
             expect(or.currentBtcBlockHeight).to.equal(800000);
             expect(or.chainTipFetchFailures).to.equal(0);
             expect(or.chainTipFallbackActive).to.be.false;
@@ -172,13 +172,13 @@ function registerExecuteroundBtcChainTipFallback5Tests9() {
         it('resets fallback state after a successful chain-tip read', async function () {
             // First: simulate a failure
             hub.db.getChainTip = sinon.stub().resolves(null);
-            await or._executeRound();
+            await or.executeRound();
             expect(or.chainTipFallbackActive).to.be.true;
 
             // Second: successful read
             or.lastExecutedRound = -1;
             hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800001, blockTime: 1700000001 });
-            await or._executeRound();
+            await or.executeRound();
             expect(or.chainTipFallbackActive).to.be.false;
             expect(or.chainTipFetchFailures).to.equal(0);
         });
@@ -189,7 +189,7 @@ function registerGetsubmissionsinfoAnchorTipBlockAge6Tests14() {
         it('flags a frozen-but-present pushed tip as block-stale while fetch counters stay clean', async function () {
             let staleBlockTime = Math.floor(Date.now() / 1000) - 100000; // ~28h old
             hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: staleBlockTime });
-            await or._executeRound();
+            await or.executeRound();
             // The bug: fetch counters all read healthy on a frozen tip.
             expect(or.chainTipFallbackActive).to.be.false;
             expect(or.chainTipFetchFailures).to.equal(0);
@@ -203,7 +203,7 @@ function registerGetsubmissionsinfoAnchorTipBlockAge6Tests14() {
         it('reports a fresh pushed tip as not block-stale', async function () {
             let freshBlockTime = Math.floor(Date.now() / 1000);
             hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800001, blockTime: freshBlockTime });
-            await or._executeRound();
+            await or.executeRound();
             let info = await or.getSubmissionsInfo();
             expect(info.chainTipBlockStale).to.be.false;
             expect(info.chainTipBlockAgeMs).to.be.lessThan(120000);
@@ -211,7 +211,7 @@ function registerGetsubmissionsinfoAnchorTipBlockAge6Tests14() {
 
         it('returns null block age when anchored on the round-number fallback', async function () {
             hub.db.getChainTip = sinon.stub().resolves(null);
-            await or._executeRound();
+            await or.executeRound();
             let info = await or.getSubmissionsInfo();
             // Wall-clock-stamped fallback anchor has no real block time to age.
             expect(info.chainTipBlockAgeMs).to.equal(null);
@@ -246,8 +246,8 @@ describe('OracleRound (extra coverage)', function () {
 
 
 
-    // ── _executeRound: chain-tip branch coverage ─────────────────────────────
-    describe('_executeRound(): BTC chain tip fallback', function () {
+    // ── executeRound: chain-tip branch coverage ─────────────────────────────
+    describe('executeRound(): BTC chain tip fallback', function () {
         registerExecuteroundBtcChainTipFallback5Tests9();
     });
 

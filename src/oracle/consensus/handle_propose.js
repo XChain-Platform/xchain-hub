@@ -344,7 +344,7 @@ module.exports = {
         // the weighted-quorum gate below, so the follower and the leader evaluate one
         // round against one height.
         if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
-            await this._refreshLastFinalizedForRound(round);
+            await this.refreshLastFinalizedForRound(round);
         }
         return lockProposeSnapshot.call(this, envelope, proposal, blockHeight);
     }

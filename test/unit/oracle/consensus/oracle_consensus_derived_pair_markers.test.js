@@ -107,7 +107,7 @@ function registerOracleConsensusDerivedPairDropMarkersItemSuite1Part2() {
         return [];
       }
     };
-    await oracleConsensusDerivedPairDropMarkersItemSuite1Oc._storeSnapshot(42, [{
+    await oracleConsensusDerivedPairDropMarkersItemSuite1Oc.storeSnapshot(42, [{
       coinPair: 'BTC/USD',
       price: '100000'
     }], 3, '[]', 900, 1700000000);
@@ -129,7 +129,7 @@ function registerOracleConsensusDerivedPairDropMarkersItemSuite1Part2() {
         return [];
       }
     };
-    await oracleConsensusDerivedPairDropMarkersItemSuite1Oc._storeSnapshot(42, [{
+    await oracleConsensusDerivedPairDropMarkersItemSuite1Oc.storeSnapshot(42, [{
       coinPair: 'BTC/USD',
       price: '100000'
     }, {

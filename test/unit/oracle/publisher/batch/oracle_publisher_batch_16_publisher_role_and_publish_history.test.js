@@ -57,7 +57,7 @@ const testCase2 = async function () {
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);   // ME is rank 0, so window 0 is its own
+            await h.p.assembleWindow(0);   // ME is rank 0, so window 0 is its own
 
             let s = h.p.getStats();
             expect(s.publisherRole).to.equal('in_set');
@@ -70,7 +70,7 @@ const testCase3 = async function () {
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let s = h.p.getStats();
             expect(s.publisherRole).to.equal('not_in_set');
@@ -87,7 +87,7 @@ const testCase4 = async function () {
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let s = h.p.getStats();
             expect(s.publisherRole).to.equal('set_unresolved');
@@ -107,11 +107,11 @@ const testCase5 = async function () {
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.p.getStats().publisherRole).to.equal('in_set');
 
             dark = true;
-            await h.p._assembleWindow(1);
+            await h.p.assembleWindow(1);
             expect(h.p.getStats().publisherRole, 'the last successful election is history, not the answer')
                 .to.equal('set_unresolved');
         };
@@ -128,11 +128,11 @@ const testCase6 = async function () {
             await h.p.start();
             for (let r = 0; r < 24; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.p.getStats().publisherRole).to.equal('in_set');
 
             members = [PEER1, PEER2];
-            await h.p._assembleWindow(2);
+            await h.p.assembleWindow(2);
             expect(h.p.getStats().publisherRole).to.equal('not_in_set');
         };
 

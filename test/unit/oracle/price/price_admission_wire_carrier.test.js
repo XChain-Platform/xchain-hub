@@ -27,7 +27,7 @@
  *      map and REFUSED when the identical call omits it.
  *
  *   2. The BATCH rail has no carrier at all, and now fails CLOSED instead of open.
- *      _buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
+ *      buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
  *      round and nothing else, so an admission map cannot ride a batch and could not be
  *      verified against a signature if it did. Before this row an admission-era batch
  *      VERIFIED and stored its rounds as legacy rows, silently, above the very activation
@@ -200,7 +200,7 @@ function snapshotFor(V) {
 
 
             function signedRound(map) {
-                const payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
+                const payload = agg.buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
                 return {
                     source_chain: 'BTC', round: 5, timestamp: 1700000000,
                     btc_block_height: ADMIT_AT, block_index: 800000, action_index: 42,
@@ -300,7 +300,7 @@ function registerEndToEndThroughThe3Tests4() {
             });
 
             it('round-trips the map: signed bytes -> wire field -> decode -> re-encode, identical', async function () {
-                const canonical = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, MAP);
+                const canonical = agg.buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, MAP);
                 const field     = canonical.slice(canonical.lastIndexOf('|') + 1);
                 const decoded   = armed.act.decodeAdmitBlocks(field);
                 assert.deepStrictEqual(decoded, MAP, 'the wire field did not decode to the signed map');
@@ -308,7 +308,7 @@ function registerEndToEndThroughThe3Tests4() {
                     're-encoding the decoded map did not reproduce the wire bytes');
                 // And the legacy round below the activation is the pre-change bytes exactly:
                 // the body is terminal, so there is no field and nothing to strip.
-                const legacy = agg._buildPriceV0Payload(5, 1700000000, PAIRS, LEGACY_AT, undefined);
+                const legacy = agg.buildPriceV0Payload(5, 1700000000, PAIRS, LEGACY_AT, undefined);
                 expect(legacy.endsWith('}')).to.equal(true, legacy.slice(-40));
                 expect(legacy).to.not.match(/BTC:/);
             });

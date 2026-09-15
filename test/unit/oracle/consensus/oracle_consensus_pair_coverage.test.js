@@ -121,7 +121,7 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part2() {
       ]
     }]));
     // The leader aggregates the full set, so LTC/USD drops out of its proposal.
-    let leaderPairs = oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._aggregateAll(oracleConsensusPROPOSEPairCoverageStressSwSuite1OracleRound.getSubmissions(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND)).map(a => a.coinPair);
+    let leaderPairs = oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.aggregateAll(oracleConsensusPROPOSEPairCoverageStressSwSuite1OracleRound.getSubmissions(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND)).map(a => a.coinPair);
     expect(leaderPairs).to.deep.equal(['BTC/USD']);
     await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
       coinPair: 'BTC/USD',

@@ -92,7 +92,7 @@ module.exports = {
         // because assemblies are serialized and a failing one holds the chain for a
         // whole sign timeout, so the unbounded form put the LIVE window behind every
         // stale one.
-        this._scheduleBufferCatchup();
+        this.scheduleBufferCatchup();
 
         // ...and the recurring pass, because a window that fails its signing round is
         // left un-memoized precisely so it can be re-proposed, and until now nothing
@@ -158,7 +158,7 @@ module.exports = {
         // No leader check here, deliberately: EVERY hub buffers EVERY round it finalizes,
         // because window leadership is decided at the window's anchor and that anchor is
         // not known when the window's first round finalizes. Leader election, the durable
-        // queue and the broadcast happen at window assembly (_assembleWindow).
+        // queue and the broadcast happen at window assembly (assembleWindow).
         await this.bufferFinalizedRound(event);
         this.noteWindowRound(event.round);
     },

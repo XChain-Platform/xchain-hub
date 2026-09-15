@@ -24,7 +24,7 @@ const { VALIDATORS_3, buildSubmissions } = require('../../helpers/fixtures');
 
 let hub, pm, sd, oc;
 
-// Put the engine in the state _storeSnapshot leaves it in for `round`: the clamp
+// Put the engine in the state storeSnapshot leaves it in for `round`: the clamp
 // basis retained, the cache already moved on to the round just stored.
 function withClampBasis(round, pair, lastFinalized) {
     oc.updateLastFinalizedPrices([{ coinPair: pair, price: lastFinalized }], round - 1);

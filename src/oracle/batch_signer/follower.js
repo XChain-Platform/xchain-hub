@@ -124,7 +124,7 @@ module.exports = {
     // thing that unlocks a signature, so a fabricated price, a dropped round, an
     // injected round, a shifted timestamp or a re-pointed anchor all land here as
     // an ordinary string inequality. Both go through the ONE canonical builder
-    // (OracleConsensus._buildPriceBatchPayload), so there is no second spelling of
+    // (OracleConsensus.buildPriceBatchPayload), so there is no second spelling of
     // the format for the two sides to disagree about.
     signIfReproduced(d, first, last, mine, myAnchor, me){
         let ours, theirs;
@@ -238,7 +238,7 @@ module.exports = {
     // spec section 6's "non-skipped row": the third enum value, 'disputed', marks a
     // row a reorg RETRACTED (ReorgHandler.js:628), and retracted content must never
     // be signed into a batch. The same filter also drops the per-pair 'skipped'
-    // markers _storeSnapshot writes for pairs absent from an otherwise-finalized
+    // markers storeSnapshot writes for pairs absent from an otherwise-finalized
     // round, which is what keeps a round's pair list identical to the one the v0
     // canonical for that round carried.
     // proof_head is the first characters of consensus_proof, which is the ONE field

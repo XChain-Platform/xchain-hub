@@ -68,7 +68,7 @@ function makeValidator() {
     let hub, agg;
 
     function signBatch(rounds, signers = V.slice(0, 3)) {
-        let payload = agg._buildPriceBatchPayload(
+        let payload = agg.buildPriceBatchPayload(
             FIRST_ROUND, LAST_ROUND, BATCH_ANCHOR,
             rounds.map(r => ({ round: r.round, timestamp: r.timestamp,
                                btcBlockHeight: r.btc_block_height, pairs: r.pairs }))

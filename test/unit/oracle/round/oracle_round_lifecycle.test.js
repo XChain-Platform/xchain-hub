@@ -81,7 +81,7 @@ function registerColdStartHydrationStart4Hooks() {
 function registerPeerSubmissionHandling2Tests1() {
 
         it('records peer submission for current round', async function () {
-            await or._executeRound(); // sets currentRound
+            await or.executeRound(); // sets currentRound
             let round = or.getCurrentRound();
 
             or._handleMessage({
@@ -100,7 +100,7 @@ function registerPeerSubmissionHandling2Tests1() {
         });
 
         it('first submission wins (duplicate sender ignored)', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.getCurrentRound();
 
             or._handleMessage({
@@ -126,7 +126,7 @@ function registerPeerSubmissionHandling2Tests1() {
 
 function registerGetsubmissionsinfo3Tests4() {
         it('returns info object with core fields', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('currentRound');
             expect(info).to.have.property('roundInterval');
@@ -134,7 +134,7 @@ function registerGetsubmissionsinfo3Tests4() {
         });
 
         it('includes consecutiveSkippedRounds and lastSuccessfulRoundTime', async function () {
-            await or._executeRound();
+            await or.executeRound();
             or.markRoundFinalized();
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('consecutiveSkippedRounds').that.equals(0);
@@ -143,7 +143,7 @@ function registerGetsubmissionsinfo3Tests4() {
 
         it('reflects skipped count when rounds fail', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('feed down'));
-            await or._executeRound();
+            await or.executeRound();
             // The durable skip is what advances the streak (item 4942).
             or.noteRoundSkipped();
             let info = await or.getSubmissionsInfo();
@@ -199,7 +199,7 @@ function registerAdditionalCoverage5Tests10() {
         });
 
         it('_handleMessage initializes the submission map for a not-yet-seen round', async function () {
-            await or._executeRound();              // sets currentRound + its own round map
+            await or.executeRound();              // sets currentRound + its own round map
             let next = or.getCurrentRound() + 1;   // a round with no map yet
             or._handleMessage({
                 type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001', sig_pubkey: pubkeyForTestSender('ws://peer-9:10001'),
@@ -210,7 +210,7 @@ function registerAdditionalCoverage5Tests10() {
 
         it('startRoundTimer schedules an aligned execution plus a steady interval', function () {
             let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 }); // 1s into a round
-            let exec = sinon.stub(or, '_executeRound').resolves();
+            let exec = sinon.stub(or, 'executeRound').resolves();
             or.startRoundTimer();
 
             clock.tick(5001);                       // initial-delay timer (1000+5000 < window)

@@ -18,7 +18,7 @@
  *
  *     round = floor((now - ORACLE_EPOCH_START) / ORACLE_ROUND_INTERVAL)
  *
- * (OracleRound._executeRound). Every hub in a federation shares the epoch and
+ * (OracleRound.executeRound). Every hub in a federation shares the epoch and
  * the interval, so a hub's own wall clock is a complete upper bound on every
  * round number an honest peer can ever present. A round numbered ahead of that
  * bound was not produced by the schedule: it is a corrupt row, a fixture, or a

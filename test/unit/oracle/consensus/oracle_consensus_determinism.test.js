@@ -60,13 +60,13 @@ const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
         // -------------------------------------------------------------
         // the FLAG this block once carried is now FIXED.
         //
-        // Was: _aggregateAll emitted results in coinPairs Set insertion order
+        // Was: aggregateAll emitted results in coinPairs Set insertion order
         // (a function of submission ARRIVAL order) and _digest hashed the array
         // in that order via raw JSON.stringify, so a digest re-derived from a
         // hub's OWN aggregation depended on arrival order. Masked only because
         // followers re-hash the LEADER's propagated array.
         //
-        // Now: _aggregateAll emits canonical pair order, and _digest
+        // Now: aggregateAll emits canonical pair order, and _digest
         // canonicalizes its own preimage independently (sorted by coinPair,
         // projected to String coinPair/price). Both are consensus-breaking and
         // ship ungated with a fleet-wide rebase.
@@ -113,34 +113,34 @@ function registerOracleconsensus1Hooks() {
 function registerL4DeterminismTrimmedMedianAggregation2Tests1() {
 
         it('per-pair median is invariant to submission/insertion order', function () {
-            expect(oc._aggregate(buildSubmissions(fwd), 'BTC/USD'))
-                .to.equal(oc._aggregate(buildSubmissions(rev), 'BTC/USD'));
-            expect(oc._aggregate(buildSubmissions(fwd), 'LTC/USD'))
-                .to.equal(oc._aggregate(buildSubmissions(rev), 'LTC/USD'));
+            expect(oc.aggregate(buildSubmissions(fwd), 'BTC/USD'))
+                .to.equal(oc.aggregate(buildSubmissions(rev), 'BTC/USD'));
+            expect(oc.aggregate(buildSubmissions(fwd), 'LTC/USD'))
+                .to.equal(oc.aggregate(buildSubmissions(rev), 'LTC/USD'));
         });
 
         it('two independent hubs derive the identical {pair → median} from the same submissions', function () {
             const ocA = mkOc(), ocB = mkOc();
-            expect(norm(ocA._aggregateAll(buildSubmissions(fwd))))
-                .to.deep.equal(norm(ocB._aggregateAll(buildSubmissions(rev))));
+            expect(norm(ocA.aggregateAll(buildSubmissions(fwd))))
+                .to.deep.equal(norm(ocB.aggregateAll(buildSubmissions(rev))));
         });
 
         it('the {pair → median} mapping is order-insensitive', function () {
-            expect(norm(oc._aggregateAll(buildSubmissions(fwd))))
-                .to.deep.equal(norm(oc._aggregateAll(buildSubmissions(rev))));
+            expect(norm(oc.aggregateAll(buildSubmissions(fwd))))
+                .to.deep.equal(norm(oc.aggregateAll(buildSubmissions(rev))));
         });
 
-        it('_aggregateAll emits canonical pair order regardless of submission arrival order', function () {
-            let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
-            let revAgg = oc._aggregateAll(buildSubmissions(rev));
+        it('aggregateAll emits canonical pair order regardless of submission arrival order', function () {
+            let fwdAgg = oc.aggregateAll(buildSubmissions(fwd));
+            let revAgg = oc.aggregateAll(buildSubmissions(rev));
             expect(fwdAgg).to.deep.equal(revAgg);
             expect(fwdAgg).to.deep.equal(canonical(fwdAgg));
             expect(fwdAgg.map(a => a.coinPair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
         });
 
         it('_digest is order-invariant over the RAW local aggregation', function () {
-            let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
-            let revAgg = oc._aggregateAll(buildSubmissions(rev));
+            let fwdAgg = oc.aggregateAll(buildSubmissions(fwd));
+            let revAgg = oc.aggregateAll(buildSubmissions(rev));
             expect(oc._digest(1, fwdAgg)).to.equal(oc._digest(1, revAgg));
         });
 
@@ -148,7 +148,7 @@ function registerL4DeterminismTrimmedMedianAggregation2Tests1() {
         // than the local aggregation produced: this is the wire case, where the
         // proposer's array is hashed by every follower.
         it('_digest ignores array order of an arbitrarily reordered price array', function () {
-            let agg = oc._aggregateAll(buildSubmissions(fwd));
+            let agg = oc.aggregateAll(buildSubmissions(fwd));
             expect(agg.length).to.be.greaterThan(1);
             expect(oc._digest(1, agg)).to.equal(oc._digest(1, agg.slice().reverse()));
         });
@@ -184,8 +184,8 @@ function registerL4DeterminismTrimmedMedianAggregation2Tests8() {
 
         it('two independent hubs derive the identical digest from the same submissions in opposite order', function () {
             const ocA = mkOc(), ocB = mkOc();
-            expect(ocA._digest(11, ocA._aggregateAll(buildSubmissions(fwd))))
-                .to.equal(ocB._digest(11, ocB._aggregateAll(buildSubmissions(rev))));
+            expect(ocA._digest(11, ocA.aggregateAll(buildSubmissions(fwd))))
+                .to.equal(ocB._digest(11, ocB.aggregateAll(buildSubmissions(rev))));
         });
 
         // also canonicalizes the oracle's own live validator set, closing the

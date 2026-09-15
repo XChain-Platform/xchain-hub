@@ -128,7 +128,7 @@ function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part2() {
         sender: 'ws://solo:10001',
         prices: PRICES
       }]));
-      let storeSpy = sinon.spy(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc, '_storeSnapshot');
+      let storeSpy = sinon.spy(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc, 'storeSnapshot');
       await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.finalizeRound(1, HEIGHT, 1700000000);
       expect(storeSpy.callCount).to.equal(1);
     });

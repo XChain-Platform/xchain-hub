@@ -44,7 +44,7 @@ const testCase1 = async function () {
             await h.p.start();
             h.p._buffer.set(0, bufferedFixture(0));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls).to.have.length(0);
             expect(logs.warn.join('\n')).to.match(/finalized round\(s\) 3 with no buffered copy/);
         };
@@ -64,7 +64,7 @@ const testCase2 = async function () {
             await h.p.start();
             h.p._buffer.set(1, bufferedFixture(1));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls).to.have.length(0);
             expect(logs.warn.join('\n')).to.match(/finalized round\(s\) 0 with no buffered copy/);
         };
@@ -81,7 +81,7 @@ const testCase3 = async function () {
             await h.p.start();
             h.p._buffer.set(0, bufferedFixture(0));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls).to.have.length(1);
             expect(h.signer.calls[0]).to.include({ first: 0, last: 0 });
         };
@@ -96,7 +96,7 @@ const testCase4 = async function () {
             await h.p.start();
             h.p._buffer.set(0, bufferedFixture(0));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls).to.have.length(0);
             expect(logs.warn.join('\n')).to.match(/withholding the batch \(fail closed\)/);
         };

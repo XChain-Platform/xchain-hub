@@ -86,7 +86,7 @@ function snapshotOf(validators, blockIndex) {
                     this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
                 this.lastExecutedRound = newRound;
             });
-            await or._executeRound();
+            await or.executeRound();
 
             const rec = lost('round_numbers_skipped');
             expect(rec, 'one record for the run').to.have.length(1);
@@ -119,7 +119,7 @@ function snapshotOf(validators, blockIndex) {
                     this.noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
                 this.lastExecutedRound = newRound;
             });
-            await or._executeRound();
+            await or.executeRound();
             expect(lost()).to.have.length(0);
         }
 

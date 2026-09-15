@@ -91,7 +91,7 @@ async function driveFiatRound(db) {
     oracleConsensus.setValidatorSet(VALIDATORS_1);
     oracleRound.setConsensus(oracleConsensus);
 
-    await oracleRound._executeRound();
+    await oracleRound.executeRound();
     // The submission write is fire-and-forget, so wait for the row itself rather than
     // for a duration: finalizeRound reads it back out of the DB.
     await waitUntil(async () => {

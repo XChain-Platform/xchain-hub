@@ -137,7 +137,7 @@ module.exports = {
     // fresh tip proposes nothing rather than a guessed height (section 5.3); the fallback
     // seat then takes the round on the same rule.
     async proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
-        let aggregated = this._aggregateAll(submissions);
+        let aggregated = this.aggregateAll(submissions);
         if (aggregated.length === 0) {
             this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
                 logger.error(nodeUtil.format('Oracle: Error storing skipped round ' + round + ':', err.message)));
@@ -160,7 +160,7 @@ module.exports = {
         // Sign the canonical PRICE v0 payload locally (this validator's contribution
         // to the on-chain anchor). Embedded in the published PRICE v0 transaction along
         // with sigs from other validators.
-        let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, admitBlocks);
+        let mySig = this.signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, admitBlocks);
 
         let ctx = { round, aggregated, digest, btcBlockHeight, btcBlockTime, admitBlocks, snapshot, quorum, weighted, memberPubkeys };
         let pending = openLeaderRound.call(this, ctx, mySig);

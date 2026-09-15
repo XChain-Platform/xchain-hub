@@ -252,9 +252,9 @@ function registerStandaloneIngestCanonicalTest() {
             });
 
             const scoped = new PriceAggregator(standaloneHub('testnet'))
-                ._buildPriceV0Payload(100, BLOCK_TIME - 3600, PLAIN_PAIRS, TBTC_HEIGHT);
+                .buildPriceV0Payload(100, BLOCK_TIME - 3600, PLAIN_PAIRS, TBTC_HEIGHT);
             const unscoped = new PriceAggregator(standaloneHub(null))
-                ._buildPriceV0Payload(100, BLOCK_TIME - 3600, PLAIN_PAIRS, TBTC_HEIGHT);
+                .buildPriceV0Payload(100, BLOCK_TIME - 3600, PLAIN_PAIRS, TBTC_HEIGHT);
 
             // These are the exact bytes a signature is verified over, so an unscoped hub
             // checks a testnet validator's signature against content it never signed.

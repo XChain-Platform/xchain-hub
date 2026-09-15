@@ -12,8 +12,8 @@
  *
  **********************************************************************
  * priceV2PayloadTwinParity: the PRICE v0 canonical is written three times, and the
- * hub owns two of them. OracleConsensus._buildPriceBatchPayload SIGNS; anything
- * PriceAggregator._buildPriceBatchPayload or xchain-indexer ed25519.buildPriceBatchPayload
+ * hub owns two of them. OracleConsensus.buildPriceBatchPayload SIGNS; anything
+ * PriceAggregator.buildPriceBatchPayload or xchain-indexer ed25519.buildPriceBatchPayload
  * builds differently is a batch the federation cannot verify, so the price rail stops
  * and the native-fee / XCHAIN-USD path stops with it. This suite asserts byte equality
  * on a batch built to exercise every normalization the builders own (round order, pair
@@ -93,7 +93,7 @@ function loadIndexerTwin(ctx) {
 }
 
 // The single-round PRICE v0 canonical is a separate write from the batch above (its own
-// builders: OracleConsensus._buildPriceV0Payload, PriceAggregator._buildPriceV0Payload,
+// builders: OracleConsensus.buildPriceV0Payload, PriceAggregator.buildPriceV0Payload,
 // xchain-indexer ed25519.buildPriceV0Payload) and, unlike the batch, it carries the round's
 // ADMISSION MAP. That makes it ERA-KEYED on the round's own BTC anchor: below the producer
 // activation the bytes are legacy and carry no field, at or above it the field is present,
@@ -222,8 +222,8 @@ function loadIndexerTwin(ctx) {
 
         function theHubTwinsAgreeAndTheTest15() {
             let era = rounds(ADMIT_AT, MAPS);
-            let fromProducer = armed.producer._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
-            let fromIngest   = armed.ingest._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
+            let fromProducer = armed.producer.buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
+            let fromIngest   = armed.ingest.buildPriceBatchPayload(FIRST, LAST, ADMIT_AT + 1, era);
             assert.strictEqual(fromIngest, fromProducer, 'PriceAggregator diverged from OracleConsensus on an era batch');
             let b = body(fromProducer);
             assert.deepStrictEqual(b.rounds.map(r => Object.keys(r)),
@@ -239,8 +239,8 @@ function loadIndexerTwin(ctx) {
 
         function belowTheActivationTheBytesAreTest16() {
             let legacy = rounds(LEGACY_AT - 1);
-            let fromProducer = armed.producer._buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy);
-            assert.strictEqual(armed.ingest._buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy), fromProducer);
+            let fromProducer = armed.producer.buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy);
+            assert.strictEqual(armed.ingest.buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy), fromProducer);
             assert.strictEqual(/admit/.test(fromProducer), false);
             assert.deepStrictEqual(Object.keys(body(fromProducer).rounds[0]), ['round', 'timestamp', 'btc_block_height', 'pairs']);
             if (armed.indexer)
@@ -248,8 +248,8 @@ function loadIndexerTwin(ctx) {
         }
 
         function everyTwinRefusesInBothDirectionsTest17() {
-            let twins = [['producer', (r, a) => armed.producer._buildPriceBatchPayload(FIRST, LAST, a, r)],
-                         ['ingest',   (r, a) => armed.ingest._buildPriceBatchPayload(FIRST, LAST, a, r)]];
+            let twins = [['producer', (r, a) => armed.producer.buildPriceBatchPayload(FIRST, LAST, a, r)],
+                         ['ingest',   (r, a) => armed.ingest.buildPriceBatchPayload(FIRST, LAST, a, r)]];
             if (armed.indexer) twins.push(['indexer', (r, a) => armed.indexer.buildPriceBatchPayload(FIRST, LAST, a, r, NETWORK)]);
             for (const [name, build] of twins) {
                 assert.throws(() => build(rounds(ADMIT_AT), ADMIT_AT + 1), /has no admit_blocks; refusing to build a legacy canonical/,
@@ -263,7 +263,7 @@ function loadIndexerTwin(ctx) {
             // The canonical itself does not refuse a straddle (the ingest and the parser do, per
             // the ruling); it spells exactly what each round's own era says.
             let mixed = rounds(LEGACY_AT, [undefined, MAPS[1]]);
-            let b = body(armed.producer._buildPriceBatchPayload(FIRST, LAST, ADMIT_AT, mixed));
+            let b = body(armed.producer.buildPriceBatchPayload(FIRST, LAST, ADMIT_AT, mixed));
             assert.strictEqual(b.rounds[0].admit_blocks, undefined);
             assert.strictEqual(b.rounds[1].admit_blocks, TAILS[1]);
         }
@@ -294,7 +294,7 @@ function loadIndexerTwin(ctx) {
                 // The era is DRIVEN, not merely named. Without this case both blocks could be
                 // running the legacy path and the whole two-era structure would prove nothing.
                 it('puts the admission field on the signed bytes exactly in its own era', function () {
-                    let canonical = armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map());
+                    let canonical = armed.producer.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map());
                     if (era.tail === null) {
                         assert.ok(canonical.endsWith('}'), 'a legacy round ends at its JSON body: ' + canonical.slice(-40));
                         assert.ok(!/BTC:799004/.test(canonical), 'a legacy round carries no admission field: ' + canonical.slice(-60));
@@ -305,16 +305,16 @@ function loadIndexerTwin(ctx) {
 
                 it('the hub twins agree with each other on a coinPair-keyed round', function () {
                     assert.strictEqual(
-                        armed.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
-                        armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                        armed.ingest.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                        armed.producer.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
                         'PriceAggregator diverged from the OracleConsensus producer on a coinPair-keyed round');
                 });
 
                 it('a coinPair-keyed round matches the pair-keyed form on both hub twins', function () {
                     for (const [name, twin] of [['producer', armed.producer], ['ingest', armed.ingest]]) {
                         assert.strictEqual(
-                            twin._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
-                            twin._buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), era.height, era.map()),
+                            twin.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()),
+                            twin.buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), era.height, era.map()),
                             'hub ' + name + ' spells coinPair and pair to different bytes');
                     }
                 });
@@ -329,10 +329,10 @@ function loadIndexerTwin(ctx) {
                             armed.indexer.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), NETWORK, era.height, era.map()), expected,
                             'indexer verifier: coinPair input must match pair input');
                         assert.strictEqual(
-                            armed.producer._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
+                            armed.producer.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
                             'OracleConsensus (PRODUCER) diverged from the indexer verifier on a coinPair-keyed round');
                         assert.strictEqual(
-                            armed.ingest._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
+                            armed.ingest.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), era.height, era.map()), expected,
                             'PriceAggregator (hub ingest verifier) diverged from the indexer verifier on a coinPair-keyed round');
                     });
                 });

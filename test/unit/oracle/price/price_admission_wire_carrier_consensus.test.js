@@ -27,7 +27,7 @@
  *      map and REFUSED when the identical call omits it.
  *
  *   2. The BATCH rail has no carrier at all, and now fails CLOSED instead of open.
- *      _buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
+ *      buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
  *      round and nothing else, so an admission map cannot ride a batch and could not be
  *      verified against a signature if it did. Before this row an admission-era batch
  *      VERIFIED and stored its rounds as legacy rows, silently, above the very activation
@@ -266,7 +266,7 @@ function registerTheOracleRoundPinsAnd2Tests1() {
             expect(sent.length).to.equal(1);
             expect(sent[0].admitBlocks).to.deep.equal(MAP);
             // The leader's own signature is over the canonical WITH the map.
-            const canon = oc._buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
+            const canon = oc.buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
             expect(canon).to.match(/\|BTC:799001,DOGE:5000001,LTC:2400001/);
             expect(hub.resolveAdmitBlocks.firstCall.args[0]).to.equal('price_snapshots');
             expect(hub.resolveAdmitBlocks.firstCall.args[1]).to.deep.equal(['BTC', 'LTC', 'DOGE']);
@@ -301,7 +301,7 @@ function registerTheOracleRoundPinsAnd2Tests1() {
             const prepare = pm.broadcast.getCalls().find(c => /PREPARE/i.test(String(c.args[0])));
             expect(prepare, 'no PREPARE').to.exist;
             // The follower's signature verifies over the LEADER's map, not its own tips.
-            const canon = oc._buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
+            const canon = oc.buildPriceV0Payload(ROUND, 1700000000, PRICES, ADMIT_AT, MAP);
             const signed = hub.getIdentity().sign.getCalls().map(c => c.args[0]);
             expect(signed).to.include(canon, 'the follower did not sign the canonical carrying the leader\'s map');
             expect(signed.every(b => /\|BTC:799001,DOGE:5000001,LTC:2400001/.test(b))).to.equal(true, 'a signature over bytes without the leader\'s map');
@@ -346,15 +346,15 @@ function registerTheOracleRoundPinsAnd2Tests5() {
             expect(oc.pendingRounds.get(ROUND).admitBlocks).to.deep.equal(MAP);
         });
 
-        it('_storeSnapshot writes the map into the admission columns, NULL for a legacy round', async function () {
+        it('storeSnapshot writes the map into the admission columns, NULL for a legacy round', async function () {
             build(NETWORK, TIPS);
             oc._persistCapabilitySnapshot = sinon.stub().resolves();
-            await oc._storeSnapshot(ROUND, PRICES, 3, '[]', ADMIT_AT, 1700000000, { DOGE: 5000001, BTC: ADMIT_AT + 1 });
+            await oc.storeSnapshot(ROUND, PRICES, 3, '[]', ADMIT_AT, 1700000000, { DOGE: 5000001, BTC: ADMIT_AT + 1 });
             let [sql, params] = queries.find(([q]) => /INSERT INTO price_snapshots/.test(q));
             expect(sql).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge\)/);
             expect(params.slice(-3)).to.deep.equal([ADMIT_AT + 1, null, 5000001]);
             queries.length = 0;
-            await oc._storeSnapshot(ROUND, PRICES, 3, '[]', LEGACY_AT, 1700000000, null);
+            await oc.storeSnapshot(ROUND, PRICES, 3, '[]', LEGACY_AT, 1700000000, null);
             [sql, params] = queries.find(([q]) => /INSERT INTO price_snapshots/.test(q));
             expect(params.slice(-3)).to.deep.equal([null, null, null]);
         });

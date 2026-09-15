@@ -182,7 +182,7 @@ function evenSplitRejected(values, mid, median, coinPair) {
 
 module.exports = {
 
-    _aggregateAll(submissions) {
+    aggregateAll(submissions) {
         if (!submissions) return [];   // no submission map for this round (guard: for..of undefined throws)
         let coinPairs = new Set();
         for (let [sender, sub] of submissions) {
@@ -195,7 +195,7 @@ module.exports = {
 
         let results = [];
         for (let pair of coinPairs) {
-            let price = this._aggregate(submissions, pair);
+            let price = this.aggregate(submissions, pair);
             if (price !== null) {
                 results.push({ coinPair: pair, price: price });
             }
@@ -207,7 +207,7 @@ module.exports = {
         // stored in price_snapshots, so two hubs with identical prices produced
         // different bytes for the same round. _digest canonicalizes its own
         // preimage independently (defence in depth for wire payloads this
-        // method did not build), and _buildPriceV0Payload already sorted; this
+        // method did not build), and buildPriceV0Payload already sorted; this
         // makes the propagated and stored array agree with both.
         return results.sort((a, b) => {
             if (a.coinPair < b.coinPair) return -1;
@@ -217,7 +217,7 @@ module.exports = {
     },
 
     // Aggregate a single coin pair using trimmed median
-    _aggregate(submissions, coinPair) {
+    aggregate(submissions, coinPair) {
         if (!submissions) return null;
         let values = collectPairValues(submissions, coinPair);
 
@@ -292,7 +292,7 @@ module.exports = {
     },
 
     // Canonicalize the digest PREIMAGE, not just hash whatever array
-    // arrived. `_aggregateAll` emits its results in coinPairs Set insertion
+    // arrived. `aggregateAll` emits its results in coinPairs Set insertion
     // order (first-seen across submissions), which is a function of submission
     // ARRIVAL order, not of the round's content. Raw JSON.stringify therefore
     // made the digest depend on that arrival order, plus on the key order of
@@ -326,7 +326,7 @@ module.exports = {
             .sort((a, b) => {
                 if (a.coinPair < b.coinPair) return -1;
                 if (a.coinPair > b.coinPair) return 1;
-                // Duplicate pairs are not produced by _aggregateAll, but a wire
+                // Duplicate pairs are not produced by aggregateAll, but a wire
                 // payload can carry them; order them by price so the digest is
                 // still total rather than arrival-dependent.
                 if (a.price < b.price) return -1;

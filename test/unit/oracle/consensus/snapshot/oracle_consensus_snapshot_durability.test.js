@@ -55,7 +55,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part1() {
     sinon.restore();
   });
   it('on durable store success: marks finalized, clears round state, emits round:finalized', async function () {
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').resolves();
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').resolves();
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let events = [];
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', e => events.push(e));
@@ -72,7 +72,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part1() {
   });
   it('on persistent store failure: retains round state, resets finalized=false, never emits', async function () {
     this.timeout(5000); // bounded retries use linear backoff
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').rejects(new Error('db down'));
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').rejects(new Error('db down'));
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let events = [];
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', e => events.push(e));
@@ -87,7 +87,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part1() {
 function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part2() {
   it('re-finalizes after a transient failure when a later COMMIT re-enters the store path', async function () {
     this.timeout(5000);
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').rejects(new Error('db down'));
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').rejects(new Error('db down'));
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let events = [];
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', e => events.push(e));
@@ -118,7 +118,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part2() {
 function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part3() {
   it('re-drives finalization on its own timer after store exhaustion, with no peer COMMIT', async function () {
     let clock = sinon.useFakeTimers();
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').rejects(new Error('db down'));
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').rejects(new Error('db down'));
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let events = [];
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', e => events.push(e));
@@ -148,7 +148,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part3() {
   // item 4281 describes, so a green self-heal cannot be an artefact of the harness.
   it('CONTROL: without the re-arm the round stays stranded forever, unstored and unpublished', async function () {
     let clock = sinon.useFakeTimers();
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').rejects(new Error('db down'));
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').rejects(new Error('db down'));
     sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'armFinalizeRetry'); // pre-fix behavior: retain only
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let events = [];
@@ -169,7 +169,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part3() {
 function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part4() {
   it('keeps at most one re-drive timer per round across repeated failures', async function () {
     let clock = sinon.useFakeTimers();
-    sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot').rejects(new Error('db down'));
+    sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').rejects(new Error('db down'));
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
     let cycle = oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalizeCommittedRound(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND);
     await clock.tickAsync(2000);
@@ -186,7 +186,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part4() {
   });
   it('recovers within one finalize cycle when an early store attempt fails but a retry succeeds', async function () {
     this.timeout(5000);
-    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, '_storeSnapshot');
+    let store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot');
     store.onFirstCall().rejects(new Error('transient'));
     store.onSecondCall().resolves();
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND, oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());

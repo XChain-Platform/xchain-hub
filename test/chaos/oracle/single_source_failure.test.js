@@ -150,7 +150,7 @@ function registerSourceFailureDoesNotAffectOracleTest() {
             { coinPair: 'DOGE/USD', price: '0.15000000',     sources: 1 }
         ]);
 
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         expect(hub._peerManager.broadcast.calledOnce).to.be.true;
         let broadcastArgs = hub._peerManager.broadcast.getCall(0).args;

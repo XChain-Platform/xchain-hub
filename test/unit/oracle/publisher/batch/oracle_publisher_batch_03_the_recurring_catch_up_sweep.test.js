@@ -64,7 +64,7 @@ const testCase1 = async function () {
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
             h.p._buffer.set(6, bufferedFixture(6));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts, 'the first attempt misses quorum').to.have.length(0);
 
             await waitUntil(() => h.broadcasts.length === 1, 3000);
@@ -83,7 +83,7 @@ const testCase2 = async function () {
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
             h.p._buffer.set(6, bufferedFixture(6));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts).to.have.length(1);
             let after = h.signer.calls.length;
 
@@ -140,7 +140,7 @@ const testCase6 = async function () {
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
             h.p._buffer.set(6, bufferedFixture(6));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.p.getStats().batchWindowsAwaitingRetry).to.equal(1);
             expect(h.p.getStats().batchCatchupSweeps).to.equal(0);
 
@@ -281,8 +281,8 @@ const testCase14 = async function () {
 
                 // Count how many assemblies are in flight at once across the whole drain.
                 let inFlight = 0, peak = 0;
-                let real = h.p._assembleWindow.bind(h.p);
-                sinon.stub(h.p, '_assembleWindow').callsFake(async (w, o) => {
+                let real = h.p.assembleWindow.bind(h.p);
+                sinon.stub(h.p, 'assembleWindow').callsFake(async (w, o) => {
                     inFlight++; peak = Math.max(peak, inFlight);
                     try { return await real(w, o); } finally { inFlight--; }
                 });

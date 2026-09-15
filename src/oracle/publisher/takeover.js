@@ -92,7 +92,7 @@ module.exports = {
         // signing, coverage, the spend guard and the at-most-once markers all still
         // apply, and the queue's own guards stop a second wire for rounds already sent.
         this._assembledWindows.delete(windowIndex);
-        await this._assembleWindow(windowIndex, { takeover: true });
+        await this.assembleWindow(windowIndex, { takeover: true });
         return true;
     },
 

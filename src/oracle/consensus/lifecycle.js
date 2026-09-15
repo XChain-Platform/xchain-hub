@@ -121,7 +121,7 @@ module.exports = {
     markFinalized(round) {
         // A round that genuinely finalizes supersedes any local skip marker for it
         // (the 'skipped' price_snapshots rows were upgraded to 'finalized' by
-        // _storeSnapshot), so clear it from locallySkipped (stress-sweep #7).
+        // storeSnapshot), so clear it from locallySkipped (stress-sweep #7).
         if (this.locallySkipped.delete(round)) {
             let i = this._locallySkippedOrder.indexOf(round);
             if (i !== -1) this._locallySkippedOrder.splice(i, 1);

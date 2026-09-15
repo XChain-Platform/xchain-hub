@@ -86,12 +86,12 @@ module.exports = {
     // clobber the first's round.
     queueWindowAssembly(windowIndex) {
         this._windowChain = this._windowChain.then(() =>
-            this._assembleWindow(windowIndex).catch(e =>
+            this.assembleWindow(windowIndex).catch(e =>
                 logger.error(nodeUtil.format('OraclePublisher: window ' + windowIndex + ' assembly failed:', e))));
         return this._windowChain;
     },
 
-    _scheduleBufferCatchup() {
+    scheduleBufferCatchup() {
         if (this._buffer.size === 0) return;
         this._catchupTimer = setTimeout(() => {
             this._catchupTimer = null;

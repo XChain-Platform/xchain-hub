@@ -166,7 +166,7 @@ function minimumSubmissionsSuite() {
             submissions.set('v1', { prices: SAMPLE_PRICES, sources: 2, timestamp: Date.now() });
             oracleRound.getSubmissions.returns(submissions);
             let storeSkipped = sinon.stub(oc, 'storeSkippedRound');
-            let storeSnapshot = sinon.stub(oc, '_storeSnapshot').resolves();
+            let storeSnapshot = sinon.stub(oc, 'storeSnapshot').resolves();
 
             await oc.finalizeRound(1);
             expect(storeSkipped.called).to.be.false;
@@ -187,30 +187,30 @@ function priceSanitySuite() {
             oc = new OracleConsensus(hub, { getSubmissions: sinon.stub() });
         });
 
-        it('_aggregate() rejects prices >= PRICE_MAX', function () {
+        it('aggregate() rejects prices >= PRICE_MAX', function () {
             let subs = buildSubmissions([
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: OVER_CAP_PRICE }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
-            let result = oc._aggregate(subs, 'BTC/USD');
+            let result = oc.aggregate(subs, 'BTC/USD');
             expect(result).to.equal('100000.00000000');
         });
 
-        it('_aggregate() rejects prices <= 0', function () {
+        it('aggregate() rejects prices <= 0', function () {
             let subs = buildSubmissions([
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '-1' }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
-            let result = oc._aggregate(subs, 'BTC/USD');
+            let result = oc.aggregate(subs, 'BTC/USD');
             expect(result).to.equal('100000.00000000');
         });
 
-        it('_aggregate() returns null when all prices are out of bounds', function () {
+        it('aggregate() returns null when all prices are out of bounds', function () {
             let subs = buildSubmissions([
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: OVER_CAP_PRICE }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '-5' }] }
             ]);
-            let result = oc._aggregate(subs, 'BTC/USD');
+            let result = oc.aggregate(subs, 'BTC/USD');
             expect(result).to.be.null;
         });
     }

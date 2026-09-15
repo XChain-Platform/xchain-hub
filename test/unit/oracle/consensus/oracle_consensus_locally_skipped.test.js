@@ -115,7 +115,7 @@ function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part3() {
     // The federation's PROPOSE re-created the round and it reached commit quorum;
     // finalizeCommittedRound persists (ON DUPLICATE KEY UPDATE upgrades the
     // skipped rows) and marks it finalized.
-    sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, '_storeSnapshot').resolves();
+    sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, 'storeSnapshot').resolves();
     oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.pendingRounds.set(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, {
       prepares: new Set(['pkA', 'pkB', 'pkC']),
       commits: new Set(['pkA', 'pkB', 'pkC']),

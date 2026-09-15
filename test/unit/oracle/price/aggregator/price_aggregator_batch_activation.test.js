@@ -14,7 +14,7 @@
 // spec section 5.7, decisions D8, D13, D14, D23, D28.
 //
 // The canonical payload itself is pinned elsewhere (priceV2PayloadTwinParity.test.js
-// asserts _buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
+// asserts buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
 // twins), so these tests sign whatever that builder emits and pin what INGEST does
 // with a batch: per-round dedupe, column semantics, the block_time-keyed pair flag
 // day, the WS mirror re-emit, the reorg fence and the publisher marker clear.
@@ -85,7 +85,7 @@ function makeValidator() {
 
     // The canonical the validators sign: exactly the bytes the aggregator rebuilds.
     function signBatch(rounds, signers = V.slice(0, 3), overrides = {}) {
-        let payload = agg._buildPriceBatchPayload(
+        let payload = agg.buildPriceBatchPayload(
             overrides.first_round      !== undefined ? overrides.first_round      : FIRST_ROUND,
             overrides.last_round       !== undefined ? overrides.last_round       : LAST_ROUND,
             overrides.btc_block_height !== undefined ? overrides.btc_block_height : BATCH_ANCHOR,

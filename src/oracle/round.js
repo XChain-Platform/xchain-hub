@@ -217,7 +217,7 @@ function initRoundState() {
     // installs roundTimer; an untracked handle leaks an interval across
     // stop()/recreate and orphans the fresh roundTimer on stop()->start().
     this.boundaryTimer     = null;
-    this._roundInFlight    = false;   // round self-overlap guard, see _executeRound()
+    this._roundInFlight    = false;   // round self-overlap guard, see executeRound()
 
     // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
     this.submissions = new Map();

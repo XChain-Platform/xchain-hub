@@ -41,7 +41,7 @@ const testCase1 = function () {
             for (let r = 0; r < 6; r++) {
                 rounds.push(bufferedFixture(r, { pairs: pairsOf(37, 'real') }));   // 37 real pairs
             }
-            let emitted = h.p._emitWire(0, 5, 800005, rounds, sigsOf(3));
+            let emitted = h.p.emitWire(0, 5, 800005, rounds, sigsOf(3));
             expect(emitted.compressed).to.equal(true);
             let fields = emitted.wire.split('|');
             expect(fields.slice(0, 3)).to.deep.equal(['PRICE', '0', PRICE_BATCH_COMPRESSION_MARKER]);
@@ -58,7 +58,7 @@ const testCase2 = function () {
             // the pathological short, high-entropy body the spec names, so that is what
             // is driven here: one round, one incompressible pair name, no signature set.
             let rounds = [bufferedFixture(0, { pairs: [{ coinPair: 'Q7fKp2ZmXn4Vb8Rt/Ld3Ws9Yj', price: '1' }] })];
-            let emitted = h.p._emitWire(0, 0, 800000, rounds, []);
+            let emitted = h.p.emitWire(0, 0, 800000, rounds, []);
             expect(emitted.compressed).to.equal(false);
             expect(emitted.wire.split('|')[2]).to.not.equal(PRICE_BATCH_COMPRESSION_MARKER);
             expect(emitted.wire).to.equal('PRICE|0|' + h.p.buildPriceBatchBody(0, 0, 800000, rounds, []));
@@ -70,7 +70,7 @@ const testCase3 = function () {
                 for (let sigCount of [0, 1, 3, 9]) {
                     let rounds = [bufferedFixture(0, { pairs: pairsOf(pairCount, 'inv' + pairCount) })];
                     let plain  = 'PRICE|0|' + h.p.buildPriceBatchBody(0, 0, 800000, rounds, sigsOf(sigCount));
-                    let out    = h.p._emitWire(0, 0, 800000, rounds, sigsOf(sigCount));
+                    let out    = h.p.emitWire(0, 0, 800000, rounds, sigsOf(sigCount));
                     expect(out.bytes, pairCount + ' pairs / ' + sigCount + ' sigs')
                         .to.be.at.most(Buffer.byteLength(plain, 'utf8'));
                 }

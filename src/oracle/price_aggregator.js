@@ -99,7 +99,7 @@ class PriceAggregator extends EventEmitter {
 
     // Build the canonical signable payload for a PRICE v0 round.
     // MUST match xchain-indexer/src/consensus/ed25519.js buildPriceV0Payload (and
-    // OracleConsensus._buildPriceV0Payload) exactly; validators signed these
+    // OracleConsensus.buildPriceV0Payload) exactly; validators signed these
     // bytes, so any divergence here rejects every legitimate round.
     //
     // `admitBlocks` is the round's admission map, the per-chain heights at which the round
@@ -107,7 +107,7 @@ class PriceAggregator extends EventEmitter {
     // signed, so it is read off the round being verified rather than resolved from this
     // hub's own tips, which would rebuild heights no signature covers. Omitted is the
     // legacy round, which is every round below the activation.
-    _buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight, admitBlocks) {
+    buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight, admitBlocks) {
         let sortedPairs = pairs
             .map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }))
             .sort((a, b) => {
@@ -139,7 +139,7 @@ class PriceAggregator extends EventEmitter {
 
     // Build the canonical signable payload for a PRICE batch: ONE signature set over
     // several rounds. MUST match xchain-indexer/src/consensus/ed25519.js buildPriceBatchPayload and
-    // OracleConsensus._buildPriceBatchPayload byte for byte; validators signed these bytes,
+    // OracleConsensus.buildPriceBatchPayload byte for byte; validators signed these bytes,
     // so any divergence here rejects every legitimate batch.
     //
     // `rounds` is [{ round, timestamp, btcBlockHeight, pairs }] and each `pairs` entry is
@@ -147,7 +147,7 @@ class PriceAggregator extends EventEmitter {
     // each round's pairs itself rather than requiring sorted input, so no caller of the
     // three twins can get the ordering contract subtly wrong.
     //
-    // The EQUIV header is UNCONDITIONAL here, unlike _buildPriceV0Payload's height gate.
+    // The EQUIV header is UNCONDITIONAL here, unlike buildPriceV0Payload's height gate.
     // v0 gates because it has pre-flag-day history whose bytes may not move; v2 has none
     // (it is ungated and every network it runs on already has EQUIV active). The
     // unwrapped bare-JSON form is also the exact
@@ -162,7 +162,7 @@ class PriceAggregator extends EventEmitter {
     // made. In the admission era the entry gains a LAST key, `admit_blocks`, holding the
     // same canonical spelling the v0 field uses; below it the entry is byte-identical to
     // the pre-admission form and a map is refused.
-    _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
+    buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
         let network = this.hub && this.hub.network;
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))

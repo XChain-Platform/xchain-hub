@@ -135,7 +135,7 @@ function registerOracleConsensusALostRoundIsDurablyRecordedSuite1Part2() {
     oracleConsensusALostRoundIsDurablyRecordedSuite1Seat(VALIDATORS_3[2]);
     await oracleConsensusALostRoundIsDurablyRecordedSuite1Oc.finalizeRound(ROUND, HEIGHT, TIME);
     // The federation finalized while the watchdog was armed.
-    sinon.stub(oracleConsensusALostRoundIsDurablyRecordedSuite1Oc, '_storeSnapshot').resolves();
+    sinon.stub(oracleConsensusALostRoundIsDurablyRecordedSuite1Oc, 'storeSnapshot').resolves();
     oracleConsensusALostRoundIsDurablyRecordedSuite1Oc.pendingRounds.set(ROUND, {
       prepares: new Set(['a', 'b', 'c']),
       commits: new Set(['a', 'b', 'c']),

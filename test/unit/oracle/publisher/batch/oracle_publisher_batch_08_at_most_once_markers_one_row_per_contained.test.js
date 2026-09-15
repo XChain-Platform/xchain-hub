@@ -42,7 +42,7 @@ const testCase1 = async function () {
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts).to.have.length(1);
             expect(Object.keys(db.markers).map(Number).sort((a, b) => a - b)).to.deep.equal([0, 1, 2, 3, 4, 5]);
             for (let r = 0; r < 6; r++) expect(db.markers[r].sent_at).to.not.equal(null);
@@ -53,7 +53,7 @@ const testCase2 = async function () {
             await h.p.start();
             for (let r = 6; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
             sinon.stub(h.p, '_processQueue').resolves();   // keep the entry on disk to read
-            await h.p._assembleWindow(1);
+            await h.p.assembleWindow(1);
 
             let queued = readJsonl(h.queuePath);
             expect(queued).to.have.length(1);
@@ -66,7 +66,7 @@ const testCase3 = async function () {
             let h  = makePublisher({ db: db });
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts).to.have.length(1);
 
             // A second leader (or this hub after a restart) re-proposes the SAME rounds
@@ -86,7 +86,7 @@ const testCase3 = async function () {
                     batch: { windowIndex: 0, firstRound: split[0], lastRound: split[1],
                              anchor: 800000 + split[1], rounds: rounds.map(r => r.round),
                              sigCount: 3, compressed: false, wireIndex: 0, wireCount: 2 },
-                    wire: second._emitWire(split[0], split[1], 800000 + split[1], rounds, sigsOf(3)).wire
+                    wire: second.emitWire(split[0], split[1], 800000 + split[1], rounds, sigsOf(3)).wire
                 });
             }
             await second._processQueue();

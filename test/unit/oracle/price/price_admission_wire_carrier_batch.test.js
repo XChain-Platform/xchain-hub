@@ -27,7 +27,7 @@
  *      map and REFUSED when the identical call omits it.
  *
  *   2. The BATCH rail has no carrier at all, and now fails CLOSED instead of open.
- *      _buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
+ *      buildPriceBatchPayload serializes {round, timestamp, btc_block_height, pairs} per
  *      round and nothing else, so an admission map cannot ride a batch and could not be
  *      verified against a signature if it did. Before this row an admission-era batch
  *      VERIFIED and stored its rounds as legacy rows, silently, above the very activation
@@ -211,7 +211,7 @@ function snapshotFor(V) {
                 sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: 'ab'.repeat(64) }))
             };
             if (signWith) {
-                const canon = signWith._buildPriceBatchPayload(5, 6, anchor, rounds.map(r => ({
+                const canon = signWith.buildPriceBatchPayload(5, 6, anchor, rounds.map(r => ({
                     round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height,
                     pairs: r.pairs, admitBlocks: r.admit_blocks })));
                 b.sigs = V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(canon) }));
@@ -310,7 +310,7 @@ function registerThePriceBatchRailCarries2Tests7() {
         it('carries the map as the LAST key of each round, and none below the activation', function () {
             const agg = aggOn(NETWORK);
             const era = batchOn(ADMIT_AT + 1, [MAP5, MAP6]);
-            const bytes = agg._buildPriceBatchPayload(5, 6, ADMIT_AT + 1, era.rounds.map(r => ({
+            const bytes = agg.buildPriceBatchPayload(5, 6, ADMIT_AT + 1, era.rounds.map(r => ({
                 round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height,
                 pairs: r.pairs, admitBlocks: r.admit_blocks })));
             const body = JSON.parse(bytes.slice(bytes.indexOf('{')));
@@ -321,7 +321,7 @@ function registerThePriceBatchRailCarries2Tests7() {
             assert.deepStrictEqual(armed.act.decodeAdmitBlocks(body.rounds[0].admit_blocks), MAP5);
 
             const legacy = batchOn(LEGACY_AT);
-            const lbytes = agg._buildPriceBatchPayload(5, 6, LEGACY_AT, legacy.rounds.map(r => ({
+            const lbytes = agg.buildPriceBatchPayload(5, 6, LEGACY_AT, legacy.rounds.map(r => ({
                 round: r.round, timestamp: r.timestamp, btcBlockHeight: r.btc_block_height, pairs: r.pairs })));
             expect(lbytes).to.not.match(/admit_blocks/);
             assert.deepStrictEqual(Object.keys(JSON.parse(lbytes.slice(lbytes.indexOf('{'))).rounds[0]),

@@ -120,7 +120,7 @@ module.exports = {
 
             // Include this validator's signature in the COMMIT message so late-joining nodes
             // can collect signatures from any of the three phases (PROPOSE, PREPARE, COMMIT)
-            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight, pending.admitBlocks);
+            let mySig = this.signPriceV0(round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight, pending.admitBlocks);
             if (mySig && !pending.signatures.has(mySig.pubkey)) {
                 pending.signatures.set(mySig.pubkey, mySig.sig);
             }
@@ -176,7 +176,7 @@ module.exports = {
         const maxAttempts = 3;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                await this._storeSnapshot(round, pending.prices, validatorCount, proof,
+                await this.storeSnapshot(round, pending.prices, validatorCount, proof,
                     pending.btcBlockHeight, pending.btcBlockTime, pending.admitBlocks);
 
                 announceCommittedRound.call(this, round, pending, attempt);
@@ -243,11 +243,11 @@ module.exports = {
     // `admitBlocks` is the round's admission map, forwarded to the canonical builder so a
     // signature always covers the heights the round is admitted at; omitted is the legacy
     // round, which is every round below the activation.
-    _signPriceV0(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
+    signPriceV0(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
         let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
         if (!identity) return null;
         try {
-            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks);
+            let payload = this.buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks);
             let sigHex  = identity.sign(payload);
             return { pubkey: identity.getPubkeyHex(), sig: sigHex };
         } catch (e) {
@@ -281,7 +281,7 @@ module.exports = {
             // The ROUND's pinned admission map, never a freshly read one: every message of
             // one round must verify against the same heights, or two tip readings inside a
             // round would split the signatures over two canonicals.
-            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices,
+            let payload = this.buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices,
                                                     pending.btcBlockHeight, pending.admitBlocks);
             let ok = ValidatorIdentity.verify(payload, sigHex, pubkeyHex);
             if (ok) {

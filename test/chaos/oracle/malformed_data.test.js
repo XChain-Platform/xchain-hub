@@ -283,7 +283,7 @@ function registerNoNaNInfinityStoredInPriceTest() {
             { coinPair: 'BTC/USD', price: '100000.00000000', sources: 1 }
         ]);
 
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         // Verify broadcast data has no NaN or Infinity
         if (hub._peerManager.broadcast.called) {

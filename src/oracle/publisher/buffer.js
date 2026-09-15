@@ -67,7 +67,7 @@ module.exports = {
         if (!Number.isFinite(entry.round)) return;
 
         // A re-finalization must land here whenever it CHANGED the round.
-        // _storeSnapshot's ON DUPLICATE KEY UPDATE is last-write-wins, so a round that
+        // storeSnapshot's ON DUPLICATE KEY UPDATE is last-write-wins, so a round that
         // finalizes twice leaves price_snapshots holding the second version. A
         // first-write-wins buffer would put the two stores permanently out
         // of step: the batch rail proposes from the BUFFER and every co-signer
@@ -102,7 +102,7 @@ module.exports = {
     },
 
     // Do two buffer entries carry the same signable content? Compares exactly the
-    // fields _buildPriceBatchPayload reads, pair order included only through a sorted
+    // fields buildPriceBatchPayload reads, pair order included only through a sorted
     // key, since the builder normalizes ordering itself. bufferedAt is metadata and is
     // deliberately excluded: re-stamping it would rewrite the file on every replay.
     sameBufferedRound(a, b) {

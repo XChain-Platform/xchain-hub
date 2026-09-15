@@ -136,7 +136,7 @@ function prepareOnPropose(envelope, proposal, proposedAdmit) {
         this.verifyAndStoreSig(pending, sig_pubkey, sig);
     }
 
-    let mySig = this._signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight, pending.admitBlocks);
+    let mySig = this.signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight, pending.admitBlocks);
     if (mySig && !pending.signatures.has(mySig.pubkey)) {
         pending.signatures.set(mySig.pubkey, mySig.sig);
     }

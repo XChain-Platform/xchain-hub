@@ -73,7 +73,7 @@ const MIX = [3, 0, 6, 1, 5, 2, 4];
 
 function registerSuitePart1() {
     it('trimmed median is correct and discards outliers @regression-p0', function () {
-        const m = priceMap(oc._aggregateAll(submissions(ENTRIES)));
+        const m = priceMap(oc.aggregateAll(submissions(ENTRIES)));
         // BTC/USD [100,200,300,400,500,600,99999] → trim 1/side → [200..600] → 400
         assert.strictEqual(m['BTC/USD'], '400.00000000', 'outlier not trimmed');
         // LTC/USD [70,72,74,76,78,80,80] → trim 1/side → [72,74,76,78,80] → 76
@@ -83,9 +83,9 @@ function registerSuitePart1() {
 
 function registerSuitePart2() {
     it('per-pair result is independent of submission arrival order @regression-p0', function () {
-        const a = priceMap(oc._aggregateAll(submissions(ENTRIES, FWD)));
-        const b = priceMap(oc._aggregateAll(submissions(ENTRIES, REV)));
-        const c = priceMap(oc._aggregateAll(submissions(ENTRIES, MIX)));
+        const a = priceMap(oc.aggregateAll(submissions(ENTRIES, FWD)));
+        const b = priceMap(oc.aggregateAll(submissions(ENTRIES, REV)));
+        const c = priceMap(oc.aggregateAll(submissions(ENTRIES, MIX)));
         assert.deepStrictEqual(a, b);
         assert.deepStrictEqual(a, c);
     });
@@ -94,16 +94,16 @@ function registerSuitePart2() {
 function registerSuitePart3() {
     it('canonical PRICE v0 payload is byte-identical regardless of order @regression-p0', function () {
         const round = 42, ts = 1700000000;
-        const build = (order) => oc._buildPriceV0Payload(round, ts, oc._aggregateAll(submissions(ENTRIES, order)));
+        const build = (order) => oc.buildPriceV0Payload(round, ts, oc.aggregateAll(submissions(ENTRIES, order)));
         const fwd = build(FWD), rev = build(REV), mix = build(MIX);
         // Sanity: the payload sort must still absorb a genuinely out-of-order
-        // input, so feed it one explicitly. (_aggregateAll emits canonical order
+        // input, so feed it one explicitly. (aggregateAll emits canonical order
         // itself, so reading the divergence straight off it would make the
         // assertion below a tautology; the un-canonical array has to be built by
         // hand.)
-        const agg = oc._aggregateAll(submissions(ENTRIES, FWD));
+        const agg = oc.aggregateAll(submissions(ENTRIES, FWD));
         assert.ok(agg.length > 1, 'need >1 pair for the sort to be observable');
-        const scrambled = oc._buildPriceV0Payload(round, ts, agg.slice().reverse());
+        const scrambled = oc.buildPriceV0Payload(round, ts, agg.slice().reverse());
         assert.strictEqual(fwd, scrambled, 'PRICE v0 payload sort did not absorb a reordered price array');
         assert.strictEqual(fwd, rev, 'canonical payload diverged with arrival order - signatures would not match');
         assert.strictEqual(fwd, mix);
@@ -117,9 +117,9 @@ function registerSuitePart3() {
 // activation, so there is no height at which the old order is still valid.
 function registerSuitePart4() {
     it('aggregate array order is canonical, not arrival-dependent @regression-p0', function () {
-        const a = oc._aggregateAll(submissions(ENTRIES, FWD));
-        const b = oc._aggregateAll(submissions(ENTRIES, REV));
-        const c = oc._aggregateAll(submissions(ENTRIES, MIX));
+        const a = oc.aggregateAll(submissions(ENTRIES, FWD));
+        const b = oc.aggregateAll(submissions(ENTRIES, REV));
+        const c = oc.aggregateAll(submissions(ENTRIES, MIX));
         assert.deepStrictEqual(a, b);
         assert.deepStrictEqual(a, c);
         assert.deepStrictEqual(a.map((p) => p.coinPair), ['BTC/USD', 'LTC/USD']);
@@ -130,10 +130,10 @@ function registerSuitePart4() {
 // re-derived from LOCAL aggregation matches the leader's.
 function registerSuitePart5() {
     it('round digest is invariant to arrival order and to array order @regression-p0', function () {
-        const dFwd = oc._digest(42, oc._aggregateAll(submissions(ENTRIES, FWD)));
-        const dRev = oc._digest(42, oc._aggregateAll(submissions(ENTRIES, REV)));
+        const dFwd = oc._digest(42, oc.aggregateAll(submissions(ENTRIES, FWD)));
+        const dRev = oc._digest(42, oc.aggregateAll(submissions(ENTRIES, REV)));
         assert.strictEqual(dFwd, dRev, 'digest diverged with arrival order');
-        const agg = oc._aggregateAll(submissions(ENTRIES, FWD));
+        const agg = oc.aggregateAll(submissions(ENTRIES, FWD));
         assert.strictEqual(dFwd, oc._digest(42, agg.slice().reverse()), 'digest diverged with array order');
     });
 }

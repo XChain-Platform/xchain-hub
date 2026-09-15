@@ -94,7 +94,7 @@ function refuseUnusableSnapshot(snapshot, weighted) {
 // round was refused instead of a 500 on the ingest path.
 function buildRoundPayload(round, timestamp, roundData, btcBlockHeight) {
     try {
-        return { payload: this._buildPriceV0Payload(round, timestamp, roundData.pairs, btcBlockHeight,
+        return { payload: this.buildPriceV0Payload(round, timestamp, roundData.pairs, btcBlockHeight,
                                                     roundData.admit_blocks) };
     } catch (e) {
         return { reason: 'admission map unusable: ' + e.message };

@@ -102,7 +102,7 @@ module.exports = {
     // `admitBlocks` is the round's admission map, stored in its per-chain columns with every
     // federation column named (NULL for a legacy round, never 0), so the batch signer and
     // the publisher rebuild the map the quorum signed from the row rather than from memory.
-    async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime, admitBlocks) {
+    async storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime, admitBlocks) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         if (!prices || prices.length === 0) return;
@@ -225,12 +225,12 @@ module.exports = {
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         let coinPairs = this.markerPairs(round);
         // One multi-row INSERT so the skipped round lands atomically (same torn-read
-        // rationale as _storeSnapshot).
+        // rationale as storeSnapshot).
         if (coinPairs.length) {
             await this.db.setSkippedPriceSnapshotRound(round, coinPairs, referenceBlock, blockTimestamp);
         }
         // Broadcast the skipped-round rows to hub-DB mirror subscribers, mirroring
-        // _storeSnapshot. Both insert paths into the mirrored price_snapshots table must
+        // storeSnapshot. Both insert paths into the mirrored price_snapshots table must
         // feed HubDbBroadcaster or a live streaming mirror never receives the skipped
         // rows (it gets them only on the next re-bootstrap), diverging from a
         // freshly-bootstrapped mirror. Best-effort; never block finalize.

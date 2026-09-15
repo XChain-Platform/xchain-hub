@@ -56,7 +56,7 @@ function registerOracleConsensusPostCommitPriceBroadcastGapSuite1Part1() {
       round_number: oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND,
       coin_pair: 'BTC/USD'
     }] : []);
-    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc._storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
+    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc.storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.broadcastRow.calledOnce).to.be.true;
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.broadcastRow.firstCall.args[0].table).to.equal('price_snapshots');
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.dropAllForResync.called).to.be.false;
@@ -66,7 +66,7 @@ function registerOracleConsensusPostCommitPriceBroadcastGapSuite1Part1() {
       if (oracleConsensusPostCommitPriceBroadcastGapSuite1IsRoundSelect(sql)) throw new Error('connection reset');
       return [];
     });
-    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc._storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
+    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc.storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.broadcastRow.called, 'no row reached a subscriber').to.be.false;
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.dropAllForResync.calledOnce, 'subscribers dropped for resync').to.be.true;
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.dropAllForResync.firstCall.args[0]).to.equal('price-round broadcast gap');
@@ -81,7 +81,7 @@ function registerOracleConsensusPostCommitPriceBroadcastGapSuite1Part1() {
 
     // Resolves rather than rejecting: finalizeCommittedRound treats a throw here as a
     // store failure and would retain + retry an already-durable round.
-    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc._storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
+    await oracleConsensusPostCommitPriceBroadcastGapSuite1Oc.storeSnapshot(oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND, oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES, 3, '[]', 900001, 1700000000);
     expect(oracleConsensusPostCommitPriceBroadcastGapSuite1Broadcaster.dropAllForResync.calledOnce).to.be.true;
   });
 }

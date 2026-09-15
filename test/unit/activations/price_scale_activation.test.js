@@ -278,7 +278,7 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
                     pairs: [{ pair: 'BTC/USD', price: i === 3 ? price : HONEST }]
                 });
             }
-            let payload = agg._buildPriceBatchPayload(
+            let payload = agg.buildPriceBatchPayload(
                 FIRST_ROUND, LAST_ROUND, BATCH_ANCHOR,
                 rounds.map(r => ({ round: r.round, timestamp: r.timestamp,
                                    btcBlockHeight: r.btc_block_height, pairs: r.pairs })));

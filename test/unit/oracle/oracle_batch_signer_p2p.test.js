@@ -29,7 +29,7 @@ const OracleConsensus = require('../../../src/oracle/consensus');
 const ValidatorIdentity = require('../../../src/validators/identity');
 const {waitUntil} = require('../../helpers/waitUntil');
 const {DB_METHODS} = require('../../helpers/mockHub.js');
-const canonicalBuilder = {_buildPriceBatchPayload:OracleConsensus.prototype._buildPriceBatchPayload};
+const canonicalBuilder = {buildPriceBatchPayload:OracleConsensus.prototype.buildPriceBatchPayload};
 function baseRounds() {
   let out = [];
   for (let i = 0; i < 6; i++) {
@@ -142,7 +142,7 @@ function registerOracleBatchSignerOverRealP2PTransportSuite1Part1() {
     let res = await oracleBatchSignerOverRealP2PTransportSuite1Signers[0].collectBatchSignatures(300, 305, 6005, rounds);
     expect(res.met).to.equal(true);
     expect(res.sigs.length).to.be.at.least(2);
-    let canonical = canonicalBuilder._buildPriceBatchPayload(300, 305, 6005, rounds);
+    let canonical = canonicalBuilder.buildPriceBatchPayload(300, 305, 6005, rounds);
     expect(res.canonical).to.equal(canonical);
     for (let s of res.sigs) {
       expect(pubkeys).to.include(s.pubkey);

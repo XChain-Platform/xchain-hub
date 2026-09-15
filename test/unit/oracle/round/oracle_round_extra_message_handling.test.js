@@ -65,7 +65,7 @@ function registerHandlemessageEdgeCases2Tests1() {
         });
 
         it('ignores submissions for rounds too far in the past', async function () {
-            await or._executeRound(); // sets currentRound=N
+            await or.executeRound(); // sets currentRound=N
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
@@ -78,7 +78,7 @@ function registerHandlemessageEdgeCases2Tests1() {
         });
 
         it('ignores submissions for rounds too far in the future', async function () {
-            await or._executeRound();
+            await or.executeRound();
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
@@ -91,7 +91,7 @@ function registerHandlemessageEdgeCases2Tests1() {
         });
 
         it('logs late submission but still records it', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.currentRound;
             // Simulate late submission: elapsed > submissionWindow
             or.roundStartTime = Date.now() - (or.submissionWindow + 1000);
@@ -109,7 +109,7 @@ function registerHandlemessageEdgeCases2Tests1() {
 function registerHandlemessageEdgeCases2Tests5() {
 
         it('enforces max submissions per round', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.currentRound;
             let subs = or.submissions.get(round);
             // Fill to max
@@ -126,7 +126,7 @@ function registerHandlemessageEdgeCases2Tests5() {
         });
 
         it('ignores price submissions where all prices are invalid', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.currentRound;
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
@@ -147,7 +147,7 @@ function registerHandlemessageEdgeCases2Tests5() {
 function registerHandlemessageEdgeCases2Tests7() {
 
         it('persists submission when the signing key is attributed', async function () {
-            await or._executeRound();
+            await or.executeRound();
             let round = or.currentRound;
             let sender = 'ws://peer-with-pubkey:10001';
             let pubkey = 'dd'.repeat(32);

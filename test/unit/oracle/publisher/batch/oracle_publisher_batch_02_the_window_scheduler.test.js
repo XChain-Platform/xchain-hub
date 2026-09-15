@@ -71,11 +71,11 @@ const testCase3 = async function () {
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(1);
+            await h.p.assembleWindow(1);
             expect(h.signer.calls).to.have.length(0);
             expect(h.p.getStats().isLeader).to.equal(false);
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls).to.have.length(1);
             expect(h.p.getStats().isLeader).to.equal(true);
         };
@@ -103,7 +103,7 @@ async function followerOf(opts) {
 
 const testCase4 = async function () {
                 let h = await followerOf({ landed: 99 });
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
                 expect(h.broadcasts).to.have.length(0);
                 expect(h.p._takeoverTimers.has(1)).to.equal(true);
                 expect(h.p.getStats().takeoverPending).to.equal(1);
@@ -111,14 +111,14 @@ const testCase4 = async function () {
 
 const testCase5 = async function () {
                 let h = await followerOf({ landed: 99, cfg: { ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS: '0' } });
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
                 expect(h.p._takeoverTimers.size).to.equal(0);
                 expect(h.p.getStats().takeoverArmed).to.equal(false);
             };
 
 const testCase6 = async function () {
                 let h = await followerOf({ landed: 99 });
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
 
                 let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(true);
@@ -145,7 +145,7 @@ const testCase7 = async function () {
 const testCase8 = async function () {
                 let h = await followerOf();   // no landed row at all
                 await h.p.start();
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
                 let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
@@ -163,7 +163,7 @@ const testCase9 = async function () {
 
 const testCase10 = async function () {
                 let h = await followerOf({ landed: 99 });
-                await h.p._assembleWindow(0);                // ME leads window 0
+                await h.p.assembleWindow(0);                // ME leads window 0
                 expect(h.p._takeoverTimers.has(0)).to.equal(false);
             };
 
@@ -179,7 +179,7 @@ const COOLDOWN_MS = 2 * 600000;
 
 const testCase11 = async function () {
                     let h = await followerOf({ landed: 99 });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     h.p._takeoverTimers.forEach(t => clearTimeout(t));
                     h.p._takeoverTimers.clear();
                     // The leader asked us to co-sign window 1 moments ago, which is the
@@ -210,7 +210,7 @@ const testCase12 = async function () {
 
 const testCase13 = async function () {
                     let h = await followerOf({ landed: 99 });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     // Co-signed a full cooldown ago and still nothing mined: whatever
                     // the leader sent is provably gone.
                     h.signer.coSignedAt = () => Date.now() - COOLDOWN_MS - 1;
@@ -224,7 +224,7 @@ const testCase13 = async function () {
 
 const testCase14 = async function () {
                     let h = await followerOf({ landed: 99 });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     // A leader that never asked for a signature never assembled a batch,
                     // so it cannot have one in flight: that is genuine silence.
                     h.signer.coSignedAt = () => null;
@@ -235,7 +235,7 @@ const testCase14 = async function () {
 
 const testCase15 = async function () {
                     let h = await followerOf({ landed: 99 });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     h.p.noteAmbiguousWindow(1);
 
                     expect(await h.p.attemptTakeover(1)).to.equal(false);
@@ -255,7 +255,7 @@ const testCase16 = async function () {
                     // ME leads window 0, so this is a plain leader publish that fails
                     // ambiguously; the takeover armed against the SAME window must then
                     // not re-broadcast over it.
-                    await h.p._assembleWindow(0);
+                    await h.p.assembleWindow(0);
                     expect(readJsonl(h.deadPath)).to.have.length(1);
                     expect(h.p._ambiguousWindows.has(0)).to.equal(true);
 
@@ -266,7 +266,7 @@ const testCase16 = async function () {
 const testCase17 = async function () {
                     let h = await followerOf({ landed: 99,
                         cfg: { ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS: '0' } });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     h.signer.coSignedAt = () => Date.now();
 
                     expect(h.p.getStats().takeoverAmbiguousCooldownMs).to.equal(0);
@@ -276,7 +276,7 @@ const testCase17 = async function () {
 
 const testCase18 = async function () {
                     let h = await followerOf({ landed: 99 });
-                    await h.p._assembleWindow(1);
+                    await h.p.assembleWindow(1);
                     delete h.signer.coSignedAt;
 
                     expect(await h.p.attemptTakeover(1)).to.equal(true);
@@ -304,7 +304,7 @@ function registerSuite3() {
 
 const testCase20 = async function () {
                 let h = await followerOf({ landed: 99 });
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
                 expect(h.p._takeoverTimers.size).to.equal(1);
                 h.p.stop();
                 expect(h.p._takeoverTimers.size).to.equal(0);
@@ -327,7 +327,7 @@ const testCase21 = async function () {
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts).to.have.length(0);
             expect(readJsonl(h.queuePath)).to.have.length(0);
             // Not memoized, so a later attempt on this hub can re-run the round.

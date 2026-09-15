@@ -100,19 +100,19 @@ function registerAggregateBoundedChangeClampVs2Tests1() {
 
         it('no finalized history: aggregate passes through unclamped', function () {
             let subs = submissionsForPair([100000, 100000, 100000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
         });
 
         it('within the +/-25% band: aggregate passes through unchanged', function () {
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([110000, 110000, 110000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('110000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('110000.00000000');
         });
 
         it('exactly on the +25% boundary: not clamped', function () {
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([125000, 125000, 125000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('125000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('125000.00000000');
         });
 
         it('upward fat-tail spike: clamped to last * 1.25', function () {
@@ -120,36 +120,36 @@ function registerAggregateBoundedChangeClampVs2Tests1() {
             // Every source agrees on the spike (survives trim and median), so only
             // the clamp bounds it.
             let subs = submissionsForPair([500000, 500000, 500000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('125000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('125000.00000000');
         });
 
         it('downward fat-tail crash: clamped to last * 0.75', function () {
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([10000, 10000, 10000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('75000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('75000.00000000');
         });
 
         it('sustained genuine move walks to the new level over successive rounds', function () {
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
             let subs = submissionsForPair([200000, 200000, 200000]);
-            let r1 = oc._aggregate(subs, 'BTC/USD');
+            let r1 = oc.aggregate(subs, 'BTC/USD');
             expect(r1).to.equal('125000.00000000');
             // Round 1 finalizes at the clamped value; round 2 clamps from there.
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r1 }]);
-            let r2 = oc._aggregate(subs, 'BTC/USD');
+            let r2 = oc.aggregate(subs, 'BTC/USD');
             expect(r2).to.equal('156250.00000000');
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r2 }]);
-            let r3 = oc._aggregate(subs, 'BTC/USD');
+            let r3 = oc.aggregate(subs, 'BTC/USD');
             expect(r3).to.equal('195312.50000000');
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: r3 }]);
             // Fourth round reaches the true level (200000 < 195312.5 * 1.25).
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('200000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('200000.00000000');
         });
 
         it('clamp is per-pair: an unrelated pair with history does not clamp BTC/USD', function () {
             oc.updateLastFinalizedPrices([{ coinPair: 'LTC/USD', price: '100.00000000' }]);
             let subs = submissionsForPair([500000, 500000, 500000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('500000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('500000.00000000');
         });
 }
 
@@ -172,21 +172,21 @@ function registerAggregateTighterPerPairClamp3Tests9() {
             // clamp is the wrong size for it: 25%/round compounds to roughly 10x in 80
             // minutes at the default cadence.
             oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
-            expect(oc._aggregate(subsFor('XCHAIN/USD', [10, 10, 10]), 'XCHAIN/USD')).to.equal('2.20000000');
+            expect(oc.aggregate(subsFor('XCHAIN/USD', [10, 10, 10]), 'XCHAIN/USD')).to.equal('2.20000000');
         });
 
         it('bounds the DOWN direction identically: fee-cheapening is the other attack', function () {
             // §5 is explicit that the incentive is bidirectional - a lower XCHAIN/USD
             // makes native-coin fees cheaper for whoever pushed it there.
             oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
-            expect(oc._aggregate(subsFor('XCHAIN/USD', [0.01, 0.01, 0.01]), 'XCHAIN/USD')).to.equal('1.80000000');
+            expect(oc.aggregate(subsFor('XCHAIN/USD', [0.01, 0.01, 0.01]), 'XCHAIN/USD')).to.equal('1.80000000');
         });
 
         it('leaves every other pair on the global bound', function () {
             // The override must not leak: BTC/USD tracks a deep external market and a
             // 10% cap would suppress genuine moves it should follow.
             oc.updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
-            expect(oc._aggregate(subsFor('BTC/USD', [500000, 500000, 500000]), 'BTC/USD')).to.equal('125000.00000000');
+            expect(oc.aggregate(subsFor('BTC/USD', [500000, 500000, 500000]), 'BTC/USD')).to.equal('125000.00000000');
         });
 
         it('walks the bootstrap to a market level over rounds, never in one print', function () {
@@ -195,10 +195,10 @@ function registerAggregateTighterPerPairClamp3Tests9() {
             // like any other move, which is what buys the operator time to notice.
             oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
             let subs = subsFor('XCHAIN/USD', [100, 100, 100]);
-            let r1 = oc._aggregate(subs, 'XCHAIN/USD');
+            let r1 = oc.aggregate(subs, 'XCHAIN/USD');
             expect(r1).to.equal('2.20000000');
             oc.updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: r1 }]);
-            expect(oc._aggregate(subs, 'XCHAIN/USD')).to.equal('2.42000000');
+            expect(oc.aggregate(subs, 'XCHAIN/USD')).to.equal('2.42000000');
         });
 
         it('stays strictly inside the propose-gate band, which keeps the global bound', function () {
@@ -280,7 +280,7 @@ function registerAggregateall5Tests20() {
                 ]}
             ];
             let subs = buildSubmissions(entries);
-            let result = oc._aggregateAll(subs);
+            let result = oc.aggregateAll(subs);
             expect(result).to.have.lengthOf(2);
             let btc = result.find(r => r.coinPair === 'BTC/USD');
             let ltc = result.find(r => r.coinPair === 'LTC/USD');
@@ -289,7 +289,7 @@ function registerAggregateall5Tests20() {
         });
 
         it('returns empty array for empty submissions', function () {
-            expect(oc._aggregateAll(new Map())).to.deep.equal([]);
+            expect(oc.aggregateAll(new Map())).to.deep.equal([]);
         });
 
 }
@@ -302,7 +302,7 @@ describe('OracleConsensus', function () {
     // -----------------------------------------------------------------
     // clampToLastFinalized(): per-pair bounded-change clamp
     // -----------------------------------------------------------------
-    describe('_aggregate(): bounded-change clamp vs last finalized', function () {
+    describe('aggregate(): bounded-change clamp vs last finalized', function () {
         registerAggregateBoundedChangeClampVs2Tests1();
         registerAggregateBoundedChangeClampVs2Tests8();
     });
@@ -312,7 +312,7 @@ describe('OracleConsensus', function () {
     // -----------------------------------------------------------------
     // Per-pair clamp override for the derived pair
     // -----------------------------------------------------------------
-    describe('_aggregate(): tighter per-pair clamp for XCHAIN/USD', function () {
+    describe('aggregate(): tighter per-pair clamp for XCHAIN/USD', function () {
         registerAggregateTighterPerPairClamp3Tests9();
     });
 
@@ -328,9 +328,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _aggregateAll()
+    // aggregateAll()
     // -----------------------------------------------------------------
-    describe('_aggregateAll()', function () {
+    describe('aggregateAll()', function () {
         registerAggregateall5Tests20();
     });
 });

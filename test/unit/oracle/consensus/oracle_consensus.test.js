@@ -91,26 +91,26 @@ function registerAggregateTrimmedMedian2Tests1() {
 
         it('single submission: returns that value', function () {
             let subs = submissionsForPair([100000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
         });
 
         it('two submissions: returns average (median of 2)', function () {
             let subs = submissionsForPair([100000, 100002]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100001.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100001.00000000');
         });
 
         it('two submissions just within the deviation gate: returns the mean', function () {
             // (105-95)/(105+95) = 0.05 = threshold; the 2-source gate is strictly
             // greater-than, so a spread exactly at the threshold still finalizes (item 4496).
             let subs = submissionsForPair([95, 105]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
         });
 
         it('two submissions beyond the deviation gate: drops the pair (returns null)', function () {
             // (110-90)/(110+90) = 0.10 > 0.05 threshold; the mean would put both sources
             // outside the slash threshold, so the pair is omitted this round (item 4496).
             let subs = submissionsForPair([90, 110]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+            expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
         });
 
         it('two submissions a hair past the gate: drops the pair at scale 18', function () {
@@ -120,14 +120,14 @@ function registerAggregateTrimmedMedian2Tests1() {
             // Publishing here federation-signed a median the followers withhold and
             // the slash detector punishes the low submitter for.
             let subs = submissionsForPair(['100.00000000', '110.52631579']);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+            expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
         });
 
         it('deviation gate does not apply to an odd count: three divergent submissions still finalize', function () {
             // An odd post-trim count medians to a REAL submitted value, so at least one
             // source stands behind the published price and the gate has nothing to refuse.
             let subs = submissionsForPair([100, 200, 300]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('200.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('200.00000000');
         });
 
         it('4 submissions in a 2-2 split: the post-trim pair trips the gate and drops (item 5333)', function () {
@@ -137,7 +137,7 @@ function registerAggregateTrimmedMedian2Tests1() {
             // the proposer-excluded set, tripped the co-sign band and rejected the whole
             // proposal, wedging the round for every pair.
             let subs = submissionsForPair([100, 100, 111, 111]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+            expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
         });
 }
 
@@ -147,23 +147,23 @@ function registerAggregateTrimmedMedian2Tests8() {
             // ceil(6 * 0.15) = 1 → after trim: [100, 100, 111, 111] → middle pair 100/111.
             // A post-trim length of exactly 2 is not the only wedge shape.
             let subs = submissionsForPair([100, 100, 100, 111, 111, 111]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+            expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
         });
 
         it('4 submissions split inside the band: still publishes the even-split mean', function () {
             // After trim: [100, 103] → spread 3/203 = 1.48% < 5%, so the pair publishes.
             let subs = submissionsForPair([100, 100, 103, 103]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('101.50000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('101.50000000');
         });
 
         it('three submissions: returns middle value', function () {
             let subs = submissionsForPair([100000, 100010, 100005]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100005.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100005.00000000');
         });
 
         it('all identical values: returns that value', function () {
             let subs = submissionsForPair([50000, 50000, 50000, 50000, 50000]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
         });
 
         it('7 submissions: trims top and bottom 15% (1 each)', function () {
@@ -171,7 +171,7 @@ function registerAggregateTrimmedMedian2Tests8() {
             let prices = [90000, 99000, 100000, 100100, 100200, 101000, 110000];
             let subs = submissionsForPair(prices);
             // After trim: [99000, 100000, 100100, 100200, 101000] → median = 100100
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100100.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100100.00000000');
         });
 
         it('10 submissions: trims 1 from each end', function () {
@@ -179,23 +179,23 @@ function registerAggregateTrimmedMedian2Tests8() {
             let prices = [1, 100, 101, 102, 103, 104, 105, 106, 107, 999];
             let subs = submissionsForPair(prices);
             // After trim: [100, 101, 102, 103, 104, 105, 106, 107] → median = (103+104)/2 = 103.5
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
         });
 
         it('outlier resistance: extreme outlier in 7 submissions is trimmed', function () {
             let prices = [100000, 100001, 100002, 100003, 100004, 100005, 999999];
             let subs = submissionsForPair(prices);
             // After trim: [100001, 100002, 100003, 100004, 100005] → median = 100003
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
         });
 
         it('returns 8-decimal fixed-point string', function () {
             let subs = submissionsForPair([1.5]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1.50000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('1.50000000');
         });
 
         it('returns null for no submissions', function () {
-            expect(oc._aggregate(new Map(), 'BTC/USD')).to.be.null;
+            expect(oc.aggregate(new Map(), 'BTC/USD')).to.be.null;
         });
 }
 
@@ -203,7 +203,7 @@ function registerAggregateTrimmedMedian2Tests17() {
 
         it('returns null for unknown coin pair', function () {
             let subs = submissionsForPair([100]);
-            expect(oc._aggregate(subs, 'ETH/USD')).to.be.null;
+            expect(oc.aggregate(subs, 'ETH/USD')).to.be.null;
         });
 
         // Item #180: the clamp-emptied null path previously had NO log line at
@@ -212,7 +212,7 @@ function registerAggregateTrimmedMedian2Tests17() {
         it('logs a drop warning naming the pair when no usable values survive the clamp', function () {
             let warn = sinon.stub(console, 'warn');
             try {
-                expect(oc._aggregate(new Map(), 'BTC/USD')).to.be.null;
+                expect(oc.aggregate(new Map(), 'BTC/USD')).to.be.null;
                 expect(warn.calledOnce).to.be.true;
                 expect(warn.firstCall.args[0]).to.include('BTC/USD');
                 expect(warn.firstCall.args[0]).to.include('dropping');
@@ -228,7 +228,7 @@ function registerAggregateTrimmedMedian2Tests17() {
                 { sender: 'v3', prices: [{ coinPair: 'BTC/USD', price: '50000' }] }
             ];
             let subs = buildSubmissions(entries);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
         });
 
         it('ignores NaN prices', function () {
@@ -237,7 +237,7 @@ function registerAggregateTrimmedMedian2Tests17() {
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '42000' }] }
             ];
             let subs = buildSubmissions(entries);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
         });
 }
 
@@ -265,7 +265,7 @@ function registerAggregateTrimmedMedian2Tests21() {
                     () => ({ coinPair: 'BTC/USD', price: '200' })) }
             ];
             let subs = buildSubmissions(entries);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
         });
 
         it('uses the first valid entry per sender, skipping an invalid leading duplicate', function () {
@@ -280,7 +280,7 @@ function registerAggregateTrimmedMedian2Tests21() {
                 ]}
             ];
             let subs = buildSubmissions(entries);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('55000.00000000');
+            expect(oc.aggregate(subs, 'BTC/USD')).to.equal('55000.00000000');
         });
 
 }
@@ -291,9 +291,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _aggregate(): trimmed median
+    // aggregate(): trimmed median
     // -----------------------------------------------------------------
-    describe('_aggregate(): trimmed median', function () {
+    describe('aggregate(): trimmed median', function () {
         registerAggregateTrimmedMedian2Tests1();
         registerAggregateTrimmedMedian2Tests8();
         registerAggregateTrimmedMedian2Tests17();

@@ -27,7 +27,7 @@ const logger = getLogger();
 // Price-deviation slash band. Defaults to the federation-uniform
 // ORACLE_DEVIATION_THRESHOLD (constants.js), the same band the oracle
 // co-sign gate (OracleConsensus._handlePropose) and the exactly-2-source
-// publish gate (_aggregate) enforce, so by default we never slash a
+// publish gate (aggregate) enforce, so by default we never slash a
 // submission the federation just co-signed. This is the band's FLOOR, not
 // the band in force every round: in a round where the aggregation clamp
 // moved a pair's published price, checkDeviations widens that pair by

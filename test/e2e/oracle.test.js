@@ -50,7 +50,7 @@ function multipleRoundsSuite() {
             });
 
             // Round numbers derive from wall-clock time against ORACLE_EPOCH_START
-            // (not a counter), and _executeRound dedupes on the derived number; shift
+            // (not a counter), and executeRound dedupes on the derived number; shift
             // the epoch back one interval so round 2 lands on a distinct number.
             cluster.getHub(0).oracle.epochStart -= cluster.getHub(0).oracle.roundInterval;
 
@@ -126,7 +126,7 @@ function skippedRoundSuite() {
             let port = cluster.getPort(0);
 
             // With both sources down the round writes no submission at all, so there is
-            // nothing to poll for: _executeRound is awaited and the skip is already decided.
+            // nothing to poll for: executeRound is awaited and the skip is already decided.
             await cluster.triggerOracleRound(0);
             let round = cluster.getHub(0).oracle.getCurrentRound();
             await cluster.triggerOracleFinalization(0, round);

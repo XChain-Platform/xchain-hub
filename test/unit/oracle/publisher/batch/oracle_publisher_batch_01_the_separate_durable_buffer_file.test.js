@@ -177,7 +177,7 @@ const testCase12 = async function () {
                     pairs: [{ coinPair: 'BTC/USD', price: '70000.00' }]
                 }));
 
-                await h.p._assembleWindow(0);
+                await h.p.assembleWindow(0);
                 expect(h.signer.calls).to.have.length(1);
                 let proposed = h.signer.collectBatchSignatures.firstCall.args[3];
                 let last = proposed[proposed.length - 1];
@@ -248,7 +248,7 @@ const testCase14 = async function () {
                 // Buffer the pre-drift content, as the hub did before the DB moved.
                 for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
 
-                await h.p._assembleWindow(0);
+                await h.p.assembleWindow(0);
 
                 let proposed = h.signer.collectBatchSignatures.firstCall.args[3];
                 let last = proposed[proposed.length - 1];

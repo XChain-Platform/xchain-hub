@@ -28,7 +28,7 @@ module.exports = {
     // or null if unavailable. Used by the co-sign gate to apply a historical-deviation
     // check for pairs this hub has no live local submission for (seq 4083).
     // Synchronous best-effort: reads from the in-memory cache populated by
-    // _storeSnapshot. Falls back to null when not cached (first round, cold start).
+    // storeSnapshot. Falls back to null when not cached (first round, cold start).
     getLastFinalizedPrice(coinPair) {
         if (!this._lastFinalizedPrices) return null;
         return this._lastFinalizedPrices.get(coinPair) || null;
@@ -62,7 +62,7 @@ module.exports = {
 
     // Fail-soft and monotonic like the seed it delegates to: carries the reference
     // FORWARD only, never clears it, never throws on the consensus path.
-    async _refreshLastFinalizedForRound(round) {
+    async refreshLastFinalizedForRound(round) {
         if (!Number.isInteger(round)) return;
         if (this._lastFinalizedRefreshRound === round) return;
         this._lastFinalizedRefreshRound = round;
@@ -82,7 +82,7 @@ module.exports = {
     // Record one pair's finalized price, newest round wins. Returns true when the
     // entry moved. The cache means "the price from this pair's HIGHEST finalized
     // round", which is what seedLastFinalizedPrices computes; before the stamp the
-    // runtime writer disagreed with the seed, so a late _storeSnapshot for an older
+    // runtime writer disagreed with the seed, so a late storeSnapshot for an older
     // round (a locally-skipped round stored by a late PROPOSE, a replayed COMMIT)
     // walked the reference BACKWARDS. An unstamped write is trusted as current, so
     // callers that have no round keep the prior set-always behaviour.
@@ -100,7 +100,7 @@ module.exports = {
     },
 
     // Update the in-memory last-finalized-price cache after a round is stored.
-    // Called at the end of _storeSnapshot. `round` is optional: the unit tests that
+    // Called at the end of storeSnapshot. `round` is optional: the unit tests that
     // drive this directly, and any future caller without one, keep the unstamped
     // set-always behaviour. Rounds arriving by push come in through
     // noteIngestedPriceRow instead.

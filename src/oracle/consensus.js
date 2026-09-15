@@ -129,7 +129,7 @@ class OracleConsensus extends EventEmitter {
 
     // Build the canonical signable payload for a PRICE v0 round.
     // MUST match xchain-indexer/src/consensus/ed25519.js buildPriceV0Payload and
-    // PriceAggregator._buildPriceV0Payload exactly so signatures produced here verify
+    // PriceAggregator.buildPriceV0Payload exactly so signatures produced here verify
     // against the same canonical bytes when indexers parse on-chain PRICE v0 actions. The
     // three twins now append an ADMISSION FIELD after the JSON body and before the EQUIV
     // wrapper; all three spell it the same way or the price rail stops.
@@ -171,7 +171,7 @@ class OracleConsensus extends EventEmitter {
     // chain the federation serves, and omitting it is the LEGACY row: correct at every
     // height below the activation and refused above it, because a round signed without the
     // heights its consumers bind on is a round no verifier can rebuild.
-    _buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
+    buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight, admitBlocks) {
         let pairs = prices.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }));
         let sortedPairs = [...pairs].sort((a, b) => {
             if (a.pair < b.pair) return -1;
@@ -203,7 +203,7 @@ class OracleConsensus extends EventEmitter {
 
     // Build the canonical signable payload for a PRICE batch: ONE signature set over
     // several rounds. THIS IS THE PRODUCER; xchain-indexer/src/consensus/ed25519.js
-    // buildPriceBatchPayload and PriceAggregator._buildPriceBatchPayload must match it byte for
+    // buildPriceBatchPayload and PriceAggregator.buildPriceBatchPayload must match it byte for
     // byte, or the bytes signed here are not the bytes any verifier checks.
     //
     // `rounds` is [{ round, timestamp, btcBlockHeight, pairs }] and each `pairs` entry is
@@ -212,7 +212,7 @@ class OracleConsensus extends EventEmitter {
     // than requiring sorted input, so no caller of the three twins can get the ordering
     // contract subtly wrong.
     //
-    // The EQUIV header is UNCONDITIONAL here, unlike _buildPriceV0Payload's height gate.
+    // The EQUIV header is UNCONDITIONAL here, unlike buildPriceV0Payload's height gate.
     // v0 gates because it has pre-flag-day history whose bytes may not move; v2 has none
     // (it is ungated and every network it runs on already has EQUIV active). The
     // unwrapped bare-JSON form is also the exact
@@ -227,7 +227,7 @@ class OracleConsensus extends EventEmitter {
     // made. In the admission era the entry gains a LAST key, `admit_blocks`, holding the
     // same canonical spelling the v0 field uses; below it the entry is byte-identical to
     // the pre-admission form and a map is refused.
-    _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
+    buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
         let network = this.hub && this.hub.network;
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))
@@ -276,7 +276,7 @@ class OracleConsensus extends EventEmitter {
 
         // Re-run the seed on a timer so the clamp reference tracks the DATABASE, not
         // this process's own finalize history (item 5834). The cache had exactly two
-        // writers, the start-time seed and _storeSnapshot, so every round this hub sat
+        // writers, the start-time seed and storeSnapshot, so every round this hub sat
         // out (co-sign reject before pendingRounds.set, commit-quorum timeout eviction,
         // a below-minSubmissions skip) left it clamping against an ever-older reference
         // while its peers moved on. The seed is idempotent, fail-soft and monotonic, so

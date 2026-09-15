@@ -302,8 +302,8 @@ async function bootApi(env, hubOverrides) {
         // An admit_blocks on this payload would therefore be an UNSIGNED consensus field
         // that a relay could rewrite in flight with every signature still verifying, which
         // is the one thing this rail may never accept. When the batch canonical gains the
-        // field across its three byte-twins (this hub's _buildPriceBatchPayload,
-        // OracleConsensus._buildPriceBatchPayload and the indexer's ed25519 twin), the
+        // field across its three byte-twins (this hub's buildPriceBatchPayload,
+        // OracleConsensus.buildPriceBatchPayload and the indexer's ed25519 twin), the
         // handler gains the key and this case becomes its parity assertion.
         async function doesNotForwardAnAdmitBlocksTest21() {
             const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });

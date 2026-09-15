@@ -100,7 +100,7 @@ const testCase4 = async function () {
 
                 expect(h.p._assembledWindows.has(1), 'not memoized: rounds 9..11 still need a wire').to.equal(false);
                 expect(h.p.pendingCatchupWindows()).to.deep.equal([1]);
-                await h.p._assembleWindow(1);
+                await h.p.assembleWindow(1);
                 expect(h.signer.calls).to.have.length(1);
                 expect(h.signer.calls[0].rounds).to.deep.equal([9, 10, 11]);
             };
@@ -278,7 +278,7 @@ const testCase12 = async function () {
                 clearTimeout(h.p._windows.get(0).timer);
                 h.p._windows.delete(0);
                 expect(h.p.pendingCatchupWindows()).to.deep.equal([0]);
-                await h.p._assembleWindow(0);
+                await h.p.assembleWindow(0);
                 expect(h.signer.calls).to.have.length(1);
                 expect(h.signer.calls[0].rounds).to.deep.equal([0, 1, 2, 3, 4, 5]);
             };

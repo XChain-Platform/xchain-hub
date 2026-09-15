@@ -126,7 +126,7 @@ function roundStateFields(info) {
 // invisible; the durable record lives in price_snapshots (status='skipped',
 // written when a round produces no usable prices).
 // skippedRounds keeps its whole-round semantic (no pair finalized): the
-// per-pair skip markers _storeSnapshot writes for partially-dropped rounds
+// per-pair skip markers storeSnapshot writes for partially-dropped rounds
 // (item #180) must not inflate the feed-outage count. Those partial drops
 // surface separately as droppedPairs.
 // Each diagnostic read carries its own *ReadError marker (item 5548):

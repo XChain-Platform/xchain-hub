@@ -73,7 +73,7 @@ function registerSingleValidatorRoundTests() {
             oracleRound.setConsensus(oracleConsensus);
 
             // Execute round
-            await oracleRound._executeRound();
+            await oracleRound.executeRound();
 
             // The submission write is fire-and-forget: wait for the row, not a duration.
             await waitUntil(async () => {
@@ -142,7 +142,7 @@ function createMultiValidatorRound(db) {
 }
 
 async function executeRoundAndWait(db, oracleRound) {
-    await oracleRound._executeRound();
+    await oracleRound.executeRound();
     await waitUntil(async () => {
         let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
             [oracleRound.getCurrentRound()]);
@@ -242,7 +242,7 @@ function registerNoPriceDataTests() {
             mockApi.mockCoinGeckoError(500);
 
             let oracleRound = new OracleRound(hub);
-            await oracleRound._executeRound();
+            await oracleRound.executeRound();
 
             expect(hub._peerManager.broadcast.called).to.be.false;
         });

@@ -39,7 +39,7 @@ module.exports = {
     // the leader stayed silent (see attemptTakeover). Everything downstream of the
     // leader check is identical, deliberately: a takeover must put the same
     // canonical content on chain the leader would have, never a variant.
-    async _assembleWindow(windowIndex, opts) {
+    async assembleWindow(windowIndex, opts) {
         if (!this.enabled) return;
         let takeover = !!(opts && opts.takeover);
         if (!takeover && this._assembledWindows.has(windowIndex)) return;
@@ -66,7 +66,7 @@ module.exports = {
 
         // The self-check. A window published with a hole in it puts a signed, permanent
         // claim on chain that the missing round did not finalize.
-        if (!(await this._windowCoverageComplete(first, last, rounds))) return;
+        if (!(await this.windowCoverageComplete(first, last, rounds))) return;
 
         let signer = this.getBatchSigner();
         if (!signer) {
@@ -137,12 +137,12 @@ module.exports = {
     // armed flag day first. Null when a range failed to reach quorum, which withholds
     // the whole window rather than publishing the part that signed.
     async signWindowWires(signer, rounds, anchor, publisherCount) {
-        let sigCountHint = await this._priceSetSizeHint(anchor, publisherCount);
+        let sigCountHint = await this.priceSetSizeHint(anchor, publisherCount);
         let wires = [];
         for (let segment of this.splitByFlagDay(rounds)) {
             let idx = 0;
             while (idx < segment.length) {
-                let take  = Math.max(1, this._packSegment(segment.slice(idx), sigCountHint));
+                let take  = Math.max(1, this.packSegment(segment.slice(idx), sigCountHint));
                 let range = segment.slice(idx, idx + take);
                 let wire  = await this.signAndSizeRange(signer, range);
                 if (wire === null) return null;
@@ -202,7 +202,7 @@ module.exports = {
     // quorum however honest the leader is.
     //
     // Replaces drifted rounds and sheds already-landed ones. It never ADDS a round:
-    // a finalized round with no buffered copy is _windowCoverageComplete's case, and
+    // a finalized round with no buffered copy is windowCoverageComplete's case, and
     // that path deliberately withholds the window rather than inventing content.
     //
     // Best effort by design. A DB error leaves the buffer as it was and assembly
@@ -303,7 +303,7 @@ module.exports = {
     // stall the window forever waiting for something no peer will ever co-sign.
     // No exemption for early rounds: batching is unconditional, so every round that
     // finalized locally was buffered and an unbuffered one is a real coverage hole.
-    async _windowCoverageComplete(first, last, rounds) {
+    async windowCoverageComplete(first, last, rounds) {
         if (!this.db) return true;
         let rows;
         try {

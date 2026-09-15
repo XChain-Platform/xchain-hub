@@ -50,7 +50,7 @@ module.exports = {
         // changes; for a batch it is every round on the wire, which is what stops
         // a re-publish under a DIFFERENT split from finding no marker and paying DOGE
         // a second time for rounds already on chain (D10).
-        let entryRounds = this._entryRounds(entry);
+        let entryRounds = this.entryRounds(entry);
 
         if (this.entryResolvedInProcess(entry, entryRounds)) return;
         if (this.db && !(await this.durableMarkersAllowSend(entry, entryRounds, pass))) return;

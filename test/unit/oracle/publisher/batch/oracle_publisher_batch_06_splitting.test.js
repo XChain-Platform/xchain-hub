@@ -42,13 +42,13 @@ const testCase1 = async function () {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'split' + r) }));
             }
             // The premise: a six-round wire really does overflow at this size.
-            let whole = h.p._emitWire(0, 5, 800005, h.p.bufferedRange(0, 5), sigsOf(3));
+            let whole = h.p.emitWire(0, 5, 800005, h.p.bufferedRange(0, 5), sigsOf(3));
             expect(whole.bytes).to.be.greaterThan(PRICE_WIRE_MAX_BYTES);
 
             // Hold the publish pass so the enqueued wires stay readable on disk; a
             // successful pass dequeues them and the split would be invisible here.
             sinon.stub(h.p, '_processQueue').resolves();
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);
             expect(entries.length).to.be.greaterThan(1);
@@ -71,7 +71,7 @@ const testCase2 = async function () {
                 h.p._buffer.set(r, bufferedFixture(r, { anchor: 960998 + r }));  // 960998..961001
             }
 
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             expect(h.signer.calls.map(c => [c.first, c.last])).to.deep.equal([[0, 1], [2, 3]]);
             // Neither proposed range straddles: the signer's receiving-side twin would
@@ -93,7 +93,7 @@ const testCase3 = async function () {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'anchor' + r) }));
             }
             sinon.stub(h.p, '_processQueue').resolves();
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);
             expect(entries.length).to.be.greaterThan(1);
@@ -121,7 +121,7 @@ const testCase4 = async function () {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'reader' + r) }));
             }
             sinon.stub(h.p, '_processQueue').resolves();
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);
             expect(entries.length).to.be.greaterThan(1);
@@ -147,7 +147,7 @@ const testCase6 = async function () {
             let h = makePublisher({ network: 'mainnet' });
             await h.p.start();
             for (let r = 0; r < 4; r++) h.p._buffer.set(r, bufferedFixture(r, { anchor: 970000 + r }));
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.signer.calls.map(c => [c.first, c.last])).to.deep.equal([[0, 3]]);
             expect(h.p.getStats().batchSplitCount).to.equal(0);
         };

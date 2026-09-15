@@ -160,11 +160,11 @@ function memberSubmissionSkip(round, submissions) {
 
 // The single-node bypass (quorum 0): aggregate, sign and store the round here, then announce it.
 async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submissions) {
-    let aggregated = this._aggregateAll(submissions);
-    // Mirror the federated proposeRound guard: _aggregateAll can
+    let aggregated = this.aggregateAll(submissions);
+    // Mirror the federated proposeRound guard: aggregateAll can
     // legitimately return [] while submissions exist (every pair dropped
     // by the price clamp or the 2-source deviation gate). Without this,
-    // _storeSnapshot early-returns on empty prices (no finalized AND no
+    // storeSnapshot early-returns on empty prices (no finalized AND no
     // skipped row - a silent drop), yet markFinalized still resets the
     // stall gauges and round:finalized still emits an empty-pair PRICE v0
     // on-chain. Store a durable skipped-round row and stop instead.
@@ -184,9 +184,9 @@ async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submission
             return;
         }
     }
-    let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, soloAdmit);
+    let mySig = this.signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight, soloAdmit);
     let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
-    await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime, soloAdmit);
+    await this.storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime, soloAdmit);
     // Mark the round finalized so the guard at the top of finalizeRound()
     // dedupes any subsequent call for this round (prevents a duplicate
     // snapshot store / PRICE v0 broadcast).
@@ -251,7 +251,7 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
     // the reference keeps its pre-alignment writers only, so a mixed-version fleet
     // never judges one round against two different references.
     if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
-        await this._refreshLastFinalizedForRound(round);
+        await this.refreshLastFinalizedForRound(round);
     }
 
     let quorum = snapshot

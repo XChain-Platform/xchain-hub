@@ -60,7 +60,7 @@ module.exports = {
     // paths keep their previous behavior byte for byte; a batch entry carries all
     // the rounds on its wire, which is the granularity every at-most-once guard and
     // every durable marker row is keyed at.
-    _entryRounds(entry) {
+    entryRounds(entry) {
         if (entry && entry.batch && Array.isArray(entry.batch.rounds) && entry.batch.rounds.length > 0) {
             return entry.batch.rounds.map(r => parseInt(r)).filter(r => Number.isFinite(r));
         }

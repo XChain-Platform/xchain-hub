@@ -39,7 +39,7 @@ const testCase1 = async function () {
             let h = makePublisher({ db: makeDb(), signerOpts: { timeouts: 4 } });
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
 
             let s = h.p.getStats();
             expect(s.batchWindowsPublished).to.equal(1);
@@ -58,7 +58,7 @@ const testCase2 = async function () {
             for (let r = 0; r < 6; r++) {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'stats' + r) }));
             }
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             let s = h.p.getStats();
             expect(s.batchSplitCount).to.be.greaterThan(0);
             expect(s.batchWindowsPublished).to.equal(1);

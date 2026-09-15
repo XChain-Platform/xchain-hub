@@ -12,8 +12,8 @@
  *
  **********************************************************************
  * priceV2PayloadTwinParity: the PRICE v0 canonical is written three times, and the
- * hub owns two of them. OracleConsensus._buildPriceBatchPayload SIGNS; anything
- * PriceAggregator._buildPriceBatchPayload or xchain-indexer ed25519.buildPriceBatchPayload
+ * hub owns two of them. OracleConsensus.buildPriceBatchPayload SIGNS; anything
+ * PriceAggregator.buildPriceBatchPayload or xchain-indexer ed25519.buildPriceBatchPayload
  * builds differently is a batch the federation cannot verify, so the price rail stops
  * and the native-fee / XCHAIN-USD path stops with it. This suite asserts byte equality
  * on a batch built to exercise every normalization the builders own (round order, pair
@@ -97,7 +97,7 @@ function loadIndexerTwin(ctx) {
     let hub;
 
     function theProducerEmitsThePinnedKeyTest2() {
-        let canonical = hub.producer._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
+        let canonical = hub.producer.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
         assert.ok(canonical.startsWith(PREFIX), 'EQUIV prefix: ' + canonical.slice(0, 60));
 
         let body = JSON.parse(canonical.slice(PREFIX.length));
@@ -121,16 +121,16 @@ function loadIndexerTwin(ctx) {
 
     function theHubTwinsAgreeWithEachTest3() {
         assert.strictEqual(
-            hub.ingest._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
-            hub.producer._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
+            hub.ingest.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
+            hub.producer.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
             'PriceAggregator diverged from the OracleConsensus producer: hub ingest would reject every batch this hub signs');
     }
 
     function theHubTwinsAreCallerOrderTest4() {
         for (const [name, twin] of [['producer', hub.producer], ['ingest', hub.ingest]]) {
             assert.strictEqual(
-                twin._buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch()),
-                twin._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
+                twin.buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch()),
+                twin.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()),
                 'hub ' + name + ' is sensitive to caller ordering');
         }
     }
@@ -139,7 +139,7 @@ function loadIndexerTwin(ctx) {
         let rounds = [{ round: 1, timestamp: 1, btcBlockHeight: 1, pairs: [{ pair: 'BTC/USD', price: '1' }] }];
         let want   = 'EQUIV|' + eq.ENGINE_TAGS.ORACLE_BATCH + '|1|1|1|0||';
         for (const [name, twin] of [['producer', hub.producer], ['ingest', hub.ingest]]) {
-            let canonical = twin._buildPriceBatchPayload(1, 1, 1, rounds);
+            let canonical = twin.buildPriceBatchPayload(1, 1, 1, rounds);
             assert.ok(canonical.startsWith(want), 'hub ' + name + ' did not wrap below the v0 flag-day: ' + canonical.slice(0, 60));
         }
         assert.strictEqual(eq.isEquivHeaderActive(1, 'mainnet'), false, 'the gate v0 would have failed here');
@@ -154,9 +154,9 @@ function loadIndexerTwin(ctx) {
             if (!ed25519) return;
 
             let fromIndexer  = ed25519.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
-            assert.strictEqual(hub.producer._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()), fromIndexer,
+            assert.strictEqual(hub.producer.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()), fromIndexer,
                 'OracleConsensus (PRODUCER) diverged from the indexer verifier: the hub would sign bytes no indexer checks');
-            assert.strictEqual(hub.ingest._buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()), fromIndexer,
+            assert.strictEqual(hub.ingest.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch()), fromIndexer,
                 'PriceAggregator (hub ingest verifier) diverged from the indexer verifier');
         }
 
@@ -167,8 +167,8 @@ function loadIndexerTwin(ctx) {
             let expected = ed25519.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
             for (const [name, canonical] of [
                 ['indexer verifier', ed25519.buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch())],
-                ['hub producer',     hub.producer._buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch())],
-                ['hub ingest',       hub.ingest._buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch())],
+                ['hub producer',     hub.producer.buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch())],
+                ['hub ingest',       hub.ingest.buildPriceBatchPayload(FIRST, LAST, ANCHOR, shuffledBatch())],
             ]) {
                 assert.strictEqual(canonical, expected, name + ' is sensitive to caller ordering');
             }
@@ -182,8 +182,8 @@ function loadIndexerTwin(ctx) {
             let twin   = [{ round: 7, timestamp: 100, btcBlockHeight: 5, pairs: [{ pair:     'BTC/USD', price: 1   }] }];
             let expected = ed25519.buildPriceBatchPayload(7, 7, 5, rounds);
             assert.strictEqual(ed25519.buildPriceBatchPayload(7, 7, 5, twin), expected, 'indexer verifier');
-            assert.strictEqual(hub.producer._buildPriceBatchPayload(7, 7, 5, twin), expected, 'hub producer');
-            assert.strictEqual(hub.ingest._buildPriceBatchPayload(7, 7, 5, rounds), expected, 'hub ingest');
+            assert.strictEqual(hub.producer.buildPriceBatchPayload(7, 7, 5, twin), expected, 'hub producer');
+            assert.strictEqual(hub.ingest.buildPriceBatchPayload(7, 7, 5, rounds), expected, 'hub ingest');
         }
 
         function againstTheIndexerVerifierTwinSuite7() {

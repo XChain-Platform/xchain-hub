@@ -16,7 +16,7 @@
  *
  * The consensus round that produces the ONE quorum signature set a PRICE v0
  * batch carries. Nothing else in the platform signs batch-shaped bytes: the
- * PBFT rail signs each round separately over _buildPriceV0Payload, and those
+ * PBFT rail signs each round separately over buildPriceV0Payload, and those
  * signatures verify only against that round's own canonical.
  *
  * Modeled on the XANCPUB publisher-attestation round in StateAnchorPublisher
@@ -227,9 +227,9 @@ class OracleBatchSigner {
     // treats that as a refusal.
     _canonical(firstRound, lastRound, btcBlockHeight, rounds){
         let oc = this.hub ? this.hub.oracleConsensus : null;
-        if(!oc || typeof oc._buildPriceBatchPayload !== 'function')
-            throw new Error('OracleConsensus._buildPriceBatchPayload is unavailable');
-        return oc._buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
+        if(!oc || typeof oc.buildPriceBatchPayload !== 'function')
+            throw new Error('OracleConsensus.buildPriceBatchPayload is unavailable');
+        return oc.buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
     }
 
     // Both oracle flag days are keyed on a round's own BTC anchor, while a batch

@@ -40,8 +40,8 @@ function registerBoundaryTrimmedMedianAggregation() {
     describe('even-split gate measures the rounded median, not the exact midpoint', registerEvenSplitGateMeasuresTheRoundedMedianNotTheExactMidpoint);
     // Item 7663: the even-count median rounds ONCE, and the gate is unconditional
     describe('even-count median rounds once', registerEvenCountMedianRoundsOnce);
-    // _aggregateAll boundary
-    describe('_aggregateAll()', registerAggregateAll);
+    // aggregateAll boundary
+    describe('aggregateAll()', registerAggregateAll);
 }
 
 function registerEvenSplitGateMeasuresTheRoundedMedianNotTheExactMidpoint() {
@@ -70,19 +70,19 @@ function testDropsThePairWhoseRoundedMedianPutsAMiddleSubmissionOutsideThe() {
     expect(devband.exceedsBand(lo, '0.10000011', 0.05, 18)).to.be.true;
 
     let subs = submissionsForPair([lo, hi], 'XCHAIN/USD');
-    expect(oc._aggregate(subs, 'XCHAIN/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'XCHAIN/USD')).to.be.null;
 }
 
 function testStillPublishesAPairWhoseRoundedMedianKeepsBothMiddlesInsideThe() {
     // Same neighbourhood, one ulp tighter: median 0.10000010, both middles inside.
     let subs = submissionsForPair(['0.09500011', '0.10500009'], 'XCHAIN/USD');
-    expect(oc._aggregate(subs, 'XCHAIN/USD')).to.equal('0.10000010');
+    expect(oc.aggregate(subs, 'XCHAIN/USD')).to.equal('0.10000010');
 }
 
 function testIsNeverLooserThanTheExactMidpointFormItReplaced() {
     // A spread the OLD gate rejected must still be rejected.
     let subs = submissionsForPair(['100', '110.6'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }
 
 function testDropsAPairWhoseAggregateRoundsToZeroAt8Decimals() {
@@ -92,17 +92,17 @@ function testDropsAPairWhoseAggregateRoundsToZeroAt8Decimals() {
     const devband = require('../../../src/consensus/deviation_band.js');
     expect(devband.twoSourceSpreadExceeds('0.000000002', '0.000000002', 0.05, 18)).to.be.false;
     let subs = submissionsForPair(['0.000000002', '0.000000002'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }
 
 function testDropsAnOddLengthSetWhoseOnlyValueRoundsToZeroAt() {
     let subs = submissionsForPair(['0.000000001'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }
 
 function testLeavesOddLengthSetsOnThePlainMedianPath() {
     let subs = submissionsForPair(['0.09500010', '0.10000011', '0.10500011'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.10000011');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('0.10000011');
 }
 
 function registerEvenCountMedianRoundsOnce() {
@@ -132,24 +132,24 @@ function testKeepsAUnanimousSubUlpPairOnItsOwnQuantizedValue() {
         bcmath.bcadd('0.0000001425', '0.0000001425', 8), '2', 8), 8)).to.equal('0.00000015');
 
     let subs = submissionsForPair(['0.0000001425', '0.0000001425'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.00000014');
+    expect(oc.aggregate(subs, 'BTC/USD')).to.equal('0.00000014');
 }
 
 function testStillPublishesTheUnanimousSubUlpPairRatherThanDroppingIt() {
     let subs = submissionsForPair(['0.0000001425', '0.0000001425'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.not.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.not.be.null;
 }
 
 function testIsInertFor8DecimalProducersAtTheRoundingBoundary() {
-    expect(oc._aggregate(submissionsForPair(['1.00000001', '1.00000002']), 'BTC/USD'))
+    expect(oc.aggregate(submissionsForPair(['1.00000001', '1.00000002']), 'BTC/USD'))
         .to.equal('1.00000002');
-    expect(oc._aggregate(submissionsForPair(['1.00000001', '1.00000004']), 'BTC/USD'))
+    expect(oc.aggregate(submissionsForPair(['1.00000001', '1.00000004']), 'BTC/USD'))
         .to.equal('1.00000003');
 }
 
 function testStillDropsTwo8DecimalMiddlesThatDisagreeBeyondTheBand() {
     let subs = submissionsForPair(['100.00000000', '120.00000000'], 'BTC/USD');
-    expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+    expect(oc.aggregate(subs, 'BTC/USD')).to.be.null;
 }
 
 function registerAggregateAll() {
@@ -169,7 +169,7 @@ function testHandlesMultipleCoinPairsWithDifferentValidity() {
         ]}
     ];
     let subs = buildSubmissions(entries);
-    let result = oc._aggregateAll(subs);
+    let result = oc.aggregateAll(subs);
 
     let btc = result.find(r => r.coinPair === 'BTC/USD');
     let ltc = result.find(r => r.coinPair === 'LTC/USD');
@@ -184,6 +184,6 @@ function testReturnsEmptyArrayWhenAllPricesAreInvalid() {
         { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '0' }] }
     ];
     let subs = buildSubmissions(entries);
-    let result = oc._aggregateAll(subs);
+    let result = oc.aggregateAll(subs);
     expect(result).to.deep.equal([]);
 }

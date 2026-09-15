@@ -30,14 +30,14 @@ const ValidatorIdentity = require('../../../src/validators/identity');
 const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 // The REAL canonical builder, taken off the class rather than reimplemented.
-// _buildPriceBatchPayload is pure (it reads no instance state), so binding it to a
+// buildPriceBatchPayload is pure (it reads no instance state), so binding it to a
 // bare object exercises the exact producer the hub signs with, without booting
 // the whole PBFT engine. If it ever starts reading `this`, this line fails loudly
 // rather than letting a second copy of the format creep into the tests.
-const canonicalBuilder = { _buildPriceBatchPayload: OracleConsensus.prototype._buildPriceBatchPayload };
+const canonicalBuilder = { buildPriceBatchPayload: OracleConsensus.prototype.buildPriceBatchPayload };
 
 function buildCanonical(first, last, anchor, rounds) {
-    return canonicalBuilder._buildPriceBatchPayload(first, last, anchor, rounds);
+    return canonicalBuilder.buildPriceBatchPayload(first, last, anchor, rounds);
 }
 
 // Six rounds, 100..105, one BTC anchor and timestamp each, two pairs each.

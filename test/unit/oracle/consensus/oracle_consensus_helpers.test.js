@@ -169,8 +169,8 @@ function registerFinalizeroundDispatchAdditionalPaths2Tests5() {
 
 function registerPriceV0SignatureHelpers3Tests7() {
 
-        it('_buildPriceV0Payload sorts pairs canonically', function () {
-            let payload = oc._buildPriceV0Payload(5, 1700000000, [
+        it('buildPriceV0Payload sorts pairs canonically', function () {
+            let payload = oc.buildPriceV0Payload(5, 1700000000, [
                 { coinPair: 'LTC/USD', price: '80' },
                 { coinPair: 'BTC/USD', price: '100000' }
             ]);
@@ -179,22 +179,22 @@ function registerPriceV0SignatureHelpers3Tests7() {
             expect(obj.pairs.map(p => p.pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
         });
 
-        it('_buildPriceV0Payload keeps both entries when pair names are equal', function () {
-            let payload = oc._buildPriceV0Payload(1, 1, [
+        it('buildPriceV0Payload keeps both entries when pair names are equal', function () {
+            let payload = oc.buildPriceV0Payload(1, 1, [
                 { coinPair: 'BTC/USD', price: '1' },
                 { coinPair: 'BTC/USD', price: '2' }
             ]);
             expect(JSON.parse(payload).pairs).to.have.length(2);
         });
 
-        it('_signPriceV0 returns null when no identity is configured', function () {
+        it('signPriceV0 returns null when no identity is configured', function () {
             hub.getIdentity.returns(null);
-            expect(oc._signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
+            expect(oc.signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
         });
 
-        it('_signPriceV0 returns null (not throw) when signing fails', function () {
+        it('signPriceV0 returns null (not throw) when signing fails', function () {
             hub.getIdentity.returns({ sign: () => { throw new Error('hsm offline'); }, getPubkeyHex: () => 'aa'.repeat(32) });
-            expect(oc._signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
+            expect(oc.signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
         });
 
         it('verifyAndStoreSig rejects missing args / duplicate / round-less pending', function () {
@@ -210,7 +210,7 @@ function registerPriceV0SignatureHelpers3Tests7() {
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
             // #4232: the height is part of the signed payload and the verify reconstruction
             // reads it from pending.btcBlockHeight, so both must carry the same value.
-            let payload = oc._buildPriceV0Payload(5, 1700000000, prices, 799000);
+            let payload = oc.buildPriceV0Payload(5, 1700000000, prices, 799000);
             let sig = id.sign(payload);
 
             let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
@@ -227,7 +227,7 @@ function registerPriceV0SignatureHelpers3Tests13() {
         it('verifyAndStoreSig keys the map on lowercase hex, so a mixed-case repeat dedupes (item 5334)', function () {
             let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-            let payload = oc._buildPriceV0Payload(5, 1700000000, prices, 799000);
+            let payload = oc.buildPriceV0Payload(5, 1700000000, prices, 799000);
             let sig = id.sign(payload);
             let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
 

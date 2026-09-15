@@ -50,7 +50,7 @@ function proposerExcludedAggregate(envelope, submissions) {
         if (proposerPk && pk === proposerPk) continue;
         refSubs.set(addr, sub);
     }
-    let localByPair  = new Map((this._aggregateAll(refSubs) || []).map(a => [a.coinPair, a.price]));
+    let localByPair  = new Map((this.aggregateAll(refSubs) || []).map(a => [a.coinPair, a.price]));
     return localByPair;
 }
 
@@ -193,7 +193,7 @@ function coverageRejects(prices, submissions, localByPair, reject) {
     let proposedPairs = new Set(prices.map(p => p && p.coinPair));
     // Reproduce the LEADER's aggregation before demanding coverage. An honest
     // leader aggregates the full member submission set, so a pair its
-    // `_aggregate` legitimately returned null for (the exactly-2-source
+    // `aggregate` legitimately returned null for (the exactly-2-source
     // deviation gate, an emptied trim) is honestly absent from the proposal.
     // `localByPair` is the proposer-EXCLUDED reference, correct for the value
     // checks above and wrong here: a pair submitted by the leader plus exactly
@@ -202,7 +202,7 @@ function coverageRejects(prices, submissions, localByPair, reject) {
     // disagreed - withholding all 36+ pairs and leaving no snapshot at all
     // (item 4939). Demand coverage only where BOTH views price the pair, which
     // is the suppression case and a strict subset of the old condition.
-    let leaderByPair = new Set((this._aggregateAll(submissions) || []).map(a => a && a.coinPair));
+    let leaderByPair = new Set((this.aggregateAll(submissions) || []).map(a => a && a.coinPair));
     for (let coinPair of localByPair.keys()) {
         if (!leaderByPair.has(coinPair)) continue;
         if (!proposedPairs.has(coinPair)) {

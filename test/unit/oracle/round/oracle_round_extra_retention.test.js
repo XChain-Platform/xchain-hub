@@ -214,7 +214,7 @@ function registerPersistsubmissionsPubkeyFallbacks4Tests11() {
 function registerGetsubmissionsinfoDbError5Tests13() {
         it('returns info without skippedRounds when DB query fails', async function () {
             hub.db.doQuery = sinon.stub().rejects(new Error('db error'));
-            await or._executeRound();
+            await or.executeRound();
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('currentRound');
             expect(info.skippedRounds).to.deep.equal([]);

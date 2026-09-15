@@ -12,8 +12,8 @@
  *
  **********************************************************************
  * priceV0CanonicalAdmission: the PRICE v0 canonical carries the round's ADMISSION MAP,
- * and it is written THREE times: OracleConsensus._buildPriceV0Payload signs it,
- * PriceAggregator._buildPriceV0Payload re-checks every pushed round against it, and
+ * and it is written THREE times: OracleConsensus.buildPriceV0Payload signs it,
+ * PriceAggregator.buildPriceV0Payload re-checks every pushed round against it, and
  * xchain-indexer ed25519.buildPriceV0Payload rebuilds it from the on-chain action. One of
  * the three spelling the map differently is not a stall, it is a fork: the hub collects a
  * quorum over bytes no indexer can reproduce, every round is then unverifiable, and the
@@ -128,8 +128,8 @@ function three(height, map, network) {
     const p = (net === NETWORK) ? armed.producer : armed.inertProducer;
     const i = (net === NETWORK) ? armed.ingest   : armed.inertIngest;
     return {
-        producer: () => p._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), height, map),
-        ingest:   () => i._buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), height, map),
+        producer: () => p.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), height, map),
+        ingest:   () => i.buildPriceV0Payload(ROUND, TIME, pairsCoinKeyed(), height, map),
         indexer:  () => armed.indexer
             ? armed.indexer.buildPriceV0Payload(ROUND, TIME, pairsPairKeyed(), net, height, map)
             : null
@@ -300,7 +300,7 @@ function builtBy(height, map, network) {
 
         function round(overrides) {
             const map     = (overrides && 'admit_blocks' in overrides) ? overrides.admit_blocks : admitMap();
-            const payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
+            const payload = agg.buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
             return Object.assign({
                 round: 5,
                 timestamp: 1700000000,

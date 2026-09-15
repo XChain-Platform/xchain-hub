@@ -166,7 +166,7 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part2() {
     }]]);
     // Buffer a vote keyed by the round before proposing. Digest must match
     // what proposeRound computes over its own aggregation.
-    let aggregated = oracleConsensusEarlyMessageBufferForF7Suite1Oc._aggregateAll(subs);
+    let aggregated = oracleConsensusEarlyMessageBufferForF7Suite1Oc.aggregateAll(subs);
     digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, aggregated);
     oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.proposeRound(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, subs, false, 1000, 1700000000, null, 2);

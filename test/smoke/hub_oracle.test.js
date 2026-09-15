@@ -95,7 +95,7 @@ function oracleAggregationSuite() {
                 { sender: 'ws://v5:10001', prices: [{ coinPair: 'BTC/USD', price: '99999.00000000' }] }
             ]);
 
-            let results = oc._aggregateAll(submissions);
+            let results = oc.aggregateAll(submissions);
             expect(results).to.be.an('array').with.lengthOf(1);
             expect(results[0].coinPair).to.equal('BTC/USD');
 
@@ -127,7 +127,7 @@ function oracleAggregationSuite() {
                 ]}
             ]);
 
-            let results = oc._aggregateAll(submissions);
+            let results = oc.aggregateAll(submissions);
             expect(results).to.be.an('array').with.lengthOf(2);
 
             let btc = results.find(r => r.coinPair === 'BTC/USD');

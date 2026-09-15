@@ -173,24 +173,24 @@ describe('Regression: Oracle Pipeline', function () {
             it('7 submissions → trims 1 from each end @regression-p0', function () {
                 let prices = [90000, 99000, 100000, 100100, 100200, 101000, 110000];
                 let subs = submissionsForPair(prices);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100100.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100100.00000000');
             });
 
             it('10 submissions → trims 1 from each end @regression-p0', function () {
                 let prices = [1, 100, 101, 102, 103, 104, 105, 106, 107, 999];
                 let subs = submissionsForPair(prices);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
             });
 
             it('outlier resistance: extreme value trimmed @regression-p0', function () {
                 let prices = [100000, 100001, 100002, 100003, 100004, 100005, 999999];
                 let subs = submissionsForPair(prices);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
             });
 
             it('all identical values → returns that value @regression-p0', function () {
                 let subs = submissionsForPair([50000, 50000, 50000, 50000, 50000]);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
             });
         });
 }
@@ -198,12 +198,12 @@ describe('Regression: Oracle Pipeline', function () {
     function registerNestedSuite1Part4() {
     describe('REG-ORA-008: Minimum submission count enforcement', function () {
             it('returns null for no submissions @regression-p0', function () {
-                expect(oc._aggregate(new Map(), 'BTC/USD')).to.be.null;
+                expect(oc.aggregate(new Map(), 'BTC/USD')).to.be.null;
             });
 
             it('single submission returns that value @regression-p0', function () {
                 let subs = submissionsForPair([100000]);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
             });
 
             it('ignores zero and negative prices @regression-p0', function () {
@@ -213,7 +213,7 @@ describe('Regression: Oracle Pipeline', function () {
                     { sender: 'v3', prices: [{ coinPair: 'BTC/USD', price: '50000' }] }
                 ];
                 let subs = buildSubmissions(entries);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
             });
 
             it('ignores NaN prices @regression-p0', function () {
@@ -222,7 +222,7 @@ describe('Regression: Oracle Pipeline', function () {
                     { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '42000' }] }
                 ];
                 let subs = buildSubmissions(entries);
-                expect(oc._aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
+                expect(oc.aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
             });
         });
 }
@@ -339,7 +339,7 @@ describe('Regression: Oracle Pipeline', function () {
 }
       // AggregateAll
     function registerNestedSuite1Part11() {
-    describe('_aggregateAll regression', function () {
+    describe('aggregateAll regression', function () {
             it('aggregates all coin pairs from submissions @regression-p1', function () {
                 let entries = [
                     { sender: 'v1', prices: [
@@ -352,7 +352,7 @@ describe('Regression: Oracle Pipeline', function () {
                     ]}
                 ];
                 let subs = buildSubmissions(entries);
-                let result = oc._aggregateAll(subs);
+                let result = oc.aggregateAll(subs);
                 expect(result).to.have.lengthOf(2);
                 let btc = result.find(r => r.coinPair === 'BTC/USD');
                 let ltc = result.find(r => r.coinPair === 'LTC/USD');

@@ -126,7 +126,7 @@ function registerFinalizeround2Tests1() {
             let emitted = null;
             oc.on('round:finalized', (data) => { emitCount++; emitted = data; });
 
-            let storeSpy = sinon.spy(oc, '_storeSnapshot');
+            let storeSpy = sinon.spy(oc, 'storeSnapshot');
 
             await oc.finalizeRound(1);
 
@@ -164,7 +164,7 @@ function registerFinalizeround2Tests4() {
 
             let emitCount = 0;
             oc.on('round:finalized', () => { emitCount++; });
-            let storeSpy = sinon.spy(oc, '_storeSnapshot');
+            let storeSpy = sinon.spy(oc, 'storeSnapshot');
 
             await oc.finalizeRound(1, 900000, 1700000000);
 
@@ -203,7 +203,7 @@ function registerFinalizeround2Tests5() {
             let emitCount = 0;
             let emitted = null;
             oc.on('round:finalized', (data) => { emitCount++; emitted = data; });
-            let storeSpy = sinon.spy(oc, '_storeSnapshot');
+            let storeSpy = sinon.spy(oc, 'storeSnapshot');
 
             await oc.finalizeRound(1, 900000, 1700000000);
 

@@ -74,7 +74,7 @@ function refuseUnusableBatchSnapshot(snapshot, weighted) {
 
 // ADMISSION ERA, PER ROUND, FAIL CLOSED IN BOTH DIRECTIONS. Every round in the
 // admission era must carry its own map and every legacy round must carry none; the
-// batch canonical enforces that inside _buildPriceBatchPayload, which throws for a
+// batch canonical enforces that inside buildPriceBatchPayload, which throws for a
 // mismatch in either direction, and a throw there is a whole-batch refusal here
 // rather than a stored legacy row. The mirror admission activation is in the
 // straddle rule above for the same reason the other two gates are: a window whose
@@ -84,12 +84,12 @@ function refuseUnusableBatchSnapshot(snapshot, weighted) {
 // batch would VERIFY and store its rounds as legacy rows above the very activation
 // that is supposed to bind them by height, the fail-OPEN direction.
 //
-// ONE verification pass over the batch canonical. _buildPriceBatchPayload is the
+// ONE verification pass over the batch canonical. buildPriceBatchPayload is the
 // byte-for-byte twin of the indexer's and OracleConsensus's builders; never
 // inline the JSON here, or the three copies drift and every honest batch fails.
 function buildBatchPayload(head, rounds, network) {
     try {
-        return { payload: this._buildPriceBatchPayload(head.firstRound, head.lastRound, head.btcBlockHeight, rounds) };
+        return { payload: this.buildPriceBatchPayload(head.firstRound, head.lastRound, head.btcBlockHeight, rounds) };
     } catch (e) {
         // The era rule firing: an admission-era round with no map, or a legacy round
         // handed one. Never silent, or an operator reading only "rejected" hunts a

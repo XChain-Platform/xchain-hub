@@ -45,7 +45,7 @@ async function publishThenRehydrate() {
             let h  = makePublisher({ db: db });
             await h.p.start();
             for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
-            await h.p._assembleWindow(0);
+            await h.p.assembleWindow(0);
             expect(h.broadcasts).to.have.length(1);
             expect(Object.keys(db.markers)).to.have.length(6);
 
@@ -77,14 +77,14 @@ const testCase1 = async function () {
 const testCase2 = async function () {
             let { live, seen } = await publishThenRehydrate();
             await live.clearPublishedMarkers([0, 1, 2, 3, 4, 5]);
-            await live._assembleWindow(0);
+            await live.assembleWindow(0);
             expect(seen, 'the recovery re-publish must go out').to.have.length(1);
         };
 
 const testCase3 = async function () {
             let { live, seen } = await publishThenRehydrate();
             live._assembledWindows.delete(0);
-            await live._assembleWindow(0);
+            await live.assembleWindow(0);
             expect(seen, 'nothing may re-publish while the markers stand').to.have.length(0);
         };
 

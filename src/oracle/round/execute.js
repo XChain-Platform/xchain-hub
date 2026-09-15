@@ -47,7 +47,7 @@ module.exports = {
         // A rejection out of a bare timer callback is an unhandled rejection
         // (process exit), so every timer-driven round execution catches here.
         const runRound = () => {
-            this._executeRound().catch(err =>
+            this.executeRound().catch(err =>
                 logger.error(nodeUtil.format('OracleRound: round execution error:', err && err.message ? err.message : err)));
         };
 
@@ -91,7 +91,7 @@ module.exports = {
     // corrupts the round already in flight. The guard is a wrapper rather than inline so
     // the finally cannot be skipped by any of the body's early returns; a rejected fetch
     // must not wedge the oracle for the process lifetime.
-    async _executeRound() {
+    async executeRound() {
         if (this._roundInFlight) {
             logger.warn('Oracle: previous round still in flight; skipping this round tick');
             return;

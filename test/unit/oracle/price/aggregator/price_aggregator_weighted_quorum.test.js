@@ -65,7 +65,7 @@ function makeValidator() {
    // <  STAKE_WEIGHTED_QUORUM mainnet
 
     function roundAt(btcHeight, signers) {
-        let payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
+        let payload = agg.buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
         return {
             round: 5,
             timestamp: 1700000000,

@@ -55,7 +55,7 @@ function oracleConsensusTheClampReferenceIsAlignedTSuite1Row(coinPair, price, ro
 }
 // Round 99 seeded and stored locally, round 100 finalized by the federation
 // without this hub storing it (the row is in price_snapshots but never went
-// through _storeSnapshot), round 101 a runaway aggregate the clamp must bind.
+// through storeSnapshot), round 101 a runaway aggregate the clamp must bind.
 // Returns the price round 101 stored.
 async function oracleConsensusTheClampReferenceIsAlignedTSuite1RunStraddledRound(network, btcBlockHeight) {
   oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.network = network;
@@ -77,7 +77,7 @@ async function oracleConsensusTheClampReferenceIsAlignedTSuite1RunStraddledRound
       price: '999999.00000000'
     }]
   }]));
-  const store = sinon.stub(oracleConsensusTheClampReferenceIsAlignedTSuite1Oc, '_storeSnapshot').resolves();
+  const store = sinon.stub(oracleConsensusTheClampReferenceIsAlignedTSuite1Oc, 'storeSnapshot').resolves();
   await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.finalizeRound(101, btcBlockHeight, 1700000000);
   expect(store.calledOnce, 'round 101 stored').to.be.true;
   return store.firstCall.args[1].find(p => p.coinPair === 'BTC/USD').price;
@@ -125,7 +125,7 @@ function registerOracleConsensusTheClampReferenceIsAlignedTSuite1Part1() {
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([oracleConsensusTheClampReferenceIsAlignedTSuite1Row('BTC/USD', '100.00000000', 100)]);
     await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.seedLastFinalizedPrices();
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resetHistory();
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
     expect(oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.called, 'a current reference must not cost a read').to.be.false;
   });
 }
@@ -134,22 +134,22 @@ function registerOracleConsensusTheClampReferenceIsAlignedTSuite1Part2() {
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([oracleConsensusTheClampReferenceIsAlignedTSuite1Row('BTC/USD', '100.00000000', 50)]);
     await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.seedLastFinalizedPrices();
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resetHistory();
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
     expect(oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.callCount, 'one attempt per round, not one per PROPOSE').to.equal(1);
   });
   it('counts a reference that is still behind after the re-read', async function () {
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([oracleConsensusTheClampReferenceIsAlignedTSuite1Row('BTC/USD', '100.00000000', 50)]);
     await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.seedLastFinalizedPrices();
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
     expect(oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._staleClampReference, 'this hub never received round 100').to.equal(1);
   });
   it('a rejected query keeps the previous reference and never throws into consensus', async function () {
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([oracleConsensusTheClampReferenceIsAlignedTSuite1Row('BTC/USD', '100.00000000', 99)]);
     await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.seedLastFinalizedPrices();
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.rejects(new Error('replica mid-restore'));
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
     expect(oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.getLastFinalizedPrice('BTC/USD'), 'reference survives a failed read').to.equal('100.00000000');
   });
   it('an empty result set does not clear the reference', async function () {
@@ -158,7 +158,7 @@ function registerOracleConsensusTheClampReferenceIsAlignedTSuite1Part2() {
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([oracleConsensusTheClampReferenceIsAlignedTSuite1Row('BTC/USD', '100.00000000', 99)]);
     await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.seedLastFinalizedPrices();
     oracleConsensusTheClampReferenceIsAlignedTSuite1Hub.db.doQuery.resolves([]);
-    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc._refreshLastFinalizedForRound(101);
+    await oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.refreshLastFinalizedForRound(101);
     expect(oracleConsensusTheClampReferenceIsAlignedTSuite1Oc.getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
   });
   it('reports the highest cached round, which is what "behind" is measured against', async function () {
@@ -217,7 +217,7 @@ function registerOracleConsensusTheProposeSideClampReferencSuite2Part1() {
     oracleConsensusTheProposeSideClampReferencSuite2Oc.setValidatorSet(VALIDATORS_3);
     oracleConsensusTheProposeSideClampReferencSuite2Leader = oracleConsensusTheProposeSideClampReferencSuite2Oc._getLeader(oracleConsensusTheProposeSideClampReferencSuite2ROUND);
     oracleConsensusTheProposeSideClampReferencSuite2Pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== oracleConsensusTheProposeSideClampReferencSuite2Leader.addr).addr;
-    oracleConsensusTheProposeSideClampReferencSuite2Refresh = sinon.spy(oracleConsensusTheProposeSideClampReferencSuite2Oc, '_refreshLastFinalizedForRound');
+    oracleConsensusTheProposeSideClampReferencSuite2Refresh = sinon.spy(oracleConsensusTheProposeSideClampReferencSuite2Oc, 'refreshLastFinalizedForRound');
     sinon.stub(console, 'warn');
     sinon.stub(console, 'log');
   });

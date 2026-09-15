@@ -292,7 +292,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
 
 }
 
-// ── OracleRound._executeRound ───────────────────────────────────────────────
+// ── OracleRound.executeRound ───────────────────────────────────────────────
 
 {
 
@@ -309,10 +309,10 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
             return [{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }];
         };
 
-        const a = or._executeRound();           // round 0
+        const a = or.executeRound();           // round 0
         await flush();
         clock.tick(60000);                      // wall clock crosses into round 1
-        await or._executeRound();               // the interval fires on top of round 0
+        await or.executeRound();               // the interval fires on top of round 0
 
         expect(or.currentRound, 'the in-flight round was not renumbered').to.equal(0);
         expect(or.lastExecutedRound, 'the skipped round did not claim a number').to.equal(0);
@@ -330,12 +330,12 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
         clock = sinon.useFakeTimers({ now: or.epochStart + 1000, toFake: ['Date'] });
 
         fetchPrices = sinon.stub().rejects(new Error('all price APIs down'));
-        await or._executeRound();               // caught internally: the round is recorded as skipped
+        await or.executeRound();               // caught internally: the round is recorded as skipped
         expect(or._roundInFlight, 'a failed fetch must not wedge the round timer').to.equal(false);
 
         fetchPrices = sinon.stub().resolves([{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }]);
         clock.tick(60000);
-        await or._executeRound();
+        await or.executeRound();
         expect(pm.broadcast.callCount, 'the next round runs normally').to.equal(1);
     }
 
@@ -358,6 +358,6 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
         it('a rejected price fetch does not wedge the oracle', aRejectedPriceFetchDoesNotTest9);
     }
 
-    describe('OracleRound._executeRound overlap guard', oracleroundExecuteroundOverlapGuardSuite7);
+    describe('OracleRound.executeRound overlap guard', oracleroundExecuteroundOverlapGuardSuite7);
 
 }

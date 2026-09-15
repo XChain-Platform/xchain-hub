@@ -74,7 +74,7 @@ module.exports = {
 
     // Name a pair that STOPPED arriving from a source chain. The PRODUCER path records a
     // durable 'skipped' row for every configured pair a finalized round omitted
-    // (OracleConsensus._storeSnapshot, item #180) and getSubmissionsInfo surfaces those as
+    // (OracleConsensus.storeSnapshot, item #180) and getSubmissionsInfo surfaces those as
     // droppedPairs; this path had no equivalent, so on a mirror hub a pair that quietly
     // stopped appearing in pushed rounds left no row, no counter and no line naming it,
     // while consumers kept serving its previous round and the drop diagnostics read

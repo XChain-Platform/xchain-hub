@@ -92,7 +92,7 @@ function registerOracleRoundSkipsWhenNoPricesTest() {
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
 
         let prevRound = oracle.currentRound;
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         // Round incremented but no broadcast
         expect(oracle.currentRound).to.equal(prevRound + 1);
@@ -112,7 +112,7 @@ function registerOracleRoundSkipsWhenFetchPricesThrowsTest() {
         sinon.stub(oracle.priceFetcher, 'fetchPrices')
             .rejects(new Error('Network error'));
 
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         expect(hub._peerManager.broadcast.called).to.be.false;
         expect(console.error.calledWithMatch('Price fetch failed')).to.be.true;
@@ -176,7 +176,7 @@ function registerNonOracleSubsystemsUnaffectedDuringPriceTest() {
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
 
         // Execute failed oracle round
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         // Hub's other methods remain callable
         expect(hub.applyConfig.called).to.be.false;  // Not touched
@@ -192,13 +192,13 @@ function registerRecoverySourcesComeBackNextRoundTest() {
 
         // Round 1: blackout
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
-        await oracle._executeRound();
+        await oracle.executeRound();
         expect(hub._peerManager.broadcast.called).to.be.false;
 
         // Round 2: recovery
         oracle.priceFetcher.fetchPrices.restore();
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves(SAMPLE_PRICES);
-        await oracle._executeRound();
+        await oracle.executeRound();
 
         expect(hub._peerManager.broadcast.calledOnce).to.be.true;
         let data = hub._peerManager.broadcast.getCall(0).args[1];
@@ -217,7 +217,7 @@ function registerMultipleConsecutiveBlackoutRoundsNoCrashTest() {
 
         // Run 5 consecutive blackout rounds
         for (let i = 0; i < 5; i++) {
-            await oracle._executeRound();
+            await oracle.executeRound();
         }
 
         expect(oracle.currentRound).to.equal(5);

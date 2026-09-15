@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 //
 // Item 5834: _lastFinalizedPrices had exactly two writers (the start-time seed and
-// _storeSnapshot), so every round this hub did not itself store left the clamp
+// storeSnapshot), so every round this hub did not itself store left the clamp
 // reference behind while the federation moved on. These cases pin the two closed
 // writer gaps -- the push-ingest stream and the periodic re-seed -- and the
 // monotonic rule that keeps either one from walking the reference BACKWARDS.
@@ -111,15 +111,15 @@ function registerOracleConsensusClampReferenceWritersItemSuite1Part2() {
   });
 }
 function registerOracleConsensusClampReferenceWritersItemSuite1Part3() {
-  describe('_storeSnapshot monotonicity', function () {
+  describe('storeSnapshot monotonicity', function () {
     it('a late store for an older round leaves the newer reference in place', async function () {
       oracleConsensusClampReferenceWritersItemSuite1Hub.db.doQuery = sinon.stub().resolves([]);
       oracleConsensusClampReferenceWritersItemSuite1Oc.markerPairs = () => [];
-      await oracleConsensusClampReferenceWritersItemSuite1Oc._storeSnapshot(9, [{
+      await oracleConsensusClampReferenceWritersItemSuite1Oc.storeSnapshot(9, [{
         coinPair: 'BTC/USD',
         price: '200.00000000'
       }], 1, '[]', 1, 1);
-      await oracleConsensusClampReferenceWritersItemSuite1Oc._storeSnapshot(4, [{
+      await oracleConsensusClampReferenceWritersItemSuite1Oc.storeSnapshot(4, [{
         coinPair: 'BTC/USD',
         price: '100.00000000'
       }], 1, '[]', 1, 1);
