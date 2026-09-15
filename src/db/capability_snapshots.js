@@ -50,7 +50,7 @@ module.exports = {
     },
 
     // Reads one row from capability_snapshots.
-    // Moved here from src/attestation/batch_publisher.js:783, src/attestation/relay.js:1121, src/cross_chain/bridge_engine.js:1405, src/cross_chain/call_engine.js:1069, src/cross_chain/dex_engine.js:1094, src/oracle/consensus.js:2435, src/oracle/price_aggregator.js:2042, src/consensus/retraction.js:461.
+    // Moved here from src/attestation/batch_publisher/anchor.js:196, src/attestation/relay.js:306, src/cross_chain/bridge/plumbing.js:87, src/cross_chain/call_engine.js:367, src/cross_chain/dex_engine.js:316, src/oracle/consensus.js:123, src/oracle/price_aggregator/capability_persist.js:38, src/consensus/retraction.js:256.
     async getCapabilitySnapshot(snapshot_block, capability, signing_pubkey, source) {
         return this.doQuery('SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1', [snapshot_block, capability, signing_pubkey, source]);
     },
