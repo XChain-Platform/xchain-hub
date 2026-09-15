@@ -44,18 +44,23 @@ function wireFederationSnapshot(hub, quorum) {
     return snapshot;
 }
 
-describe('Chaos: Quorum Loss (CON-2)', function () {
-    this.timeout(15000);
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerPBFTProposalTimesOutWhenQuorumTest() {
 
     it('PBFT proposal times out when quorum is unreachable', async function () {
         // N=4, quorum=3; only 1 peer responds → insufficient
@@ -94,6 +99,9 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         con.stop();
     });
+}
+
+function registerConfigNotAppliedWhenPREPAREQuorumTest() {
 
     it('config not applied when PREPARE quorum met but COMMIT quorum lost', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -137,6 +145,9 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         con.stop();
     });
+}
+
+function registerOracleConsensusSkipsRoundWhenQuorumTest() {
 
     it('oracle consensus skips round when quorum unreachable', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -162,6 +173,9 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         oracleCon.stop();
     });
+}
+
+function registerOracleLeaderProposesButQuorumNeverTest() {
 
     it('oracle leader proposes but quorum never reached → timeout', async function () {
         // Round 4: leader = validators[4 % 4] = validators[0] (this node)
@@ -194,6 +208,9 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         oracleCon.stop();
     });
+}
+
+function registerViewChangeAlsoFailsWhenQuorumTest() {
 
     it('view change also fails when quorum is lost', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -218,6 +235,9 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         con.stop();
     });
+}
+
+function registerQuorumRestoredProposalSucceedsAfterPeersTest() {
 
     it('quorum restored: proposal succeeds after peers reconnect', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -269,4 +289,15 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
 
         con.stop();
     });
+}
+describe('Chaos: Quorum Loss (CON-2)', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerPBFTProposalTimesOutWhenQuorumTest();
+    registerConfigNotAppliedWhenPREPAREQuorumTest();
+    registerOracleConsensusSkipsRoundWhenQuorumTest();
+    registerOracleLeaderProposesButQuorumNeverTest();
+    registerViewChangeAlsoFailsWhenQuorumTest();
+    registerQuorumRestoredProposalSucceedsAfterPeersTest();
 });
