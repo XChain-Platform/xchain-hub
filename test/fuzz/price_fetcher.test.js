@@ -16,19 +16,26 @@ const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
 const gen        = require('./helpers/generators');
 
-describe('Fuzz: PriceFetcher', function () {
 
-    let axiosStub, PriceFetcher, pf;
+
+let axiosStub, PriceFetcher, pf;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         axiosStub    = { get: sinon.stub() };
         PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
         pf           = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerMedianTests() {
 
     // -----------------------------------------------------------------
     // _median()
@@ -78,6 +85,9 @@ describe('Fuzz: PriceFetcher', function () {
             }), { numRuns: 200 });
         });
     });
+}
+
+function registerFetchFromCoinGeckoResponseParsingTests() {
 
     // -----------------------------------------------------------------
     // fetchFromCoinGecko() response parsing
@@ -129,6 +139,9 @@ describe('Fuzz: PriceFetcher', function () {
             ), { numRuns: 50 });
         });
     });
+}
+
+function registerFetchPricesAggregateOutputTests() {
 
     // -----------------------------------------------------------------
     // fetchPrices() aggregate output
@@ -185,4 +198,11 @@ describe('Fuzz: PriceFetcher', function () {
             ), { numRuns: 50 });
         });
     });
+}
+describe('Fuzz: PriceFetcher', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerMedianTests();
+    registerFetchFromCoinGeckoResponseParsingTests();
+    registerFetchPricesAggregateOutputTests();
 });
