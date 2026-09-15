@@ -25,19 +25,19 @@ const {
   Gauge,
   Histogram,
   collectDefaultMetrics
-} = require('../../src/observability/metrics.js');
+} = require('../../../src/observability/metrics.js');
 const {
   createLogShipper,
   readLogEnv,
   redactFields,
   scrubMessage,
   REDACTED
-} = require('../../src/observability/logShipper.js');
+} = require('../../../src/observability/logShipper.js');
 const {
   installObservability,
   readObservabilityEnv,
   routeLabel
-} = require('../../src/observability/index.js');
+} = require('../../../src/observability/index.js');
 
 // A console-shaped sink so tests never write to the mocha output.
 function fakeConsole() {
@@ -70,7 +70,7 @@ function registerObservabilityInstallObservabilitySuite1Part1() {
   // service), so a suite that installs many times has to drop them between
   // cases or it reads the previous case's service label and HTTP series.
   afterEach(function () {
-    require('../../src/observability/index.js')._resetObservability();
+    require('../../../src/observability/index.js')._resetObservability();
   });
   it('reads a default-off config from an empty env', function () {
     const cfg = readObservabilityEnv({});
