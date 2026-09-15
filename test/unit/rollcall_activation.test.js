@@ -40,15 +40,11 @@
  * Every gate keys on the carried BTC EPOCH height on both chains, never a local
  * processing height; see the module header for why.
  */
-
 'use strict';
-
 const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
-
 const local = require('../../src/rollcall_activation.js');
-
 // Sibling resolution, same convention as price_pair_activation.test.js: an
 // explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
@@ -56,7 +52,6 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'rollcall_activation.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'rollcall_activation.js');
-
 const NETWORKS = ['mainnet', 'testnet', 'regtest'];
 const MAPS = [
     'ROLLCALL_ACTIVATION',
@@ -66,7 +61,6 @@ const MAPS = [
     'ROLLCALL_DOGE_MATURITY',
 ];
 const SCALARS = ['ROLLCALL_EVICT_MISSES', 'ROLLCALL_STREAK_LOOKBACK', 'ROLLCALL_REWARD_AMOUNT'];
-
 // ROLLCALL_ACTIVATION.regtest is resolved at REQUIRE time from
 // XC_ROLLCALL_REGTEST_ACTIVATION, so the only honest way to exercise an armed
 // venue is a fresh copy of the module under that environment.
@@ -90,18 +84,16 @@ function loadWithEnv(value){
         else delete require.cache[id];
     }
 }
-
-describe('ROLLCALL activation: hub copy @regression', function () {
-
+{
     // ------------------------------------------------------------------
     // Layer 1: no sibling required. These pins are what make hub-side drift
     // red in a hub-only checkout.
     // ------------------------------------------------------------------
-    describe('the eight consensus values this hub will sign against', function () {
-
-        it('pins the per-network activation heights, regtest INERT by default', function () {
-            // mainnet arms at genesis by the 2026-09-09 ruling: 0 validators, 0 stakes and
-            // 0 roll-calls measured that day, so every epoch below the tip closes empty.
+    let registertheEightConsensusValuesThisHub2;
+    {
+        function pinsThePerNetworkActivationHeightsTest4() {
+            // Mainnet arms at genesis under the consensus rule: 0 validators, 0 stakes and
+            // 0 roll-calls at activation, so every epoch below the tip closes empty.
             // regtest is null until the VENUE opts in; arming it by default
             // wedges every single-coin BTC venue at its first close, because the epoch
             // close has no DOGE peer to ask and defers rather than reading silence as
@@ -110,27 +102,24 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             expect(local.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
             expect(local.ROLLCALL_ACTIVATION.regtest).to.equal(null);
-        });
-
-        it('names the regtest arming height, and puts it on a real epoch boundary', function () {
+        }
+        function namesTheRegtestArmingHeightAndTest5() {
             expect(local.ROLLCALL_REGTEST_ARMED_HEIGHT).to.equal(0);
             expect(local.ROLLCALL_REGTEST_ARMED_HEIGHT % local.ROLLCALL_INTERVAL_BLOCKS.regtest).to.equal(0);
             expect(local.ROLLCALL_REGTEST_ENV).to.equal('XC_ROLLCALL_REGTEST_ACTIVATION');
-        });
-
-        it('arms this hub only when the venue opts in, and never a shared-ledger network', function () {
+        }
+        function armsThisHubOnlyWhenTheTest6() {
             const armed = loadWithEnv('armed');
             expect(armed.ROLLCALL_ACTIVATION.regtest).to.equal(0);
             expect(armed.isRollcallActive(0, 'regtest')).to.equal(true);
-            // The 2026-09-01 ruling scopes the no-tunable-input rule to networks with a
+            // The consensus rule scopes the no-tunable-input constraint to networks with a
             // shared ledger. These two must stay unreachable from the environment.
             expect(armed.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             expect(armed.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
             expect(loadWithEnv('off').ROLLCALL_ACTIVATION.regtest).to.equal(null);
             expect(loadWithEnv('nonsense').ROLLCALL_ACTIVATION.regtest).to.equal(null);
-        });
-
-        it('pins the epoch cadence, accept window, proof delay and DOGE maturity', function () {
+        }
+        function pinsTheEpochCadenceAcceptWindowTest7() {
             expect(local.ROLLCALL_INTERVAL_BLOCKS)
                 .to.deep.equal({ mainnet: 1008, testnet: 1008, regtest: 30 });
             expect(local.ROLLCALL_ACCEPT_WINDOW_BLOCKS)
@@ -139,123 +128,138 @@ describe('ROLLCALL activation: hub copy @regression', function () {
                 .to.deep.equal({ mainnet: 36, testnet: 36, regtest: 2 });
             expect(local.ROLLCALL_DOGE_MATURITY)
                 .to.deep.equal({ mainnet: 60, testnet: 60, regtest: 2 });
-        });
-
-        it('pins K, 2K and the frozen leader reward', function () {
+        }
+        function pinsK2kAndTheFrozenTest8() {
             expect(local.ROLLCALL_EVICT_MISSES).to.equal(2);
             expect(local.ROLLCALL_STREAK_LOOKBACK).to.equal(4);
             // A string, in ANCHOR_REWARD_AMOUNT parity: never a float, never from the wire.
             expect(local.ROLLCALL_REWARD_AMOUNT).to.equal('10.00000000');
-        });
-
-        it('keeps the lookback at exactly 2K, so one edit cannot strand the streak window', function () {
+        }
+        function keepsTheLookbackAtExactly2kTest9() {
             expect(local.ROLLCALL_STREAK_LOOKBACK).to.equal(2 * local.ROLLCALL_EVICT_MISSES);
-        });
-
-        it('keeps the proof delay at 1 or more on every network', function () {
+        }
+        function keepsTheProofDelayAt1Test10() {
             // A block's block_time is written AFTER its own processing, so the window
             // endpoint must be a strictly earlier block than the close.
             for (const net of NETWORKS)
                 expect(local.ROLLCALL_PROOF_DELAY_BLOCKS[net], net + ' proof delay').to.be.at.least(1);
-        });
-
-        it('closes every epoch before the next one opens, on every network', function () {
+        }
+        function closesEveryEpochBeforeTheNextTest11() {
             for (const net of NETWORKS) {
                 const span = local.ROLLCALL_ACCEPT_WINDOW_BLOCKS[net] + local.ROLLCALL_PROOF_DELAY_BLOCKS[net];
                 expect(span, net + ' close offset must stay inside the epoch interval')
                     .to.be.below(local.ROLLCALL_INTERVAL_BLOCKS[net]);
             }
-        });
-
-        it('arms testnet on a real epoch boundary, so no first epoch is skipped', function () {
+        }
+        function armsTestnetOnARealEpochTest12() {
             expect(local.ROLLCALL_ACTIVATION.testnet % local.ROLLCALL_INTERVAL_BLOCKS.testnet).to.equal(0);
-        });
-
-        it('exports every consensus value the indexer reads back', function () {
+        }
+        function exportsEveryConsensusValueTheIndexerTest13() {
             // A dropped export is drift too: the twin would resolve undefined and the
             // parity checks below would compare undefined to undefined and pass.
             for (const name of MAPS.concat(SCALARS))
                 expect(local[name], name + ' is not exported').to.not.equal(undefined);
-        });
-    });
-
-    describe('isRollcallActive, as this hub evaluates it', function () {
-
-        it('arms mainnet at genesis, every height included', function () {
+        }
+        function theEightConsensusValuesThisHubSuite3() {
+            it('pins the per-network activation heights, regtest INERT by default', pinsThePerNetworkActivationHeightsTest4);
+            it('names the regtest arming height, and puts it on a real epoch boundary', namesTheRegtestArmingHeightAndTest5);
+            it('arms this hub only when the venue opts in, and never a shared-ledger network', armsThisHubOnlyWhenTheTest6);
+            it('pins the epoch cadence, accept window, proof delay and DOGE maturity', pinsTheEpochCadenceAcceptWindowTest7);
+            it('pins K, 2K and the frozen leader reward', pinsK2kAndTheFrozenTest8);
+            it('keeps the lookback at exactly 2K, so one edit cannot strand the streak window', keepsTheLookbackAtExactly2kTest9);
+            it('keeps the proof delay at 1 or more on every network', keepsTheProofDelayAt1Test10);
+            it('closes every epoch before the next one opens, on every network', closesEveryEpochBeforeTheNextTest11);
+            it('arms testnet on a real epoch boundary, so no first epoch is skipped', armsTestnetOnARealEpochTest12);
+            it('exports every consensus value the indexer reads back', exportsEveryConsensusValueTheIndexerTest13);
+        }
+        registertheEightConsensusValuesThisHub2 = function registerSuite() {
+            describe('the eight consensus values this hub will sign against', theEightConsensusValuesThisHubSuite3);
+        };
+    }
+    let registerisrollcallactiveAsThisHubEvaluatesIt14;
+    {
+        function armsMainnetAtGenesisEveryHeightTest16() {
             expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(0);
             for (const h of [0, 1, 961000, 99999999])
                 expect(local.isRollcallActive(h, 'mainnet'), 'mainnet inert at ' + h).to.equal(true);
             // Still fails closed on a height it cannot parse, even at threshold 0.
             expect(local.isRollcallActive('abc', 'mainnet')).to.equal(false);
-        });
-
-        it('gates testnet exactly at its pinned height', function () {
+        }
+        function gatesTestnetExactlyAtItsPinnedTest17() {
             expect(local.isRollcallActive(151199, 'testnet')).to.equal(false);
             expect(local.isRollcallActive(151200, 'testnet')).to.equal(true);
             expect(local.isRollcallActive(151201, 'testnet')).to.equal(true);
-        });
-
-        it('is active from genesis on an ARMED regtest venue, epoch 0 included', function () {
+        }
+        function isActiveFromGenesisOnAnTest18() {
             expect(loadWithEnv('armed').isRollcallActive(0, 'regtest')).to.equal(true);
-        });
-
-        it('arms nothing on regtest while the venue has not opted in', function () {
+        }
+        function armsNothingOnRegtestWhileTheTest19() {
             expect(local.isRollcallActive(0, 'regtest')).to.equal(false);
             expect(local.isRollcallActive(30, 'regtest')).to.equal(false);
-        });
-
-        it('fails closed on an unknown network or an unparseable height', function () {
+        }
+        function failsClosedOnAnUnknownNetworkTest20() {
             expect(local.isRollcallActive(5, 'bogusnet')).to.equal(false);
             expect(local.isRollcallActive('abc', 'regtest')).to.equal(false);
             expect(local.isRollcallActive(null, 'regtest')).to.equal(false);
             expect(local.isRollcallActive(undefined, 'regtest')).to.equal(false);
-        });
-    });
-
-    describe('isRollcallEpoch', function () {
-
-        it('treats regtest height 0 as a REAL epoch, not a falsy skip', function () {
+        }
+        function isrollcallactiveAsThisHubEvaluatesItSuite15() {
+            it('arms mainnet at genesis, every height included', armsMainnetAtGenesisEveryHeightTest16);
+            it('gates testnet exactly at its pinned height', gatesTestnetExactlyAtItsPinnedTest17);
+            it('is active from genesis on an ARMED regtest venue, epoch 0 included', isActiveFromGenesisOnAnTest18);
+            it('arms nothing on regtest while the venue has not opted in', armsNothingOnRegtestWhileTheTest19);
+            it('fails closed on an unknown network or an unparseable height', failsClosedOnAnUnknownNetworkTest20);
+        }
+        registerisrollcallactiveAsThisHubEvaluatesIt14 = function registerSuite() {
+            describe('isRollcallActive, as this hub evaluates it', isrollcallactiveAsThisHubEvaluatesItSuite15);
+        };
+    }
+    let registerisrollcallepoch21;
+    {
+        function treatsRegtestHeight0AsATest23() {
             expect(local.isRollcallEpoch(0, 'regtest')).to.equal(true);
-        });
-
-        it('accepts multiples of the interval and rejects everything else', function () {
+        }
+        function acceptsMultiplesOfTheIntervalAndTest24() {
             expect(local.isRollcallEpoch(30, 'regtest')).to.equal(true);
             expect(local.isRollcallEpoch(60, 'regtest')).to.equal(true);
             expect(local.isRollcallEpoch(31, 'regtest')).to.equal(false);
             expect(local.isRollcallEpoch(151200, 'testnet')).to.equal(true);
             expect(local.isRollcallEpoch(151201, 'testnet')).to.equal(false);
-        });
-
-        it('fails closed on a negative height, an unknown network, or garbage', function () {
+        }
+        function failsClosedOnANegativeHeightTest25() {
             expect(local.isRollcallEpoch(-30, 'regtest')).to.equal(false);
             expect(local.isRollcallEpoch(30, 'bogusnet')).to.equal(false);
             expect(local.isRollcallEpoch('abc', 'regtest')).to.equal(false);
-        });
-    });
-
-    describe('epoch close arithmetic', function () {
-
-        it('computes C = E + window + proof delay', function () {
+        }
+        function isrollcallepochSuite22() {
+            it('treats regtest height 0 as a REAL epoch, not a falsy skip', treatsRegtestHeight0AsATest23);
+            it('accepts multiples of the interval and rejects everything else', acceptsMultiplesOfTheIntervalAndTest24);
+            it('fails closed on a negative height, an unknown network, or garbage', failsClosedOnANegativeHeightTest25);
+        }
+        registerisrollcallepoch21 = function registerSuite() {
+            describe('isRollcallEpoch', isrollcallepochSuite22);
+        };
+    }
+    let registerepochCloseArithmetic26;
+    {
+        function computesCEWindowProofDelayTest28() {
             expect(local.rollcallWindowEndHeight(30, 'regtest')).to.equal(42);
             expect(local.rollcallCloseHeight(30, 'regtest')).to.equal(44);
             expect(local.rollcallCloseHeight(151200, 'testnet')).to.equal(151200 + 144 + 36);
-        });
-
-        it('round-trips a close block back to its epoch on an ARMED network', function () {
+        }
+        function roundTripsACloseBlockBackTest29() {
             const armed = loadWithEnv('armed');
             for (const [E, net] of [[30, 'regtest'], [60, 'regtest'], [151200, 'testnet']]) {
                 const C = armed.rollcallCloseHeight(E, net);
                 expect(armed.rollcallEpochClosingAt(C, net), net + ' close ' + C).to.equal(E);
             }
-        });
-
-        it('returns null for a block where no epoch closes', function () {
+        }
+        function returnsNullForABlockWhereTest30() {
             const armed = loadWithEnv('armed');
             expect(armed.rollcallEpochClosingAt(43, 'regtest')).to.equal(null);
             expect(armed.rollcallEpochClosingAt(12345, 'regtest')).to.equal(null);
-        });
-
-        it('closes epochs on a genesis-armed mainnet, and never on an inert regtest', function () {
+        }
+        function closesEpochsOnAGenesisArmedTest31() {
             const C = local.rollcallCloseHeight(1008, 'mainnet');
             expect(C, 'the arithmetic stays well-defined').to.be.a('number');
             expect(local.rollcallEpochClosingAt(C, 'mainnet'),
@@ -266,34 +270,35 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(local.rollcallEpochClosingAt(R, 'regtest'),
                 'an inert network must never close an epoch, which is what keeps it from evicting anyone')
                 .to.equal(null);
-        });
-
-        it('fails closed on garbage rather than returning NaN', function () {
+        }
+        function failsClosedOnGarbageRatherThanTest32() {
             expect(local.rollcallWindowEndHeight('abc', 'regtest')).to.equal(null);
             expect(local.rollcallCloseHeight(30, 'bogusnet')).to.equal(null);
             expect(local.rollcallEpochClosingAt('abc', 'regtest')).to.equal(null);
-        });
-    });
-
+        }
+        function epochCloseArithmeticSuite27() {
+            it('computes C = E + window + proof delay', computesCEWindowProofDelayTest28);
+            it('round-trips a close block back to its epoch on an ARMED network', roundTripsACloseBlockBackTest29);
+            it('returns null for a block where no epoch closes', returnsNullForABlockWhereTest30);
+            it('closes epochs on a genesis-armed mainnet, and never on an inert regtest', closesEpochsOnAGenesisArmedTest31);
+            it('fails closed on garbage rather than returning NaN', failsClosedOnGarbageRatherThanTest32);
+        }
+        registerepochCloseArithmetic26 = function registerSuite() {
+            describe('epoch close arithmetic', epochCloseArithmeticSuite27);
+        };
+    }
     // ------------------------------------------------------------------
     // Layer 2: the twin. Skips when the sibling is absent, which is exactly
     // why layer 1 above carries the literal pins.
     // ------------------------------------------------------------------
-    describe('parity with the xchain-indexer twin', function () {
-        before(function () {
-            if (!fs.existsSync(TWIN_PATH)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
-                this.skip();
-            }
-        });
-
+    let registerparityWithTheXchainIndexerTwin33;
+    {
         // Byte-identity apart from the ONE header line in which each copy names
         // the other, which is the only difference the module header sanctions.
         // Normalizing that line rather than skipping the comparison is what keeps
         // comment drift (which carries the reasoning a future editor relies on)
         // inside the guard.
-        it('is byte-identical to xchain-indexer/src/rollcall_activation.js, twin-reference line aside', function () {
+        function isByteIdenticalToXchainIndexerTest35() {
             const TWIN_REF = /xchain-\S+\/src\/rollcall_activation\.js/;
             const norm = (p) => fs.readFileSync(p, 'utf8')
                 .split(/\r?\n/)
@@ -302,15 +307,13 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(norm(LOCAL_PATH)).to.equal(norm(TWIN_PATH),
                 'the hub copy has drifted from the indexer twin; the hub would sign roll calls '
                 + 'for epochs the indexer does not judge the same way, and eviction forks at the boundary');
-        });
-
-        it('agrees with the twin on every consensus value', function () {
+        }
+        function agreesWithTheTwinOnEveryTest36() {
             const twin = require(TWIN_PATH);
             for (const name of MAPS.concat(SCALARS))
                 expect(local[name], name + ' drifted between hub and indexer').to.deep.equal(twin[name]);
-        });
-
-        it('agrees with the twin predicate across the boundaries and the failure cases', function () {
+        }
+        function agreesWithTheTwinPredicateAcrossTest37() {
             const twin = require(TWIN_PATH);
             const cases = [
                 [0, 'mainnet'], [1008, 'mainnet'],
@@ -331,16 +334,38 @@ describe('ROLLCALL activation: hub copy @regression', function () {
                 expect(local.rollcallEpochClosingAt(h, net), 'rollcallEpochClosingAt disagreed at ' + at)
                     .to.equal(twin.rollcallEpochClosingAt(h, net));
             }
-        });
-    });
-
+        }
+        function parityWithTheXchainIndexerTwinSuite34() {
+            before(function () {
+                if (!fs.existsSync(TWIN_PATH)) {
+                    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
+                    this.skip();
+                }
+            });
+            it('is byte-identical to xchain-indexer/src/rollcall_activation.js, twin-reference line aside', isByteIdenticalToXchainIndexerTest35);
+            it('agrees with the twin on every consensus value', agreesWithTheTwinOnEveryTest36);
+            it('agrees with the twin predicate across the boundaries and the failure cases', agreesWithTheTwinPredicateAcrossTest37);
+        }
+        registerparityWithTheXchainIndexerTwin33 = function registerSuite() {
+            describe('parity with the xchain-indexer twin', parityWithTheXchainIndexerTwinSuite34);
+        };
+    }
     // The third copy, xchain-documentation/protocol/constants.js, is the map of
     // record. The hub is NOT the repo that diffs against it: rollcallActivation
     // .test.js in xchain-indexer already owns that assertion, and duplicating it
-    // here would report one open drift as two. That check was RED on
-    // ROLLCALL_ACTIVATION.regtest from 2026-08-31, when docs de1bb30 ruled regtest
-    // INERT (null) and neither vendored twin was propagated. It is closed in
-    // all three copies at once: regtest resolves from XC_ROLLCALL_REGTEST_ACTIVATION,
-    // ships inert, and arms at ROLLCALL_REGTEST_ARMED_HEIGHT when a two-chain venue
-    // opts in. Whoever changes that edits three files and the pins above together.
-});
+    // here would report one open drift as two. The current assertion keeps
+    // ROLLCALL_ACTIVATION.regtest synchronized with the documentation record: regtest
+    // is INERT (null) unless a venue opts in, and neither vendored twin may drift.
+    // All three copies resolve regtest from XC_ROLLCALL_REGTEST_ACTIVATION, ship inert,
+    // and arm at ROLLCALL_REGTEST_ARMED_HEIGHT when a two-chain venue opts in.
+    // Whoever changes that edits all three consensus files and the literal pins above together.
+    function rollcallActivationHubCopyRegressionSuite1() {
+        registertheEightConsensusValuesThisHub2();
+        registerisrollcallactiveAsThisHubEvaluatesIt14();
+        registerisrollcallepoch21();
+        registerepochCloseArithmetic26();
+        registerparityWithTheXchainIndexerTwin33();
+    }
+    describe('ROLLCALL activation: hub copy @regression', rollcallActivationHubCopyRegressionSuite1);
+}
