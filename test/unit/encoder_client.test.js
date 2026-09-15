@@ -37,16 +37,7 @@ function okResponse(result) {
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('EncoderClient', function () {
-
-    beforeEach(function () {
-        loadModule();
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
+function registerConstructorTests() {
     // ── Constructor ─────────────────────────────────────────────────────────
 
     describe('constructor', function () {
@@ -84,10 +75,10 @@ describe('EncoderClient', function () {
             expect(c._rpcId).to.equal(0);
         });
     });
+}
 
-    // ── _call ───────────────────────────────────────────────────────────────
-
-    describe('_call()', function () {
+// ── _call ───────────────────────────────────────────────────────────────
+function registerCallRequestTests() {
         it('throws when encoderUrl is empty', async function () {
             let c = new EncoderClient('', '');
             let threw = false;
@@ -132,7 +123,9 @@ describe('EncoderClient', function () {
             let opts = axiosStub.post.firstCall.args[2];
             expect(opts.headers).to.not.have.property('x-api-key');
         });
+}
 
+function registerCallResultTests() {
         it('returns the result field on success', async function () {
             axiosStub.post.resolves({ data: { result: { utxos: [{ txid: 'abc', vout: 0 }] } } });
             let c = new EncoderClient('http://enc/rpc', '');
@@ -169,18 +162,20 @@ describe('EncoderClient', function () {
             }
             expect(threw).to.be.true;
         });
+}
 
-        // The encoder answers auth, rate-limit and batch-guard failures with a non-2xx
-        // status AND a JSON-RPC error body. axios rejects before the 2xx error check
-        // below it runs, so the specific reason used to be replaced by the bare status
-        // message on every publisher surface and in every dead-letter record.
-        function httpError(status, encoderBody) {
-            let e = new Error('Request failed with status code ' + status);
-            e.isAxiosError = true;
-            e.response = { status: status, data: encoderBody };
-            return e;
-        }
+// The encoder answers auth, rate-limit and batch-guard failures with a non-2xx
+// status AND a JSON-RPC error body. axios rejects before the 2xx error check
+// below it runs, so the specific reason was once replaced by the bare status
+// message on every publisher surface and in every dead-letter record.
+function httpError(status, encoderBody) {
+    let e = new Error('Request failed with status code ' + status);
+    e.isAxiosError = true;
+    e.response = { status: status, data: encoderBody };
+    return e;
+}
 
+function registerHttpErrorTests() {
         it('surfaces the encoder reason for 401 / 429 / 400 bodies', async function () {
             const cases = [
                 [401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized' } }, 'Unauthorized'],
@@ -223,11 +218,13 @@ describe('EncoderClient', function () {
             try { await c._call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 404');
         });
+}
 
-        // create_tx reports its operational failures with code -32010 and a stable
-        // data.reason so a caller can branch on the condition rather than parse a
-        // message. Both failure branches must surface it, or which one the encoder
-        // happens to use decides whether the code exists.
+// create_tx reports its operational failures with code -32010 and a stable
+// data.reason so a caller can branch on the condition rather than parse a
+// message. Both failure branches must surface it, or which one the encoder
+// happens to use decides whether the code exists.
+function registerStructuredErrorTests() {
         it('mirrors the encoder code and data.reason on the 200-with-error-body branch', async function () {
             axiosStub.post.resolves({ data: { error: {
                 code: -32010, message: 'insufficient funds',
@@ -262,18 +259,20 @@ describe('EncoderClient', function () {
             // keep reading the HTTP status.
             expect(caught.response.status).to.equal(400);
         });
+}
 
-        // The 5xx rule is what keeps an ambiguous send from being re-labelled
-        // retry-safe; attaching the structured fields must not disturb it.
-        //
-        // Unlike the create_tx fixture above, this body is DELIBERATELY synthetic and
-        // must not be copied as a wire example. The encoder never sends it: broadcast_tx
-        // collapses every failure to -32010's sibling -32603 with no `data` at all, its
-        // own busy body is -32029 with no reason, and UTXO_TRACKER_STALE reaches a caller
-        // only through create_tx's -32010. The fixture exists to prove the passthrough is
-        // driven by the STATUS and not by the body, so it carries fields the real 5xx
-        // lacks on purpose: a consumer that branches on rpcData.reason after a
-        // broadcast_tx would read undefined in production.
+// The 5xx rule is what keeps an ambiguous send from being re-labelled
+// retry-safe; attaching the structured fields must not disturb it.
+//
+// Unlike the create_tx fixture above, this body is DELIBERATELY synthetic and
+// must not be copied as a wire example. The encoder never sends it: broadcast_tx
+// collapses every failure to -32010's sibling -32603 with no `data` at all, its
+// own busy body is -32029 with no reason, and UTXO_TRACKER_STALE reaches a caller
+// only through create_tx's -32010. The fixture exists to prove the passthrough is
+// driven by the STATUS and not by the body, so it carries fields the real 5xx
+// lacks on purpose: a consumer that branches on rpcData.reason after a
+// broadcast_tx would read undefined in production.
+function registerAmbiguousErrorTest() {
         it('a 5xx keeps its untouched message and its ambiguous classification', async function () {
             axiosStub.post.rejects(httpError(503, { jsonrpc: '2.0', id: null, error: {
                 code: -32000, message: 'Server busy, retry shortly', data: { reason: 'UTXO_TRACKER_STALE' }
@@ -285,10 +284,20 @@ describe('EncoderClient', function () {
             expect(caught.rpcData.reason).to.equal('UTXO_TRACKER_STALE');
             expect(isAmbiguousSendError(caught)).to.equal(true);
         });
+}
+
+function registerCallTests() {
+    describe('_call()', function () {
+        registerCallRequestTests();
+        registerCallResultTests();
+        registerHttpErrorTests();
+        registerStructuredErrorTests();
+        registerAmbiguousErrorTest();
     });
+}
 
-    // ── getUtxos ─────────────────────────────────────────────────────────────
-
+// ── getUtxos ─────────────────────────────────────────────────────────────
+function registerGetUtxoTests() {
     describe('getUtxos()', function () {
         it('delegates to _call with get_utxos and address param', async function () {
             axiosStub.post.resolves(okResponse({ utxos: [] }));
@@ -322,9 +331,10 @@ describe('EncoderClient', function () {
             expect(await c.getUtxos('D1')).to.equal(null);
         });
     });
+}
 
-    // ── createTx ─────────────────────────────────────────────────────────────
-
+// ── createTx ─────────────────────────────────────────────────────────────
+function registerCreateTxTests() {
     describe('createTx()', function () {
         it('delegates to _call with create_tx', async function () {
             axiosStub.post.resolves(okResponse({ psbt: 'cHNidP8B...' }));
@@ -336,9 +346,10 @@ describe('EncoderClient', function () {
             expect(body.params).to.equal(params);
         });
     });
+}
 
-    // ── broadcastTx ───────────────────────────────────────────────────────────
-
+// ── broadcastTx ───────────────────────────────────────────────────────────
+function registerBroadcastTxTests() {
     describe('broadcastTx()', function () {
         it('delegates to _call with broadcast_tx and tx_hex param', async function () {
             axiosStub.post.resolves(okResponse({ txid: 'deadbeef' }));
@@ -349,4 +360,20 @@ describe('EncoderClient', function () {
             expect(body.params.tx_hex).to.equal('aabbcc');
         });
     });
+}
+
+describe('EncoderClient', function () {
+    beforeEach(function () {
+        loadModule();
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    registerConstructorTests();
+    registerCallTests();
+    registerGetUtxoTests();
+    registerCreateTxTests();
+    registerBroadcastTxTests();
 });
