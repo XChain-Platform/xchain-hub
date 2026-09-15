@@ -20,18 +20,18 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 
-const swq       = require('../../src/stake_weighted_quorum.js');
-const snapWrite = require('../../src/lib/capability_snapshot_write.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const swq       = require('../../../src/stake_weighted_quorum.js');
+const snapWrite = require('../../../src/lib/capability_snapshot_write.js');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
-const OracleConsensus       = require('../../src/oracle/consensus.js');
-const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
-const CrossChainDexEngine   = require('../../src/cross_chain/dex_engine.js');
-const CrossChainCallEngine  = require('../../src/cross_chain/call_engine.js');
-const RetractionConsensus   = require('../../src/consensus/retraction.js');
-const AttestationRelay      = require('../../src/attestation/relay.js');
-const PriceAggregator       = require('../../src/oracle/price_aggregator.js');
-const AttestationBatchPublisher = require('../../src/attestation/batch_publisher.js');
+const OracleConsensus       = require('../../../src/oracle/consensus.js');
+const StateCheckpointEngine = require('../../../src/anchor/checkpoint_engine.js');
+const CrossChainDexEngine   = require('../../../src/cross_chain/dex_engine.js');
+const CrossChainCallEngine  = require('../../../src/cross_chain/call_engine.js');
+const RetractionConsensus   = require('../../../src/consensus/retraction.js');
+const AttestationRelay      = require('../../../src/attestation/relay.js');
+const PriceAggregator       = require('../../../src/oracle/price_aggregator.js');
+const AttestationBatchPublisher = require('../../../src/attestation/batch_publisher.js');
 
 // Count mode is only reachable BELOW a network's stake-weighted activation height, and
 // mainnet is the one network whose height is not 0. The premise is asserted, not assumed:

@@ -13,7 +13,7 @@
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
-const { DB_METHODS }     = require('../helpers/mockHub');
+const { DB_METHODS }     = require('../../helpers/mockHub');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Stub out capabilities/index.js so we don't hit real self-tests
@@ -34,7 +34,7 @@ function loadModule(selfTestResults) {
             )
         };
     }
-    CapabilityRegistry = proxyquire('../../src/validators/capability_registry', {
+    CapabilityRegistry = proxyquire('../../../src/validators/capability_registry', {
         '../capabilities/index.js': selfTestStubs
     });
 }

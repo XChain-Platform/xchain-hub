@@ -32,7 +32,7 @@ function installSuiteHooks1() {
     beforeEach(function () {
             axiosStub = { post: sinon.stub() };
             logStub = { debug: sinon.stub(), info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
-            CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', {
+            CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', {
                 axios: axiosStub,
                 '../observability': { getLogger: () => logStub, '@global': true }
             });

@@ -24,9 +24,9 @@
 const { expect }           = require('chai');
 const fs                   = require('fs');
 const path                 = require('path');
-const snapWrite            = require('../../src/lib/capability_snapshot_write.js');
-const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine.js');
-const { DB_METHODS }       = require('../helpers/mockHub.js');
+const snapWrite            = require('../../../src/lib/capability_snapshot_write.js');
+const StateCheckpointEngine = require('../../../src/anchor/checkpoint_engine.js');
+const { DB_METHODS }       = require('../../helpers/mockHub.js');
 
 const BLOCK      = 953200;
 const CAPABILITY = 'oracle_publish';
@@ -92,9 +92,9 @@ it('writes no statement at all for an empty set', async function () {
     it('every capability_snapshots writer goes through the shared helper', function () {
         // Paths relative to this suite, so each one names the writer's file wherever
         // its feature directory keeps it.
-        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/cross_chain/dex_engine.js',
-                         '../../src/cross_chain/call_engine.js', '../../src/oracle/consensus.js',
-                         '../../src/consensus/retraction.js', '../../src/attestation/relay.js'];
+        const WRITERS = ['../../../src/anchor/checkpoint_engine.js', '../../../src/cross_chain/dex_engine.js',
+                         '../../../src/cross_chain/call_engine.js', '../../../src/oracle/consensus.js',
+                         '../../../src/consensus/retraction.js', '../../../src/attestation/relay.js'];
         let offenders = [];
         for (const name of WRITERS) {
             const src = fs.readFileSync(path.join(__dirname, name), 'utf8');

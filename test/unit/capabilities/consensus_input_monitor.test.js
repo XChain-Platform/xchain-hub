@@ -21,7 +21,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
 const { ConsensusInputMonitor, REASONS, classifyFetchError } =
-    require('../../src/validators/consensus_input_monitor.js');
+    require('../../../src/validators/consensus_input_monitor.js');
 
 // Injected clock + log sink: the monitor's throttle and streak are
 // time-based, and a real clock would make these tests either slow or flaky.
@@ -340,7 +340,7 @@ function registerAlertThresholdTests() {
 describe('CapabilitySnapshot consensus-input alarms', function () {
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', { axios: axiosStub });
         // Silence the loud operator lines; the assertions read the monitor.
         sinon.stub(console, 'error');
     });

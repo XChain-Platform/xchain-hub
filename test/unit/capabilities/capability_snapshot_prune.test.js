@@ -11,8 +11,8 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const prune = require('../../src/validators/capability_snapshot_prune.js');
-const capabilitySnapshotQueries = require('../../src/db/capability_snapshots.js');
+const prune = require('../../../src/validators/capability_snapshot_prune.js');
+const capabilitySnapshotQueries = require('../../../src/db/capability_snapshots.js');
 
 // Minimal stand-in for src/db.js: it records the SQL it is handed and serves
 // rows out of an in-memory capability_snapshots table, so the tests exercise

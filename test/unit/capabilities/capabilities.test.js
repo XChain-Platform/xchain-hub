@@ -21,7 +21,7 @@ const proxyquire = require('proxyquire');
 describe('capabilities/cross_chain selfTest()', function () {
     let crossChain;
     before(function () {
-        crossChain = require('../../src/capabilities/cross_chain');
+        crossChain = require('../../../src/capabilities/cross_chain');
     });
 
     it('returns ok=false when cross_chain config is missing', async function () {
@@ -177,7 +177,7 @@ it('returns ok=false when oracle_publish config is missing', async function () {
 
 describe('capabilities/oracle_publish selfTest()', function () {
     before(function () {
-        oraclePub = require('../../src/capabilities/oracle_publish');
+        oraclePub = require('../../../src/capabilities/oracle_publish');
     });
 
     registerOraclePublishCoreTests();
@@ -201,7 +201,7 @@ describe('capabilities/oracle_publish selfTest()', function () {
 describe('capabilities/price selfTest()', function () {
     let price;
     before(function () {
-        price = require('../../src/capabilities/price');
+        price = require('../../../src/capabilities/price');
     });
 
     it('returns ok=false when price config is missing', async function () {
@@ -246,7 +246,7 @@ describe('capabilities/attestation selfTest()', function () {
     function loadAttestation(healthCheckResult) {
         let httpGetStub = { healthCheck: sinon.stub().resolves(healthCheckResult || { ok: true }) };
         // hub-credentials returns ok=false so llm probe is skipped unless explicitly enabled
-        return proxyquire('../../src/capabilities/attestation', {
+        return proxyquire('../../../src/capabilities/attestation', {
             '../providers/http_get.js': httpGetStub,
             '../lib/hub_credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
         });
@@ -279,7 +279,7 @@ describe('capabilities/attestation selfTest()', function () {
         // We can't easily add fake providers; just verify partial failure case with http_get
         // by having healthCheck throw
         let throwStub = { healthCheck: sinon.stub().rejects(new Error('probe died')) };
-        let attestation = proxyquire('../../src/capabilities/attestation', {
+        let attestation = proxyquire('../../../src/capabilities/attestation', {
             '../providers/http_get.js': throwStub,
             '../lib/hub_credentials':  { resolveHubLlmAuth: () => ({ ok: false }) }
         });
@@ -294,7 +294,7 @@ describe('capabilities/attestation selfTest()', function () {
 
 describe('capabilities/index.js', function () {
     it('exports all four capability modules', function () {
-        let idx = require('../../src/capabilities/index.js');
+        let idx = require('../../../src/capabilities/index.js');
         expect(idx).to.have.property('price');
         expect(idx).to.have.property('cross_chain');
         expect(idx).to.have.property('oracle_publish');

@@ -40,7 +40,7 @@ function installSuiteHooks1() {
             // injected rather than spied: proxyquire hands other suites their own
             // copy of that module, and a spy on this file's copy then sees nothing.
             logStub = { debug: sinon.stub(), info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
-            CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', {
+            CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', {
                 axios: axiosStub,
                 // @global so the monitor module this one loads logs to the same stub;
                 // its auth and ALERT lines are half of what these tests assert on.
