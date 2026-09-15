@@ -113,14 +113,7 @@ function enforcedOver(catalogue, wanted) {
 const NARROW = ['snapshot_block', 'capability', 'signing_pubkey'];
 const WIDE   = '(snapshot_block, capability, signing_pubkey, source)';
 
-describe('Database._widenUniqueKey: a failed widen never unconstrains the table', function () {
-
-    beforeEach(function () {
-        sinon.stub(console, 'log');
-        sinon.stub(console, 'error');
-    });
-    afterEach(function () { sinon.restore(); });
-
+function registerWidenOrderingTests() {
     it('widens the key in place on the happy path, leaving no temporary index behind', async function () {
         const { db, catalogue } = makeDb({
             columns: [...NARROW, 'source', 'id'],
@@ -158,7 +151,9 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         expect(catalogue.indexes.get('uq_cap_snap')).to.deep.equal(NARROW);
         expect(enforcedOver(catalogue, NARROW)).to.be.true;
     });
+}
 
+function registerWidenFailureTests() {
     it('names the table, the index and the repair statement when it skips the widen', async function () {
         const { db } = makeDb({ columns: [...NARROW, 'id'], indexes: { uq_cap_snap: NARROW } });
         await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
@@ -200,7 +195,9 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         expect(enforcedOver(catalogue, [...NARROW, 'source'])).to.be.true;
         expect(catalogue.indexes.has('uq_cap_snap')).to.be.true;
     });
+}
 
+function registerInterruptedWidenTests() {
     // Failure point: re-adding under the real name after the old key is gone. The
     // temporary key is still there and still unique, so the table stays constrained
     // and the hub is allowed to boot.
@@ -231,7 +228,9 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         expect([...catalogue.indexes.keys()]).to.deep.equal(['uq_cap_snap']);
         expect(catalogue.indexes.get('uq_cap_snap')).to.include('source');
     });
+}
 
+function registerUnconstrainedTableTest() {
     // The fail-closed guard, end to end: the temporary key builds, the old key
     // drops, and then the table loses BOTH (the re-add fails and the temporary key
     // goes with it). That is the state the old code shipped silently. Here it must
@@ -262,7 +261,9 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         expect(thrown.message).to.match(/ADD UNIQUE KEY uq_cap_snap/);
         expect(enforcedOver(catalogue, NARROW), 'the table is unconstrained').to.be.false;
     });
+}
 
+function registerUniqueKeyGuardTests() {
     it('the guard passes, with a warning, while only the temporary key is live', async function () {
         const { db, catalogue } = makeDb({
             columns: [...NARROW, 'source', 'id'],
@@ -299,4 +300,18 @@ describe('Database._widenUniqueKey: a failed widen never unconstrains the table'
         await db._widenUniqueKey('capability_snapshots', 'uq_cap_snap', 'source', WIDE);
         expect(catalogue.sqlLog.some(s => /^ALTER TABLE/i.test(s)), 'DDL ran on an already-wide key').to.be.false;
     });
+}
+
+describe('Database._widenUniqueKey: a failed widen never unconstrains the table', function () {
+    beforeEach(function () {
+        sinon.stub(console, 'log');
+        sinon.stub(console, 'error');
+    });
+    afterEach(function () { sinon.restore(); });
+
+    registerWidenOrderingTests();
+    registerWidenFailureTests();
+    registerInterruptedWidenTests();
+    registerUnconstrainedTableTest();
+    registerUniqueKeyGuardTests();
 });
