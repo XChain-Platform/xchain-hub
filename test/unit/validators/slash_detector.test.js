@@ -12,9 +12,9 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const SlashDetector  = require('../../src/validators/slash_detector');
-const { createMockHub }     = require('../helpers/mockHub');
-const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
+const SlashDetector  = require('../../../src/validators/slash_detector');
+const { createMockHub }     = require('../../helpers/mockHub');
+const { VALIDATORS_3, buildSubmissions } = require('../../helpers/fixtures');
 
 let hub, pm, sd;
 
@@ -74,7 +74,7 @@ it('uses defaults when config is empty', function () {
             expect(sd2.missedRoundsThreshold).to.equal(30);
         });
 it('binds the default slash band to the federation-uniform oracle co-sign band', function () {
-            let { ORACLE_DEVIATION_THRESHOLD } = require('../../src/constants');
+            let { ORACLE_DEVIATION_THRESHOLD } = require('../../../src/constants');
             let sd2 = new SlashDetector(createMockHub({ p2pConfig: {} }));
             expect(sd2.deviationThreshold).to.equal(ORACLE_DEVIATION_THRESHOLD);
         });

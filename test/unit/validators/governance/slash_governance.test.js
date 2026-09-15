@@ -14,9 +14,9 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const SlashGovernance = require('../../src/validators/slash_governance');
+const SlashGovernance = require('../../../../src/validators/slash_governance');
 const { parseSlashPenaltyParam, computeEvidenceHash, SLASH_PENALTY_PREFIX } = SlashGovernance;
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub } = require('../../../helpers/mockHub');
 
 const PK   = 'ab'.repeat(32);
 const HASH = 'cd'.repeat(32);
@@ -309,8 +309,8 @@ function registerSlashGovernanceIntegrationTest() {
 
     describe('integration with Governance proposal:finalized', function () {
         it('a passed SLASH_PENALTY proposal executes the penalty via the event', async function () {
-            const Governance = require('../../src/validators/governance');
-            const { VALIDATORS_3 } = require('../helpers/fixtures');
+            const Governance = require('../../../../src/validators/governance');
+            const { VALIDATORS_3 } = require('../../../helpers/fixtures');
 
             let ghub = createMockHub();
             ghub._identity.getPubkeyHex.returns(VALIDATORS_3[0].pubkey);

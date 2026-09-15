@@ -13,7 +13,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
+const { waitUntil } = require('../../../helpers/waitUntil');
 
 const PK = 'a'.repeat(64);
 
@@ -61,7 +61,7 @@ async function bootController(slashDetector) {
         HUB_ALLOW_UNAUTHENTICATED: 'true'
     });
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),
@@ -155,7 +155,7 @@ function registerSlashRpcContractTests() {
         // SENSITIVE_READ_METHODS would 401 the explorer whenever HUB_API_KEY is set.
         const fs  = require('fs');
         const path = require('path');
-        const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../../src/api.js'), 'utf8');
         const writeBlock = src.slice(src.indexOf('WRITE_METHODS'), src.indexOf(']', src.indexOf('WRITE_METHODS')));
         const sensIdx    = src.indexOf('SENSITIVE_READ_METHODS = new Set(');
         const sensBlock  = src.slice(sensIdx, src.indexOf(')', sensIdx));
@@ -164,7 +164,7 @@ function registerSlashRpcContractTests() {
     });
 
     it('is documented in the published OpenRPC contract as a non-auth method', function () {
-        const doc = require('../../docs/openrpc.json');
+        const doc = require('../../../../docs/openrpc.json');
         const m = doc.methods.find(x => x.name === 'getslashproposals');
         expect(m, 'regenerate with: node docs/openrpc.build.js').to.be.an('object');
         expect(m['x-auth']).to.equal(undefined);

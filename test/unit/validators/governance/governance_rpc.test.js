@@ -20,12 +20,12 @@ const {
   expect
 } = require('chai');
 const proxyquire = require('proxyquire').noCallThru();
-const Governance = require('../../src/validators/governance');
+const Governance = require('../../../../src/validators/governance');
 const {
   createMockHub,
   DB_METHODS
-} = require('../helpers/mockHub');
-const CapabilityRegistry = proxyquire('../../src/validators/capability_registry', {
+} = require('../../../helpers/mockHub');
+const CapabilityRegistry = proxyquire('../../../../src/validators/capability_registry', {
   '../capabilities/index.js': {}
 });
 function capabilityRegistryListStateSuite1MakeDb() {

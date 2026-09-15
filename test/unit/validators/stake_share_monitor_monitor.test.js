@@ -13,7 +13,7 @@
 const { expect } = require('chai');
 const {
     StakeShareMonitor, evaluateStakeShare, LEVELS
-} = require('../../src/validators/stake_share_monitor.js');
+} = require('../../../src/validators/stake_share_monitor.js');
 
 function rows(spec) {
     return spec.map((s, i) => ({ pubkey: 'pk' + i, source: s.source, weight: String(s.weight) }));

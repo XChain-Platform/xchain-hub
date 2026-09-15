@@ -10,8 +10,8 @@
 // contact legal@dankest.llc.
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ProviderRegistry   = require('../../src/validators/provider_registry');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const ProviderRegistry   = require('../../../src/validators/provider_registry');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ it('lists all known provider ids', function () {
 // ── DEFAULTS export ──────────────────────────────────────────────────────
 describe('DEFAULTS export', function () {
 it('exports DEFAULTS object', function () {
-            let { DEFAULTS } = require('../../src/validators/provider_registry');
+            let { DEFAULTS } = require('../../../src/validators/provider_registry');
             expect(DEFAULTS).to.have.property('http_get');
             expect(DEFAULTS).to.have.property('llm');
             expect(DEFAULTS.llm.additional_config).to.have.property('judge_model');

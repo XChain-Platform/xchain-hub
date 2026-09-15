@@ -21,12 +21,12 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-const OracleRound        = require('../../src/oracle/round');
-const OracleConsensus    = require('../../src/oracle/consensus');
-const CapabilityRegistry = require('../../src/validators/capability_registry');
-const StakeWeightFeed    = require('../../src/validators/stake_weight_feed');
-const { createMockHub }  = require('../helpers/mockHub');
-const { makeValidator }  = require('../helpers/fixtures');
+const OracleRound        = require('../../../src/oracle/round');
+const OracleConsensus    = require('../../../src/oracle/consensus');
+const CapabilityRegistry = require('../../../src/validators/capability_registry');
+const StakeWeightFeed    = require('../../../src/validators/stake_weight_feed');
+const { createMockHub }  = require('../../helpers/mockHub');
+const { makeValidator }  = require('../../helpers/fixtures');
 
 // Testnet's STAKE_WEIGHTED_QUORUM activation is block 0, so any real height is
 // weighted. CapabilitySnapshot buries every read by the canonical reorg buffer.
@@ -109,7 +109,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
                 return countResult(body.params.capability, body.params.block_index);
             return { data: { result: null } };
         }) };
-        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
+        CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', { axios: axiosStub });
 
         hub = createMockHub({ p2pConfig: { HUB_NETWORK: 'testnet', ORACLE_EPOCH_START: 1704067200000 } });
         db  = hub.db;

@@ -21,7 +21,7 @@ const { expect } = require('chai');
 
 const {
     evaluateStakeShare, normalizeSources, isAlertLevel, LEVELS
-} = require('../../src/validators/stake_share_monitor.js');
+} = require('../../../src/validators/stake_share_monitor.js');
 
 // One row per staking source, all equal weight, as the outage's set was.
 function rows(spec) {

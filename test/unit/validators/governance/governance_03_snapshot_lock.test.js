@@ -12,10 +12,10 @@
 
 const sinon        = require('sinon');
 const { expect }   = require('chai');
-const Governance   = require('../../src/validators/governance');
-const ValidatorIdentity = require('../../src/validators/identity');
-const { createMockHub }   = require('../helpers/mockHub');
-const { VALIDATORS_3 }    = require('../helpers/fixtures');
+const Governance   = require('../../../../src/validators/governance');
+const ValidatorIdentity = require('../../../../src/validators/identity');
+const { createMockHub }   = require('../../../helpers/mockHub');
+const { VALIDATORS_3 }    = require('../../../helpers/fixtures');
 
 let hub, gov, kps, valset, snapshotJson;
 

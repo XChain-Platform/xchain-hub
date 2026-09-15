@@ -12,9 +12,9 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const SlashDetector  = require('../../src/validators/slash_detector');
-const { createMockHub }     = require('../helpers/mockHub');
-const { VALIDATORS_3 } = require('../helpers/fixtures');
+const SlashDetector  = require('../../../src/validators/slash_detector');
+const { createMockHub }     = require('../../helpers/mockHub');
+const { VALIDATORS_3 } = require('../../helpers/fixtures');
 
 let hub, pm, sd;
 

@@ -35,14 +35,14 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const Governance = require('../../src/validators/governance');
-const ValidatorIdentity = require('../../src/validators/identity');
+const Governance = require('../../../../src/validators/governance');
+const ValidatorIdentity = require('../../../../src/validators/identity');
 const {
   createMockHub
-} = require('../helpers/mockHub');
+} = require('../../../helpers/mockHub');
 const {
   VALIDATORS_3
-} = require('../helpers/fixtures');
+} = require('../../../helpers/fixtures');
 const PROPOSAL = 'gov:MIN_STAKE:1';
 let governanceGOVVOTEREPLAYSuite1Hub, governanceGOVVOTEREPLAYSuite1Gov, governanceGOVVOTEREPLAYSuite1Kp, governanceGOVVOTEREPLAYSuite1Idn;
 function governanceGOVVOTEREPLAYSuite1Inbound(vote, seq, signWithSeq) {

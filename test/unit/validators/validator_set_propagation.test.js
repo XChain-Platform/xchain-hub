@@ -21,8 +21,8 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const XChainHub  = require('../../src/XChainHub');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const XChainHub  = require('../../../src/XChainHub');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 const PUBKEY = 'ab'.repeat(32);
 const SET    = [{ addr: 'ws://v1:10001', signing_pubkey: 'aa'.repeat(32) }];

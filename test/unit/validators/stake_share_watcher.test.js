@@ -18,8 +18,8 @@
 
 const { expect } = require('chai');
 
-const StakeShareWatcher = require('../../src/validators/stake_share_watcher.js');
-const { LEVELS } = require('../../src/validators/stake_share_monitor.js');
+const StakeShareWatcher = require('../../../src/validators/stake_share_watcher.js');
+const { LEVELS } = require('../../../src/validators/stake_share_monitor.js');
 
 const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];
 

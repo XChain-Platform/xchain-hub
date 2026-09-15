@@ -18,8 +18,8 @@
 
 const { expect } = require('chai');
 
-const ProviderRegistry = require('../../src/validators/provider_registry.js');
-const SpendGuard       = require('../../src/lib/spend_guard.js');
+const ProviderRegistry = require('../../../src/validators/provider_registry.js');
+const SpendGuard       = require('../../../src/lib/spend_guard.js');
 
 // Every provider the registry pre-seeds, with the hooks a round calls on it.
 const PROVIDERS = ['http_get', 'llm'];
@@ -30,7 +30,7 @@ describe('provider registry module resolution', function () {
     // getModule() installs config into llm and rebuilds its spend guard, both module
     // state. Loading a fresh llm instance and putting the cached one and its guard
     // registration back afterwards keeps that state out of every later suite.
-    const LLM_PATH = require.resolve('../../src/providers/llm.js');
+    const LLM_PATH = require.resolve('../../../src/providers/llm.js');
     let cachedLlm;
     let priorGuard;
 

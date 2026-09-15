@@ -12,8 +12,8 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ProviderRegistry   = require('../../src/validators/provider_registry');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const ProviderRegistry   = require('../../../src/validators/provider_registry');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 
 function makeHub(overrides) {
@@ -316,7 +316,7 @@ it('agrees with the live governance apply path on the anchored floor', async fun
             // and one that restarts and replays it from governance_proposals must resolve
             // the SAME floor at the same block; a floor read by only one of the two paths
             // is a cross-hub divergence.
-            const XChainHub = require('../../src/XChainHub');
+            const XChainHub = require('../../../src/XChainHub');
             let proposal = { provider_id: 'llm', min_stake_xchain: '30000',
                              additional_config: { approved_models: ['z'] } };
 

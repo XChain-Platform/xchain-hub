@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect }          = require('chai');
-const ValidatorIdentity   = require('../../src/validators/identity');
+const ValidatorIdentity   = require('../../../src/validators/identity');
 
 // Pre-generate a keypair for reuse across tests
 let keypair;

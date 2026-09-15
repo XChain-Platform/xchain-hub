@@ -38,9 +38,9 @@
 const crypto     = require('crypto');
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const SlashDetector    = require('../../src/validators/slash_detector');
-const SlashGovernance  = require('../../src/validators/slash_governance');
-const { createMockHub } = require('../helpers/mockHub');
+const SlashDetector    = require('../../../../src/validators/slash_detector');
+const SlashGovernance  = require('../../../../src/validators/slash_governance');
+const { createMockHub } = require('../../../helpers/mockHub');
 
 const PK  = 'a'.repeat(64);
 const PK2 = 'b'.repeat(64);

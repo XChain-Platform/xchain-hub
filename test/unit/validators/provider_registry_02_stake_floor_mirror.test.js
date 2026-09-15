@@ -12,8 +12,8 @@
 
 const sinon              = require('sinon');
 const { expect }         = require('chai');
-const ProviderRegistry   = require('../../src/validators/provider_registry');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const ProviderRegistry   = require('../../../src/validators/provider_registry');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 
 function makeHub(overrides) {
