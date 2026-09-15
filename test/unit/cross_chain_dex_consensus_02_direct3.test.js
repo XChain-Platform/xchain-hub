@@ -175,207 +175,191 @@ async function rootSuiteDrivePropose(bus, victim, mid, proposedRow) {
     }
   });
 }
-function registerDirect1Part1() {
-  it('N=4: reaches 2f+1 and every node finalizes the same match with verifying sigs', async function () {
+function registerDirect3Part1() {
+  it('followers ADOPT a validated leader canonical whose leader-choice fields differ (regression: per-hub effective_time deadlock)', async function () {
+    // Every hub pre-builds its row at discovery with its OWN clock second and
+    // chain-tip view. Byte-equality once silently dropped the leader's
+    // PROPOSE, deadlocking the round (live finding: 3-hub XCALL relay,
+    // 2026-06-11). Each node here proposes a row with a different
+    // effective_time; the round must still finalize on the LEADER's
+    // canonical with quorum verifying sigs on every node.
     let bus = rootSuiteBuildMesh(4);
     await rootSuiteStartAll(bus);
-    let mid = 'aa'.repeat(32),
-      row = sampleRow(mid);
-    await rootSuiteProposeAll(bus, mid, row);
+    let mid = 'a1'.repeat(32);
+    let snap = {
+      validators: rootSuiteValidatorsOf(bus),
+      count: 4
+    };
+    for (let k = 0; k < bus.nodes.length; k++) {
+      let row = Object.assign(sampleRow(mid), {
+        effective_time: 1700000000 + k
+      });
+      await bus.nodes[k].consensus.propose(mid, {
+        row,
+        snapshot: snap
+      });
+    }
     await waitUntil(() => bus.nodes.every(nd => nd.finalized.length === 1), {
-      label: 'every node to finalize the match'
+      label: 'every node to finalize on the leader canonical'
     });
-    expect(bus.nodes.every(nd => nd.finalized.length === 1)).to.be.true;
-    let ev = bus.nodes[0].finalized[0];
-    expect(ev.signatures.length).to.be.at.least(3); // quorum 2f+1 = 3
-    let canon = canonicalMatch(row);
-    expect(ev.signatures.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
-    expect(bus.nodes.every(nd => nd.finalized[0].matchId === mid)).to.be.true;
+    expect(bus.nodes.every(nd => nd.finalized.length === 1), 'every node finalizes').to.be.true;
+    // All nodes converged on ONE canonical (the leader's), and every
+    // emitted signature verifies against it (no empty-signature rows).
+    let leaderPk = rootSuiteLeaderPubkey(bus, mid, 0);
+    let leaderIdx = bus.nodes.findIndex(nd => nd.pubkey === leaderPk);
+    let leaderCanon = canonicalMatch(Object.assign(sampleRow(mid), {
+      effective_time: 1700000000 + leaderIdx
+    }));
+    for (let nd of bus.nodes) {
+      let ev = nd.finalized[0];
+      expect(canonicalMatch(ev.row)).to.equal(leaderCanon);
+      expect(ev.signatures.length, 'collected sigs on node ' + nd.i).to.be.at.least(3);
+      expect(ev.signatures.every(s => ValidatorIdentity.verify(leaderCanon, s.sig, s.pubkey))).to.be.true;
+    }
   });
-  it('N=1: quorum 0 collapses to immediate self-sign + finalize', async function () {
-    let bus = rootSuiteBuildMesh(1);
+}
+function registerDirect3Part2() {
+  it('FINAL_SYNC: a straggler that missed a finalized round catches up via state transfer (regression: lost callback)', async function () {
+    // Live finding: one hub missed a result round (validation raced the
+    // confirmation depth); the others finalized and thereafter ignored the
+    // round, so the straggler's mirror NEVER got the row. Its VIEW_CHANGE
+    // heartbeat must now elicit a FINAL_SYNC carrying the row + quorum
+    // signatures, which it verifies and finalizes from.
+    this.timeout(5000);
+    let partitioned = true;
+    let bus = rootSuiteBuildMesh(4, {
+      roundTimeoutMs: 150,
+      drop: (self, other) => partitioned && (self.i === 0 || other.i === 0)
+    });
     await rootSuiteStartAll(bus);
-    let mid = 'bb'.repeat(32),
+    let mid = 'c3'.repeat(32),
       row = sampleRow(mid);
     await rootSuiteProposeAll(bus, mid, row);
+    await waitUntil(() => [1, 2, 3].every(i => bus.nodes[i].finalized.length === 1), {
+      timeoutMs: 4000,
+      label: 'the three connected nodes to finalize without the straggler'
+    });
+
+    // nodes 1-3 finalized without node 0
+    expect([1, 2, 3].every(i => bus.nodes[i].finalized.length === 1)).to.be.true;
+    expect(bus.nodes[0].finalized.length).to.equal(0);
+
+    // heal the partition; node 0's view-change timer fires and a finalized
+    // peer answers with FINAL_SYNC
+    partitioned = false;
     await waitUntil(() => bus.nodes[0].finalized.length === 1, {
-      label: 'the single-node round to self-finalize'
+      timeoutMs: 4000,
+      label: 'the healed straggler to catch up via FINAL_SYNC'
     });
+    expect(bus.nodes[0].finalized.length, 'straggler caught up').to.equal(1);
     let ev = bus.nodes[0].finalized[0];
-    expect(ev).to.exist;
-    expect(ev.signatures.length).to.equal(1);
-    expect(ValidatorIdentity.verify(canonicalMatch(row), ev.signatures[0].sig, ev.signatures[0].pubkey)).to.be.true;
+    expect(ev.signatures.length).to.be.at.least(3); // the round's quorum proof
+    let canon = canonicalMatch(ev.row);
+    expect(ev.signatures.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
   });
-
-  // M-13: after a round finalizes, its id sits in the finalized ring and propose()
-  // is a no-op (steady-state dedup). A reorg that RETRACTS the row then re-confirms
-  // the action must be able to re-run the round; forgetFinalized drops the ring
-  // entry so the next propose() finalizes a FRESH round instead of stranding the
-  // call/match in 'retracted' forever.
 }
-function registerDirect1Part2() {
-  // M-13: after a round finalizes, its id sits in the finalized ring and propose()
-  // is a no-op (steady-state dedup). A reorg that RETRACTS the row then re-confirms
-  // the action must be able to re-run the round; forgetFinalized drops the ring
-  // entry so the next propose() finalizes a FRESH round instead of stranding the
-  // call/match in 'retracted' forever.
-  it('forgetFinalized lets a retracted-then-reconfirmed round re-finalize (M-13)', async function () {
-    let bus = rootSuiteBuildMesh(1);
+function registerDirect3Part3() {
+  it('guard: a FINAL_SYNC without a quorum of verifying signatures is ignored', async function () {
+    let bus = rootSuiteBuildMesh(4, {
+      drop: () => true
+    }); // isolated victim
     await rootSuiteStartAll(bus);
-    let nd = bus.nodes[0];
-    let mid = 'cc'.repeat(32),
+    let mid = 'd4'.repeat(32),
       row = sampleRow(mid);
-    await nd.consensus.propose(mid, {
+    let victim = bus.nodes[0];
+    await victim.consensus.propose(mid, {
       row,
       snapshot: {
         validators: rootSuiteValidatorsOf(bus),
-        count: 1
+        count: 4
       }
     });
-    await waitUntil(() => nd.finalized.length === 1, {
-      label: 'the first round to finalize'
-    });
-    expect(nd.finalized.length).to.equal(1);
-    expect(nd.consensus.finalized.has(mid)).to.equal(true);
 
-    // Without forgetting, a re-propose is suppressed by the finalized ring.
-    await nd.consensus.propose(mid, {
+    // one real signature (below quorum 3) + one garbage signature
+    let signer = bus.nodes[1];
+    victim.consensus._handleMessage({
+      type: 'XDEX_MATCH_FINAL_SYNC',
+      sender: signer.pubkey,
+      data: {
+        matchId: mid,
+        row,
+        signatures: [{
+          pubkey: signer.pubkey,
+          sig: signer.identity.sign(canonicalMatch(row))
+        }, {
+          pubkey: bus.nodes[2].pubkey,
+          sig: 'ab'.repeat(64)
+        }]
+      }
+    });
+    // FINAL_SYNC is handled synchronously, so the verdict is already in.
+    expect(victim.finalized.length).to.equal(0);
+    expect(victim.consensus.pending.get(mid).finalized).to.equal(false);
+  });
+}
+function registerDirect3Part4() {
+  it('FINAL_SYNC: a straggler finalizes under the PROOF view, not its own rotated view', async function () {
+    // The catch-up path verifies the offered proof against the canonical rebuilt at
+    // the PROOF's view, so it adopts that view and not only row/canonical/signatures.
+    // A pending.view left at whatever the straggler rotated to is what finalize
+    // emits and markFinalized caches, so with the EQUIV header active the node
+    // publishes a quorum proof under a view none of its signatures cover and re-serves
+    // the same wrong view to the NEXT straggler. Every other FINAL_SYNC test runs at
+    // view 0, where the two views coincide and nothing can diverge.
+    const equivCanonical = (r, view) => canonicalMatch(r) + '|EQ|' + Number(view || 0);
+    let bus = rootSuiteBuildMesh(4, {
+      drop: () => true,
+      canonical: equivCanonical
+    }); // isolated victim
+    await rootSuiteStartAll(bus);
+    let mid = 'd5'.repeat(32),
+      row = sampleRow(mid);
+    let victim = bus.nodes[0];
+    await victim.consensus.propose(mid, {
       row,
       snapshot: {
         validators: rootSuiteValidatorsOf(bus),
-        count: 1
+        count: 4
       }
     });
-    // The finalized ring is consulted inside propose(), so the duplicate is already
-    // suppressed here; a settle would only add dead time to a decided outcome.
-    expect(nd.finalized.length).to.equal(1, 'ring must suppress a duplicate finalize');
 
-    // Retraction clears the ring; the next propose runs a fresh round.
-    expect(nd.consensus.forgetFinalized(mid)).to.equal(true);
-    expect(nd.consensus.finalized.has(mid)).to.equal(false);
-    await nd.consensus.propose(mid, {
-      row,
-      snapshot: {
-        validators: rootSuiteValidatorsOf(bus),
-        count: 1
+    // Drive the isolated straggler ahead of the proof: it view-changed twice while
+    // the rest of the federation finalized at view 0.
+    victim.consensus.pending.get(mid).view = 2;
+
+    // A real quorum proof (3 of 4) taken at view 0.
+    let signers = [bus.nodes[1], bus.nodes[2], bus.nodes[3]];
+    let proofCanon = equivCanonical(row, 0);
+    // _handleMessage fires the FINAL_SYNC branch and forgets it (the handler is
+    // async: an offered row can declare a different snapshot, which has to be
+    // re-resolved before its proof is measured), so drive the handler directly and
+    // let its completion be the verdict.
+    await victim.consensus.handleFinalSync({
+      type: 'XDEX_MATCH_FINAL_SYNC',
+      sender: signers[0].pubkey,
+      data: {
+        matchId: mid,
+        row,
+        view: 0,
+        signatures: signers.map(nd => ({
+          pubkey: nd.pubkey,
+          sig: nd.identity.sign(proofCanon)
+        }))
       }
     });
-    await waitUntil(() => nd.finalized.length === 2, {
-      label: 'the re-proposed round to finalize a second time'
-    });
-    expect(nd.finalized.length).to.equal(2, 're-confirmed action must re-finalize after retraction');
+    expect(victim.finalized.length, 'the straggler caught up').to.equal(1);
+    let ev = victim.finalized[0];
+    expect(ev.view, 'finalized under the proof view, not the local rotated view').to.equal(0);
+    expect(ev.signatures.length).to.be.at.least(3);
+    expect(ev.signatures.every(s => ValidatorIdentity.verify(equivCanonical(ev.row, ev.view), s.sig, s.pubkey)), 'every published signature verifies under the view it was published at').to.be.true;
+    expect(victim.consensus.finalizedRows.get(mid).view, 'the cached state-transfer payload re-serves the proof view to the next straggler').to.equal(0);
   });
 }
-function registerDirect1Part3() {
-  it('does NOT self-finalize over an EMPTY snapshot (bootstrap/mirror-lag wedge guard)', async function () {
-    // quorum 0 from an empty snapshot must NOT collapse to the single-operator
-    // fast path: a 1-sig match no populated-snapshot peer will ratify wedges the
-    // order and forks this hub's ledger. The round must abort and stay retryable.
-    let bus = rootSuiteBuildMesh(1);
-    await rootSuiteStartAll(bus);
-    let mid = 'ab'.repeat(32),
-      row = sampleRow(mid);
-    let abandoned = [];
-    bus.nodes[0].consensus.on('match:abandoned', ev => abandoned.push(String(ev.matchId)));
-    await bus.nodes[0].consensus.propose(mid, {
-      row,
-      snapshot: {
-        validators: [],
-        count: 0
-      }
-    });
-    // The refusal announces itself: match:abandoned is what releases the engine slot.
-    await waitUntil(() => abandoned.includes(mid.toLowerCase()), {
-      label: 'the empty-snapshot round to abandon'
-    });
-    expect(bus.nodes[0].finalized.length).to.equal(0);
-    // Aborted, not left half-open: a later propose with a real snapshot can retry.
-    expect(bus.nodes[0].consensus.pending.has(mid.toLowerCase())).to.be.false;
-    // The refuse must emit match:abandoned so the engine releases its _inflight slot;
-    // without it the engine (which added round_id to _inflight before propose) never
-    // re-attempts the call/match on this hub even once the snapshot populates.
-    expect(abandoned).to.include(mid.toLowerCase());
-  });
-  it('fails CLOSED over a TRUNCATED weighted snapshot and releases the round (SWQ-TRUNC)', async function () {
-    // At/above STAKE_WEIGHTED_QUORUM (regtest = genesis) a snapshot that overflowed
-    // VALIDATOR_QUERY_LIMIT under-counts summed stake S; every indexer consumer fails
-    // closed on it, so the hub must refuse rather than mirror a row all indexers reject.
-    let bus = rootSuiteBuildMesh(4);
-    await rootSuiteStartAll(bus);
-    let mid = 'ad'.repeat(32),
-      row = sampleRow(mid); // regtest snapshot_block 100 -> weighted
-    let abandoned = [];
-    for (let nd of bus.nodes) nd.consensus.on('match:abandoned', ev => abandoned.push(String(ev.matchId)));
-    let snap = {
-      validators: rootSuiteValidatorsOf(bus),
-      count: bus.nodes.length
-    };
-    snap.validators.truncated = true; // indexer hit VALIDATOR_QUERY_LIMIT
-    for (let nd of bus.nodes) await nd.consensus.propose(mid, {
-      row,
-      snapshot: snap
-    });
-    await waitUntil(() => abandoned.filter(m => m === mid.toLowerCase()).length === bus.nodes.length, {
-      label: 'every node to abandon the truncated weighted round'
-    });
-    expect(bus.nodes.every(nd => nd.finalized.length === 0), 'no node finalizes a truncated weighted round').to.be.true;
-    expect(bus.nodes.every(nd => nd.consensus.pending.has(mid.toLowerCase()) === false), 'round released, retryable').to.be.true;
-    expect(abandoned.filter(m => m === mid.toLowerCase()).length).to.equal(bus.nodes.length, 'each node releases its inflight slot');
-  });
-}
-function registerDirect1Part4() {
-  it('a TRUNCATED count snapshot (below STAKE_WEIGHTED_QUORUM) still finalizes (deterministic cap)', async function () {
-    // The count path is proceed-on-truncation: the cap is cross-hub deterministic, so
-    // quorum stays consistent fleet-wide (CapabilitySnapshot.getQuorum). Only the
-    // weighted path fails closed.
-    let bus = rootSuiteBuildMesh(4);
-    await rootSuiteStartAll(bus);
-    let mid = 'ae'.repeat(32),
-      row = sampleRow(mid);
-    row.network = 'mainnet';
-    row.snapshot_block = 100; // below 961000 -> count path
-    let snap = {
-      validators: rootSuiteValidatorsOf(bus),
-      count: bus.nodes.length
-    };
-    snap.validators.truncated = true;
-    for (let nd of bus.nodes) await nd.consensus.propose(mid, {
-      row,
-      snapshot: snap
-    });
-    await waitUntil(() => bus.nodes.every(nd => nd.finalized.length === 1), {
-      label: 'the count path to finalize on every node'
-    });
-    expect(bus.nodes.every(nd => nd.finalized.length === 1), 'count path proceeds on a deterministic truncation cap').to.be.true;
-  });
-  it('does NOT self-finalize when the sole snapshot validator is someone else', async function () {
-    let bus = rootSuiteBuildMesh(1);
-    await rootSuiteStartAll(bus);
-    let mid = 'ac'.repeat(32),
-      row = sampleRow(mid);
-    let stranger = ValidatorIdentity.generate().pubkeyHex.toLowerCase();
-    await bus.nodes[0].consensus.propose(mid, {
-      row,
-      snapshot: {
-        validators: [{
-          pubkey: stranger,
-          source: 'src:' + stranger,
-          weight: '1',
-          amount: '1'
-        }],
-        count: 1
-      }
-    });
-    // propose() resolves the elected-signer check inline, so the refusal is decided
-    // by the time it returns.
-    expect(bus.nodes[0].finalized.length).to.equal(0);
-  });
-}
-function registerDirect1() {
-  registerDirect1Part1();
-  registerDirect1Part2();
-  registerDirect1Part3();
-  registerDirect1Part4();
+function registerDirect3() {
+  registerDirect3Part1();
+  registerDirect3Part2();
+  registerDirect3Part3();
+  registerDirect3Part4();
 }
 describe('CrossChainDexConsensus (PBFT mesh)', function () {
   afterEach(async function () {
@@ -388,5 +372,5 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
   // Build n consensus instances over a shared in-memory gossip bus.
   // opts.validate(self) → bool (default true); opts.drop(self,other,type,data) → bool;
   // opts.roundTimeoutMs → view-change timeout.
-  registerDirect1();
+  registerDirect3();
 });
