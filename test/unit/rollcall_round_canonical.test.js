@@ -28,6 +28,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const RollcallRound     = require('../../src/rollcall/round.js');
+const wirePart          = require('../../src/rollcall/round/wire.js');
 const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
@@ -342,8 +343,19 @@ describe('RollcallRound size statics dispatch through the class', function () {
 
     const NAMES = ['v1HeaderBytes', 'maxPairsForGates', 'chunkPairs'];
     const saved = {};
-    beforeEach(function () { for (const n of NAMES) saved[n] = RollcallRound[n]; });
-    afterEach(function () { Object.assign(RollcallRound, saved); });
+    // wire.js dispatches through the class round.js bound when last evaluated, and
+    // a suite that proxyquires round.js rebinds it to a copy the require cache no
+    // longer holds, so each case binds the class it reassigns and restores after.
+    let boundBefore;
+    beforeEach(function () {
+        for (const n of NAMES) saved[n] = RollcallRound[n];
+        boundBefore = wirePart.roundClass();
+        wirePart.bindRoundClass(RollcallRound);
+    });
+    afterEach(function () {
+        Object.assign(RollcallRound, saved);
+        wirePart.bindRoundClass(boundBefore);
+    });
 
     it('maxPairsForGates sizes the header through RollcallRound.v1HeaderBytes', function () {
         RollcallRound.v1HeaderBytes = () => RollcallRound.ACTION_DATA_CEILING - 5 * RollcallRound.BYTES_PER_PAIR;
