@@ -46,7 +46,7 @@ module.exports = {
     // SAME set the BTC close uses as R(E).
     //
     // The height passed is the RAW epoch. CapabilitySnapshot applies
-    // CANONICAL_REORG_BUFFER itself (_buriedBlockIndex), so this resolves at
+    // CANONICAL_REORG_BUFFER itself (buriedBlockIndex), so this resolves at
     // E - 6 = buriedSnapshotBlock(E, network), which is where the chain resolves
     // R(E). Passing an already-buried height here would bury twice and elect from
     // E - 12, forking the hub's leader from the one the close pays.

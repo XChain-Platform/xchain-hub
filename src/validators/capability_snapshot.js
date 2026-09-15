@@ -124,7 +124,7 @@ class CapabilitySnapshot {
     //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
     // Returns null when the indexer can't be reached or returns an error.
     async getSnapshot(capability, blockIndex) {
-        blockIndex = this._buriedBlockIndex(blockIndex);
+        blockIndex = this.buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
 
         // Resolve this hub's MIN_STAKE, or refuse the read when a live registry has
@@ -180,7 +180,7 @@ class CapabilitySnapshot {
     // aggregate stake), so the quorum tally can dedupe by source. Cache key is
     // disjoint from the count snapshot ('w:' prefix). Returns null on indexer error.
     async getWeightSnapshot(capability, blockIndex) {
-        blockIndex = this._buriedBlockIndex(blockIndex);
+        blockIndex = this.buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
 
         // min_stake rides in the cache key for the same reason as getSnapshot:
@@ -241,7 +241,7 @@ class CapabilitySnapshot {
     // where quorum is over all stakers, not a capability subset. Cache key is
     // disjoint from capability snapshots (capability='*').
     async getActiveValidatorSnapshot(blockIndex) {
-        blockIndex = this._buriedBlockIndex(blockIndex);
+        blockIndex = this.buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
         let key = '*:' + this.netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
@@ -286,7 +286,7 @@ class CapabilitySnapshot {
     // used by Consensus (config-change PBFT) to weight quorum by stake. Cache key is
     // disjoint ('wa:' prefix). Returns null on indexer error.
     async getActiveWeightSnapshot(blockIndex) {
-        blockIndex = this._buriedBlockIndex(blockIndex);
+        blockIndex = this.buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
         let key = 'wa:' + this.netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
@@ -356,7 +356,7 @@ class CapabilitySnapshot {
     // The buried height feeds the cache key, the indexer RPC and the echo
     // guard alike, so the snapshot is labeled with the height it truly
     // represents.
-    _buriedBlockIndex(blockIndex) {
+    buriedBlockIndex(blockIndex) {
         if (blockIndex === undefined || blockIndex === null) return null;
         let n = Number(blockIndex);
         if (!Number.isFinite(n)) return null;

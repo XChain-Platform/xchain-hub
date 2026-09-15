@@ -61,7 +61,7 @@ module.exports = {
             return { ok: false, error: 'response_hash does not match the stored body' };
 
         // The capability snapshot at the request's own declared height. The BURIAL is
-        // applied inside CapabilitySnapshot (_buriedBlockIndex subtracts
+        // applied inside CapabilitySnapshot (buriedBlockIndex subtracts
         // CANONICAL_REORG_BUFFER from every height it is handed), which is why the
         // DECLARED height is passed here and why this must not bury it a second time:
         // AttestationRound passes the declared height too, so this resolves exactly

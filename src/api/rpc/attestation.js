@@ -164,7 +164,7 @@ function responsibleSetRpc(ctx) {
                 let redundancy    = Math.max(1, Number(request.redundancy) || 1);
                 let weighted      = swq.isStakeWeightedQuorumActive(declaredBlock, hub.network);
 
-                // Buried inside CapabilitySnapshot itself (_buriedBlockIndex), same as the
+                // Buried inside CapabilitySnapshot itself (buriedBlockIndex), same as the
                 // gossip verifier at AttestationResponseMirror.js: pass the DECLARED height,
                 // never bury it again here.
                 let cs = hub.capabilitySnapshot;
