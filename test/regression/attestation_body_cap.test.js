@@ -28,21 +28,24 @@ const { createMockHub }    = require('../helpers/mockHub');
 // message and sustain memory-amplification pressure on the hub.
 // -----------------------------------------------------------------
 
-describe('Regression: Attestation body_b64 size cap', function () {
+const PROVIDER_ID  = 'http_get';
 
-    const PROVIDER_ID  = 'http_get';
-    const MAX_RESP     = 32768;
-    const MAX_B64      = Math.ceil(MAX_RESP * 1.4);   // 45876
-    // A body that clears BOTH gates: the wire-side base64 ceiling above and the
-    // protocol body cap (ATTEST_RESPONSE_BODY_MAX_BYTES, 8189 decoded bytes)
-    // that every follower applies before it will sign. 10916 base64 chars
-    // decode to 8187 bytes; MAX_B64 decodes to 34407 and is wire-legal but
-    // over the body cap, so it can no longer stand in for "legitimate".
-    const LEGIT_B64    = 10916;
-    const SENDER_PK    = 'cd'.repeat(32);
+const MAX_RESP     = 32768;
 
-    let hub, consensus;
+const MAX_B64      = Math.ceil(MAX_RESP * 1.4);
+   // 45876
+// A body that clears BOTH gates: the wire-side base64 ceiling above and the
+// protocol body cap (ATTEST_RESPONSE_BODY_MAX_BYTES, 8189 decoded bytes)
+// that every follower applies before it will sign. 10916 base64 chars
+// decode to 8187 bytes; MAX_B64 decodes to 34407 and is wire-legal but
+// over the body cap, so it can no longer stand in for "legitimate".
+const LEGIT_B64    = 10916;
 
+const SENDER_PK    = 'cd'.repeat(32);
+
+let hub, consensus;
+
+function registerSuitePart1() {
     beforeEach(function () {
         hub = createMockHub();
         let providerRegistry = {
@@ -64,27 +67,31 @@ describe('Regression: Attestation body_b64 size cap', function () {
             finalized:   false
         });
     });
+}
 
+function registerSuitePart2() {
     afterEach(function () {
         for (let [, p] of consensus.pending) { if (p.timer) clearTimeout(p.timer); }
         sinon.restore();
     });
+}
 
-    function envelope(type, b64Len) {
-        return {
-            type,
-            data: {
-                requestId:  'rid',
-                providerId: PROVIDER_ID,
-                body_b64:   'A'.repeat(b64Len),
-                meta:       '',
-                status:     'ok',
-                sig_pubkey: SENDER_PK,
-                sig:        'ee'.repeat(64)
-            }
-        };
-    }
+function envelope(type, b64Len) {
+    return {
+        type,
+        data: {
+            requestId:  'rid',
+            providerId: PROVIDER_ID,
+            body_b64:   'A'.repeat(b64Len),
+            meta:       '',
+            status:     'ok',
+            sig_pubkey: SENDER_PK,
+            sig:        'ee'.repeat(64)
+        }
+    };
+}
 
+function registerSuitePart3() {
     describe('maxBodyB64Length()', function () {
         it('derives the cap from max_response_bytes ×1.4 @regression-p1', function () {
             expect(consensus.maxBodyB64Length(PROVIDER_ID)).to.equal(MAX_B64);
@@ -95,7 +102,9 @@ describe('Regression: Attestation body_b64 size cap', function () {
             expect(consensus.maxBodyB64Length('unknown')).to.equal(Math.ceil(65536 * 1.4));
         });
     });
+}
 
+function registerSuitePart4() {
     describe('_handlePropose()', function () {
         it('rejects an oversized body before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -112,7 +121,9 @@ describe('Regression: Attestation body_b64 size cap', function () {
             expect(verify.calledOnce).to.equal(true);
         });
     });
+}
 
+function registerSuitePart5() {
     describe('handlePrepare()', function () {
         it('rejects an oversized body before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -133,4 +144,13 @@ describe('Regression: Attestation body_b64 size cap', function () {
             expect(consensus.pending.get('rid').prepares.has(SENDER_PK)).to.equal(false);
         });
     });
+}
+
+describe('Regression: Attestation body_b64 size cap', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+    registerSuitePart5();
+
 });
