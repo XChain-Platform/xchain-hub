@@ -66,11 +66,19 @@ function deadSnapshot(kind) {
     return { async getSnapshot() { return null; }, async getWeightSnapshot() { return null; } };
 }
 
+let warn;
+
 describe('StateAnchorPublisher._getActiveOraclePublishPubkeys local-table fallback', () => {
 
-    let warn;
     beforeEach(() => { warn = sinon.stub(console, 'warn'); });
     afterEach(() => { sinon.restore(); });
+
+    registerOracleSetFallbackTests();
+    registerOracleSetFailureTests();
+    registerOracleSetEdgeTests();
+});
+
+function registerOracleSetFallbackTests() {
 
     it('snapshot path up: resolves from the snapshot and never touches the local table', async () => {
         let { pub, queried } = buildPub({ network: 'regtest', capabilitySnapshot: liveSnapshot() });
@@ -105,6 +113,9 @@ describe('StateAnchorPublisher._getActiveOraclePublishPubkeys local-table fallba
         expect(set).to.deep.equal([KEY_A]);
         expect(queried.count).to.equal(1);
     });
+}
+
+function registerOracleSetFailureTests() {
 
     it('both down on regtest: abstains with an empty set, LOUDLY', async () => {
         let { pub, queried } = buildPub({
@@ -145,6 +156,9 @@ describe('StateAnchorPublisher._getActiveOraclePublishPubkeys local-table fallba
             expect(warn.firstCall.args[0]).to.match(/regtest-only/);
         }
     });
+}
+
+function registerOracleSetEdgeTests() {
 
     it('a legitimately EMPTY snapshot is a real answer: no fallback, no warning', async () => {
         let { pub, queried } = buildPub({
@@ -165,4 +179,4 @@ describe('StateAnchorPublisher._getActiveOraclePublishPubkeys local-table fallba
         expect(queried.count).to.equal(0);
         expect(warn.called).to.equal(false);
     });
-});
+}
