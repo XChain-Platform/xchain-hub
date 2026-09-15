@@ -22,7 +22,7 @@
  ********************************************************************/
 
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('../secret_env');
-const { evaluateAuthPosture } = require('../lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
+const { evaluateAuthPosture } = require('./auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 
 // Returns the database secret, exiting the process when it cannot be resolved or
 // is unset under both of its names.
@@ -51,7 +51,7 @@ function requireDbSecret(logger) {
 
 // Write-method auth posture. Keyless, every write method is callable by
 // anyone who can reach the port, on a validator AND on a config-oracle hub. The
-// decision itself lives in lib/auth_posture.js so it is unit-testable; here we
+// decision itself lives in api/auth_posture.js so it is unit-testable; here we
 // only log it and refuse the boot. Keyless operation is still available, but it
 // must be DECLARED (HUB_ALLOW_UNAUTHENTICATED=true) rather than being what you
 // get by forgetting a variable.

@@ -20,7 +20,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
-const { evaluateAuthPosture } = require('../../src/lib/auth_posture.js');
+const { evaluateAuthPosture } = require('../../src/api/auth_posture.js');
 const { ConsensusInputMonitor, REASONS } = require('../../src/validators/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub');
