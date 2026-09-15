@@ -67,9 +67,47 @@ function memDb(failAt) {
     };
 }
 
-describe('capability_snapshots mirror writes are all-or-nothing', function () {
+function registerAtomicWriterIntegrationTests() {
+it('writes no statement at all for an empty set', async function () {
+        let db = memDb(1);                                              // would throw if it ran
+        expect(await snapWrite.writeCapabilitySnapshotRows(db, CAPABILITY, BLOCK, [])).to.deep.equal([]);
+        expect(db.statements()).to.equal(0);
+    });
 
-    it('CONTROL: the retired per-row loop leaves a PARTIAL set behind a mid-set fault', async function () {
+    it('StateCheckpointEngine leaves no partial mirror when the snapshot write faults', async function () {
+        let db  = memDb(1);
+        let eng = new StateCheckpointEngine({ db, network: 'regtest', p2pConfig: {},
+                                              getPeerManager: () => ({ on(){}, broadcast(){} }) });
+        eng.resolveCapabilityValidators = async () => VALIDATORS.slice();
+        let threw = false;
+        try { await eng._persistCapabilitySnapshot(CAPABILITY, BLOCK); }
+        catch (e) { threw = true; }
+        expect(threw, 'the persist must fail closed so no checkpoint row rides a partial mirror').to.equal(true);
+        expect(db.rows().length).to.equal(0);
+    });
+
+    // Structural guard for the parity the six writers' own comments claim. It names the
+    // offending file directly rather than asserting an empty set, so a writer that
+    // re-grows its own per-row INSERT is reported by path.
+    it('every capability_snapshots writer goes through the shared helper', function () {
+        // Paths relative to this suite, so each one names the writer's file wherever
+        // its feature directory keeps it.
+        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/cross_chain/dex_engine.js',
+                         '../../src/cross_chain/call_engine.js', '../../src/oracle/consensus.js',
+                         '../../src/consensus/retraction.js', '../../src/attestation/relay.js'];
+        let offenders = [];
+        for (const name of WRITERS) {
+            const src = fs.readFileSync(path.join(__dirname, name), 'utf8');
+            if (!/writeCapabilitySnapshotRows\(/.test(src)) offenders.push(name + ': does not call the shared writer');
+            if (/INSERT IGNORE INTO capability_snapshots/.test(src)) offenders.push(name + ': still carries a per-row INSERT');
+        }
+        expect(offenders, 'writers must stay in lockstep on the atomic write').to.deep.equal([]);
+        expect(WRITERS.length, 'the census must actually cover the six writers').to.equal(6);
+    });
+}
+
+function registerAtomicWriterCoreTests() {
+it('CONTROL: the retired per-row loop leaves a PARTIAL set behind a mid-set fault', async function () {
         let db = memDb(2);
         let threw = false;
         try {
@@ -111,41 +149,11 @@ describe('capability_snapshots mirror writes are all-or-nothing', function () {
         expect(snapWrite.normalizeCapabilitySnapshotRows(CAPABILITY, BLOCK, [{ pubkey: 'dd'.repeat(32) }])[0].amount)
             .to.equal('0');
     });
+}
 
-    it('writes no statement at all for an empty set', async function () {
-        let db = memDb(1);                                              // would throw if it ran
-        expect(await snapWrite.writeCapabilitySnapshotRows(db, CAPABILITY, BLOCK, [])).to.deep.equal([]);
-        expect(db.statements()).to.equal(0);
-    });
+describe('capability_snapshots mirror writes are all-or-nothing', function () {
 
-    it('StateCheckpointEngine leaves no partial mirror when the snapshot write faults', async function () {
-        let db  = memDb(1);
-        let eng = new StateCheckpointEngine({ db, network: 'regtest', p2pConfig: {},
-                                              getPeerManager: () => ({ on(){}, broadcast(){} }) });
-        eng.resolveCapabilityValidators = async () => VALIDATORS.slice();
-        let threw = false;
-        try { await eng._persistCapabilitySnapshot(CAPABILITY, BLOCK); }
-        catch (e) { threw = true; }
-        expect(threw, 'the persist must fail closed so no checkpoint row rides a partial mirror').to.equal(true);
-        expect(db.rows().length).to.equal(0);
-    });
+    registerAtomicWriterCoreTests();
 
-    // Structural guard for the parity the six writers' own comments claim. It names the
-    // offending file directly rather than asserting an empty set, so a writer that
-    // re-grows its own per-row INSERT is reported by path.
-    it('every capability_snapshots writer goes through the shared helper', function () {
-        // Paths relative to this suite, so each one names the writer's file wherever
-        // its feature directory keeps it.
-        const WRITERS = ['../../src/anchor/checkpoint_engine.js', '../../src/cross_chain/dex_engine.js',
-                         '../../src/cross_chain/call_engine.js', '../../src/oracle/consensus.js',
-                         '../../src/consensus/retraction.js', '../../src/attestation/relay.js'];
-        let offenders = [];
-        for (const name of WRITERS) {
-            const src = fs.readFileSync(path.join(__dirname, name), 'utf8');
-            if (!/writeCapabilitySnapshotRows\(/.test(src)) offenders.push(name + ': does not call the shared writer');
-            if (/INSERT IGNORE INTO capability_snapshots/.test(src)) offenders.push(name + ': still carries a per-row INSERT');
-        }
-        expect(offenders, 'writers must stay in lockstep on the atomic write').to.deep.equal([]);
-        expect(WRITERS.length, 'the census must actually cover the six writers').to.equal(6);
-    });
+    registerAtomicWriterIntegrationTests();
 });
