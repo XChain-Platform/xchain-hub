@@ -27,10 +27,12 @@ const { buildEnvelope, createPeerPair, sendEnvelope, waitForEvent } = require('.
 const { waitUntil } = require('../helpers/waitUntil');
 const { measure, Histogram, MemoryTracker } = require('./helpers/metrics');
 
-describe('Performance: P2P Message Flood', function () {
-    this.timeout(120000);
 
-    let db;
+
+let db;
+let latencyPm, latencyPeerWs;
+let dedupPm, dedupPeerWs;
+function registerBeforeHook() {
 
     before(async function () {
         try {
@@ -41,27 +43,29 @@ describe('Performance: P2P Message Flood', function () {
             this.skip();
         }
     });
+}
+
+function registerAfterHook() {
 
     after(async function () {
         await testDb.teardown();
     });
+}
 
-    // ─── Message Processing Latency ─────────────────────────────────
+function registerLatencyHooks() {
+    beforeEach(async function () {
+        let pair = await createPeerPair(db);
+        latencyPm     = pair.pm;
+        latencyPeerWs = pair.peerWs;
+    });
 
-    describe('message processing latency', function () {
-        let pm, peerWs;
+    afterEach(async function () {
+        if (latencyPeerWs && latencyPeerWs.readyState === WebSocket.OPEN) latencyPeerWs.close();
+        if (latencyPm) await latencyPm.stop();
+    });
+}
 
-        beforeEach(async function () {
-            let pair = await createPeerPair(db);
-            pm     = pair.pm;
-            peerWs = pair.peerWs;
-        });
-
-        afterEach(async function () {
-            if (peerWs && peerWs.readyState === WebSocket.OPEN) peerWs.close();
-            if (pm) await pm.stop();
-        });
-
+function registerLatencyTestCases() {
         it('single message round-trip latency', async function () {
             let hist = new Histogram('msg-latency');
 
@@ -69,8 +73,8 @@ describe('Performance: P2P Message Flood', function () {
                 let env   = buildEnvelope('PERF_TEST', { seq: i }, 'ws://peer-' + i + ':10001');
                 let start = process.hrtime.bigint();
 
-                let msgPromise = waitForEvent(pm, 'message', 5000);
-                sendEnvelope(peerWs, env);
+                let msgPromise = waitForEvent(latencyPm, 'message', 5000);
+                sendEnvelope(latencyPeerWs, env);
                 await msgPromise;
 
                 let ms = Number(process.hrtime.bigint() - start) / 1e6;
@@ -85,7 +89,7 @@ describe('Performance: P2P Message Flood', function () {
             let received = 0;
             let hist     = new Histogram('burst-50');
             let allDone  = new Promise((resolve) => {
-                pm.on('message', () => {
+                latencyPm.on('message', () => {
                     received++;
                     if (received >= 50) resolve();
                 });
@@ -94,7 +98,7 @@ describe('Performance: P2P Message Flood', function () {
             let start = process.hrtime.bigint();
             for (let i = 0; i < 50; i++) {
                 let env = buildEnvelope('BURST_TEST', { seq: i }, 'ws://burst-peer-' + i + ':10001');
-                sendEnvelope(peerWs, env);
+                sendEnvelope(latencyPeerWs, env);
             }
 
             await Promise.race([
@@ -108,28 +112,34 @@ describe('Performance: P2P Message Flood', function () {
             expect(received).to.equal(50, 'all 50 messages should be received');
             expect(totalMs).to.be.below(5000, 'burst should complete within 5s');
         });
+}
+
+function registerMessageProcessingLatencyTests() {
+    // ─── Message Processing Latency ─────────────────────────────────
+    describe('message processing latency', function () {
+        registerLatencyHooks();
+        registerLatencyTestCases();
+    });
+}
+
+function registerDedupHooks() {
+    beforeEach(async function () {
+        let pair = await createPeerPair(db);
+        dedupPm     = pair.pm;
+        dedupPeerWs = pair.peerWs;
     });
 
-    // ─── Dedup Cache Behavior ───────────────────────────────────────
+    afterEach(async function () {
+        if (dedupPeerWs && dedupPeerWs.readyState === WebSocket.OPEN) dedupPeerWs.close();
+        if (dedupPm) await dedupPm.stop();
+    });
+}
 
-    describe('dedup cache', function () {
-        let pm, peerWs;
-
-        beforeEach(async function () {
-            let pair = await createPeerPair(db);
-            pm     = pair.pm;
-            peerWs = pair.peerWs;
-        });
-
-        afterEach(async function () {
-            if (peerWs && peerWs.readyState === WebSocket.OPEN) peerWs.close();
-            if (pm) await pm.stop();
-        });
-
+function registerDedupTestCases() {
         it('duplicate messages are correctly filtered', async function () {
             let received  = 0;
             let probeSeen = false;
-            pm.on('message', (env) => {
+            dedupPm.on('message', (env) => {
                 if (env && env.type === 'FLUSH_PROBE') probeSeen = true;
                 else received++;
             });
@@ -138,13 +148,13 @@ describe('Performance: P2P Message Flood', function () {
 
             // Send same message 10 times
             for (let i = 0; i < 10; i++) {
-                sendEnvelope(peerWs, env);
+                sendEnvelope(dedupPeerWs, env);
             }
 
             // Order-preserving flush: a distinct probe sent behind the duplicates can
             // only be delivered once every one of them has been processed or filtered,
             // so its arrival is the observable the fixed settle stood in for.
-            sendEnvelope(peerWs, buildEnvelope('FLUSH_PROBE', {}, 'ws://dedup-peer:10001'));
+            sendEnvelope(dedupPeerWs, buildEnvelope('FLUSH_PROBE', {}, 'ws://dedup-peer:10001'));
             await waitUntil(() => probeSeen, { timeoutMs: 10000, label: 'the flush probe to arrive behind the duplicates' });
 
             // Only first should be processed
@@ -155,7 +165,7 @@ describe('Performance: P2P Message Flood', function () {
             let received = 0;
             let target   = 500;
             let allDone  = new Promise((resolve) => {
-                pm.on('message', () => {
+                dedupPm.on('message', () => {
                     received++;
                     if (received >= target) resolve();
                 });
@@ -165,7 +175,7 @@ describe('Performance: P2P Message Flood', function () {
 
             for (let i = 0; i < target; i++) {
                 let env = buildEnvelope('CACHE_TEST', { seq: i }, 'ws://cache-peer-' + i + ':10001');
-                sendEnvelope(peerWs, env);
+                sendEnvelope(dedupPeerWs, env);
             }
 
             await Promise.race([
@@ -181,7 +191,35 @@ describe('Performance: P2P Message Flood', function () {
             // 500 messages should not consume more than 50 MB
             expect(memGrowthMB).to.be.below(50, 'memory growth should be < 50MB for 500 messages');
         });
+}
+
+function registerDedupCacheTests() {
+    // ─── Dedup Cache Behavior ───────────────────────────────────────
+    describe('dedup cache', function () {
+        registerDedupHooks();
+        registerDedupTestCases();
     });
+}
+
+function createRateLimitedPeerManager(PeerManager) {
+    // Create a PeerManager with a very low rate limit for testing
+    return new PeerManager({
+        P2P_VALIDATOR_ADDR:     'ws://hub-rl:10001',
+        P2P_PORT:               0,
+        P2P_HOST:               '127.0.0.1',
+        REQUIRE_SIGNATURES:     false,
+        P2P_HEARTBEAT_INTERVAL: 600000,
+        P2P_RECONNECT_BASE:     60000,
+        P2P_MSG_DEDUP_TTL:      60000,
+        P2P_MSG_RATE_LIMIT:       20,  // low limit for testing
+        // The first verified message registers the connection as an
+        // established peer, which switches it to the known-peer ceiling
+        // (default 20x). Pin that ceiling too so the cap under test stays 20.
+        P2P_MSG_RATE_LIMIT_KNOWN: 20
+    }, db);
+}
+
+function registerRateLimitingTests() {
 
     // ─── Rate Limiting ──────────────────────────────────────────────
 
@@ -189,21 +227,7 @@ describe('Performance: P2P Message Flood', function () {
         it('messages exceeding rate limit are dropped', async function () {
             let PeerManager = require('../../src/peers/manager');
 
-            // Create a PeerManager with a very low rate limit for testing
-            let pm = new PeerManager({
-                P2P_VALIDATOR_ADDR:     'ws://hub-rl:10001',
-                P2P_PORT:               0,
-                P2P_HOST:               '127.0.0.1',
-                REQUIRE_SIGNATURES:     false,
-                P2P_HEARTBEAT_INTERVAL: 600000,
-                P2P_RECONNECT_BASE:     60000,
-                P2P_MSG_DEDUP_TTL:      60000,
-                P2P_MSG_RATE_LIMIT:       20,  // low limit for testing
-                // The first verified message registers the connection as an
-                // established peer, which switches it to the known-peer ceiling
-                // (default 20x). Pin that ceiling too so the cap under test stays 20.
-                P2P_MSG_RATE_LIMIT_KNOWN: 20
-            }, db);
+            let pm = createRateLimitedPeerManager(PeerManager);
 
             await pm.start();
             let peerWs;
@@ -248,6 +272,22 @@ describe('Performance: P2P Message Flood', function () {
             }
         });
     });
+}
+
+function createMultiPeerManager(PeerManager) {
+    return new PeerManager({
+        P2P_VALIDATOR_ADDR:          'ws://hub-multi:10001',
+        P2P_PORT:                    0,
+        P2P_HOST:                    '127.0.0.1',
+        REQUIRE_SIGNATURES:          false,
+        P2P_HEARTBEAT_INTERVAL:      600000,
+        P2P_RECONNECT_BASE:          60000,
+        P2P_MSG_DEDUP_TTL:           60000,
+        P2P_MAX_CONNECTIONS_PER_IP:  10  // allow more for testing
+    }, db);
+}
+
+function registerMultiPeerConnectionsTests() {
 
     // ─── Multi-Peer Connections ─────────────────────────────────────
 
@@ -255,16 +295,7 @@ describe('Performance: P2P Message Flood', function () {
         it('handles messages from multiple concurrent peers', async function () {
             let PeerManager = require('../../src/peers/manager');
 
-            let pm = new PeerManager({
-                P2P_VALIDATOR_ADDR:          'ws://hub-multi:10001',
-                P2P_PORT:                    0,
-                P2P_HOST:                    '127.0.0.1',
-                REQUIRE_SIGNATURES:          false,
-                P2P_HEARTBEAT_INTERVAL:      600000,
-                P2P_RECONNECT_BASE:          60000,
-                P2P_MSG_DEDUP_TTL:           60000,
-                P2P_MAX_CONNECTIONS_PER_IP:  10  // allow more for testing
-            }, db);
+            let pm = createMultiPeerManager(PeerManager);
 
             await pm.start();
             let peers = [];
@@ -314,4 +345,13 @@ describe('Performance: P2P Message Flood', function () {
             }
         });
     });
+}
+describe('Performance: P2P Message Flood', function () {
+    this.timeout(120000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerMessageProcessingLatencyTests();
+    registerDedupCacheTests();
+    registerRateLimitingTests();
+    registerMultiPeerConnectionsTests();
 });
