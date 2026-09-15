@@ -53,8 +53,7 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
     return { sd, slashed };
 }
 
-describe('Regression: slashing safety + reward split', function () {
-
+function registerSuitePart1() {
     describe('price-deviation slashing', function () {
         const FINAL = [{ coinPair: 'BTC/USD', price: '60000' }];
 
@@ -89,13 +88,15 @@ describe('Regression: slashing safety + reward split', function () {
             assert.strictEqual(slashed.length, 0, 'boundary deviation was wrongly slashed');
         });
     });
+}
 
-    // The trigger is a SLIDING WINDOW of missed rounds plus a one-shot latch: a
-    // consecutive-miss counter that any single participation reset was evadable
-    // (participate once every Nth round and never be slashed), so the counter was
-    // replaced. Two safety properties survive that change and are pinned here: an
-    // honest validator under the threshold is never slashed, and a genuine
-    // offender yields exactly ONE proposal per offense, not one per round.
+// The trigger is a SLIDING WINDOW of missed rounds plus a one-shot latch: a
+// consecutive-miss counter that any single participation reset was evadable
+// (participate once every Nth round and never be slashed), so the counter was
+// replaced. Two safety properties survive that change and are pinned here: an
+// honest validator under the threshold is never slashed, and a genuine
+// offender yields exactly ONE proposal per offense, not one per round.
+function registerSuitePart2() {
     describe('non-participation slashing', function () {
         it('slashes at the missed-rounds threshold, once per offense @regression-p0', async function () {
             const { sd, slashed } = makeSlashDetector('0.05', '3');   // 3 missed rounds in the window
@@ -138,7 +139,9 @@ describe('Regression: slashing safety + reward split', function () {
             assert.strictEqual(slashed[1].offenseType, 'non_participation');
         });
     });
+}
 
+function registerSuitePart3() {
     describe('reward split', function () {
         function makeRewardTracker(perRound) {
             const writes = [];
@@ -163,4 +166,11 @@ describe('Regression: slashing safety + reward split', function () {
             for (const w of writes) assert.strictEqual(w[2], '3.00000000', '9/3 should be 3 each');
         });
     });
+}
+
+describe('Regression: slashing safety + reward split', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+
 });
