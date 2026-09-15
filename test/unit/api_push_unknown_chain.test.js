@@ -132,28 +132,43 @@ function freshEngines() {
     };
 }
 
-describe('durable push handlers: an unknown chain is a JSON-RPC error', function () {
-    this.timeout(15000);
+const UNKNOWN = ['ETH', 'btc', 'BTCX', 'BTC ', 'XCP', 42, {}, []];
 
-    let controller, engines;
+let controller, engines;
 
-    before(async function () {
-        engines = freshEngines();
-        controller = await bootApi(engines);
+function registerHubStateRefusalSuite() {
+describe('a hub-state refusal keeps its returned shape', function () {
+        let notReady;
+
+        before(async function () {
+            // Explicit nulls, so the harness Proxy does not auto-stub them into existence.
+            notReady = await bootApi({ priceAggregator: null, attestationResponseMirror: null });
+        });
+
+        it('pushpriceround returns the aggregator-not-ready refusal', async function () {
+            expect(await notReady.pushpriceround({ source_chain: 'BTC', round: 1, pairs: [] }))
+                .to.deep.equal({ error: 'price aggregator not ready' });
+        });
+
+        it('pushpricebatch returns the aggregator-not-ready refusal', async function () {
+            expect(await notReady.pushpricebatch({ source_chain: 'BTC', first_round: 1, last_round: 6, rounds: [] }))
+                .to.deep.equal({ error: 'price aggregator not ready' });
+        });
+
+        it('pushoracleprice returns the aggregator-not-ready refusal', async function () {
+            expect(await notReady.pushoracleprice({ source_chain: 'BTC', source_address: 'a', coin: 'BTC', tick: 'XCP', fiat: 'USD', value: '1' }))
+                .to.deep.equal({ error: 'price aggregator not ready' });
+        });
+
+        it('pushattestbatch returns the mirror-not-ready refusal', async function () {
+            expect(await notReady.pushattestbatch({ source_chain: 'BTC', rows: [] }))
+                .to.deep.equal({ error: 'attestation response mirror not ready' });
+        });
     });
+}
 
-    afterEach(function () {
-        for (const group of Object.values(engines))
-            for (const stub of Object.values(group)) stub.resetHistory();
-    });
-
-    after(function () { sinon.restore(); });
-
-    // A PRESENT but unknown chain is what reaches validateChain. Casing matters ('btc' is
-    // not 'BTC'), and a non-string is refused by the same guard rather than coerced.
-    const UNKNOWN = ['ETH', 'btc', 'BTCX', 'BTC ', 'XCP', 42, {}, []];
-
-    for (const h of HANDLERS) {
+function registerUnknownChainHandlerSuites() {
+for (const h of HANDLERS) {
         describe(h.method, function () {
 
             for (const bad of UNKNOWN) {
@@ -189,36 +204,31 @@ describe('durable push handlers: an unknown chain is a JSON-RPC error', function
             }
         });
     }
+}
+
+describe('durable push handlers: an unknown chain is a JSON-RPC error', function () {
+    this.timeout(15000);
+
+
+    before(async function () {
+        engines = freshEngines();
+        controller = await bootApi(engines);
+    });
+
+    afterEach(function () {
+        for (const group of Object.values(engines))
+            for (const stub of Object.values(group)) stub.resetHistory();
+    });
+
+    after(function () { sinon.restore(); });
+
+    // A PRESENT but unknown chain is what reaches validateChain. Casing matters ('btc' is
+    // not 'BTC'), and a non-string is refused by the same guard rather than coerced.
+
+    registerUnknownChainHandlerSuites();
 
     // The other half of the split, and the reason this cannot be a blanket conversion: a
     // refusal that describes the hub's own state is retryable, and the push client must go
     // on reading it out of the result envelope. Only the payload-keyed refusal throws.
-    describe('a hub-state refusal keeps its returned shape', function () {
-        let notReady;
-
-        before(async function () {
-            // Explicit nulls, so the harness Proxy does not auto-stub them into existence.
-            notReady = await bootApi({ priceAggregator: null, attestationResponseMirror: null });
-        });
-
-        it('pushpriceround returns the aggregator-not-ready refusal', async function () {
-            expect(await notReady.pushpriceround({ source_chain: 'BTC', round: 1, pairs: [] }))
-                .to.deep.equal({ error: 'price aggregator not ready' });
-        });
-
-        it('pushpricebatch returns the aggregator-not-ready refusal', async function () {
-            expect(await notReady.pushpricebatch({ source_chain: 'BTC', first_round: 1, last_round: 6, rounds: [] }))
-                .to.deep.equal({ error: 'price aggregator not ready' });
-        });
-
-        it('pushoracleprice returns the aggregator-not-ready refusal', async function () {
-            expect(await notReady.pushoracleprice({ source_chain: 'BTC', source_address: 'a', coin: 'BTC', tick: 'XCP', fiat: 'USD', value: '1' }))
-                .to.deep.equal({ error: 'price aggregator not ready' });
-        });
-
-        it('pushattestbatch returns the mirror-not-ready refusal', async function () {
-            expect(await notReady.pushattestbatch({ source_chain: 'BTC', rows: [] }))
-                .to.deep.equal({ error: 'attestation response mirror not ready' });
-        });
-    });
+    registerHubStateRefusalSuite();
 });
