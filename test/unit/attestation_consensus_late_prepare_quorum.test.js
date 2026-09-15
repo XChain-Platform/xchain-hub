@@ -35,12 +35,46 @@ function makeProviderRegistry() {
     };
 }
 
+const BODY = Buffer.from('winning-body');
+const RID  = 'ab'.repeat(16); // 32 hex chars
+let hub, consensus, me, peerB, peerC, pending;
+
+function registerLatePrepareQuorumTest() {
+it('finalizes the round when peer C\'s PREPARE (its COMMIT was lost) completes quorum', function () {
+        let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
+        let finalized = sinon.spy();
+        consensus.on('request:finalized', finalized);
+
+        // Sanity: not yet quorate (2 of 3 sigs), round not finalized.
+        expect(pending.finalized).to.equal(false);
+        expect(pending.signatures.size).to.equal(2);
+
+        // Peer C's COMMIT never arrived (lost on best-effort gossip); its
+        // PREPARE arrives after this node already sent COMMIT.
+        consensus.handlePrepare({
+            type: 'ATTEST_PREPARE',
+            data: {
+                requestId:  RID,
+                providerId: 'http_get',
+                body_b64:   BODY.toString('base64'),
+                meta:       '',
+                status:     'ok',
+                sig_pubkey: pub(peerC),
+                sig:        peerC.sign(canonical)
+            }
+        });
+
+        // The late sig crosses commit quorum and the round finalizes now,
+        // rather than stalling until the round timeout.
+        expect(pending.signatures.size).to.equal(3);
+        expect(pending.finalized).to.equal(true);
+        expect(consensus.finalized.has(RID)).to.equal(true);
+        expect(finalized.calledOnce).to.equal(true);
+        expect(finalized.firstCall.args[0].signatures).to.have.lengthOf(3);
+    });
+}
+
 describe('AttestationConsensus: late PREPARE completes commit quorum after COMMIT sent', function () {
-
-    let hub, consensus, me, peerB, peerC, pending;
-    const RID  = 'ab'.repeat(16); // 32 hex chars
-    const BODY = Buffer.from('winning-body');
-
     beforeEach(function () {
         hub       = createMockHub();
         consensus = new AttestationConsensus(hub, makeProviderRegistry());
@@ -84,36 +118,5 @@ describe('AttestationConsensus: late PREPARE completes commit quorum after COMMI
         sinon.restore();
     });
 
-    it('finalizes the round when peer C\'s PREPARE (its COMMIT was lost) completes quorum', function () {
-        let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
-        let finalized = sinon.spy();
-        consensus.on('request:finalized', finalized);
-
-        // Sanity: not yet quorate (2 of 3 sigs), round not finalized.
-        expect(pending.finalized).to.equal(false);
-        expect(pending.signatures.size).to.equal(2);
-
-        // Peer C's COMMIT never arrived (lost on best-effort gossip); its
-        // PREPARE arrives after this node already sent COMMIT.
-        consensus.handlePrepare({
-            type: 'ATTEST_PREPARE',
-            data: {
-                requestId:  RID,
-                providerId: 'http_get',
-                body_b64:   BODY.toString('base64'),
-                meta:       '',
-                status:     'ok',
-                sig_pubkey: pub(peerC),
-                sig:        peerC.sign(canonical)
-            }
-        });
-
-        // The late sig crosses commit quorum and the round finalizes now,
-        // rather than stalling until the round timeout.
-        expect(pending.signatures.size).to.equal(3);
-        expect(pending.finalized).to.equal(true);
-        expect(consensus.finalized.has(RID)).to.equal(true);
-        expect(finalized.calledOnce).to.equal(true);
-        expect(finalized.firstCall.args[0].signatures).to.have.lengthOf(3);
-    });
+    registerLatePrepareQuorumTest();
 });
