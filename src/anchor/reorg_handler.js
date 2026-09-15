@@ -35,11 +35,9 @@
  ********************************************************************/
 
 const crypto       = require('crypto');
-const axios        = require('axios');
 const EventEmitter = require('events');
 const coins        = require('../coins');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
-const { noteDrop } = require('../consensus/diagnostics');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');

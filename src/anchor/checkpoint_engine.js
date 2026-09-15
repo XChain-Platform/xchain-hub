@@ -50,18 +50,7 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const axios             = require('axios');
-const ValidatorIdentity = require('../validators/identity.js');
-const swq               = require('../stake_weighted_quorum.js');
-const eq                = require('../equivocation_header.js');
-const ckpt              = require('../checkpoint_commitment_activation.js');
-const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
-const { positiveIntConfig } = require('../lib/config_int.js');
-const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
-const coins             = require('../coins');
-const { noteCheckpointStalled } = require('../consensus/diagnostics');
-const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
