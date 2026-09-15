@@ -31,10 +31,10 @@ const { seedAll }        = require('./helpers/seed-data');
 const { measure, Histogram } = require('./helpers/metrics');
 const { blast }          = require('./helpers/concurrent');
 
-describe('Performance: Dependency Degradation', function () {
-    this.timeout(120000);
 
-    let cluster;
+
+let cluster;
+function registerBeforeHook() {
 
     before(async function () {
         try {
@@ -59,20 +59,32 @@ describe('Performance: Dependency Degradation', function () {
             attestations: 20
         });
     });
+}
+
+function registerAfterHook() {
 
     after(async function () {
         if (cluster) await cluster.stop();
         mockApi.teardown();
         await testDb.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         mockApi.reset();
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function register6aSlowPriceAPITests() {
 
     // ─── 6a. Slow Price API ─────────────────────────────────────────
 
@@ -121,6 +133,9 @@ describe('Performance: Dependency Degradation', function () {
             expect(duringResult.errors).to.equal(0, 'queries should not error');
         });
     });
+}
+
+function register6bFailedPriceAPITests() {
 
     // ─── 6b. Failed Price API ───────────────────────────────────────
 
@@ -170,6 +185,9 @@ describe('Performance: Dependency Degradation', function () {
             expect(errors).to.equal(0, 'read queries should work regardless of API state');
         });
     });
+}
+
+function register6cVariedAPILatencyTests() {
 
     // ─── 6c. Price Fetch with Varied Latency ────────────────────────
 
@@ -212,6 +230,9 @@ describe('Performance: Dependency Degradation', function () {
             }
         });
     });
+}
+
+function register6dLoadDuringDegradationTests() {
 
     // ─── 6d. Concurrent Load During Degradation ─────────────────────
 
@@ -245,6 +266,9 @@ describe('Performance: Dependency Degradation', function () {
             expect(errors).to.equal(0, 'queries should succeed during oracle failures');
         });
     });
+}
+
+function register6eRecoveryAfterDegradationTests() {
 
     // ─── 6e. Recovery After Degradation ─────────────────────────────
 
@@ -292,4 +316,16 @@ describe('Performance: Dependency Degradation', function () {
                 'recovery p95 should be within 3x of baseline');
         });
     });
+}
+describe('Performance: Dependency Degradation', function () {
+    this.timeout(120000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    register6aSlowPriceAPITests();
+    register6bFailedPriceAPITests();
+    register6cVariedAPILatencyTests();
+    register6dLoadDuringDegradationTests();
+    register6eRecoveryAfterDegradationTests();
 });
