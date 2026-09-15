@@ -80,7 +80,7 @@ module.exports = {
         let _confFloored = (this.network === 'mainnet' || this.network === 'testnet');
         this.minConfirmations = {};
         for(const tick of ALLOWED_CHAINS){
-            let perCoin = parseInt(process.env['XDEX_MIN_CONFIRMATIONS_' + tick] || cfg['XDEX_MIN_CONFIRMATIONS_' + tick]);
+            let perCoin = parseInt(hubConfig.env()['XDEX_MIN_CONFIRMATIONS_' + tick] || cfg['XDEX_MIN_CONFIRMATIONS_' + tick]);
             let def = coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS;
             let val = Number.isFinite(perCoin) && perCoin > 0 ? perCoin
                     : (Number.isFinite(flatMinConf) && flatMinConf > 0 ? flatMinConf
