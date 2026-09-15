@@ -241,60 +241,121 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
+// ------------------------------------------------------------ publishing
 
-// ------------------------------------------------------------ window math
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
+
+        // A hub whose Bitcoin indexer never called pushchaintip publishes nothing, ever.
+        // That is a one-line configuration gap presenting as total silence, so the defer
+        // has to name the missing thing; and it has to name it ONCE, because the sweep
+        // runs every window and a regtest window is seconds long.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names the missing BTC chain tip when it defers, once per cause', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            hub.db.setTip(null);
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try {
+                await p.sweep(now);
+                await p.sweep(now + WINDOW_S);
+            } finally {
+                console.warn = realWarn;
+            }
+
+            let anchorWarnings = warned.filter(w => /no BTC anchor/.test(w));
+            expect(anchorWarnings.length, 'one line per cause, not one per window').to.equal(1);
+            expect(anchorWarnings[0]).to.match(/chain_tips/);
+            expect(anchorWarnings[0], 'the operator has to be told which call is missing')
+                .to.match(/pushchaintip/);
+            expect(p.getStats().anchorFailure).to.match(/chain_tips/);
+
+            // A DIFFERENT cause speaks again: the latch is on the reason, not on the fact
+            // that something once failed.
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 2 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length).to.equal(1);
+
+            // And it clears once the tip resolves, so a LATER outage of the same cause is
+            // a new episode rather than a swallowed one.
+            hub.db.getChainTip = async () => ({ blockHeight: ANCHOR, blockTime: 1 });
+            await p.sweep(now + 3 * WINDOW_S);
+            expect(p.getStats().anchorFailure).to.equal(null);
+
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length,
+                'a recovered rail that fails again must warn again').to.equal(1);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ publishing
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+
+
+        // A federation that shares one Bitcoin indexer has one hub with a chain_tips
+        // row and N-1 without (testnet 2026-09-07: four of five validators). Every
+        // one of them polls that indexer for requests, and the poll reports the tip,
+        // so a hub with no pushed row anchors on the tip its own round observed.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('anchors on the tip the attestation poll observed when no chain tip was pushed', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let result = await p.sweep(now);
+
+            expect(result.published).to.equal(1);
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR - 3);
+            expect(p.getStats().anchorSource).to.equal('observed');
+            expect(p.getStats().anchorFailure).to.equal(null);
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('prefers the pushed chain tip over the observed one where both exist', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            await p.sweep(now);
+
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR);
+            expect(p.getStats().anchorSource).to.equal('pushed');
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names both missing sources when neither the pushed nor the observed tip resolves', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now); } finally { console.warn = realWarn; }
+
+            expect(p.wires.length).to.equal(0);
+            let line = warned.find(w => /no BTC anchor/.test(w));
+            expect(line).to.match(/chain_tips/);
+            expect(line).to.match(/pushchaintip/);
+            expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
+            expect(p.getStats().anchorSource).to.equal(null);
         }); }); });
 }

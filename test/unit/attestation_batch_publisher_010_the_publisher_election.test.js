@@ -241,60 +241,29 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
+// ------------------------------------------------------------ the election
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the publisher election', function () { it('defers a window until this hub\'s rank comes up', async function () {
+            // A five-member set: this hub leads only the windows its own hash order wins,
+            // and picks up the others one window later per rank.
+            let ids = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate(),
+                       ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let hub = makeHub({ dir: dir, identities: ids });
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            let window = { network: 'regtest', window_start: start, window_end: now,
+                           row_count: 0, btc_block_height: ANCHOR, rows: [] };
+            let rank = (await p.electionRank(ANCHOR, abw.computeBatchKey(window))).rank;
+            expect(rank).to.be.at.least(0).and.below(5);
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
-        }); }); });
-
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
-        }); }); });
-
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            // One window younger than this hub's rank: not its turn.
+            if (rank > 0) {
+                p._floorWindow = start;
+                await p.publishWindow(start, rank - 1);
+                expect(p.wires.length, 'a hub must not publish before its rank comes up').to.equal(0);
+            }
+            // At its rank, it takes over.
+            await p.publishWindow(start, rank);
+            expect(p.wires.length).to.equal(1);
         }); }); });
 }

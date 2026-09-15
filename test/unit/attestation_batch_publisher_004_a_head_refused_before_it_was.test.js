@@ -241,60 +241,135 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
+// A broadcaster that throws the scripted error for call N, and succeeds once the
+        // script runs out. `calls` counts every attempt, thrown or not.
+        function makeScriptedPublisher(hub, script){
+            let p = new AttestationBatchPublisher(hub);
+            let sent = [];
+            p.calls = 0;
+            p.setBroadcastHook(async (payload) => {
+                let e = script[p.calls++];
+                if(e) throw e;
+                sent.push(payload);
+                return { txid: 'tx' + sent.length };
+            });
+            p.wires = sent;
+            return p;
         }
 
-// ------------------------------------------------------------ window math
+// The encoder refusing the call before it builds anything: insufficient funds, or
+        // change from the previous window still unconfirmed. HTTP 4xx, nothing sent.
+        function httpRefusal(){
+            return Object.assign(new Error('Encoder RPC error: insufficient funds'),
+                                 { response: { status: 400 } });
+        }
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+function neverConnected(){
+            return Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        }
+
+// ------------------------------------------------------------ refused before sending
+
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // The classifier the branch turns on. Its contract is NARROWER than "safe to
+        // retry": a named node rejection is definitive, but the node had to receive the
+        // transaction to reject it, so it is not proof that nothing left the process and
+        // must not withdraw a marker.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('classifies only provably-unsent shapes as never sent', function () {
+            expect(isNeverSentError({ response: { status: 400 } })).to.equal(true);
+            expect(isNeverSentError({ response: { status: 429 } })).to.equal(true);
+            expect(isNeverSentError({ code: 'ECONNREFUSED' })).to.equal(true);
+            expect(isNeverSentError({ code: 'ENOTFOUND' })).to.equal(true);
+            expect(isNeverSentError({ code: 'EAI_AGAIN' })).to.equal(true);
+
+            expect(isNeverSentError(new Error('Encoder RPC error: bad-txns-inputs-missingorspent')),
+                'a node rejection received the transaction').to.equal(false);
+            expect(isNeverSentError({ response: { status: 502 } })).to.equal(false);
+            expect(isNeverSentError({ code: 'ETIMEDOUT' })).to.equal(false);
+            expect(isNeverSentError(new Error('socket hang up'))).to.equal(false);
+            expect(isNeverSentError(null)).to.equal(false);
+            // A multi-phase signer that already funded on chain is never "unsent",
+            // whatever shape the failure that follows has.
+            expect(isNeverSentError(Object.assign(new Error('refused'),
+                { fundsCommitted: true, response: { status: 400 } }))).to.equal(false);
+            expect(isNeverSentError(Object.assign(new Error('refused'),
+                { fundsCommitted: true, code: 'ECONNREFUSED' }))).to.equal(false);
+
+            // And it never contradicts the ambiguity gate: nothing may be both.
+            for (let e of [{ response: { status: 400 } }, { code: 'ECONNREFUSED' },
+                           { code: 'ETIMEDOUT' }, new Error('socket hang up')])
+                expect(isNeverSentError(e) && isAmbiguousSendError(e)).to.equal(false);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ refused before sending
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('withdraws the intent marker on an HTTP 4xx head refusal and lands the window next cycle',
+        async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [httpRefusal()]);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+
+            expect(p.wires.length, 'the refused head never went out').to.equal(0);
+            expect(hub.db.marker(start),
+                'an intent marker for an unsent window is what strands its coverage').to.equal(null);
+            expect(p.stats.windowsRefusalRetried).to.equal(1);
+            expect(p.stats.windowsQuarantined).to.equal(0);
+            // Nothing was sent, so nothing may be charged against the window ceiling.
+            expect(p.spendGuard.spentInWindow()).to.equal(0);
+
+            let result = await p.sweep(now);
+
+            expect(result.published, 'the rebuilt window must publish').to.equal(1);
+            expect(p.wires.length).to.equal(1);
+            expect(decodeHead(p.wires[0]).windowStart).to.equal(start);
+            expect(hub.db.marker(start).status).to.equal('sent');
+            expect(p.getStats().refusalRetryWindows,
+                'a landed window keeps no attempt history').to.equal(0);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ refused before sending
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('does the same for a never-connected transport error', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [neverConnected()]);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+            expect(hub.db.marker(start)).to.equal(null);
+            expect(p.stats.windowsRefusalRetried).to.equal(1);
+
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(1);
+            expect(hub.db.marker(start).status).to.equal('sent');
         }); }); });
 }

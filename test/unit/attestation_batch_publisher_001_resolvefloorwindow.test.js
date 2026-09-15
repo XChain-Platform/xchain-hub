@@ -241,60 +241,121 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
+function markerAt(windowStart, status){
+            return { network: 'regtest', window_start: windowStart, window_end: windowStart + WINDOW_S,
+                     batch_key: 'k' + windowStart, row_count: 0, status: status || 'landed' };
         }
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ the resume floor
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still starts a hub with no markers at the window in progress', async function () {
             let hub = makeHub({ dir: dir });
             let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            let now = 200 * WINDOW_S;
+            p._nowSeconds = () => now;
+
+            expect(await p.resolveFloorWindow()).to.equal(p.windowStartFor(now));
+            p._floorWindow = await p.resolveFloorWindow();
+            expect(await p.pendingWindows(now),
+                'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ the resume floor
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('retries a window the sweep walked past, below a newer marker', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            let now = 200 * WINDOW_S;
+            // Birth two windows back, the window after it left behind, the newest one done.
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S), markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
+                .to.equal(now - 3 * WINDOW_S);
+            let pending = await p.pendingWindows(now);
+            expect(pending.map(w => w.windowStart),
+                'the skipped window is inside the catch-up horizon and must come back')
+                .to.deep.equal([now - 2 * WINDOW_S]);
+            // And the gap is no longer silent.
+            expect(p.stats.coverageGapsDetected).to.equal(1);
+            expect(p.getStats().coverageGapWindows).to.equal(1);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ the resume floor
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('never re-exposes a window older than the hub\'s first marker', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let now = 200 * WINDOW_S;
+            // First marker one window back: the three horizon windows below it predate
+            // this hub, and publishing them would be three empty coverage heads at fee cost.
+            hub.db.markers.push(markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(p._floorWindow).to.equal(now - WINDOW_S);
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        }); }); });
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('reports no gap when every horizon window already carries a marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            for(let i = 4; i >= 1; i--) hub.db.markers.push(markerAt(now - i * WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        }); }); });
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still quarantines an intent-only marker sitting below the lowered floor', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S),
+                                markerAt(now - 2 * WINDOW_S, 'intent'),
+                                markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p._nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(await p.pendingWindows(now),
+                'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);
+            expect(p.stats.windowsQuarantined).to.equal(1);
         }); }); });
 }

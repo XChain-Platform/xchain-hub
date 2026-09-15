@@ -241,60 +241,88 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
+// ------------------------------------------------------------ membership
 
-// ------------------------------------------------------------ window math
+    // Which rows a window holds is decided by the SIGNED effective time, never by the
+    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
+    // cases below are the two a reading cannot settle: that two hubs stamping one row
+    // hours apart still agree on its window, and that the bounds are half-open.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('puts one row in the same window on two hubs whose finalized_at disagree', async function () {
+            let ids  = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            // One logical row, a second before the boundary, stamped by two hubs on
+            // opposite sides of it: hub A finalized it inside the window, hub B's clock
+            // put its copy in the NEXT one. Its signed effective time is identical.
+            let base = makeRow({ effective_time: now - 1 });
+            let hubA = makeHub({ dir: dir, identities: ids });
+            let hubB = makeHub({ dir: dir, identities: [ids[1], ids[0], ids[2]] });
+            hubA.db.responses.push(Object.assign({}, base, { finalized_at: start + 2 }));
+            hubB.db.responses.push(Object.assign({}, base, { finalized_at: now + 3 }));
+
+            let proposals = [];
+            hubA.peerManager = { on(){}, removeListener(){},
+                broadcast(type, data){ if(type === AttestationBatchPublisher.XATTESTB_SIGN_REQ) proposals.push(data); } };
+            let sentByB = [];
+            hubB.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sentByB.push({ type, data }); } };
+
+            let pA = makePublisher(hubA), pB = makePublisher(hubB);
+            let rowsA = await pA._selectWindowRows(start, now);
+            let rowsB = await pB._selectWindowRows(start, now);
+            expect(rowsA.length, 'hub A must hold the boundary row for this window').to.equal(1);
+            expect(rowsB.length, 'hub B must hold the SAME row for the SAME window').to.equal(1);
+            expect(rowsA).to.deep.equal(rowsB);
+
+            // The same rows means the same batch key, which is what two hubs have to
+            // agree on before either can co-sign the other's proposal.
+            let windowOf = (rows) => ({ network: 'regtest', window_start: start, window_end: now,
+                                        row_count: rows.length, btc_block_height: ANCHOR, rows: rows });
+            expect(abw.computeBatchKey(windowOf(rowsA))).to.equal(abw.computeBatchKey(windowOf(rowsB)));
+
+            // And the agreement is real, not arithmetic: B co-signs A's actual proposal.
+            pA._floorWindow = start;
+            await pA.publishWindow(start, 4);
+            expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
+            await pB.handleSignReq({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: hubA._identity.getPubkeyHex().toLowerCase(),
+                data: proposals[0]
+            });
+            expect(pB.stats.signRefusals, 'hub B must not refuse a window it holds the same rows for').to.equal(0);
+            expect(sentByB.length).to.equal(1);
+            expect(sentByB[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ membership
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+    // Which rows a window holds is decided by the SIGNED effective time, never by the
+    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
+    // cases below are the two a reading cannot settle: that two hubs stamping one row
+    // hours apart still agree on its window, and that the bounds are half-open.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('takes a row at window_start and leaves one at exactly window_end to the next window', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
-        }); }); });
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            let first = makeRow({ effective_time: start });          // the inclusive lower bound
+            let edge  = makeRow({ effective_time: now });            // the EXCLUSIVE upper bound
+            hub.db.responses.push(first, edge);
 
-// ------------------------------------------------------------ window math
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+            await p.sweep(now);
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let head = decodeHead(p.wires[0]);
+            expect(head.windowEnd).to.equal(now);
+            expect(head.rowCount, 'window_end is exclusive').to.equal(1);
+            let body = abw.reassembleAttestBatch(head, []);
+            expect(body.batch.rows[0].request_id).to.equal(first.request_id);
+
+            // The boundary row is not dropped: it rides the NEXT window, exactly once.
+            await p.sweep(now + WINDOW_S);
+            let next = decodeHead(p.wires[1]);
+            expect(next.windowStart).to.equal(now);
+            expect(next.rowCount).to.equal(1);
+            expect(abw.reassembleAttestBatch(next, []).batch.rows[0].request_id).to.equal(edge.request_id);
         }); }); });
 }

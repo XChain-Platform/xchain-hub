@@ -241,60 +241,115 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
+// Three validators on a bus. The two followers co-sign only when `answering` is
+        // true, which is how the same window is driven through a failed round and then a
+        // successful one without changing a single row.
+        function federation(hub, followers, state){
+            return {
+                on(){}, removeListener(){},
+                broadcast(type, data){
+                    if(type !== AttestationBatchPublisher.XATTESTB_SIGN_REQ) return;
+                    if(!state.answering) return;
+                    state.proposals.push(JSON.stringify(data));
+                    let canonical = abw.buildAttestBatchCanonical({
+                        network: data.network, window_start: data.window_start,
+                        window_end: data.window_end, row_count: data.row_count,
+                        btc_block_height: data.btc_block_height, rows: data.rows
+                    });
+                    for (let f of followers) {
+                        // The follower's own payload shape, window bounds included: a
+                        // co-signature that did not name its window would be counted into
+                        // whatever round happened to be open.
+                        state.publisher.handleSign({
+                            type: AttestationBatchPublisher.XATTESTB_SIGN,
+                            data: { network: data.network, window_start: data.window_start,
+                                    window_end: data.window_end,
+                                    pubkey: f.getPubkeyHex().toLowerCase(), sig: f.sign(canonical) }
+                        }).catch(() => {});
+                    }
+                }
+            };
         }
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ the quorum
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('leaves a quorum-less window unpublished and retries it with byte-identical content', async function () {
+            let ids = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let state = { answering: false, proposals: [], publisher: null };
+            let followers = [new ValidatorIdentity(ids[1].privkeyHex), new ValidatorIdentity(ids[2].privkeyHex)];
+            let hub = makeHub({ dir: dir, identities: ids });
+            hub.peerManager = federation(hub, followers, state);
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            let p = makePublisher(hub);
+            state.publisher = p;
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            p._floorWindow = start;
+
+            // Driven at an age past every rank so the election is not what decides this
+            // case; the election has its own test below.
+            // Nobody answers: the round times out, nothing is published, and NO marker is
+            // written, which is what makes the retry possible at all.
+            await p.publishWindow(start, 4);
+            expect(p.wires.length).to.equal(0);
+            expect(p.stats.signTimeouts).to.equal(1);
+            expect(hub.db.marker(start)).to.equal(null);
+
+            // Same window, same rows, one window later: the proposal must be the same
+            // bytes, because a batch rebuilt differently is a batch the earlier
+            // signatures could never have covered.
+            state.answering = true;
+            let firstProposal = null;
+            hub.peerManager.broadcast = ((orig) => function (type, data) {
+                if (type === AttestationBatchPublisher.XATTESTB_SIGN_REQ && firstProposal === null)
+                    firstProposal = JSON.stringify(data);
+                return orig.call(this, type, data);
+            })(hub.peerManager.broadcast);
+
+            await p.publishWindow(start, 4);
+
+            expect(p.wires.length, 'the retried window must publish').to.equal(1);
+            let head = decodeHead(p.wires[0]);
+            expect(head.windowStart).to.equal(start);
+            expect(head.rowCount).to.equal(1);
+            // The proposal the round timed out on and the one it published from are the
+            // same window bytes.
+            expect(JSON.parse(firstProposal).window_start).to.equal(start);
+            let body = abw.reassembleAttestBatch(head, []);
+            expect(body.ok, body.status).to.equal(true);
+            expect(body.batch.sigs.length).to.be.at.least(2);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ the quorum
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('signs with the attestation set at the anchor, and the wire carries verifying signatures', async function () {
+            let ids = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let state = { answering: true, proposals: [], publisher: null };
+            let followers = [new ValidatorIdentity(ids[1].privkeyHex), new ValidatorIdentity(ids[2].privkeyHex)];
+            let hub = makeHub({ dir: dir, identities: ids });
+            hub.peerManager = federation(hub, followers, state);
+            let p = makePublisher(hub);
+            state.publisher = p;
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
-        }); }); });
+            await p.publishWindow(now - WINDOW_S, 4);
 
-// ------------------------------------------------------------ window math
+            // A co-signature naming a DIFFERENT window is not counted, even though it
+            // carries a real signature from a real member of the set.
+            await p.handleSign({
+                type: AttestationBatchPublisher.XATTESTB_SIGN,
+                data: { network: 'regtest', window_start: 1, window_end: 2,
+                        pubkey: followers[0].getPubkeyHex().toLowerCase(), sig: 'ab'.repeat(64) }
+            });
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let body = abw.reassembleAttestBatch(decodeHead(p.wires[0]), []);
+            let canonical = abw.buildAttestBatchCanonical(body.batch);
+            let qualified = new Set(hub._snapshot.validators.map(v => v.pubkey));
+            for (let s of body.batch.sigs) {
+                expect(qualified.has(s.pubkey), 'signer ' + s.pubkey.substring(0, 8) + ' is not in the set').to.equal(true);
+                expect(ValidatorIdentity.verify(canonical, s.sig, s.pubkey),
+                    'a carried signature does not verify over the batch canonical').to.equal(true);
+            }
         }); }); });
 }

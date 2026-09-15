@@ -241,60 +241,122 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
-
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
+// ------------------------------------------------------------ the quorum
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('refuses to co-sign a window it cannot rebuild from its own rows', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+            let mine  = makeRow({ effective_time: start + 5 });
+            hub.db.responses.push(mine);
+
+            let proposal = (rows) => ({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: 'ff'.repeat(32),
+                data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                        row_count: rows.length, btc_block_height: ANCHOR, rows: rows }
+            });
+            let wireRow = (r) => {
+                let out = {};
+                for (let f of abw.ATTEST_BATCH_ROW_FIELDS) out[f] = r[f];
+                return out;
+            };
+
+            // An invented row, an altered row, and a row silently dropped from the window.
+            await p.handleSignReq(proposal([wireRow(makeRow({ effective_time: start + 1 }))]));
+            await p.handleSignReq(proposal([Object.assign(wireRow(mine), { response_payload: 'tampered' })]));
+            await p.handleSignReq(proposal([]));
+            expect(sent.length, 'every refusal must be silent on the wire').to.equal(0);
+            expect(p.stats.signRefusals).to.equal(3);
+            // None of these three is the missing-chain-tip shape, so the dedicated
+            // class must stay at zero rather than absorbing unrelated refusals.
+            expect(p.stats.signRefusalsNoChainTip).to.equal(0);
+
+            // The honest proposal is co-signed.
+            await p.handleSignReq(proposal([wireRow(mine)]));
+            expect(sent.length).to.equal(1);
+            expect(sent[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+// ------------------------------------------------------------ the quorum
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('bounds a proposed anchor instead of re-deriving it', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+
+            let at = async (anchor) => {
+                sent.length = 0;
+                await p.handleSignReq({
+                    type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                    sig_pubkey: 'ff'.repeat(32),
+                    data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                            row_count: 0, btc_block_height: anchor, rows: [] }
+                });
+                return sent.length === 1;
+            };
+
+            expect(await at(ANCHOR), 'this hub\'s own tip must be signable').to.equal(true);
+            expect(await at(ANCHOR - AttestationBatchPublisher.ANCHOR_MAX_LAG_BLOCKS), 'the oldest admissible anchor').to.equal(true);
+            expect(await at(ANCHOR + 1), 'an anchor above this hub\'s tip is refused').to.equal(false);
+            expect(await at(ANCHOR - AttestationBatchPublisher.ANCHOR_MAX_LAG_BLOCKS - 1), 'too far back').to.equal(false);
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+// ------------------------------------------------------------ the quorum
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('counts a missing chain tip as its own refusal class, not the generic bound', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+            hub.db.setTip(null);   // no chain_tips row for this network at all
+
+            await p.handleSignReq({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: 'ff'.repeat(32),
+                data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                        row_count: 0, btc_block_height: ANCHOR, rows: [] }
+            });
+
+            expect(sent.length, 'a refusal is silent on the wire').to.equal(0);
+            expect(p.stats.signRefusals).to.equal(1);
+            expect(p.stats.signRefusalsNoChainTip).to.equal(1);
+        }); }); });
+
+// ------------------------------------------------------------ the quorum
+
+
+
+        // The follower half of the same gap: a hub with no chain_tips row refused every
+        // proposal, so a federation sharing one Bitcoin indexer could never reach the
+        // batch quorum. With the poll-observed tip it bounds the proposal like any
+        // other follower, and the bound is still enforced against that tip.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the batch quorum', function () { it('co-signs from the observed tip when no chain tip was pushed, and still bounds the anchor', async function () {
+            let hub = makeHub({ dir: dir });
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+
+            let at = async (anchor) => {
+                sent.length = 0;
+                await p.handleSignReq({
+                    type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                    sig_pubkey: 'ff'.repeat(32),
+                    data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                            row_count: 0, btc_block_height: anchor, rows: [] }
+                });
+                return sent.length === 1;
+            };
+
+            expect(await at(ANCHOR), 'the observed tip must be signable').to.equal(true);
+            expect(await at(ANCHOR + 1), 'an anchor above the observed tip is refused').to.equal(false);
+            expect(p.stats.signRefusalsNoChainTip, 'a bound refusal is not the missing-tip class').to.equal(0);
         }); }); });
 }

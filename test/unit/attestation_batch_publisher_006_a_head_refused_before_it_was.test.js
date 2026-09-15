@@ -241,60 +241,132 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
+// A broadcaster that throws the scripted error for call N, and succeeds once the
+        // script runs out. `calls` counts every attempt, thrown or not.
+        function makeScriptedPublisher(hub, script){
+            let p = new AttestationBatchPublisher(hub);
+            let sent = [];
+            p.calls = 0;
+            p.setBroadcastHook(async (payload) => {
+                let e = script[p.calls++];
+                if(e) throw e;
+                sent.push(payload);
+                return { txid: 'tx' + sent.length };
+            });
+            p.wires = sent;
+            return p;
         }
 
-// ------------------------------------------------------------ window math
+// The encoder refusing the call before it builds anything: insufficient funds, or
+        // change from the previous window still unconfirmed. HTTP 4xx, nothing sent.
+        function httpRefusal(){
+            return Object.assign(new Error('Encoder RPC error: insufficient funds'),
+                                 { response: { status: 400 } });
+        }
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
+function captureErrors(){
+            let lines = [];
+            let real = console.error;
+            console.error = (msg) => lines.push(String(msg));
+            return { lines, restore(){ console.error = real; } };
+        }
+
+// ------------------------------------------------------------ refused before sending
+
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // A refusal that never clears must not re-propose forever: the federation's
+        // signing capacity is the scarce thing. At the bound it latches like any other
+        // failure, once, and quarantines from then on.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('latches exactly once when the attempt bound is reached', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [httpRefusal(), httpRefusal(), httpRefusal(), httpRefusal()]);
+            p._floorWindow = start;
+            expect(p.maxRefusalAttempts).to.equal(3);
+
+            let cap = captureErrors();
+            try {
+                await p.sweep(now);          // attempt 1: withdrawn, retried
+                await p.sweep(now);          // attempt 2: withdrawn, retried
+                await p.sweep(now);          // attempt 3: the bound, latch
+                await p.sweep(now);          // quarantined, no fourth broadcast attempt
+            } finally { cap.restore(); }
+
+            expect(p.stats.windowsRefusalRetried).to.equal(2);
+            expect(p.calls, 'the latched window must not be broadcast again').to.equal(3);
+            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(cap.lines.filter(l => /CRITICAL - wire 1\//.test(l)).length,
+                'a permanently refused window latches once, not once per sweep').to.equal(1);
+            expect(p.stats.windowsQuarantined).to.equal(1);
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ refused before sending
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // The withdraw is guarded on status = 'intent'. A batch the federation landed
+        // between the send and the failure leaves a `landed` row, and that row is the
+        // authoritative coverage record: the retry path must not be able to remove it.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('cannot withdraw a marker that is no longer intent-only', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 3, status: 'landed', txid: 'dogetxid' });
+            let p = makeScriptedPublisher(hub, []);
+
+            await p.clearIntent(start);
+
+            expect(hub.db.marker(start).status).to.equal('landed');
+            expect(hub.db.marker(start).txid).to.equal('dogetxid');
         }); }); });
 
-// ------------------------------------------------------------ window math
+// ------------------------------------------------------------ refused before sending
 
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // A crash marker is a genuinely unknown outcome and stays quarantined across a
+        // restart: the retry path must not have widened what hydrateMarkers admits.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still quarantines a genuine intent-only crash marker after a restart', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 1, status: 'intent', txid: null });
+
+            let p = makeScriptedPublisher(hub, []);
+            let cap = captureErrors();
+            try { await p.hydrateMarkers(); } finally { cap.restore(); }
+
+            expect(p._quarantined.has(start)).to.equal(true);
+            expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);
+
+            p._floorWindow = start;
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(0);
         }); }); });
 }

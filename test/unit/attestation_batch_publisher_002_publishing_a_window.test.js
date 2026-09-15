@@ -241,60 +241,124 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
-
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('publishes an EMPTY window as a row_count 0 coverage head', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let result = await p.sweep(now);
+
+            expect(result.published).to.equal(1);
+            expect(p.wires.length).to.equal(1);
+            let head = decodeHead(p.wires[0]);
+            expect(head.rowCount).to.equal(0);
+            expect(head.windowStart).to.equal(now - WINDOW_S);
+            expect(head.windowEnd).to.equal(now);
+            expect(head.totalChunks).to.equal(1);
+            expect(p.stats.windowsEmpty).to.equal(1);
+            expect(hub.db.marker(now - WINDOW_S).status).to.equal('sent');
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('carries the window\'s terminal rows, in the applier\'s order', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(
+                makeRow({ effective_time: start + 5, request_block_index: 121, request_action_index: 2 }),
+                makeRow({ effective_time: start + 1, request_block_index: 120, request_action_index: 9 }),
+                makeRow({ effective_time: start - 1 })                       // the PREVIOUS window's row
+            );
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+
+            let head = decodeHead(p.wires[0]);
+            expect(head.rowCount).to.equal(2);
+            let body = abw.reassembleAttestBatch(head, []);
+            expect(body.ok, body.status).to.equal(true);
+            expect(body.batch.rows.map(r => r.request_block_index)).to.deep.equal([120, 121]);
+            // The audit column is hub wall clock and two hubs disagree on it, so it must
+            // never reach the signed bytes.
+            expect(Object.keys(body.batch.rows[0])).to.not.include('finalized_at');
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('dead-letters an over-cap window loudly instead of truncating it', async function () {
             let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            for (let i = 0; i <= abw.ATTEST_BATCH_MAX_ROWS; i++)
+                hub.db.responses.push(makeRow({ effective_time: start + 1, request_action_index: i }));
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+
+            expect(p.wires.length, 'nothing may be published for an over-cap window').to.equal(0);
+            expect(p.stats.windowsDeadLettered).to.equal(1);
+            expect(hub.db.marker(start).status).to.equal('deadletter');
+            let dead = fs.readFileSync(p.deadLetterPath, 'utf8').trim().split('\n').map(JSON.parse);
+            expect(dead.length).to.equal(1);
+            expect(dead[0].row_count).to.equal(abw.ATTEST_BATCH_MAX_ROWS + 1);
+            expect(dead[0].reason).to.match(/exceeds ATTEST_BATCH_MAX_ROWS/);
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('does not re-publish a window a restart finds already sent', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+
+            let first = makePublisher(hub);
+            first._floorWindow = start;
+            await first.sweep(now);
+            expect(first.wires.length).to.equal(1);
+
+            // The restart: a NEW publisher over the same durable tables, exactly as a
+            // process restart sees them. Its in-process state is empty, so only the
+            // marker can stop a second DOGE fee.
+            let second = makePublisher(hub);
+            second._floorWindow = start;
+            let result = await second.sweep(now);
+
+            expect(second.wires.length, 'the marker must stop the second broadcast').to.equal(0);
+            expect(result.attempted).to.equal(0);
+            expect(hub.db.marker(start).txid).to.equal('tx1');
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('quarantines a window whose marker is intent-only, never re-publishing it', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 1, status: 'intent', txid: null });
+
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+            await p.sweep(now);
+
+            expect(p.wires.length).to.equal(0);
+            expect(p.stats.windowsQuarantined).to.equal(1);
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('leaves a window unpublished when the anchor cannot be resolved', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            await p.sweep(now);
+
+            expect(p.wires.length).to.equal(0);
+            expect(hub.db.marker(now - WINDOW_S), 'a deferred window leaves NO marker').to.equal(null);
+            expect(p.stats.windowsDeferred).to.equal(1);
         }); }); });
 }

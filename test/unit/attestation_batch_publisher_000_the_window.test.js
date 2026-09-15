@@ -241,60 +241,56 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function variants(){
-            let rid = crypto.randomBytes(32).toString('hex');
-            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
-            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
-            return { a, b };
-        }
-
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('accepts two honest variants of one request that differ only in effective_time', function () {
-            let hub = makeHub({ dir: dir });
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('aligns to the unix hour at the protocol value, not to process start', function () {
+            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
             let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            expect(p.matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
-            expect(p.matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+            expect(p.windowS).to.equal(3600);
+            for (let t of [1780000123, 1779998400, 0, 1780003599]) {
+                let start = p.windowStartFor(t);
+                expect(start % 3600, 'window start for ' + t).to.equal(0);
+                expect(t - start).to.be.at.least(0).and.below(3600);
+                expect(p.windowEndFor(start)).to.equal(start + 3600);
+            }
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('still refuses the same variant twice', function () {
-            let hub = makeHub({ dir: dir });
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('never schedules the boundary in the past, and lands exactly on it', function () {
+            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
             let p   = new AttestationBatchPublisher(hub);
-            let { a } = variants();
-            let v = p.matchesLocalWindow([a, Object.assign({}, a)], [a]);
-            expect(v.ok).to.equal(false);
-            expect(v.why).to.match(/appears twice/);
+            // A millisecond after a boundary asks for very nearly a whole window; a
+            // millisecond before asks for one millisecond, never zero or negative.
+            expect(p.msToNextBoundary(1780002000 * 1000 + 1)).to.equal(3600 * 1000 - 1);
+            expect(p.msToNextBoundary(1780002000 * 1000)).to.equal(3600 * 1000);
+            expect(p.msToNextBoundary(1780005599 * 1000 + 999)).to.be.at.least(1);
         }); }); });
 
-// ------------------------------------------------------------ window math
-
-    // Row identity in the co-sign compare is (request_id, effective_time), the table's
-    // own key. A round that finalized under two leader slots leaves two honest rows for
-    // one request that differ only in the stamp; keying on request_id alone read that
-    // as "appears twice" on the hub holding both and as a field mismatch on a hub
-    // holding one, so no such window could be co-signed (AT5 pass 19).
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('matchesLocalWindow row identity', function () { it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('honours the regtest override, so an acceptance run closes windows in seconds', function () {
             let hub = makeHub({ dir: dir });
+            expect(new AttestationBatchPublisher(hub).windowS).to.equal(WINDOW_S);
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('IGNORES the override off regtest, where a private cadence would break co-signing', function () {
+            let hub = makeHub({ dir: dir, network: 'testnet' });
+            expect(new AttestationBatchPublisher(hub).windowS).to.equal(3600);
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('throws on a malformed regtest override rather than aligning to NaN', function () {
+            for (let bad of ['0', 'ten', '', ' ', '-5', '1.5']) {
+                let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: bad } });
+                if (String(bad).trim() === '') {
+                    expect(new AttestationBatchPublisher(hub).windowS,
+                        'an unset override is the protocol value, not an error').to.equal(3600);
+                    continue;
+                }
+                expect(() => new AttestationBatchPublisher(hub), 'override "' + bad + '"').to.throw(/positive integer/);
+            }
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('schedules nothing on a network whose mirror activation entry is null', async function () {
+            let hub = makeHub({ dir: dir, network: 'mainnet' });
             let p   = new AttestationBatchPublisher(hub);
-            let { a, b } = variants();
-            let notHeld = p.matchesLocalWindow([a, b], [a]);
-            expect(notHeld.ok).to.equal(false);
-            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
-            let notProposed = p.matchesLocalWindow([a], [a, b]);
-            expect(notProposed.ok).to.equal(false);
-            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+            expect(p.isArmedNetwork()).to.equal(false);
+            await p.start();
+            expect(p._windowTimer, 'an unarmed network must arm no window timer').to.equal(null);
+            p.stop();
         }); }); });
 }
