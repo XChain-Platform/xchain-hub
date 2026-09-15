@@ -87,53 +87,8 @@ function finalizedEvent(rid, blockIndex) {
     };
 }
 
-describe('AttestationPublisher: mirror-activation gate (D58)', function () {
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
-    it('regtest, request block at the activation height (0): no queue append, no broadcast', async function () {
-        const pub = makePublisher(MY_PUB, { network: 'regtest' });
-        const bcast = sinon.stub().resolves({ txid: 'should-not-be-called' });
-        pub.setBroadcastHook(bcast);
-
-        await pub.onRequestFinalized(finalizedEvent('11'.repeat(32), 0));
-
-        expect(bcast.called).to.equal(false, 'the mirror-era gate must skip the broadcast entirely');
-        expect(readQueue(pub.queuePath)).to.have.length(0, 'the mirror-era gate must skip the WAL append entirely');
-        cleanup(pub);
-    });
-
-    it('regtest, request block well above the activation height: still gated', async function () {
-        const pub = makePublisher(MY_PUB, { network: 'regtest' });
-        const bcast = sinon.stub().resolves({ txid: 'should-not-be-called' });
-        pub.setBroadcastHook(bcast);
-
-        await pub.onRequestFinalized(finalizedEvent('22'.repeat(32), 500));
-
-        expect(bcast.called).to.equal(false);
-        expect(readQueue(pub.queuePath)).to.have.length(0);
-        cleanup(pub);
-    });
-
-    it('regtest, missing request.block_index: NOT gated, falls to the legacy on-chain path', async function () {
-        // isResponseMirrorActive must fail closed to "not gated" on an
-        // unparseable block, which is the safe direction: the request still
-        // gets an on-chain ATTEST v1 rather than silently losing its response.
-        const pub = makePublisher(MY_PUB, { network: 'regtest' });
-        const bcast = sinon.stub().resolves({ txid: 'legacy-tx-1' });
-        pub.setBroadcastHook(bcast);
-
-        const event = finalizedEvent('33'.repeat(32), undefined);
-        delete event.request.block_index;
-        await pub.onRequestFinalized(event);
-
-        expect(bcast.calledOnce).to.equal(true, 'an unparseable block_index must not gate the legacy broadcast');
-        cleanup(pub);
-    });
-
-    it('mainnet (activation entry null, unratified): NOT gated, legacy path runs even at a high block', async function () {
+function registerMirrorGateEdgeTests() {
+it('mainnet (activation entry null, unratified): NOT gated, legacy path runs even at a high block', async function () {
         const pub = makePublisher(MY_PUB, { network: 'mainnet' });
         const bcast = sinon.stub().resolves({ txid: 'legacy-tx-2' });
         pub.setBroadcastHook(bcast);
@@ -177,4 +132,57 @@ describe('AttestationPublisher: mirror-activation gate (D58)', function () {
         expect(mainnetBcast.calledOnce).to.equal(true);
         cleanup(mainnetPub);
     });
+}
+
+function registerMirrorGateCoreTests() {
+it('regtest, request block at the activation height (0): no queue append, no broadcast', async function () {
+        const pub = makePublisher(MY_PUB, { network: 'regtest' });
+        const bcast = sinon.stub().resolves({ txid: 'should-not-be-called' });
+        pub.setBroadcastHook(bcast);
+
+        await pub.onRequestFinalized(finalizedEvent('11'.repeat(32), 0));
+
+        expect(bcast.called).to.equal(false, 'the mirror-era gate must skip the broadcast entirely');
+        expect(readQueue(pub.queuePath)).to.have.length(0, 'the mirror-era gate must skip the WAL append entirely');
+        cleanup(pub);
+    });
+
+    it('regtest, request block well above the activation height: still gated', async function () {
+        const pub = makePublisher(MY_PUB, { network: 'regtest' });
+        const bcast = sinon.stub().resolves({ txid: 'should-not-be-called' });
+        pub.setBroadcastHook(bcast);
+
+        await pub.onRequestFinalized(finalizedEvent('22'.repeat(32), 500));
+
+        expect(bcast.called).to.equal(false);
+        expect(readQueue(pub.queuePath)).to.have.length(0);
+        cleanup(pub);
+    });
+
+    it('regtest, missing request.block_index: NOT gated, falls to the legacy on-chain path', async function () {
+        // isResponseMirrorActive must fail closed to "not gated" on an
+        // unparseable block, which is the safe direction: the request still
+        // gets an on-chain ATTEST v1 rather than silently losing its response.
+        const pub = makePublisher(MY_PUB, { network: 'regtest' });
+        const bcast = sinon.stub().resolves({ txid: 'legacy-tx-1' });
+        pub.setBroadcastHook(bcast);
+
+        const event = finalizedEvent('33'.repeat(32), undefined);
+        delete event.request.block_index;
+        await pub.onRequestFinalized(event);
+
+        expect(bcast.calledOnce).to.equal(true, 'an unparseable block_index must not gate the legacy broadcast');
+        cleanup(pub);
+    });
+}
+
+describe('AttestationPublisher: mirror-activation gate (D58)', function () {
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    registerMirrorGateCoreTests();
+
+    registerMirrorGateEdgeTests();
 });
