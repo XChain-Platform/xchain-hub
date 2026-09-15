@@ -92,12 +92,12 @@ class OracleConsensus extends EventEmitter {
     // 0 means the set degraded to empty or was refused as truncated.
     //
     // Byte-for-byte the same write and select-back as
-    // StateCheckpointEngine/CrossChainCallEngine._persistCapabilitySnapshot: INSERT IGNORE
+    // StateCheckpointEngine/CrossChainCallEngine.persistCapabilitySnapshot: INSERT IGNORE
     // on the natural key is the idempotency primitive (all hubs write identical rows for a
     // block, and a replayed round re-writes nothing), and the select-back keys on the full
     // widened uq_cap_snap (block, capability, pubkey, SOURCE) because a pubkey delegated by
     // two sources has two rows and a pubkey-only LIMIT 1 re-read would stream only one.
-    async _persistCapabilitySnapshot(capability, block) {
+    async persistCapabilitySnapshot(capability, block) {
         let validators = await this.resolveCapabilityValidators(capability, block);
         // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated` marker is what
         // fails this hub's own meetsStakeThreshold closed, but it is a JS array property
@@ -300,7 +300,7 @@ class OracleConsensus extends EventEmitter {
         }, this._reseedIntervalMs);
         if (this._reseedTimer.unref) this._reseedTimer.unref();
 
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this._messageHandler = (envelope) => this.handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
         logger.info('Oracle consensus engine started');
     }

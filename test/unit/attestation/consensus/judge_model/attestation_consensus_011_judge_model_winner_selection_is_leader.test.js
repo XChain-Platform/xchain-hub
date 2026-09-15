@@ -151,9 +151,9 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // hotReload lands: the live def now says byte_equality, which would make this
         // follower run its own agree() and latch its own winner.
         reg.getDef.returns({ max_response_bytes: 65536, consensus_strategy: 'byte_equality' });
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
         await flush();
         let pending = c.pending.get(RID);
         expect(agreeSpy.called, 'a follower must not judge because the live def moved').to.equal(false);
@@ -167,7 +167,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         rs.leaderPubkey = pub(p1); rs.role = 'follower';   // p1 is the elected leader
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
         await flush();
         let pending = c.pending.get(RID);
         expect(agreeSpy.called).to.equal(false);
@@ -180,7 +180,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // roundState() makes `me` the leader by default.
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         let pending = c.pending.get(RID);
         expect(agreeSpy.called).to.equal(true);
@@ -191,7 +191,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'judge_model'));
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.winner).to.not.equal(null);
@@ -209,8 +209,8 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         rs.myProposal = { body: Buffer.alloc(0), meta: '', status: 'provider_error' };
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.winner, 'agree() still runs over the follower ok bodies').to.not.equal(null);
@@ -227,7 +227,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         rs.pinnedJudgeModel = 'claude-opus-4-7';
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         expect(agreeSpy.called).to.equal(true);
         // timeoutMs bounds the judge call to the round's fetch-timeout budget
@@ -254,7 +254,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         expect(agreeSpy.called).to.equal(true);
         expect(agreeSpy.firstCall.args[1].timeoutMs).to.equal(7500);
@@ -271,7 +271,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         rs.pinnedApprovedModels = ['retired-model-1', 'claude-opus-4-7'];
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         expect(agreeSpy.called).to.equal(true);
         expect(agreeSpy.firstCall.args[1].pinnedApprovedModels)
@@ -290,7 +290,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         rs.pinnedVendors    = { 'llama-3-70b': 'openai' };
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         expect(agreeSpy.called).to.equal(true);
         expect(agreeSpy.firstCall.args[1].pinnedVendors).to.deep.equal({ 'llama-3-70b': 'openai' });
@@ -309,7 +309,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         let leaderBody = Buffer.from('leader-winning-body');
         // The leader's PROPOSE always precedes its PREPARE on the wire; A-F1
         // requires the follower to hold it so the winner can be hash-checked.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));
         await flush();
         c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         expect(pending.winner.body.toString()).to.equal('leader-winning-body');
@@ -337,7 +337,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // PREPARE then replays and is verified over the CANONICAL WINNER, so its
         // signature (taken over a divergent body) cannot be credited.
         let leaderBody = Buffer.from('leader-winning-body');
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));   // PROPOSE precedes PREPARE (A-F1)
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));   // PROPOSE precedes PREPARE (A-F1)
         await flush();
         c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         await flush();

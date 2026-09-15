@@ -139,35 +139,35 @@ const BODY = Buffer.from('committed-body');
 async function seedWithWinner() {
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
         await flush();
         return c.pending.get(RID);
     }
 
-describe('AttestationConsensus: _handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('records a valid COMMIT signature and counts the vote', async function () {
+describe('AttestationConsensus: handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('records a valid COMMIT signature and counts the vote', async function () {
         let pending = await seedWithWinner();
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, BODY));
         expect(pending.commits.has(pub(p1))).to.equal(true);
         expect(pending.signatures.has(pub(p1))).to.equal(true);
     }); });
 
-describe('AttestationConsensus: _handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('counts a COMMIT vote even when its signature fails to verify', async function () {
+describe('AttestationConsensus: handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('counts a COMMIT vote even when its signature fails to verify', async function () {
         let pending = await seedWithWinner();
         // Drop p2's collected sig so we can prove a bad COMMIT sig is not stored.
         pending.signatures.delete(pub(p2));
         let env = signEnv('ATTEST_COMMIT', RID, 'http_get', p2, BODY);
         env.data.sig = 'dd'.repeat(64);
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(pending.commits.has(pub(p2))).to.equal(true);
         expect(pending.signatures.has(pub(p2))).to.equal(false);
     }); });
 
-describe('AttestationConsensus: _handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('ignores a COMMIT from outside the responsible set', async function () {
+describe('AttestationConsensus: handleCommit signed verification', function () { beforeEach(hookAt73244); afterEach(hookAt73479); it('ignores a COMMIT from outside the responsible set', async function () {
         let pending = await seedWithWinner();
         let outsider = mkIdentity();
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', outsider, BODY));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', outsider, BODY));
         expect(pending.commits.has(pub(outsider))).to.equal(false);
     }); });
 }

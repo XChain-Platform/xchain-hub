@@ -92,14 +92,14 @@ function registerFinalizeroundDispatchAdditionalPaths2Tests1() {
             expect(store.getCall(0).args[3]).to.include('below minimum');
         });
 
-        it('_handleMessage routes PROPOSE / PREPARE / COMMIT and ignores unknown', function () {
-            let prop = sinon.stub(oc, '_handlePropose').resolves();
+        it('handleMessage routes PROPOSE / PREPARE / COMMIT and ignores unknown', function () {
+            let prop = sinon.stub(oc, 'handlePropose').resolves();
             let prep = sinon.spy(oc, 'handlePrepare');
-            let com  = sinon.spy(oc, '_handleCommit');
-            oc._handleMessage({ type: 'ORACLE_PROPOSE', data: { round: 1 } });
-            oc._handleMessage({ type: 'ORACLE_PREPARE', data: { round: 1, digest: 'd' } });
-            oc._handleMessage({ type: 'ORACLE_COMMIT',  data: { round: 1, digest: 'd' } });
-            expect(() => oc._handleMessage({ type: 'X', data: {} })).to.not.throw();
+            let com  = sinon.spy(oc, 'handleCommit');
+            oc.handleMessage({ type: 'ORACLE_PROPOSE', data: { round: 1 } });
+            oc.handleMessage({ type: 'ORACLE_PREPARE', data: { round: 1, digest: 'd' } });
+            oc.handleMessage({ type: 'ORACLE_COMMIT',  data: { round: 1, digest: 'd' } });
+            expect(() => oc.handleMessage({ type: 'X', data: {} })).to.not.throw();
             expect(prop.calledOnce).to.be.true;
             expect(prep.calledOnce).to.be.true;
             expect(com.calledOnce).to.be.true;

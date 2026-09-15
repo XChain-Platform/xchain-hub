@@ -155,7 +155,7 @@ module.exports = {
     },
 
     initCadenceMeters(cfg){
-        // Cadence stalls. Every pre-leadership bail in _tick used to return
+        // Cadence stalls. Every pre-leadership bail in tick used to return
         // silently, so a hub whose oracle_publish capability had gone unqualified
         // produced zero checkpoints and zero log lines. The mainnet hub sat that way
         // for 18 days (last checkpoint 2026-07-10 at BTC 957439, tip 960028) because

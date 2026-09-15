@@ -207,7 +207,7 @@ function makeHub(opts) {
     opts = opts || {};
     return {
         capabilityRegistry: opts.registry || null,
-        _resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
+        resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
         btcIndexerHeaders: () => ({})
     };
 }

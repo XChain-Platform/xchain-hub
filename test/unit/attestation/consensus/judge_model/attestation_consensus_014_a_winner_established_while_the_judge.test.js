@@ -146,16 +146,16 @@ async function raceRound() {
             // p1 fetched the same body; p2's own fetch failed, so its proposal is an
             // error report. That is what makes the round advance on two ok bodies
             // while p2 still has standing to send a signed no_quorum PREPARE.
-            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+            c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
             await flush();
-            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+            c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
             await flush();
             let pending = c.pending.get(RID);
             expect(pending._agreeing).to.equal(true);   // judge call in flight
             expect(pending.winner).to.equal(null);
 
             // The race: a responsible peer's signed no_quorum PREPARE is adopted.
-            c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'no_quorum'));
+            c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'no_quorum'));
             await flush();
             expect(pending.status).to.equal('no_quorum');
 

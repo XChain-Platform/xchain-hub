@@ -100,7 +100,7 @@ class RetractionConsensus {
         this.finalized    = new Set();   // round ids already streamed (dedup leader/finalized double-delivery)
 
         if(this.peerManager){
-            this._messageHandler = (envelope) => this._handleMessage(envelope);
+            this._messageHandler = (envelope) => this.handleMessage(envelope);
             this.peerManager.on('message', this._messageHandler);
         }
     }
@@ -127,7 +127,7 @@ class RetractionConsensus {
         return intentKey(evt);
     }
 
-    _roundId(canonical){
+    roundId(canonical){
         return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
     }
 
@@ -149,7 +149,7 @@ class RetractionConsensus {
         if(this.broadcaster) this.broadcaster.broadcastDeletion(evt);
     }
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XRETRACT_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('RetractionConsensus: SIGN_REQ error: ' + (e && e.message))); break;
@@ -161,7 +161,7 @@ class RetractionConsensus {
     // Mirrors verify against the capability_snapshots rows at snapshot_block,
     // streamed on the SAME ordered socket BEFORE the deletion event, so a
     // live subscriber always holds the set it needs (same contract as the
-    // engines' _persistCapabilitySnapshot before a signed row insert).
+    // engines' persistCapabilitySnapshot before a signed row insert).
     //
     // FAIL CLOSED, in lockstep with CrossChainCallEngine.writeFinalizedRow and
     // CrossChainDexEngine.writeFinalizedMatch: that persist is a PRECONDITION of the
@@ -185,7 +185,7 @@ class RetractionConsensus {
                     ' (snapshot ' + evt.snapshot_block + ')';
         let persistedRows = 0;
         try {
-            persistedRows = await this._persistCapabilitySnapshot('cross_chain', evt.snapshot_block);
+            persistedRows = await this.persistCapabilitySnapshot('cross_chain', evt.snapshot_block);
         } catch(e){
             logger.error('RetractionConsensus: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           'signed retraction ' + label + ', nothing streamed): ' + (e && e.message));
@@ -216,18 +216,18 @@ class RetractionConsensus {
     }
 
     // Persist + mirror the qualifying validator set (same contract as
-    // CrossChainCallEngine._persistCapabilitySnapshot).
+    // CrossChainCallEngine.persistCapabilitySnapshot).
     // Returns the number of capability rows resolved (and persisted) for this
     // (capability, block). A return of 0 means there was no DB mirror to write to,
     // the set degraded to empty (an indexer RPC error / auth mismatch surfaces as a
     // null snapshot, which resolveCapabilityValidators normalizes to []), or the set
     // was refused as truncated - so finalize can fail closed rather than streaming a
     // signed deletion whose signatures no mirror can verify.
-    async _persistCapabilitySnapshot(capability, block){
+    async persistCapabilitySnapshot(capability, block){
         if(!this.db) return 0;
         let validators = await this.resolveCapabilityValidators(capability, block, this.network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
-        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. The retraction
+        // spelled out in CrossChainDexEngine.persistCapabilitySnapshot. The retraction
         // rail is a fourth writer into the SAME shared capability_snapshots mirror, so an
         // unguarded write here re-opens the accept/reject divergence the three engines
         // close: off-BTC verifiers read the capped rows back as COMPLETE

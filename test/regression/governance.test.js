@@ -305,8 +305,8 @@ function registerSuitePart10() {
 
 function registerSuitePart11() {
     describe('P2P message handlers', function () {
-        it('_handlePropose stores proposal locally @regression-p2', async function () {
-            await gov._handlePropose({
+        it('handlePropose stores proposal locally @regression-p2', async function () {
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -350,9 +350,9 @@ function registerSuitePart11() {
         });
 
         it('ignores messages with missing fields @regression-p2', function () {
-            gov._handlePropose({ sender: 'peer', data: {} });
+            gov.handlePropose({ sender: 'peer', data: {} });
             gov.handleVote({ sender: 'peer', data: {} });
-            gov._handleResult({ sender: 'peer', data: {} });
+            gov.handleResult({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
         });
     });

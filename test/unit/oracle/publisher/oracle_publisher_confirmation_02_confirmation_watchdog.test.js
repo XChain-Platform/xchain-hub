@@ -25,7 +25,7 @@ async function publishThen(h, after) {
             // Publish one round against a confirmed reserve, then hand the encoder
             // a set that describes the published transaction's fate.
             seedQueue(h, [queueEntry(5)]);
-            await h.p._processQueue();
+            await h.p.processQueue();
             expect(h.broadcasts).to.have.length(1);
             h.encoder.serve(after);
         }
@@ -121,7 +121,7 @@ const testCase8 = async function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)], txids: [null] });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(1);
             expect(h.p.getStats().unconfirmedPublishes).to.equal(0);

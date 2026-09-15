@@ -16,7 +16,7 @@
  *
  * The one gossip message type the round path broadcasts and receives. Held
  * beside the parts rather than in either of them, because the sender
- * (executeRoundInner) and the receiver (_handleMessage) live in different
+ * (executeRoundInner) and the receiver (handleMessage) live in different
  * files and must spell it identically.
  *
  ********************************************************************/

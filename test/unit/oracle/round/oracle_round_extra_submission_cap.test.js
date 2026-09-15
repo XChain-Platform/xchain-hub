@@ -13,7 +13,7 @@
 // Extra OracleRound tests covering branches not already exercised by
 // the existing OracleRound.test.js:
 //   - stop() clears all timers
-//   - _handleMessage: invalid round, late submission, duplicate sender,
+//   - handleMessage: invalid round, late submission, duplicate sender,
 //     max submissions, invalid prices, known validator pubkey → DB persist path
 //   - scheduleFinalization: fallback-suppression branch
 //   - pruneSubmissions: old round eviction

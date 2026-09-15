@@ -265,7 +265,7 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart2() {
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       network: 'regtest',
       latest_block_index: 200,

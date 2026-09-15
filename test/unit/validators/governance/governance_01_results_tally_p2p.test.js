@@ -38,12 +38,12 @@ const PAST = '2020-01-01T00:00:00Z';
 
 const leaderAddr = () => gov.getProposalLeader('gov:P:1').addr;
 
-// _handleResult(): followers must apply a passed proposal too.
+// handleResult(): followers must apply a passed proposal too.
 // Authenticated GOV_RESULT comes only from the proposal's deterministic tally
 // leader, after voting_end. Call order is: SELECT voting_end, UPDATE, SELECT row.
 describe('Governance', function () {
     installSuiteHooks1();
-describe('_handleResult()', function () {
+describe('handleResult()', function () {
 it('emits proposal:finalized on a passed status transition (affectedRows > 0)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);    // SELECT voting_end
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });       // UPDATE: voting → passed
@@ -53,7 +53,7 @@ it('emits proposal:finalized on a passed status transition (affectedRows > 0)', 
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
 
-            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov.handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
 
             expect(emitted).to.not.be.null;
             expect(emitted.proposalId).to.equal('gov:P:1');
@@ -66,7 +66,7 @@ it('does NOT emit when already finalized (affectedRows = 0, tally-leader loopbac
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 0 });
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov.handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
             expect(emitted).to.be.false;
         });
 it('does NOT emit for a failed proposal', async function () {
@@ -74,7 +74,7 @@ it('does NOT emit for a failed proposal', async function () {
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'failed' } });
+            await gov.handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'failed' } });
             expect(emitted).to.be.false;
         });
 // Authentication permits only the tally leader and only after voting_end.
@@ -82,7 +82,7 @@ it('DROPS a result from a non-leader validator (no DB write, no split-brain)', a
             let notLeader = VALIDATORS_3.find(v => v.addr !== leaderAddr()).addr;
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ sender: notLeader, data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov.handleResult({ sender: notLeader, data: { proposalId: 'gov:P:1', status: 'passed' } });
             expect(hub.db.doQuery.called).to.be.false;   // never reaches the voting_end SELECT / UPDATE
             expect(emitted).to.be.false;
         });
@@ -90,13 +90,13 @@ it('DROPS a result that arrives before voting_end (spurious early finalize)', as
             hub.db.doQuery.onCall(0).resolves([{ voting_end: '2999-01-01T00:00:00Z' }]); // not yet ended
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov.handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
             expect(hub.db.doQuery.callCount).to.equal(1);  // only the voting_end SELECT; no UPDATE
             expect(emitted).to.be.false;
         });
 it('DROPS a result for a proposal this hub never saw (no local row)', async function () {
             hub.db.doQuery.onCall(0).resolves([]);          // no proposal row
-            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov.handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
             expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only, no UPDATE
         });
 });
@@ -217,8 +217,8 @@ it('returns null when not found', async function () {
 describe('Governance', function () {
     installSuiteHooks1();
 describe('P2P message handlers', function () {
-it('_handlePropose stores proposal locally', async function () {
-            await gov._handlePropose({
+it('handlePropose stores proposal locally', async function () {
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -229,11 +229,11 @@ it('_handlePropose stores proposal locally', async function () {
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
         });
-it('_handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end locally (GOV-VOTINGEND-FORGE-1)', async function () {
+it('handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end locally (GOV-VOTINGEND-FORGE-1)', async function () {
             // A single Byzantine validator sets votingEnd to year 3000: if trusted, the row's
             // voting_end never reaches NOW(), so it is never tallied, never leaves 'voting', and
             // propose() then refuses every honest proposal for 'P' forever (permanent censorship).
-            await gov._handlePropose({
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -249,8 +249,8 @@ it('_handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end
             // Locally recomputed to ~now + votingPeriod, NOT the year-3000 wire value.
             expect(Math.abs(persistedVotingEnd - expected)).to.be.lessThan(10000);
         });
-it('_handlePropose DROPS an inbound CAPABILITY_*_MIN_STAKE proposal (pinned #4352)', function () {
-            gov._handlePropose({
+it('handlePropose DROPS an inbound CAPABILITY_*_MIN_STAKE proposal (pinned #4352)', function () {
+            gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:CAPABILITY_PRICE_MIN_STAKE:1', parameter: 'CAPABILITY_PRICE_MIN_STAKE',
@@ -268,11 +268,11 @@ it('_handlePropose DROPS an inbound CAPABILITY_*_MIN_STAKE proposal (pinned #435
 describe('Governance', function () {
     installSuiteHooks1();
 describe('P2P message handlers', function () {
-it('_handlePropose DROPS an inbound out-of-bounds numeric proposal (change-bounds guard)', function () {
+it('handlePropose DROPS an inbound out-of-bounds numeric proposal (change-bounds guard)', function () {
             // 100 -> 200 is +100%, over the +50% MAX_INCREASE. propose() rejects it
             // locally; a Byzantine peer that skips propose() and broadcasts the raw
             // GOV_PROPOSE must not get every hub to record and vote on it.
-            gov._handlePropose({
+            gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -283,10 +283,10 @@ it('_handlePropose DROPS an inbound out-of-bounds numeric proposal (change-bound
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
-it('_handlePropose persists an inbound non-numeric proposal (bounds guard is a no-op there)', async function () {
+it('handlePropose persists an inbound non-numeric proposal (bounds guard is a no-op there)', async function () {
             // The bounds check only applies to numeric parameters; a non-numeric
             // change must still be recorded so it can be voted on.
-            await gov._handlePropose({
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:MODE:1', parameter: 'MODE',
@@ -297,14 +297,14 @@ it('_handlePropose persists an inbound non-numeric proposal (bounds guard is a n
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
         });
-it('_handlePropose DROPS an inbound proposal for a parameter still in re-proposal cooldown (#12)', async function () {
+it('handlePropose DROPS an inbound proposal for a parameter still in re-proposal cooldown (#12)', async function () {
             // A Byzantine validator skips propose() (which enforces the cooldown) and
             // broadcasts a raw GOV_PROPOSE for a parameter whose last proposal FAILED
             // 1 day ago (cooldown is 14 days). The follower must re-enforce the cooldown
             // and never record it, matching the leader-side propose() guard.
             hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/))
                 .resolves([{ voting_end: new Date(Date.now() - 86400000) }]); // 1 day ago
-            await gov._handlePropose({
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -322,11 +322,11 @@ it('_handlePropose DROPS an inbound proposal for a parameter still in re-proposa
 describe('Governance', function () {
     installSuiteHooks1();
 describe('P2P message handlers', function () {
-it('_handlePropose ADMITS an inbound proposal once the re-proposal cooldown has expired (#12)', async function () {
+it('handlePropose ADMITS an inbound proposal once the re-proposal cooldown has expired (#12)', async function () {
             // Last failure was 15 days ago (> 14-day cooldown): the proposal is admitted.
             hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/))
                 .resolves([{ voting_end: new Date(Date.now() - 15 * 86400000) }]);
-            await gov._handlePropose({
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -338,11 +338,11 @@ it('_handlePropose ADMITS an inbound proposal once the re-proposal cooldown has 
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/)),
                 'proposal recorded after cooldown expiry').to.be.true;
         });
-it('_handlePropose proceeds (fail-open) when the cooldown re-check DB read errors (#12)', async function () {
+it('handlePropose proceeds (fail-open) when the cooldown re-check DB read errors (#12)', async function () {
             // A transient DB error on the cooldown SELECT must not drop an otherwise
             // valid honest proposal; fail open and still record it.
             hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/)).rejects(new Error('db down'));
-            await gov._handlePropose({
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',

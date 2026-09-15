@@ -356,7 +356,7 @@ function registerFeature5persistenceRetractionFragment6Part2() {
     const parked = new Promise(resolve => {
       release = resolve;
     });
-    sinon.stub(engine, '_persistCapabilitySnapshot').callsFake(async () => {
+    sinon.stub(engine, 'persistCapabilitySnapshot').callsFake(async () => {
       await parked;
       return 3;
     });

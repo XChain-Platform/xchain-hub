@@ -206,7 +206,7 @@ module.exports = {
         let cp = this.cpFromRow(rows[0]);
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would
         // drop our attestation signature anyway.
-        let eligible = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        let eligible = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(eligible.length === 0 || !eligible.includes(myPubkey)) return;
 
         let canonical = this.archiveAttestationCanonical(cp, batchSeq, publisher);

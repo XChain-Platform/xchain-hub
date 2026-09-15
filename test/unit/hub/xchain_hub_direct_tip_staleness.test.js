@@ -42,7 +42,7 @@ function hubWith(tip, directResult) {
     hub.db = mockDb;
     mockDb.getChainTip.resolves(tip);
     hub.resolveBtcNetwork   = async () => 'mainnet';
-    hub._resolveBtcIndexerUrl = async () => 'http://indexer.invalid/api';
+    hub.resolveBtcIndexerUrl = async () => 'http://indexer.invalid/api';
     axiosStub.post.resolves({ data: { result: directResult } });
     return hub;
 }

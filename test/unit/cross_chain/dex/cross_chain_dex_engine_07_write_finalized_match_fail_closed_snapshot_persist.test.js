@@ -151,7 +151,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart1() {
       affectedRows: 1
     });
     let eng = new CrossChainDexEngine(hub);
-    sinon.stub(eng, '_persistCapabilitySnapshot').rejects(new Error('db down'));
+    sinon.stub(eng, 'persistCapabilitySnapshot').rejects(new Error('db down'));
     let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');
@@ -176,7 +176,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart1() {
     });
     let eng = new CrossChainDexEngine(hub);
     // Degraded/null snapshot => zero validators resolved => zero rows persisted.
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(0);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(0);
     let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');
@@ -202,7 +202,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart2() {
       affectedRows: 1
     });
     let eng = new CrossChainDexEngine(hub);
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
     let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
@@ -244,7 +244,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart3() {
     hub.db.doQuery = q;
     let eng = new CrossChainDexEngine(hub);
     eng.broadcaster = broadcaster;
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
     let commit = sinon.stub(eng, 'applyCommit');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
     eng._inflight.add(row.match_id);
@@ -280,7 +280,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart4() {
     hub.db.doQuery = q;
     let eng = new CrossChainDexEngine(hub);
     eng.broadcaster = broadcaster;
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
     sinon.stub(eng, 'applyCommit');
     await eng.writeFinalizedMatch({
       row: feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow(),
@@ -299,7 +299,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart4() {
       affectedRows: 1
     });
     let eng = new CrossChainDexEngine(hub);
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
     sinon.stub(eng, '_insertMatchRow').rejects(new Error('deadlock'));
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');

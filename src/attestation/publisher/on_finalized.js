@@ -58,7 +58,7 @@ module.exports = {
         // gate in this file. `null` in the activation map reads as unratified/off, so
         // on every network but regtest this branch is dead code until the operator
         // arms a height (mainnet and testnet are both null as of this writing). The
-        // failover sweep (_processQueue) replays from the on-disk queue file
+        // failover sweep (processQueue) replays from the on-disk queue file
         // independently of this event, so a legacy-era entry queued before a future
         // flag day still drains untouched; skipping the enqueue here needs no sweep
         // change.
@@ -160,7 +160,7 @@ module.exports = {
         // the indexer's attest/index.js): Math.max(1, Number(redundancy) || 1). The prior
         // event.signatures.length fallback produced a responsible list of a
         // different LENGTH than consensus and the indexer derived whenever the
-        // request carried no redundancy, so _myRank and the failover step-in
+        // request carried no redundancy, so myRank and the failover step-in
         // schedule ranked against a divergent ordering. Failover timing
         // only - the indexer's pending-set guard still prevents a double landing -
         // but wrong timing means multiple followers can step in early or the true
@@ -271,7 +271,7 @@ module.exports = {
         // Classify BEFORE settling the reservation: "the send failed" and "the send
         // did not go out" are not the same answer, and only the second one frees
         // budget. An ambiguous send may have reached the BTC node. Mark it so
-        // the sweep defers re-broadcast (see _processQueue) instead of blindly
+        // the sweep defers re-broadcast (see processQueue) instead of blindly
         // spending a second fee. Definitive pre-send errors leave no mark and retry
         // normally.
         if (this.isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){

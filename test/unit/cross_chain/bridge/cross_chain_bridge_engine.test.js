@@ -147,7 +147,7 @@ function registerFeature1signedCanonicalsAndIdPreimagesPart1() {
     const raw = 'XBRIDGE|' + 'b'.repeat(64) + '|150|XCHAIN|8|BTC|41|mSrc|DOGE|nDest|5.00000000|1757000000|regtest';
     // regtest EQUIV activation is 0, so the wrap is unconditional on this venue.
     expect(eq.isEquivHeaderActive(150, 'regtest')).to.equal(true);
-    expect(engine._canonicalMatch(row, 3)).to.equal('EQUIV|XBRIDGE|' + 'b'.repeat(64) + '|3||' + raw);
+    expect(engine.canonicalMatch(row, 3)).to.equal('EQUIV|XBRIDGE|' + 'b'.repeat(64) + '|3||' + raw);
   });
   it('builds the XPOLICY snapshot canonical exactly as the spec spells it', function () {
     const {
@@ -165,7 +165,7 @@ function registerFeature1signedCanonicalsAndIdPreimagesPart1() {
       network: 'regtest'
     };
     const raw = 'XPOLICY|' + 'c'.repeat(64) + '|150|BTC|FUFU|2|900|' + 'e'.repeat(64) + '|1757000000|regtest';
-    expect(engine._canonicalMatch(row, 0)).to.equal('EQUIV|XPOLICY|' + 'c'.repeat(64) + '|0||' + raw);
+    expect(engine.canonicalMatch(row, 0)).to.equal('EQUIV|XPOLICY|' + 'c'.repeat(64) + '|0||' + raw);
   });
 }
 function registerFeature1signedCanonicalsAndIdPreimagesPart2() {
@@ -173,11 +173,11 @@ function registerFeature1signedCanonicalsAndIdPreimagesPart2() {
     const {
       engine
     } = makeEngine();
-    expect(() => engine._canonicalMatch({
+    expect(() => engine.canonicalMatch({
       transfer_id: 'a',
       snapshot_id: 'b'
     }, 0)).to.throw(/exactly one/);
-    expect(() => engine._canonicalMatch({
+    expect(() => engine.canonicalMatch({
       snapshot_block: 1
     }, 0)).to.throw(/exactly one/);
   });
@@ -227,26 +227,26 @@ function registerFeature2activationGatesPart1() {
     } = makeEngine({
       gates: false
     });
-    engine._indexerCall = sinon.stub().resolves({
+    engine.indexerCall = sinon.stub().resolves({
       latest_block_index: 200,
       network: 'regtest',
       transfers: [pendingLeg()]
     });
-    await engine._poll();
-    expect(engine._indexerCall.called).to.equal(false);
+    await engine.poll();
+    expect(engine.indexerCall.called).to.equal(false);
     expect(engine.transferConsensus.propose.called).to.equal(false);
   });
   it('polls once the bridge gate is armed', async function () {
     const {
       engine
     } = makeEngine();
-    engine._indexerCall = sinon.stub().resolves({
+    engine.indexerCall = sinon.stub().resolves({
       latest_block_index: 200,
       network: 'regtest',
       transfers: []
     });
-    await engine._poll();
-    expect(engine._indexerCall.called).to.equal(true);
+    await engine.poll();
+    expect(engine.indexerCall.called).to.equal(true);
   });
 
   // Row 28: XCHAIN_BRIDGE_ACTIVATION is keyed '<COIN>:<network>', because BTC, LTC and
@@ -318,7 +318,7 @@ function registerFeature2activationGatesPart3() {
       engine
     } = makeEngine();
     engine.activation.bridge = (block, network, coin) => coin === 'DOGE' ? Number(block) >= 500 : true;
-    engine._indexerCall = sinon.stub().resolves({
+    engine.indexerCall = sinon.stub().resolves({
       latest_block_index: 200,
       network: 'regtest',
       transfers: [pendingLeg({

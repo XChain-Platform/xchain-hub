@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The block-PINNED _getActiveOraclePublishPubkeys path must mirror
+// The block-PINNED getActiveOraclePublishPubkeys path must mirror
 // resolveCapabilitySet: primary source is the deterministic capability
 // snapshot; on a miss, the local capability_snapshots table stands in ONLY on
 // regtest (seeded stacks with no live snapshot resolution). Before the
@@ -68,7 +68,7 @@ function deadSnapshot(kind) {
 
 let warn;
 
-describe('StateAnchorPublisher._getActiveOraclePublishPubkeys local-table fallback', () => {
+describe('StateAnchorPublisher.getActiveOraclePublishPubkeys local-table fallback', () => {
 
     beforeEach(() => { warn = sinon.stub(console, 'warn'); });
     afterEach(() => { sinon.restore(); });
@@ -82,7 +82,7 @@ function registerOracleSetFallbackTests() {
 
     it('snapshot path up: resolves from the snapshot and never touches the local table', async () => {
         let { pub, queried } = buildPub({ network: 'regtest', capabilitySnapshot: liveSnapshot() });
-        let set = await pub._getActiveOraclePublishPubkeys(100);
+        let set = await pub.getActiveOraclePublishPubkeys(100);
         expect(set, 'lowercased, deduped, sorted').to.deep.equal([KEY_A, KEY_B]);
         expect(queried.count).to.equal(0);
         expect(warn.called).to.equal(false);
@@ -96,7 +96,7 @@ function registerOracleSetFallbackTests() {
             // election set must still see each key exactly once.
             rows: [{ signing_pubkey: KEY_B.toUpperCase() }, { signing_pubkey: KEY_B }, { signing_pubkey: KEY_A }]
         });
-        let set = await pub._getActiveOraclePublishPubkeys(100);
+        let set = await pub.getActiveOraclePublishPubkeys(100);
         expect(set).to.deep.equal([KEY_A, KEY_B]);
         expect(queried.count).to.equal(1);
         expect(queried.params).to.deep.equal([100, 'oracle_publish']);
@@ -109,7 +109,7 @@ function registerOracleSetFallbackTests() {
             capabilitySnapshot: deadSnapshot('throws'),
             rows: [{ signing_pubkey: KEY_A }]
         });
-        let set = await pub._getActiveOraclePublishPubkeys(100);
+        let set = await pub.getActiveOraclePublishPubkeys(100);
         expect(set).to.deep.equal([KEY_A]);
         expect(queried.count).to.equal(1);
     });
@@ -123,7 +123,7 @@ function registerOracleSetFailureTests() {
             capabilitySnapshot: deadSnapshot('throws'),
             rows: []
         });
-        let set = await pub._getActiveOraclePublishPubkeys(100);
+        let set = await pub.getActiveOraclePublishPubkeys(100);
         expect(set).to.deep.equal([]);
         expect(queried.count).to.equal(1);
         expect(warn.calledOnce).to.equal(true);
@@ -137,7 +137,7 @@ function registerOracleSetFailureTests() {
             capabilitySnapshot: deadSnapshot('null'),
             dbThrows: true
         });
-        expect(await pub._getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
+        expect(await pub.getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
         expect(warn.calledOnce).to.equal(true);
         expect(warn.firstCall.args[0]).to.match(/db gone/);
     });
@@ -150,7 +150,7 @@ function registerOracleSetFailureTests() {
                 capabilitySnapshot: deadSnapshot('null'),
                 rows: [{ signing_pubkey: KEY_A }]
             });
-            expect(await pub._getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
+            expect(await pub.getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
             expect(queried.count, network + ' must never read the per-hub table').to.equal(0);
             expect(warn.calledOnce, network + ' abstain must be loud').to.equal(true);
             expect(warn.firstCall.args[0]).to.match(/regtest-only/);
@@ -167,7 +167,7 @@ function registerOracleSetEdgeTests() {
                                   async getWeightSnapshot() { return { validators: [] }; } },
             rows: [{ signing_pubkey: KEY_A }]
         });
-        expect(await pub._getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
+        expect(await pub.getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
         expect(queried.count).to.equal(0);
         expect(warn.called).to.equal(false);
     });
@@ -175,7 +175,7 @@ function registerOracleSetEdgeTests() {
     it('the UNPINNED (blockIndex null) membership pre-filter is untouched', async () => {
         let { pub, queried } = buildPub({ network: 'regtest', capabilitySnapshot: deadSnapshot('null') });
         pub.hub.capabilityRegistry = { async getActiveValidators() { return [KEY_A.toUpperCase()]; } };
-        expect(await pub._getActiveOraclePublishPubkeys(null)).to.deep.equal([KEY_A]);
+        expect(await pub.getActiveOraclePublishPubkeys(null)).to.deep.equal([KEY_A]);
         expect(queried.count).to.equal(0);
         expect(warn.called).to.equal(false);
     });

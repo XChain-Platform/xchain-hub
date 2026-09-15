@@ -19,7 +19,7 @@ let axiosStub, CapabilitySnapshot, logStub;
 function makeHub(registry) {
         return {
             capabilityRegistry: registry,
-            _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+            resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
             btcIndexerHeaders: () => ({})
         };
     }

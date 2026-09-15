@@ -57,7 +57,7 @@ function proposeEnvelope(signer) {
 
 function registerProposerRecordEdgeTests() {
 it('reads a case-folded pubkey and rid the same way', function () {
-        consensus._handlePropose(proposeEnvelope(live));
+        consensus.handlePropose(proposeEnvelope(live));
         expect(consensus.hasProposedFor(RID.toUpperCase(), pub(live).toUpperCase())).to.be.true;
     });
 
@@ -73,7 +73,7 @@ it('reads a case-folded pubkey and rid the same way', function () {
     });
 
     it('clears the record on stop()', async function () {
-        consensus._handlePropose(proposeEnvelope(live));
+        consensus.handlePropose(proposeEnvelope(live));
         await consensus.stop();
         expect(consensus.proposerSeen.size).to.equal(0);
         expect(consensus.hasProposedFor(RID, pub(live))).to.be.false;
@@ -82,14 +82,14 @@ it('reads a case-folded pubkey and rid the same way', function () {
 
 function registerProposerRecordCoreTests() {
 it('records an accepted PROPOSE and reads it back per request and pubkey', function () {
-        consensus._handlePropose(proposeEnvelope(live));
+        consensus.handlePropose(proposeEnvelope(live));
         expect(consensus.hasProposedFor(RID, pub(live))).to.be.true;
         expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
         expect(consensus.hasProposedFor('cd'.repeat(16), pub(live))).to.be.false;
     });
 
     it('survives the round teardown a timeout performs', function () {
-        consensus._handlePropose(proposeEnvelope(live));
+        consensus.handlePropose(proposeEnvelope(live));
         // What the round-timeout handler does to a stalled round.
         consensus.pending.delete(RID);
         consensus.earlyMessages.delete(RID);
@@ -103,12 +103,12 @@ it('records an accepted PROPOSE and reads it back per request and pubkey', funct
     it('does not record a PROPOSE it rejects', function () {
         let env = proposeEnvelope(mute);
         env.data.sig = 'ff'.repeat(64);            // bad signature
-        consensus._handlePropose(env);
+        consensus.handlePropose(env);
         expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
 
         // Nor one from outside the responsible set.
         let outsider = mkIdentity();
-        consensus._handlePropose(proposeEnvelope(outsider));
+        consensus.handlePropose(proposeEnvelope(outsider));
         expect(consensus.hasProposedFor(RID, pub(outsider))).to.be.false;
     });
 }

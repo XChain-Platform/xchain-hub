@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -201,7 +201,7 @@ const refusedHomeRow = () => homeRelayedRow({
         // on a v3 every indexer drops.
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('materializes the request when the gate is ARMED, refused row and all', async function () {
                 const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [refusedHomeRow()]);
-                await withThreshold('regtest', 1786060800, () => relay._poll());
+                await withThreshold('regtest', 1786060800, () => relay.poll());
                 expect(proposedRows(relay, 'request')).to.have.length(1);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(false);
             }); }); }); });
@@ -221,7 +221,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
         // on a v3 every indexer drops.
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('still suppresses the request one second BELOW the arm', async function () {
                 const relay = makeRelay(hubWithTipTime(1786060799), [originRow()], [refusedHomeRow()]);
-                await withThreshold('regtest', 1786060800, () => relay._poll());
+                await withThreshold('regtest', 1786060800, () => relay.poll());
                 expect(proposedRows(relay, 'request')).to.have.length(0);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
             }); }); }); });
@@ -244,14 +244,14 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 // keeps the pre-arm behaviour rather than guessing armed and spending.
                 const relay = makeRelay({ db: { doQuery: sinon.stub().resolves([]) } },
                     [originRow()], [refusedHomeRow()]);
-                await relay._poll();
+                await relay.poll();
                 expect(proposedRows(relay, 'request')).to.have.length(0);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
 
                 // A tip row with no time reads 0 through getChainTip, which is "unknown"
                 // and must not satisfy a 0 threshold.
                 const zero = makeRelay(hubWithTipTime(0), [originRow()], [refusedHomeRow()]);
-                await zero._poll();
+                await zero.poll();
                 expect(proposedRows(zero, 'request')).to.have.length(0);
                 expect(zero._homeRelayed.has(REQ_ID)).to.equal(true);
             }); }); }); });
@@ -274,7 +274,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 // a fulfilled BTC row is out of the pending queue but the request IS
                 // materialized, and re-broadcasting it burns a fee on a duplicate v3.
                 const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [homeRelayedRow()]);
-                await withThreshold('regtest', 1786060800, () => relay._poll());
+                await withThreshold('regtest', 1786060800, () => relay.poll());
                 expect(proposedRows(relay, 'request')).to.have.length(0);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
             }); }); }); });
@@ -295,7 +295,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('leaves an armed hub with no refused rows untouched, and asks the DB nothing', async function () {
                 const hub   = hubWithTipTime(1786060800);
                 const relay = makeRelay(hub, [originRow()], [homeRelayedRow()]);
-                await withThreshold('regtest', 1786060800, () => relay._poll());
+                await withThreshold('regtest', 1786060800, () => relay.poll());
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
                 // The gate read is only taken when there is a refusal to weigh.
                 expect(hub.db.getChainTip.called).to.equal(false);

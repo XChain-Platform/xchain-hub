@@ -35,7 +35,7 @@
  *      still the reason checking the two middles is sufficient, but no gate
  *      calls them: the value a co-signer receives is the rounded median, and
  *      rounding moves it off m by enough to straddle the band (item 7067).
- *   2. Co-sign admission gate (OracleConsensus._handlePropose): the
+ *   2. Co-sign admission gate (OracleConsensus.handlePropose): the
  *      follower's local aggregate measured against the PROPOSED price as
  *      reference. (Previously this divided by the local value, opening a
  *      price-ratio window where the leader publishes a pair the follower

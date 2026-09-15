@@ -68,7 +68,7 @@ function registerSpreadTests() {
 }
 
 function registerCosignAlignmentTests() {
-    // The seq-2400 divergence window itself, end to end through _handlePropose:
+    // The seq-2400 divergence window itself, end to end through handlePropose:
     // leader's 2-source gate accepts {100000, 110400} (spread 0.04943 <= 0.05) and
     // proposes the mean 105200; the low-side follower (local 100000) must now
     // co-sign it instead of withholding the round.
@@ -87,7 +87,7 @@ function registerCosignAlignmentTests() {
             hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
             oc = new OracleConsensus(hub, oracleRound);
             oc.setValidatorSet(VALIDATORS_3);
-            leader = oc._getLeader(ROUND);
+            leader = oc.getLeader(ROUND);
             pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: pm.validatorAddr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
@@ -98,7 +98,7 @@ function registerCosignAlignmentTests() {
 
         function proposeEnvelope(prices, round = ROUND) {
             return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
-                round, prices, digest: oc._digest(round, prices),
+                round, prices, digest: oc.digest(round, prices),
                 btcBlockHeight: 100, btcBlockTime: 1700000000
             } };
         }
@@ -107,7 +107,7 @@ function registerCosignAlignmentTests() {
             // proposed = mean(100000, 110400) = 105200; local = 100000.
             // Old behavior: 5200/100000 = 0.052 > 0.05 -> withheld the whole round.
             // Canonical:  5200/105200 = 0.04943 <= 0.05 -> co-signs.
-            await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '105200' }]));
+            await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '105200' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.true;
         });
 
@@ -115,14 +115,14 @@ function registerCosignAlignmentTests() {
             // 10600/110600 = 0.0958 > 0.05 on the canonical denominator.
             let events = [];
             oc.on('oracle:propose-rejected', e => events.push(e));
-            await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '110600' }]));
+            await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '110600' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.false;
             expect(events.map(e => e.reason)).to.include('deviation');
         });
 
         it('withholds a low-side proposal just outside the band (reference = proposed)', async function () {
             // proposed 95000 vs local 100000: 5000/95000 = 0.05263 > 0.05.
-            await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '95000' }]));
+            await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '95000' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.false;
         });
     });

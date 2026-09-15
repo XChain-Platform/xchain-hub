@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -269,20 +269,20 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         const pub = makePublisher(MY_PUB, { db, p2pConfig: { [ENV_KEY]: '600000' } });
         fs.writeFileSync(pub.queuePath, '');
 
-        await pub._processQueue();
+        await pub.processQueue();
         await pub._retentionSweep;
         expect(deletes(db).length, 'nothing published yet, so nothing to age out').to.equal(0);
 
         // A confirmed marker landing is what arms the sweep.
         await pub.markPublished(RID_A, 'tx-1');
         expect(pub._markersAddedSinceSweep).to.equal(true);
-        await pub._processQueue();
+        await pub.processQueue();
         await pub._retentionSweep;
         expect(deletes(db).length).to.equal(1);
         expect(pub.publishedRequestsPruned).to.equal(1);
 
         // Disarmed again: a second pass with no new marker must not re-sweep.
-        await pub._processQueue();
+        await pub.processQueue();
         await pub._retentionSweep;
         expect(deletes(db).length).to.equal(1);
     }); });
@@ -294,14 +294,14 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         fs.writeFileSync(pub.queuePath, '');
         await pub.markPublished(RID_A, 'tx-1');
 
-        await pub._processQueue();          // must not reject
+        await pub.processQueue();          // must not reject
         await pub._retentionSweep;          // the rejection is swallowed inside
         expect(pub.publishedRequestsPruned).to.equal(0);
 
         pub.enabled = false;
         pub._markersAddedSinceSweep = true;
         pub._retentionSweep = null;
-        await pub._processQueue();
+        await pub.processQueue();
         expect(pub._retentionSweep, 'a paused publisher touches nothing').to.equal(null);
     }); });
 

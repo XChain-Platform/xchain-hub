@@ -48,7 +48,7 @@ function builder(network) {
 
     function reproducesTheFrozenEquivWrappedCanonicalTest2() {
         const eng = builder(V.canonical.network);
-        assert.strictEqual(eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash),
+        assert.strictEqual(eng.canonical(V.canonical.epoch_height, V.canonical.ledger_hash),
                            V.canonical.expected);
     }
 
@@ -59,14 +59,14 @@ function builder(network) {
         // to match today cannot pass tomorrow.
         const eq  = require('../../../src/equivocation_header.js');
         const eng = builder('regtest');
-        const out = eng._canonical(30, V.canonical.ledger_hash);
+        const out = eng.canonical(30, V.canonical.ledger_hash);
         assert.ok(out.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.ROLLCALL, '30', 0))));
         assert.strictEqual(eq.ENGINE_TAGS.ROLLCALL, 'XROLLCALL');
     }
 
     function signsWithRealEd25519KeysToTest4() {
         const eng   = builder(V.canonical.network);
-        const canon = eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
+        const canon = eng.canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
         for (const s of V.signers) {
             const id = new ValidatorIdentity(s.seed);
             assert.strictEqual(id.getPubkeyHex().toLowerCase(), s.pubkey,
@@ -79,7 +79,7 @@ function builder(network) {
 
     function rejectsEveryNegativeVectorASignatureTest5() {
         const eng   = builder(V.canonical.network);
-        const canon = eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
+        const canon = eng.canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
         for (const bad of V.invalid) {
             assert.strictEqual(bad.verifies, false);
             // The vector's own stated canonical must not verify...
@@ -96,16 +96,16 @@ function builder(network) {
         const lh = V.canonical.ledger_hash;
         const regtest = builder('regtest');
         const testnet = builder('testnet');
-        assert.notStrictEqual(regtest._canonical(30, lh), testnet._canonical(30, lh));
-        assert.notStrictEqual(regtest._canonical(30, lh), regtest._canonical(60, lh));
-        assert.notStrictEqual(regtest._canonical(30, lh), regtest._canonical(30, '0'.repeat(64)));
+        assert.notStrictEqual(regtest.canonical(30, lh), testnet.canonical(30, lh));
+        assert.notStrictEqual(regtest.canonical(30, lh), regtest.canonical(60, lh));
+        assert.notStrictEqual(regtest.canonical(30, lh), regtest.canonical(30, '0'.repeat(64)));
     }
 
     function epoch0IsARealEpochTest7() {
-        // _canonical is pure string building and does not consult ROLLCALL_ACTIVATION,
+        // canonical is pure string building and does not consult ROLLCALL_ACTIVATION,
         // so this holds whether or not regtest is armed. A falsy check on the height
         // would build 'EQUIV|XROLLCALL||0||...' or skip the epoch outright.
-        const out = builder('regtest')._canonical(0, V.canonical.ledger_hash);
+        const out = builder('regtest').canonical(0, V.canonical.ledger_hash);
         assert.strictEqual(out, 'EQUIV|XROLLCALL|0|0||regtest|0|' + V.canonical.ledger_hash);
     }
 
@@ -182,7 +182,7 @@ function builder(network) {
     function reproducesTheFrozenV1CanonicalGatesTest12() {
         const V1  = V.canonical_v1;
         const eng = builder(V1.network);
-        assert.strictEqual(eng._canonical(V1.epoch_height, V1.ledger_hash, V1.gates), V1.expected);
+        assert.strictEqual(eng.canonical(V1.epoch_height, V1.ledger_hash, V1.gates), V1.expected);
         // The commitment is sha256 of the field EXACTLY as carried, and the vector
         // states it separately so a helper that hashed a normalised list would fail
         // here rather than at an eviction a year later.
@@ -197,16 +197,16 @@ function builder(network) {
         // build that knows v1 must be unchanged: an accidental v1 canonical below the
         // height would drop every peer signature on the network.
         const eng = builder(V.canonical.network);
-        const v0  = eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
+        const v0  = eng.canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
         assert.strictEqual(v0, V.canonical.expected);
-        assert.strictEqual(eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash, null), v0);
+        assert.strictEqual(eng.canonical(V.canonical.epoch_height, V.canonical.ledger_hash, null), v0);
         assert.notStrictEqual(v0, V.canonical_v1.expected);
     }
 
     function signsTheV1CanonicalWithRealTest14() {
         const V1    = V.canonical_v1;
         const eng   = builder(V1.network);
-        const canon = eng._canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
+        const canon = eng.canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
         for (const s of V.signers_v1) {
             const id = new ValidatorIdentity(s.seed);
             assert.strictEqual(id.getPubkeyHex().toLowerCase(), s.pubkey,
@@ -219,7 +219,7 @@ function builder(network) {
 
     function rejectsEveryV1NegativeVectorTheTest15() {
         const V1    = V.canonical_v1;
-        const canon = builder(V1.network)._canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
+        const canon = builder(V1.network).canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
         const realSigs = new Set(V.signers_v1.map(s => s.sig));
         for (const bad of V.invalid_v1) {
             assert.strictEqual(bad.verifies, false);

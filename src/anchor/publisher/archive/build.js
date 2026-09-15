@@ -49,7 +49,7 @@ module.exports = {
     //
     // Trade-off taken on purpose: successive batches under one wrapper now elect the same
     // leader. Rotation still happens as checkpoint_seq advances, and within a wrapper the
-    // ladder (`_rankUnlocked` against electionBlock - snapshot_block) is what moves the
+    // ladder (`rankUnlocked` against electionBlock - snapshot_block) is what moves the
     // publish off a dead leader, which is exactly the job a STABLE anchor is needed for.
     // `batchSeq` is accepted and ignored so existing call sites/stubs stay valid.
     archiveElectionKey(cp, batchSeq){                      // eslint-disable-line no-unused-vars
@@ -86,7 +86,7 @@ module.exports = {
     // unlocked publishers build byte-identical archives (both verify against
     // the same quorum-agreed rows), so a race is duplicate-tx waste, not a
     // divergence hazard.
-    _rankUnlocked(order, pubkey, sinceBlocks){
+    rankUnlocked(order, pubkey, sinceBlocks){
         let rank = order.indexOf(String(pubkey || '').toLowerCase());
         if(rank < 0) return false;
         if(rank === 0) return true;

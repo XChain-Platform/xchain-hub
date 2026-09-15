@@ -284,7 +284,7 @@ function feature5persistenceRetractionFragment3PendingFinalizeRow() {
 // stop the parked write from inserting and mirroring an executable dispatch the
 // reorg already removed.
 function registerFeature5persistenceRetractionFragment3Part1() {
-  it('_persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
+  it('persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
     const {
       engine
     } = makeEngine();
@@ -299,7 +299,7 @@ function registerFeature5persistenceRetractionFragment3Part1() {
       weight: '1',
       amount: '1'
     }];
-    expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(2);
+    expect(await engine.persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(2);
     const capped = [{
       pubkey: 'c'.repeat(64),
       source: 's3',
@@ -308,7 +308,7 @@ function registerFeature5persistenceRetractionFragment3Part1() {
     }];
     capped.truncated = true;
     engine.resolveCapabilityValidators = async () => capped;
-    expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(0);
+    expect(await engine.persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(0);
   });
 }
 function registerFeature5persistenceRetractionFragment3Part2() {

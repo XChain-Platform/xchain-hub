@@ -96,7 +96,7 @@ module.exports = {
     async persistSnapshotOrDefer(row, roundId, consensus){
         let persisted = 0;
         try {
-            persisted = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+            persisted = await this.persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
             logger.error('CrossChainBridge: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           String(roundId).substring(0, 16) + '... to a later round): ' + (e && e.message));

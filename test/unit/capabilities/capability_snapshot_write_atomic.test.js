@@ -80,7 +80,7 @@ it('writes no statement at all for an empty set', async function () {
                                               getPeerManager: () => ({ on(){}, broadcast(){} }) });
         eng.resolveCapabilityValidators = async () => VALIDATORS.slice();
         let threw = false;
-        try { await eng._persistCapabilitySnapshot(CAPABILITY, BLOCK); }
+        try { await eng.persistCapabilitySnapshot(CAPABILITY, BLOCK); }
         catch (e) { threw = true; }
         expect(threw, 'the persist must fail closed so no checkpoint row rides a partial mirror').to.equal(true);
         expect(db.rows().length).to.equal(0);

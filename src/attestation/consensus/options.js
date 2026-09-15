@@ -149,7 +149,7 @@ module.exports = {
     initEarlyBuffers(){
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round.
-        // _handlePropose silently returns at `if(!pending)`, losing the vote.
+        // handlePropose silently returns at `if(!pending)`, losing the vote.
         // Buffer envelopes here keyed by rid and drain in propose() once
         // pending exists. Bounded TTL prevents leaks if pending never starts.
         // Map<rid, Array<envelope>>
@@ -181,7 +181,7 @@ module.exports = {
         // before a winner is established: the PROPOSE->agree() transition is
         // async, and drainEarlyMessages replays buffered envelopes in arrival
         // order, so a COMMIT can be replayed ahead of its own PROPOSE. Without
-        // buffering, such a COMMIT hits the `!winner` guard in _handleCommit and
+        // buffering, such a COMMIT hits the `!winner` guard in handleCommit and
         // is permanently dropped, costing the round that peer's vote and
         // stalling finalization in quorum>1 federations until a re-broadcast or
         // round timeout. Hold these per-request and drain them the instant a

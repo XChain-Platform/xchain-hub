@@ -38,7 +38,7 @@ function mkPub(network, rewardRows, hits){
         resolveBtcLatestBlock: async () => BLOCK
     });
     const me = identity.getPubkeyHex().toLowerCase();
-    pub._getActiveOraclePublishPubkeys = async () => [me];
+    pub.getActiveOraclePublishPubkeys = async () => [me];
     return pub;
 }
 
@@ -87,7 +87,7 @@ function mkSelector(network, rows, maxBatch, hits){
     });
     pub.maxBatch = maxBatch;
     const me = identity.getPubkeyHex().toLowerCase();
-    pub._getActiveOraclePublishPubkeys = async () => [me];
+    pub.getActiveOraclePublishPubkeys = async () => [me];
     return pub;
 }
 

@@ -152,7 +152,7 @@ function registerRowTests() {
         consensusHub.hubDbBroadcaster   = null;
         const oc = new OracleConsensus(consensusHub, null);
         oc.db = consensusDb;
-        await oc._persistCapabilitySnapshot('price', ANCHOR);
+        await oc.persistCapabilitySnapshot('price', ANCHOR);
         await agg.persistPriceCapabilitySnapshot(ANCHOR);
         const ocInsert  = consensusDb.queries.find(query => /^INSERT IGNORE INTO capability_snapshots/.test(query.sql));
         const aggInsert = db.queries.find(query => /^INSERT IGNORE INTO capability_snapshots/.test(query.sql));

@@ -132,7 +132,7 @@ const hookAt4037 = function () {
     };
 
 // Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
+    // handleCommit, so the test asserts vote-counting (commits.add) without
     // needing real validator crypto. The buffering decision under test happens
     // before any signature check regardless.
     function commitEnvelope(rid, peerPubkey) {
@@ -143,10 +143,10 @@ const RID  = 'f00df00df00df00df00df00df00df00d';
 
 const PEER = '33'.repeat(32);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: COMMIT before the round exists', function () { it('still buffers in earlyMessages (unchanged !pending behavior)', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: COMMIT before the round exists', function () { it('still buffers in earlyMessages (unchanged !pending behavior)', function () {
             // No pending for RID; the pre-existing early-arrival path must
             // still capture the COMMIT for replay in propose().
-            consensus._handleCommit(commitEnvelope(RID, PEER));
+            consensus.handleCommit(commitEnvelope(RID, PEER));
 
             expect(consensus.earlyMessages.get(RID)).to.have.lengthOf(1);
             expect(consensus.earlyCommits.has(RID)).to.equal(false);

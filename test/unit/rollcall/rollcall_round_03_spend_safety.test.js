@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// RollcallRound engine behaviour, driven through the real _tick() against a
+// RollcallRound engine behaviour, driven through the real tick() against a
 // stubbed indexer pair. Everything signature-shaped uses REAL Ed25519 identities:
 // a stubbed verifier would certify a canonical nobody ever checked.
 //
@@ -112,7 +112,7 @@ function makeHub(o) {
         },
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
-        _resolveBtcIndexerUrl: async () => BTC_URL,
+        resolveBtcIndexerUrl: async () => BTC_URL,
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
@@ -194,10 +194,10 @@ async function twoChunkLeader(env) {
             const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
                                    Object.assign({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 8,
                                                    ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
+            await eng.tick();
+            const canon = eng.canonical(EPOCH, LEDGER_HASH);
             for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                      data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
             wireRpc({ tip: 38 });
             return { eng, many, myPubkey: many[leaderIdx] };
@@ -219,7 +219,7 @@ it('refuses to publish with the wallet under DOGE_LOW_BALANCE_THRESHOLD', async 
                                { oraclePublisher: { broadcastFn: sinon.stub().resolves({ txid: 't' }),
                                                     walletSignFn: sinon.stub(),
                                                     getBalanceFn: sinon.stub().resolves(1), encoder: null } });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('fails closed when the wallet balance is unreadable', async function () {
@@ -229,20 +229,20 @@ it('fails closed when the wallet balance is unreadable', async function () {
                                                     walletSignFn: sinon.stub(),
                                                     getBalanceFn: sinon.stub().rejects(new Error('rpc down')),
                                                     encoder: null } });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('refuses to publish while the effector is paused', async function () {
             wireRpc({ tip: 38 });
             const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
             eng.spendGuard.pause('drill');
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('writes a durable intent BEFORE the money moves and gates the send on it', async function () {
             wireRpc({ tip: 38 });
             const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
+            await eng.tick();
             const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
                             .trim().split('\n').map(JSON.parse);
             assert.strictEqual(lines[0].phase, 'intent');
@@ -254,7 +254,7 @@ it('defers the publish when the spend-audit path is unwritable', async function 
             wireRpc({ tip: 38 });
             const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
             sinon.stub(eng, 'recordSpend').returns(false);
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'a real DOGE fee must never be spent with no recoverable trace');
             assert.strictEqual(eng.rounds.get(EPOCH).published, false, 'the slot is released for a retry');
@@ -268,14 +268,14 @@ describe('spend safety', function () {
 it('a restart does not re-publish an epoch a prior process committed', async function () {
             wireRpc({ tip: 38 });
             const first = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await first._tick();
+            await first.tick();
             assert.strictEqual(first.hub.oraclePublisher.broadcastFn.callCount, 1);
 
             loadModule();
             wireRpc({ tip: 38 });
             const second = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
             second.loadSpendLog();
-            await second._tick();
+            await second.tick();
             assert.strictEqual(second.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('a definitively FAILED publish clears the commitment so a retry can run', async function () {
@@ -285,7 +285,7 @@ it('a definitively FAILED publish clears the commitment so a retry can run', asy
                                                         new Error('encoder rejected: bad payload'), { response: { status: 400 } })),
                                                     walletSignFn: sinon.stub(),
                                                     getBalanceFn: sinon.stub().resolves(1000), encoder: null } });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.get(EPOCH).published, false);
             const phases = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
                              .trim().split('\n').map(l => JSON.parse(l).phase);
@@ -299,7 +299,7 @@ it('an AMBIGUOUS send keeps the epoch claimed rather than risking a double spend
                                { oraclePublisher: { broadcastFn: sinon.stub().rejects(timeout),
                                                     walletSignFn: sinon.stub(),
                                                     getBalanceFn: sinon.stub().resolves(1000), encoder: null } });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.get(EPOCH).published, true, 'the slot stays claimed');
             assert.strictEqual(eng._committed.has(String(EPOCH)), true);
             const phases = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
@@ -316,7 +316,7 @@ it('does not send a two-action roll call with only one publish left in the windo
             // The ceiling is checked once before chunking, so without a per-chunk
             // reservation both actions go out and the window overruns by one fee.
             const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 1 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'a batch the window cannot afford in full must send nothing');
             assert.strictEqual(eng.rounds.get(EPOCH).published, false, 'the slot is released for a later tick');
@@ -329,7 +329,7 @@ it('does not send a two-action roll call with only one publish left in the windo
         });
 it('spends exactly one window slot per action, never one per batch', async function () {
             const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 2 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 2);
             assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 2,
                 'two transactions are two spends, not one');
@@ -343,7 +343,7 @@ it('a mid-batch failure gives back the budget the untried action never spent', a
             eng.hub.oraclePublisher.broadcastFn = sinon.stub();
             eng.hub.oraclePublisher.broadcastFn.onCall(0).resolves({ txid: 'txid-a' });
             eng.hub.oraclePublisher.broadcastFn.onCall(1).rejects(bad);
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 1,
                 'the action that landed is a spend; the one that was refused is not');
         });
@@ -362,14 +362,14 @@ it('retries only the actions that never reached the wire', async function () {
             bc.resolves({ txid: 'txid-b' });
             eng.hub.oraclePublisher.broadcastFn = bc;
 
-            await eng._tick();
+            await eng.tick();
             const state = eng.rounds.get(EPOCH);
             assert.strictEqual(state.published, false, 'the slot is released so the tail can still land');
             assert.strictEqual(state.sent.size, 41, 'the action that landed is remembered');
             assert.strictEqual(eng._committed.has(String(EPOCH)), false);
 
             wireRpc({ tip: 39 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(bc.callCount, 3, 'the retry sends one action, not the whole set again');
             const first = parseWire(bc.getCall(0).args[0]).pairs.map(p => p.pubkey);
             const retry = parseWire(bc.getCall(2).args[0]).pairs.map(p => p.pubkey);
@@ -389,7 +389,7 @@ it('counts our own signature as on the wire once ITS action landed', async funct
             bc.onCall(0).resolves({ txid: 'txid-a' });
             bc.onCall(1).rejects(bad);
             eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
+            await eng.tick();
             const state = eng.rounds.get(EPOCH);
             assert.ok(state.sent.has(myPubkey), 'our signature rode the first action');
             assert.strictEqual(state.ownSigOnWire, true,

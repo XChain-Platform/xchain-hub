@@ -73,7 +73,7 @@ function mkEngine(db, broadcaster) {
         getPeerManager: () => null,
         getIdentity:    () => null
     });
-    engine._persistCapabilitySnapshot = async () => {};   // isolate the checkpoint leg
+    engine.persistCapabilitySnapshot = async () => {};   // isolate the checkpoint leg
     return engine;
 }
 

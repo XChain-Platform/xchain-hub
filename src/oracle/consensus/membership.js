@@ -92,7 +92,7 @@ module.exports = {
     // boundary, so deriving the leader from it keeps the election identical
     // everywhere. Without a usable snapshot (memberPubkeys null), legacy
     // live-set rotation is preserved (graceful-degradation path).
-    _getLeader(round, memberPubkeys) {
+    getLeader(round, memberPubkeys) {
         if (memberPubkeys && memberPubkeys.size > 0) {
             let keys = [...memberPubkeys].sort();
             let pubkey = keys[round % keys.length];

@@ -102,7 +102,7 @@ class CrossChainEngine extends EventEmitter {
                 } catch(_){}
             }
         }
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this._messageHandler = (envelope) => this.handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
         logger.info('Cross-chain attestation engine started');
     }
@@ -159,7 +159,7 @@ class CrossChainEngine extends EventEmitter {
 
         let res;
         try {
-            res = await this._indexerCall(sourceChain, 'getactionconfirmations', { action_index: idx });
+            res = await this.indexerCall(sourceChain, 'getactionconfirmations', { action_index: idx });
         } catch (err) {
             logger.warn('CrossChain: source action lookup failed for ' + sourceChain + ':' + idx +
                 ': ' + (err && err.message));
@@ -171,7 +171,7 @@ class CrossChainEngine extends EventEmitter {
         return Number.isFinite(depth) && depth >= required;
     }
 
-    async _indexerCall(coin, method, params) {
+    async indexerCall(coin, method, params) {
         let ix = this.indexers[coin];
         if (!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

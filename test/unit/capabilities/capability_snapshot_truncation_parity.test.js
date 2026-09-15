@@ -110,7 +110,7 @@ function instance(entry, db, capSnapshot) {
 }
 
 const persist = (entry, db, cap) =>
-    instance(entry, db, cap)._persistCapabilitySnapshot(entry[2], ...entry[3]);
+    instance(entry, db, cap).persistCapabilitySnapshot(entry[2], ...entry[3]);
 
 // The resolver on its own, so a reverted marker carry is named at its source rather than
 // only through a writer. The resolvers take the network as an argument or off `this`.

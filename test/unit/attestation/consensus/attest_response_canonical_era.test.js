@@ -65,7 +65,7 @@ function makeFederation(network, n) {
                 // Deep-ish copy through JSON so a handler cannot mutate a peer's
                 // object, and so a Buffer never crosses the bus by reference.
                 let env = { type: type, data: JSON.parse(JSON.stringify(data)) };
-                for (let e of bus.engines) if (e.identity !== identity) e._handleMessage(env);
+                for (let e of bus.engines) if (e.identity !== identity) e.handleMessage(env);
             }
         };
         let hub = {

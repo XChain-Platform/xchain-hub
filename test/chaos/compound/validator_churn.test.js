@@ -159,17 +159,17 @@ function registerLeaderRotationReflectsUpdatedValidatorSetTest() {
         con.validatorSet = [...VALIDATORS_4];
 
         // Leader for seq=1, view=0: validators[(1+0) % 4] = validators[1]
-        expect(con._getLeader(1).addr).to.equal(VALIDATORS_4[1].addr);
+        expect(con.getLeader(1).addr).to.equal(VALIDATORS_4[1].addr);
 
         // Add 5th validator
         let v5 = makeValidator(5);
         con.validatorSet.push(v5);
 
         // Leader for seq=1, view=0: validators[(1+0) % 5] = validators[1] (same)
-        expect(con._getLeader(1).addr).to.equal(VALIDATORS_4[1].addr);
+        expect(con.getLeader(1).addr).to.equal(VALIDATORS_4[1].addr);
 
         // seq=4: validators[(4+0) % 5] = validators[4] = v5
-        expect(con._getLeader(4).addr).to.equal(v5.addr);
+        expect(con.getLeader(4).addr).to.equal(v5.addr);
     });
 }
 
@@ -207,17 +207,17 @@ function registerOracleLeaderChangesWhenValidatorSetTest() {
         oracleCon.validatorSet = [...VALIDATORS_4];
 
         // Round 4: leader = validators[4 % 4] = validators[0]
-        expect(oracleCon._getLeader(4).addr).to.equal(VALIDATORS_4[0].addr);
+        expect(oracleCon.getLeader(4).addr).to.equal(VALIDATORS_4[0].addr);
 
         // Add 5th validator
         let v5 = makeValidator(5);
         oracleCon.validatorSet.push(v5);
 
         // Round 4: leader = validators[4 % 5] = validators[4] = v5
-        expect(oracleCon._getLeader(4).addr).to.equal(v5.addr);
+        expect(oracleCon.getLeader(4).addr).to.equal(v5.addr);
 
         // Round 5: leader = validators[5 % 5] = validators[0]
-        expect(oracleCon._getLeader(5).addr).to.equal(VALIDATORS_4[0].addr);
+        expect(oracleCon.getLeader(5).addr).to.equal(VALIDATORS_4[0].addr);
     });
 }
 

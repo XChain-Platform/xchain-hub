@@ -37,7 +37,7 @@ module.exports = {
 
     // ── collect ──────────────────────────────────────────────────────────────
 
-    _handleMessage(env){
+    handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
             case XROLLCALL_SIGN: return this.onSign(env.data);

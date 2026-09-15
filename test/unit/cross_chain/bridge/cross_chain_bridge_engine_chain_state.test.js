@@ -21,7 +21,7 @@
  *      halves off the two DIFFERENT chains the invariant is stated over (base
  *      spec section 3): a copy chain's supply on the copy, the escrow backing
  *      it at ADDRESS.BRIDGE_<copy> on the ORIGIN.
- *   2. the TRUNCATED capability-snapshot refusal in _persistCapabilitySnapshot.
+ *   2. the TRUNCATED capability-snapshot refusal in persistCapabilitySnapshot.
  *      The refusal was written but nothing drove it, so it could have been
  *      deleted without a single test going red.
  *   3. the activation gates against the REAL vendored flag-day twins on a
@@ -81,7 +81,7 @@ function registerChainReadCoreTests() {
         it('asks every chain that carries the tick, by name, through the indexer client', async function(){
             const { engine } = makeEngine();
             const seen = [];
-            engine._indexerCall = async (coin, method, params) => {
+            engine.indexerCall = async (coin, method, params) => {
                 seen.push([coin, method, params.tick]);
                 return { supply: '0', escrow: {} };
             };
@@ -98,7 +98,7 @@ function registerChainReadCoreTests() {
         // bridge as a deficit of its entire supply.
         it('reads supply on the copy and the backing escrow on the origin', async function(){
             const { engine } = makeEngine();
-            engine._indexerCall = async (coin) => {
+            engine.indexerCall = async (coin) => {
                 if(coin === 'BTC')  return { supply: '30', escrow: { DOGE: '10', LTC: '7' } };
                 if(coin === 'DOGE') return { supply: '10', escrow: {} };
                 return { supply: '7', escrow: {} };
@@ -118,7 +118,7 @@ function registerChainReadCoreTests() {
         // The indexer keys the map by the role address it read.
         it('accepts the escrow map keyed by the role name as well as by the coin', async function(){
             const { engine } = makeEngine();
-            engine._indexerCall = async (coin) =>
+            engine.indexerCall = async (coin) =>
                 (coin === 'BTC' ? { supply: '5', escrow: { BRIDGE_DOGE: '5' } } : { supply: '5', escrow: {} });
             const inv = await engine.getBridgeInvariant('XCHAIN');
             expect(inv.XCHAIN.DOGE.escrow).to.equal('5');
@@ -128,7 +128,7 @@ function registerChainReadCoreTests() {
     it('counts in-flight against the escrow before judging the delta', async function(){
             const { engine } = makeEngine();
             engine._pendingInFlight = new Map([['XCHAIN|DOGE', ['4']]]);
-            engine._indexerCall = async (coin) =>
+            engine.indexerCall = async (coin) =>
                 (coin === 'BTC' ? { supply: '4', escrow: { DOGE: '4' } } : { supply: '0', escrow: {} });
             const inv = await engine.getBridgeInvariant('XCHAIN');
             expect(inv.XCHAIN.DOGE.in_flight).to.equal('4');
@@ -142,7 +142,7 @@ function registerChainReadDegradationTests() {
         it('degrades to null with one logged line when the method is absent', async function(){
             const { engine } = makeEngine();
             const warn = sinon.stub(console, 'warn');
-            engine._indexerCall = async () => { throw new Error('indexer RPC error: {"code":-32601}'); };
+            engine.indexerCall = async () => { throw new Error('indexer RPC error: {"code":-32601}'); };
             const inv = await engine.getBridgeInvariant('XCHAIN');
             expect(inv.XCHAIN.DOGE.escrow).to.equal(null);
             expect(inv.XCHAIN.DOGE.supply).to.equal(null);
@@ -160,7 +160,7 @@ function registerChainReadDegradationTests() {
         it('one unreachable chain does not take the readable ones out of the answer', async function(){
             const { engine } = makeEngine();
             sinon.stub(console, 'warn');
-            engine._indexerCall = async (coin) => {
+            engine.indexerCall = async (coin) => {
                 if(coin === 'DOGE') throw new Error('ECONNREFUSED');
                 if(coin === 'BTC')  return { supply: '9', escrow: { DOGE: '9', LTC: '0' } };
                 return { supply: '0', escrow: {} };
@@ -184,7 +184,7 @@ function registerChainOriginTests() {
                 if(sql.startsWith('SELECT MAX(policy_seq)')) return [{ seq: 0 }];
                 return [];
             };
-            engine._indexerCall = async () => ({ supply: '3', escrow: { LTC: '3', DOGE: '3' } });
+            engine.indexerCall = async () => ({ supply: '3', escrow: { LTC: '3', DOGE: '3' } });
             let inv = await engine.getBridgeInvariant('FUFU');
             expect(inv.FUFU.LTC.supply).to.equal('3');
             expect(inv.FUFU.LTC.escrow).to.equal(null);
@@ -201,11 +201,11 @@ function registerChainOriginTests() {
         // replace the whole reader, and when it does the indexer is never called.
         it('an injected chainStateReader replaces the indexer read entirely', async function(){
             const { engine } = makeEngine();
-            engine._indexerCall = sinon.stub().rejects(new Error('the injected reader must win'));
+            engine.indexerCall = sinon.stub().rejects(new Error('the injected reader must win'));
             engine.chainStateReader = async (coin) =>
                 (coin === 'BTC' ? { XCHAIN: { supply: '2', escrow: { DOGE: '2' } } } : { XCHAIN: { supply: '2', escrow: {} } });
             const inv = await engine.getBridgeInvariant('XCHAIN');
-            expect(engine._indexerCall.called).to.equal(false);
+            expect(engine.indexerCall.called).to.equal(false);
             expect(inv.XCHAIN.DOGE.escrow).to.equal('2');
         });
 }
@@ -241,7 +241,7 @@ function registerTruncatedSnapshotTests() {
             const warn = sinon.stub(console, 'warn');
             const before = db.calls.length;
 
-            const persisted = await engine._persistCapabilitySnapshot('cross_chain', 150, 'regtest');
+            const persisted = await engine.persistCapabilitySnapshot('cross_chain', 150, 'regtest');
 
             expect(persisted).to.equal(0);
             const wrote = db.calls.slice(before).filter(c => /capability_snapshots/i.test(c.sql));
@@ -267,7 +267,7 @@ function registerTruncatedSnapshotTests() {
                 }
             });
             const before = db.calls.length;
-            const persisted = await engine._persistCapabilitySnapshot('cross_chain', 150, 'regtest');
+            const persisted = await engine.persistCapabilitySnapshot('cross_chain', 150, 'regtest');
             expect(persisted).to.be.above(0);
             expect(db.calls.slice(before).filter(c => /capability_snapshots/i.test(c.sql)).length).to.be.above(0);
         });
@@ -305,10 +305,10 @@ function registerFlagDayTests() {
         // Armed gates plus a regtest config: the poll actually reaches the indexer.
         it('a regtest hub with the real gates polls instead of idling', async function(){
             const { engine } = makeEngine({ network: 'regtest' });
-            engine._indexerCall = sinon.stub().resolves({ latest_block_index: 200, network: 'regtest', transfers: [] });
-            await engine._poll();
-            expect(engine._indexerCall.called).to.equal(true);
-            expect(engine._indexerCall.getCalls().some(c => c.args[1] === 'getpendingbridgetransfers')).to.equal(true);
+            engine.indexerCall = sinon.stub().resolves({ latest_block_index: 200, network: 'regtest', transfers: [] });
+            await engine.poll();
+            expect(engine.indexerCall.called).to.equal(true);
+            expect(engine.indexerCall.getCalls().some(c => c.args[1] === 'getpendingbridgetransfers')).to.equal(true);
         });
     });
 }

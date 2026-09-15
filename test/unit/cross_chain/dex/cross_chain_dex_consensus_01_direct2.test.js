@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // In-process PBFT mesh: K CrossChainDexConsensus instances share a mock gossip
-// bus (broadcast fans out to every other instance's _handleMessage), each with a
+// bus (broadcast fans out to every other instance's handleMessage), each with a
 // real ValidatorIdentity. Exercises the full round (PROPOSE/PREPARE/COMMIT),
 // single-node fallback, Byzantine-value tolerance, leader-failover via
 // view-change, and the tamper / NEW_VIEW guards. The same properties validated
@@ -22,7 +22,7 @@ const CrossChainDexConsensus = require('../../../../src/cross_chain/dex_consensu
 const ValidatorIdentity      = require('../../../../src/validators/identity');
 const { waitUntil }          = require('../../../helpers/waitUntil');
 
-// Canonical format byte-identical to the indexer verifier (cross_settle._canonical).
+// Canonical format byte-identical to the indexer verifier (cross_settle.canonical).
 function canonicalMatch(r) {
     return ['XMATCH', r.match_id, String(r.snapshot_block),
         r.a_chain, String(r.a_action_index), r.a_tick || '', String(r.a_amount), String(r.a_ownership), r.a_payout_addr,
@@ -86,8 +86,8 @@ function rootSuiteBuildMesh(n, opts) {
       capSnapshot: null,
       // opts.canonical simulates the EQUIV-header-active engine, whose
       // canonical folds the view (H-8 regression); default ignores view.
-      _canonicalMatch: opts.canonical || canonicalMatch,
-      _persistCapabilitySnapshot: async () => {},
+      canonicalMatch: opts.canonical || canonicalMatch,
+      persistCapabilitySnapshot: async () => {},
       validateProposedMatch: async () => opts.validate ? opts.validate(self) : true
     };
     self.consensus = new CrossChainDexConsensus(engine);
@@ -163,7 +163,7 @@ async function rootSuiteDrivePropose(bus, victim, mid, proposedRow) {
   let leaderPk = rootSuiteLeaderPubkey(bus, mid, 0);
   let leaderNode = bus.nodes.find(nd => nd.pubkey === leaderPk);
   let sig = leaderNode.identity.sign(canonicalMatch(proposedRow));
-  await victim.consensus._handlePropose({
+  await victim.consensus.handlePropose({
     type: 'XDEX_MATCH_PROPOSE',
     sender: leaderPk,
     data: {
@@ -226,7 +226,7 @@ function registerDirect2Part1() {
 }
 function registerDirect2Part2() {
   it('leader failover finalizes when the canonical folds the view (EQUIV header active; H-8 regression)', async function () {
-    // With the EQUIV header active, _canonicalMatch(row, view) moves with the
+    // With the EQUIV header active, canonicalMatch(row, view) moves with the
     // view, so a new-view leader that re-signs the view-0 canonical produces a
     // PROPOSE no follower verifies (they recompute at d.view) and failover is
     // dead. This pins the fix: the rotated leader rebuilds + re-signs the
@@ -347,9 +347,9 @@ function registerDirect2Part4() {
     });
     let badSig = leaderNode.identity.sign(canonicalMatch(badRow));
     let before = victim.consensus.pending.get(mid).signatures.size;
-    // _handleMessage fires the PROPOSE branch and forgets it, so drive the async
+    // handleMessage fires the PROPOSE branch and forgets it, so drive the async
     // handler directly: its completion IS the verdict, with nothing left to settle.
-    await victim.consensus._handlePropose({
+    await victim.consensus.handlePropose({
       type: 'XDEX_MATCH_PROPOSE',
       sender: leaderPk,
       data: {

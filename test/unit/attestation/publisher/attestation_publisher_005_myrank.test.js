@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -107,47 +107,47 @@ function readQueue(file) {
 // request, which is the longest provider deadline_window_blocks.
 
 {
-describe('AttestationPublisher: _myRank', function () { it('returns null when identity is not set', function () {
+describe('AttestationPublisher: myRank', function () { it('returns null when identity is not set', function () {
         const hub = makeHub(MY_PUB, { p2pConfig: {} });
         hub.getIdentity = () => null;
         const pub = new AttestationPublisher(hub);
         pub.queuePath = '/tmp/test.jsonl';
-        expect(pub._myRank({ responsible: [MY_PUB] })).to.be.null;
+        expect(pub.myRank({ responsible: [MY_PUB] })).to.be.null;
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('returns 0 when this node is the leader in the responsible set', function () {
+describe('AttestationPublisher: myRank', function () { it('returns 0 when this node is the leader in the responsible set', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({ responsible: [MY_PUB, LEADER_PUB] })).to.equal(0);
+        expect(pub.myRank({ responsible: [MY_PUB, LEADER_PUB] })).to.equal(0);
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('returns 1 when this node is rank-1 follower in the responsible set', function () {
+describe('AttestationPublisher: myRank', function () { it('returns 1 when this node is rank-1 follower in the responsible set', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({ responsible: [LEADER_PUB, MY_PUB] })).to.equal(1);
+        expect(pub.myRank({ responsible: [LEADER_PUB, MY_PUB] })).to.equal(1);
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('returns null when this node is not in the responsible set', function () {
+describe('AttestationPublisher: myRank', function () { it('returns null when this node is not in the responsible set', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({ responsible: [LEADER_PUB, OTHER_PUB] })).to.be.null;
+        expect(pub.myRank({ responsible: [LEADER_PUB, OTHER_PUB] })).to.be.null;
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('uses leaderPubkey fallback when responsible array is empty/absent (we are leader)', function () {
+describe('AttestationPublisher: myRank', function () { it('uses leaderPubkey fallback when responsible array is empty/absent (we are leader)', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({ leaderPubkey: MY_PUB })).to.equal(0);
+        expect(pub.myRank({ leaderPubkey: MY_PUB })).to.equal(0);
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('uses leaderPubkey fallback when responsible array is empty/absent (we are follower)', function () {
+describe('AttestationPublisher: myRank', function () { it('uses leaderPubkey fallback when responsible array is empty/absent (we are follower)', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({ leaderPubkey: LEADER_PUB })).to.equal(1);
+        expect(pub.myRank({ leaderPubkey: LEADER_PUB })).to.equal(1);
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('returns 0 when neither responsible nor leaderPubkey is present', function () {
+describe('AttestationPublisher: myRank', function () { it('returns 0 when neither responsible nor leaderPubkey is present', function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub._myRank({})).to.equal(0);
+        expect(pub.myRank({})).to.equal(0);
     }); });
 
-describe('AttestationPublisher: _myRank', function () { it('is case-insensitive for pubkey comparison', function () {
+describe('AttestationPublisher: myRank', function () { it('is case-insensitive for pubkey comparison', function () {
         const pub = makePublisher(MY_PUB);
         // MY_PUB already lowercase, but verify the uppercase variant is matched
-        expect(pub._myRank({ responsible: [MY_PUB.toUpperCase(), LEADER_PUB] })).to.equal(0);
+        expect(pub.myRank({ responsible: [MY_PUB.toUpperCase(), LEADER_PUB] })).to.equal(0);
     }); });
 }

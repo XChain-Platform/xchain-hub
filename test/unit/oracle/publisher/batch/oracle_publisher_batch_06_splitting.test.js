@@ -47,7 +47,7 @@ const testCase1 = async function () {
 
             // Hold the publish pass so the enqueued wires stay readable on disk; a
             // successful pass dequeues them and the split would be invisible here.
-            sinon.stub(h.p, '_processQueue').resolves();
+            sinon.stub(h.p, 'processQueue').resolves();
             await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);
@@ -92,7 +92,7 @@ const testCase3 = async function () {
             for (let r = 0; r < 6; r++) {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'anchor' + r) }));
             }
-            sinon.stub(h.p, '_processQueue').resolves();
+            sinon.stub(h.p, 'processQueue').resolves();
             await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);
@@ -120,7 +120,7 @@ const testCase4 = async function () {
             for (let r = 0; r < 6; r++) {
                 h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'reader' + r) }));
             }
-            sinon.stub(h.p, '_processQueue').resolves();
+            sinon.stub(h.p, 'processQueue').resolves();
             await h.p.assembleWindow(0);
 
             let entries = readJsonl(h.queuePath);

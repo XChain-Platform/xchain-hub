@@ -112,7 +112,7 @@ function mkPub(db){
     pub.ambiguousPollDelayMs  = 1;
     pub.ambiguousPollAttempts = 1;
     pub.peerManager           = null;                     // skips the XANC_FINALIZED announce
-    pub._getActiveOraclePublishPubkeys = async () => [identity.getPubkeyHex().toLowerCase()];
+    pub.getActiveOraclePublishPubkeys = async () => [identity.getPubkeyHex().toLowerCase()];
     pub.recordReward         = () => {};
     pub.runArchiveAttestationRound = async () => ({ met: false, sigs: [] });   // legacy v1, no quorum needed
     return { pub: pub, identity: identity };
@@ -210,7 +210,7 @@ function registerArchiveStartTests() {
     describe('startArchiveRound', function () {
         // flush() hands over whatever hub.resolveBtcLatestBlock() returned, and that is
         // null on a stale pushed tip, an over-lag indexer, or a failed RPC. A non-finite
-        // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch (the
+        // block makes getActiveOraclePublishPubkeys take its block-UNPINNED branch (the
         // per-hub gossip registry, scoped by its own contract to the coarse sender
         // pre-filter), so the round would elect over a set that differs hub to hub on a
         // path that spends real DOGE. Defer instead, and do it before the resolver is
@@ -220,7 +220,7 @@ function registerArchiveStartTests() {
                 const db = mkDb({ rows: ARCHIVE_ROWS });
                 const { pub, identity } = mkPub(db);
                 let elections = 0;
-                pub._getActiveOraclePublishPubkeys = async () => {
+                pub.getActiveOraclePublishPubkeys = async () => {
                     elections++;
                     return [identity.getPubkeyHex().toLowerCase()];
                 };
@@ -244,7 +244,7 @@ function registerArchiveStartOutcomeTests() {
             const db = mkDb({ rows: ARCHIVE_ROWS });
             const { pub, identity } = mkPub(db);
             let elections = 0;
-            pub._getActiveOraclePublishPubkeys = async () => {
+            pub.getActiveOraclePublishPubkeys = async () => {
                 elections++;
                 return [identity.getPubkeyHex().toLowerCase()];
             };

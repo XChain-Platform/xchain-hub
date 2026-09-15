@@ -52,7 +52,7 @@ module.exports = {
     // E - 12, forking the hub's leader from the one the close pays.
     //
     // Returns null when the set is unresolved, and every caller treats null as
-    // abstain: an empty order would make _rankUnlocked false for everyone anyway,
+    // abstain: an empty order would make rankUnlocked false for everyone anyway,
     // but null says WHY, and it must never be read as "the federation is empty".
     async electionOrder(epoch){
         let keys = null;
@@ -86,7 +86,7 @@ module.exports = {
     // ROLLCALL_ELECTION_TOLERANCE_BLOCKS of BTC height past the epoch. Blocks, not
     // wall clock, so every hub computes the same unlock with no clock sync. A key
     // outside the order never publishes.
-    _rankUnlocked(order, pubkey, sinceBlocks){
+    rankUnlocked(order, pubkey, sinceBlocks){
         if(!order) return false;
         let rank = order.indexOf(String(pubkey || '').toLowerCase());
         if(rank < 0) return false;

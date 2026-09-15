@@ -128,13 +128,13 @@ function registerVerifyDatabaseTests() {
 
         it('retries on a transient (code-less) error then succeeds', async function () {
             const { db, mockMariadb, mockConn } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
+            sinon.stub(db, 'sleep').resolves();
             mockMariadb.createConnection
                 .onFirstCall().rejects(new Error('socket hang up')) // no .code -> "unknown"
                 .onSecondCall().resolves(mockConn);
             mockConn.query.resolves([{ schema_name: 'test_db' }]);
             expect(await db.verifyDatabase()).to.be.true;
-            expect(db._sleep.calledWith(5000)).to.be.true;
+            expect(db.sleep.calledWith(5000)).to.be.true;
         });
     });
 }
@@ -167,12 +167,12 @@ function registerCreateDatabaseTests() {
 
         it('retries on a transient (code-less) error then succeeds', async function () {
             const { db, mockMariadb, mockConn } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
+            sinon.stub(db, 'sleep').resolves();
             mockMariadb.createConnection
                 .onFirstCall().rejects(new Error('reset')) // no .code -> "unknown"
                 .onSecondCall().resolves(mockConn);
             expect(await db.createDatabase()).to.be.true;
-            expect(db._sleep.calledWith(5000)).to.be.true;
+            expect(db.sleep.calledWith(5000)).to.be.true;
         });
     });
 }

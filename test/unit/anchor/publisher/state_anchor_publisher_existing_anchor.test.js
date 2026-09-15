@@ -51,7 +51,7 @@ function mkPubWithIndexer(reply) {
       url: 'http://doge-indexer'
     }
   };
-  pub._indexerCall = async (coin, method, params) => {
+  pub.indexerCall = async (coin, method, params) => {
     expect(coin).to.equal('DOGE');
     expect(method).to.equal('getanchoraction');
     expect(params.block_index).to.equal(494);
@@ -75,7 +75,7 @@ function mkPubWithVersionedIndexer(byVersion, unfiltered) {
       url: 'http://doge-indexer'
     }
   };
-  pub._indexerCall = async (coin, method, params) => {
+  pub.indexerCall = async (coin, method, params) => {
     expect(method).to.equal('getanchoraction');
     asked.push(params.version === undefined ? null : params.version);
     return params.version === undefined ? unfiltered : byVersion[params.version] || {
@@ -210,7 +210,7 @@ function registerSplitSuitePart4() {
         url: 'http://doge-indexer'
       }
     };
-    pub._indexerCall = async () => head;
+    pub.indexerCall = async () => head;
     let err = null;
     try {
       await pub.findExistingCheckpointAnchor(ROW);
@@ -226,7 +226,7 @@ function registerSplitSuitePart4() {
   // from a transaction that does not carry the others.
 }
 function registerSplitSuitePart5() { describe('findExistingBundle', function () { const SECTIONS = [{ chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 }, { chain: 'LTC', network: 'regtest', block_index: 990, checkpoint_seq: 7 }]; // Answers per chain, so a partial or split-txid view can be scripted.
-function mkPubByChain(byChain) { const pub = mkPub(); pub.indexers = { DOGE: { url: 'http://doge-indexer' } }; pub._indexerCall = async (coin, method, params) => { const a = byChain[params.chain]; if (a instanceof Error) throw a; return a; }; return pub; } const mined = txid => ({ exists: true, version: 0, status: 'valid', txid: txid }); it('adopts when every section resolves to ONE mined transaction', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('ab'.repeat(32)) }); expect(await pub.findExistingBundle(SECTIONS)).to.deep.equal({ exists: true, txid: 'ab'.repeat(32) }); }); it('does NOT adopt when one section is absent (that transaction is not this bundle)', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: { exists: false } }); expect(await pub.findExistingBundle(SECTIONS)).to.equal(null); }); it('does NOT adopt when the sections were anchored by DIFFERENT transactions', async function () { // A leftover per-chain history, or two racing publishers that each landed
+function mkPubByChain(byChain) { const pub = mkPub(); pub.indexers = { DOGE: { url: 'http://doge-indexer' } }; pub.indexerCall = async (coin, method, params) => { const a = byChain[params.chain]; if (a instanceof Error) throw a; return a; }; return pub; } const mined = txid => ({ exists: true, version: 0, status: 'valid', txid: txid }); it('adopts when every section resolves to ONE mined transaction', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('ab'.repeat(32)) }); expect(await pub.findExistingBundle(SECTIONS)).to.deep.equal({ exists: true, txid: 'ab'.repeat(32) }); }); it('does NOT adopt when one section is absent (that transaction is not this bundle)', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: { exists: false } }); expect(await pub.findExistingBundle(SECTIONS)).to.equal(null); }); it('does NOT adopt when the sections were anchored by DIFFERENT transactions', async function () { // A leftover per-chain history, or two racing publishers that each landed
 // part of the set: adopting either txid would stamp rows it does not carry.
 const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('cd'.repeat(32)) }); expect(await pub.findExistingBundle(SECTIONS)).to.equal(null); }); it('does NOT adopt against a pre-upgrade indexer that serves no txid', async function () { const pub = mkPubByChain({ BTC: { exists: true, version: 0, status: 'valid' }, LTC: { exists: true, version: 0, status: 'valid' } }); expect(await pub.findExistingBundle(SECTIONS)).to.equal(null); }); it('propagates an undetermined section (never a false absent, which would double-spend)', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: new Error('ETIMEDOUT') }); let err = null; try { await pub.findExistingBundle(SECTIONS); } catch (e) { err = e; } expect(err).to.be.an('error'); }); it('treats a decoded-invalid section as not-this-bundle', async function () { const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: { exists: true, version: 0, status: 'invalid: SECTION 1 stale', txid: 'ab'.repeat(32) } }); expect(await pub.findExistingBundle(SECTIONS)).to.equal(null); }); }); }
 function registerSplitSuitePart6() {
@@ -237,7 +237,7 @@ function registerSplitSuitePart6() {
         url: 'http://doge-indexer'
       }
     };
-    pub._indexerCall = async (coin, method, params) => {
+    pub.indexerCall = async (coin, method, params) => {
       if (params.version === undefined) return {
         exists: true,
         version: 1,

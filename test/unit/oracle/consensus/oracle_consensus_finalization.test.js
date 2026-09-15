@@ -47,7 +47,7 @@ const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
         // reaches the pending-round creation block where the guards live.
         function goodEnvelope(round, extra) {
             oc.setValidatorSet(VALIDATORS_3);
-            pm.validatorPubkeys = new Set();   // size 0 -> _isKnownSender returns true
+            pm.validatorPubkeys = new Set();   // size 0 -> isKnownSender returns true
             let leader = VALIDATORS_3[round % 3];
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
             // Local submission (from a NON-leader validator) pricing the pair at the
@@ -56,7 +56,7 @@ const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
                 { sender: VALIDATORS_3[(round + 1) % 3].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]));
             return { type: 'ORACLE_PROPOSE', sender: leader.addr, sig_pubkey: leader.pubkey, data: Object.assign({
-                round, prices, digest: oc._digest(round, prices)
+                round, prices, digest: oc.digest(round, prices)
             }, extra || {}) };
         }
 
@@ -263,12 +263,12 @@ function registerHandleproposeFollowerFailClosedGuards3Tests8() {
         it('#1225: drops a PROPOSE carrying no BTC block height on a federated hub', async function () {
             // No btcBlockHeight in the envelope -> must NOT pin the price snapshot at
             // block_index = round (not a BTC boundary); federated hub drops the round.
-            await oc._handlePropose(goodEnvelope(0, { /* btcBlockHeight omitted */ }));
+            await oc.handlePropose(goodEnvelope(0, { /* btcBlockHeight omitted */ }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
 
         it('#1225: drops a PROPOSE carrying btcBlockHeight 0 on a federated hub', async function () {
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 0 }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 0 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
 
@@ -282,7 +282,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests8() {
             // Real BTC height present, so the #1225 height guard passes; the #1222
             // weighted-snapshot guard must then fire and drop rather than degrade to
             // a count quorum this hub's peers are not using.
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
 
@@ -297,7 +297,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests8() {
                 getWeightSnapshot: sinon.stub().resolves({ validators: VALIDATORS_3 }),
                 getQuorum:         sinon.stub().returns(2)
             };
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
             // The attacker-chosen block never reaches the snapshot resolve, so it can
             // size no quorum and elect no leader.
@@ -306,7 +306,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests8() {
         });
 
         it('drops a PROPOSE whose height sits far above our own BTC tip', async function () {
-            await oc._handlePropose(goodEnvelope(0, {
+            await oc.handlePropose(goodEnvelope(0, {
                 btcBlockHeight: 900000 + oc.snapshotToleranceBlocks + 1
             }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
@@ -316,13 +316,13 @@ function registerHandleproposeFollowerFailClosedGuards3Tests8() {
 function registerHandleproposeFollowerFailClosedGuards3Tests13() {
 
         it('accepts a height at the edge of the tolerance in both directions', async function () {
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 - oc.snapshotToleranceBlocks }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 - oc.snapshotToleranceBlocks }));
             expect(oc.pendingRounds.has(0)).to.equal(true);
             let p = oc.pendingRounds.get(0);
             if (p && p.timer) clearTimeout(p.timer);
             oc.pendingRounds.delete(0);
 
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 + oc.snapshotToleranceBlocks }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 + oc.snapshotToleranceBlocks }));
             expect(oc.pendingRounds.has(0)).to.equal(true);
             p = oc.pendingRounds.get(0);
             if (p && p.timer) clearTimeout(p.timer);
@@ -330,7 +330,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests13() {
 
         it('fails closed when this hub cannot resolve a BTC tip of its own', async function () {
             hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
         });
 
@@ -340,7 +340,7 @@ function registerHandleproposeFollowerFailClosedGuards3Tests13() {
             // tip resolve. Asserted on the resolver, which is the whole cost.
             sinon.stub(oc, 'getQuorum').returns(0);
             hub.resolveBtcLatestBlock = sinon.stub().resolves(null);
-            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
+            await oc.handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
             expect(hub.resolveBtcLatestBlock.called).to.equal(false);
         });
 
@@ -363,9 +363,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _handlePropose() follower fail-closed guards (#1222, #1225)
+    // handlePropose() follower fail-closed guards (#1222, #1225)
     // -----------------------------------------------------------------
-    describe('_handlePropose() follower fail-closed guards', function () {
+    describe('handlePropose() follower fail-closed guards', function () {
         registerHandleproposeFollowerFailClosedGuards3Tests8();
         registerHandleproposeFollowerFailClosedGuards3Tests13();
     });

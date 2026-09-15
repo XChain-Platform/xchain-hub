@@ -147,7 +147,7 @@ it('REJECTS a no_quorum PREPARE it cannot derive, leaving its own stamp in place
         let f = makeFollower();
         let pending = await openRound(f);
         let bad = f.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK, NOW - 10).toString('utf8');
-        f.engine._handlePropose({
+        f.engine.handlePropose({
             type: 'ATTEST_PROPOSE',
             data: { requestId: RID, providerId: PROVIDER, body_b64: BODY.toString('base64'), meta: META,
                     status: 'ok', sig_pubkey: f.leaderKey, sig: f.leader.sign(bad), effective_time: NOW - 10 }

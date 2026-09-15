@@ -39,7 +39,7 @@ module.exports = {
     // indexer's Anchor._rewardCanonical (a divergence forks the derived reward row). The
     // amount is the FROZEN consensus constant (ar.ANCHOR_REWARD_AMOUNT, read from the twin
     // module, NOT the operator-tunable ANCHOR_REWARD_PER_PUBLISH env). The EQUIV wrapper uses
-    // the bundle's NETWORK (b.network) like _canonical/archiveCanonical, NOT this.network,
+    // the bundle's NETWORK (b.network) like canonical/archiveCanonical, NOT this.network,
     // and a distinct 'XANCPUB|...' roundId gives the attestation its own equivocation family so
     // a validator that signs both the checkpoint root canonical and this reward attestation in
     // the same round is never falsely slashable.
@@ -158,7 +158,7 @@ module.exports = {
 
         // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
         // this file fails closed on an unresolved set, and the two resolvers used across
-        // one round can legitimately disagree (_getActiveOraclePublishPubkeys reads the
+        // one round can legitimately disagree (getActiveOraclePublishPubkeys reads the
         // capability snapshot, resolveCapabilitySet may take the weighted one), so a
         // hub can pass the eligible.length fail-closed gate in publishPendingCheckpoints
         // and still resolve snapCount 0 here. Self-attesting on that would emit a v0
@@ -224,7 +224,7 @@ module.exports = {
         // hash-ordered by the bundle election key) and confirm the proposer is
         // rank-unlocked on the SAME failover ladder publishBundle used, bounded to our own
         // BTC tip (anti-spam; the binding security is the byte-match below).
-        let eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock);
+        let eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
         {
             // Run the ladder check for EVERY set size: a single-member set must
@@ -234,7 +234,7 @@ module.exports = {
                 this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
             let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
-            if(!this._rankUnlocked(order, sender, since)) return;          // proposer not unlocked
+            if(!this.rankUnlocked(order, sender, since)) return;          // proposer not unlocked
         }
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would drop
         // our attestation signature anyway (same gate the archive follower applies).

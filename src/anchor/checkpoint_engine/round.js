@@ -41,11 +41,11 @@ module.exports = {
     async runRound(chain, snapshotBlock, validators){
         // Checkpoint the chain's tip minus a confirmation margin, so every peer's
         // indexer/replica has indexed the block and a shallow reorg can't race the round.
-        let tip = await this._indexerCall(chain, 'getblockhashes', {});
+        let tip = await this.indexerCall(chain, 'getblockhashes', {});
         if(!tip || tip.block_index == null) throw new Error('no tip block hashes from ' + chain + ' indexer');
         let target = Number(tip.block_index) - this.confirmations;
         if(target < 0) target = Number(tip.block_index);
-        let bh = (target === Number(tip.block_index)) ? tip : await this._indexerCall(chain, 'getblockhashes', { block_index: target });
+        let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
         if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
 
         let network = String(bh.network || '');
@@ -66,7 +66,7 @@ module.exports = {
             throw new Error('checkpoint-commitment active for ' + chain + '@' + cp.block_index +
                             ' but indexer returned no light-client roots (state-commitment flag-day not yet reached on ' + chain + ')');
         let canonical = canonicalForms.canonicalCheckpoint(cp);
-        let id        = this._roundId(cp);
+        let id        = this.roundId(cp);
         if(this.pending.has(id)) return;
         if(!this.identity) throw new Error('no validator identity (cannot sign checkpoints)');
 
@@ -121,7 +121,7 @@ module.exports = {
     // key for multiple sources (pubkey->source is 1:1), so that round could never
     // gather a second signer and would stall (item 2651). Detect the genuine
     // sole-self case - every snapshot row is our own pubkey - and self-finalize,
-    // mirroring the CrossChainDexConsensus soleSelf guard. The _tick cadence check
+    // mirroring the CrossChainDexConsensus soleSelf guard. The tick cadence check
     // already proved we are a member, so a distinct-pubkey count of 1 means that one
     // pubkey is ours. Inert below SWQ, where distinct pubkeys == snapCount (no dupes),
     // so the weighted term never fires and the condition is byte-for-byte snapCount<=1.
@@ -192,7 +192,7 @@ module.exports = {
             .catch(e => logger.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
     },
 
-    _roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; },
+    roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; },
 
     // Claim the right to sign `canonical` at this checkpoint's sequence: true for an
     // unsigned sequence and for a re-delivery of the payload already signed there (a

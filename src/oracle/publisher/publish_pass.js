@@ -42,7 +42,7 @@ module.exports = {
     // skip the release. Skipping is safe: the skipped round stays on the durable queue
     // (the rewrite below preserves mid-pass arrivals) and publishes on the next round
     // this hub leads.
-    async _processQueue() {
+    async processQueue() {
         if (this._sweeping) {
             logger.warn('OraclePublisher: publish pass still in flight; skipping this pass ' +
                 '(entries stay on the durable queue and publish on the next pass)');

@@ -15,7 +15,7 @@
  * XChain Hub - Price Aggregator: derived capability snapshots
  *
  * NOTHING wrote a capability snapshot of ANY kind on a hub that does not run oracle
- * consensus. For `price` the sole writer was OracleConsensus._persistCapabilitySnapshot on the
+ * consensus. For `price` the sole writer was OracleConsensus.persistCapabilitySnapshot on the
  * round-FINALIZATION path, which only a validator hub reaches, so a chain-only node
  * (an indexer whose only price source is the on-chain batch, pointed at its own
  * standalone hub) mirrored an empty capability_snapshots and recorded EVERY landed

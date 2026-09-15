@@ -154,7 +154,7 @@ module.exports = {
         // local peer set has drifted from the block-locked staker set elect a
         // different leader for the same seq and reject the legitimate
         // PRE_PREPARE. Same shape as the already-hardened
-        // OracleConsensus._getLeader: sorted member pubkeys, index by
+        // OracleConsensus.getLeader: sorted member pubkeys, index by
         // rotation, resolve the addr locally. Null memberPubkeys (no usable
         // snapshot, i.e. the single-node / graceful-degradation path) keeps the
         // legacy live-set rotation.
@@ -176,7 +176,7 @@ module.exports = {
         //     followers accept any seq above lastAppliedSeq, and the follower
         //     identity guard evaluates the rotation at the CLAIMED seq.
         let nextSeq = Math.max(this.seq, this.lastAppliedSeq) + 1;
-        let leader = this._getLeader(nextSeq, memberPubkeys);
+        let leader = this.getLeader(nextSeq, memberPubkeys);
         if (leader && !this.isLeaderIdentity(leader, this.peerManager.validatorAddr, this.selfPubkey())) {
             this.seq = nextSeq;
             throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' +
@@ -186,7 +186,7 @@ module.exports = {
         this.seq = nextSeq;
         let seq = this.seq;
         this.view = 0; // Reset view on new proposal
-        let digest = this._digest(config);
+        let digest = this.digest(config);
         return openLeaderRound(this,
             { config, seq, digest, snapshot, quorum, weighted, requestedBlockIndex, memberPubkeys });
     }

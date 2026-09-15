@@ -96,7 +96,7 @@ module.exports = {
         // slip past an earlier early-return.
         this.assertCheckpointNetwork(cp, 'accept-finalized');
         // EVERY hub persists the oracle_publish snapshot for the checkpoint's
-        // snapshot_block, not just the cadence leader (_tick): ANCHOR verifiers
+        // snapshot_block, not just the cadence leader (tick): ANCHOR verifiers
         // check the checkpoint's signatures against capability_snapshots in
         // whichever hub DB they mirror, and a follower's DB may be the only one
         // they read. Deterministic from BTC stakes + INSERT IGNORE, so all hubs
@@ -105,15 +105,15 @@ module.exports = {
         // must therefore fail closed (throw) rather than log-and-continue, so the
         // checkpoint INSERT/broadcast/emit below are all skipped and no
         // quorum-signed, unverifiable row reaches a mirror or the anchor poller.
-        // Matches the leader _tick persist (unguarded) and writeFinalizedMatch;
-        // callers (_tick .catch, handleFinalized .catch, the leader accept .catch)
+        // Matches the leader tick persist (unguarded) and writeFinalizedMatch;
+        // callers (tick .catch, handleFinalized .catch, the leader accept .catch)
         // log the accept error, and the FINALIZED broadcast is re-deliverable.
         this.refuseRootlessPersist(cp);
 
         let seated = await this.seatedCheckpointAtSeq(cp);
         if(this.reportSeqConflict(seated, cp, sigs)) return;
 
-        await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
+        await this.persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
 
         await this.broadcastRowOrResync(
@@ -151,7 +151,7 @@ module.exports = {
     // Refuse and say so instead. This is DETECTION, not prevention: nothing here
     // stops a Byzantine cadence leader collecting quorum on two payloads at one
     // sequence (co-sign bounds every field derived from snapshot_block but leaves
-    // block_index free, and _roundId's block_index puts the two proposals in
+    // block_index free, and roundId's block_index puts the two proposals in
     // different rounds), so a divergence can still form across hubs. It becomes
     // diagnosable rather than invisible.
     //
@@ -179,7 +179,7 @@ module.exports = {
 
     // Advance the cadence latch for PEER-led rounds too, symmetric with the
     // startup seed (loadLastCheckpointLatch reads MAX(snapshot_block) over rows
-    // written by ANY leader). Writing it only in the leader branch of _tick left
+    // written by ANY leader). Writing it only in the leader branch of tick left
     // each hub gated on its own leadership history: with N validators and leader
     // = btcBlock % N, every hub's latch is stale on the N-1 blocks it does not
     // lead, so the federation finalizes a round roughly every intervalBlocks / N

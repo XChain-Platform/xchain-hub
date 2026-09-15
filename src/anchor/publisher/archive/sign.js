@@ -49,7 +49,7 @@ module.exports = {
         if(!Number.isFinite(electionBlock)) return;
         let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
-        let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
         if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null) return;
@@ -61,7 +61,7 @@ module.exports = {
         // signer holds oracle_publish AT snapshot_block, so a follower present only
         // in the current election set would contribute a signature that is dropped
         // on-chain and could drag an otherwise-valid archive below quorum.
-        let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        let signingPubkeys = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(!signingPubkeys.includes(myPubkey)) return;
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
@@ -111,7 +111,7 @@ module.exports = {
             // sole elected leader cannot be impersonated by a non-member.
             let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
-            if(!this._rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
+            if(!this.rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
         }
         return true;
     },
@@ -254,7 +254,7 @@ module.exports = {
         // anything, so a member cannot walk our numbering backwards or forwards at will.
         if(d.consumed_seq !== undefined && d.consumed_seq !== null){
             if(Number(d.consumed_seq) < round.batchSeq) return;
-            let electionPubkeys = await this._getActiveOraclePublishPubkeys(round.electionBlock);
+            let electionPubkeys = await this.getActiveOraclePublishPubkeys(round.electionBlock);
             if(!electionPubkeys.includes(pubkey)) return;
             if(!ValidatorIdentity.verify(this.seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;

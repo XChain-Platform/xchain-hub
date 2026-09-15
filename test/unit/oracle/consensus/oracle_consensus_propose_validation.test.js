@@ -27,7 +27,7 @@ const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('
 
     function proposeEnvelope(prices, round = ROUND) {
         return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
-            round, prices, digest: oc._digest(round, prices),
+            round, prices, digest: oc.digest(round, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } };
     }
@@ -37,12 +37,12 @@ const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('
    // second addr bound to the leader's pubkey
         const PAIR     = 'BTC/XAU';
 
-function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() {                               // must be truthy (_handlePropose: `if (!round) return`)
+function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() {                               // must be truthy (handlePropose: `if (!round) return`)
 
     beforeEach(function () {
         hub = createMockHub();
         pm  = hub._peerManager;
-        pm.validatorPubkeys = new Set();          // size 0 → _isKnownSender accepts any sender
+        pm.validatorPubkeys = new Set();          // size 0 → isKnownSender accepts any sender
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         // A federated hub refuses a round with no deterministic capability snapshot, so the
         // harness models one over the same validators. These cases are about price content,
@@ -50,7 +50,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() { 
         hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
-        leader = oc._getLeader(ROUND);             // this round's deterministic leader
+        leader = oc.getLeader(ROUND);             // this round's deterministic leader
         // This hub is a follower; pick a validator that is NOT the round leader.
         pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
         // This follower's own locally-observed price for BTC/USD is 100000.
@@ -81,14 +81,14 @@ function register2399ProposerExcludedFromDeviation2Hooks() {                  //
 function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests1() {
 
     it('rejects (no sign/PREPARE) a proposed price outside the slash deviation band', async function () {
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '200000' }])); // +100% vs local 100000
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '200000' }])); // +100% vs local 100000
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
         expect(pm.broadcast.called).to.be.false;
     });
 
     it('rejects a proposed price at/above PRICE_MAX', async function () {
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate → only the PRICE_MAX bound applies
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '20000000000' }])); // 2e10 > PRICE_MAX (1e10)
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '20000000000' }])); // 2e10 > PRICE_MAX (1e10)
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
     });
 
@@ -100,26 +100,26 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests1() {
         expect(PRICE_MAX).to.be.greaterThan(1.35e8);
         oracleRound.getSubmissions.returns(new Map()); // bound-only (no local aggregate to deviate against)
         oc.allowUnverifiedPairs = true; // isolate the PRICE_MAX bound from the unverifiable-pair gate
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '135000000' }])); // 1.35e8, realistic
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '135000000' }])); // 1.35e8, realistic
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
     it('accepts a proposed price within the deviation band', async function () {
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '102000' }])); // +2% vs local
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '102000' }])); // +2% vs local
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
     it('accepts (bound-only) an unverifiable pair only with ORACLE_ALLOW_UNVERIFIED_PAIRS opt-in', async function () {
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate, no finalized history
         oc.allowUnverifiedPairs = true;                // deliberate single-fetcher opt-in
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
     it('withholds co-sign on a pair with no local submission and no finalized history', async function () {
         oracleRound.getSubmissions.returns(new Map()); // nothing to verify against
         expect(oc.allowUnverifiedPairs).to.equal(false); // fail-closed default
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
         expect(pm.broadcast.called).to.be.false;
     });
@@ -127,7 +127,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests1() {
     it('a finalized-history pair still co-signs within the 5x historical band', async function () {
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]); // but history exists
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '110000' }])); // +10% < 5x band
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '110000' }])); // +10% < 5x band
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 }
@@ -143,7 +143,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests8() {
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]);
         // Exactly at the band (bcgt is strict >) -> co-signs.
         let atEdge = String(100000 * (1 + ORACLE_MAX_CHANGE_PER_ROUND));
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: atEdge }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: atEdge }]));
         expect(oc.pendingRounds.has(ROUND), 'clamped-max move must pass').to.be.true;
 
         oc.pendingRounds.delete(ROUND);
@@ -151,7 +151,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests8() {
         let overEdge = String(100000 * (1 + ORACLE_MAX_CHANGE_PER_ROUND) + 1);
         let events = [];
         oc.on('oracle:propose-rejected', e => events.push(e));
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: overEdge }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: overEdge }]));
         expect(oc.pendingRounds.has(ROUND), 'beyond the band must withhold').to.be.false;
         expect(events.map(e => e.reason)).to.include('historical-deviation');
     });
@@ -170,14 +170,14 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests8() {
         let clamped = String(oc.clampToLastFinalized('BTC/USD', '999'));
         expect(clamped).to.equal('0.13888889');
 
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: clamped }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: clamped }]));
         expect(oc.pendingRounds.has(ROUND), 'a clamped aggregate must always co-sign').to.be.true;
 
         oc.pendingRounds.delete(ROUND);
         let events = [];
         oc.on('oracle:propose-rejected', e => events.push(e));
         // One 8dp tick beyond what the clamp can emit is still withheld.
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '0.13888890' }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '0.13888890' }]));
         expect(oc.pendingRounds.has(ROUND), 'beyond the clamp bound must withhold').to.be.false;
         expect(events.map(e => e.reason)).to.include('historical-deviation');
     });
@@ -273,7 +273,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests14() 
         // way; the whitelist behavior is the thing under test here.
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000'], ['XCHAIN/USD', '0.50000000']]); // no local aggregate: only bound + whitelist apply
         // Honest aggregate for a canonical pair PLUS one fabricated pair the fetcher never serves.
-        await oc._handlePropose(proposeEnvelope([
+        await oc.handlePropose(proposeEnvelope([
             { coinPair: 'BTC/USD', price: '100000' },
             { coinPair: 'BTC/ZZZ', price: '123' }        // fabricated, in-range price
         ]));
@@ -286,7 +286,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests14() 
         oracleRound.getSubmissions.returns(new Map());
         let events = [];
         oc.on('oracle:propose-rejected', e => events.push(e));
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/ZZZ', price: '123' }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/ZZZ', price: '123' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
         expect(events).to.have.length(1);
         expect(events[0].reason).to.equal('non-canonical-pair');
@@ -303,7 +303,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests17() 
         // Finalized history so the unverifiable-pair gate stays out of the
         // way; the whitelist behavior is the thing under test here.
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000'], ['XCHAIN/USD', '0.50000000']]);
-        await oc._handlePropose(proposeEnvelope([
+        await oc.handlePropose(proposeEnvelope([
             { coinPair: 'BTC/USD', price: '100000' },
             { coinPair: 'XCHAIN/USD', price: '0.50000000' }
         ]));
@@ -316,7 +316,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests17() 
         oracleRound.canonicalPairs = new Set();          // size 0 -> whitelist skipped
         oracleRound.getSubmissions.returns(new Map());
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]); // keep the unverifiable-pair gate out of the way
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
@@ -325,7 +325,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests17() 
     it('emits oracle:propose-rejected when a proposed price is withheld', async function () {
         let events = [];
         oc.on('oracle:propose-rejected', e => events.push(e));
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '200000' }])); // +100% vs local 100000
+        await oc.handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '200000' }])); // +100% vs local 100000
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
         expect(events).to.have.length(1);
         expect(events[0].reason).to.equal('deviation');
@@ -339,7 +339,7 @@ function register2399ProposerExcludedFromDeviation2Tests20() {
         it('withholds co-sign for a leader-only pair proposed from a sibling addr', async function () {
             let events = [];
             oc.on('oracle:propose-rejected', e => events.push(e));
-            await oc._handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
+            await oc.handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.false;   // NOT self-validated at deviation 0
             expect(events.map(e => e.reason)).to.include('unverifiable-new-pair');
         });
@@ -353,7 +353,7 @@ function register2399ProposerExcludedFromDeviation2Tests20() {
                 { sender: ALT_ADDR,    prices: [{ coinPair: PAIR, price: '123' }] },
                 { sender: honest.addr, prices: [{ coinPair: PAIR, price: '123' }] }
             ]));
-            await oc._handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
+            await oc.handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.true;
         });
 

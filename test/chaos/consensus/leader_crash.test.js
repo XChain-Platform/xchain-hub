@@ -119,7 +119,7 @@ function registerViewChangeProducesNewLeaderTest() {
         expect(con.view).to.equal(1);
 
         // With view=1, leader for seq 4 = validators[(4+1) % 4] = validators[1]
-        let newLeader = con._getLeader(4);
+        let newLeader = con.getLeader(4);
         expect(newLeader.addr).to.equal(VALIDATORS_4[1].addr);
 
         con.stop();

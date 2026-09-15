@@ -136,7 +136,7 @@ module.exports = {
     // on the wire, or null when there is none. Two sources, both of which mean "a tx
     // may exist that this hub cannot see yet":
     //
-    //   - this hub's own ambiguous send for the window (_processQueue dead-letters it
+    //   - this hub's own ambiguous send for the window (processQueue dead-letters it
     //     rather than retrying, precisely because the DOGE node may have taken it);
     //   - the co-signature this hub gave the window's leader, which is the last thing
     //     the leader was waiting on. A leader that never asked cannot have broadcast,

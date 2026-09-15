@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // In-process PBFT mesh: K CrossChainDexConsensus instances share a mock gossip
-// bus (broadcast fans out to every other instance's _handleMessage), each with a
+// bus (broadcast fans out to every other instance's handleMessage), each with a
 // real ValidatorIdentity. Exercises the full round (PROPOSE/PREPARE/COMMIT),
 // single-node fallback, Byzantine-value tolerance, leader-failover via
 // view-change, and the tamper / NEW_VIEW guards. The same properties validated
@@ -22,7 +22,7 @@ const CrossChainDexConsensus = require('../../../../src/cross_chain/dex_consensu
 const ValidatorIdentity      = require('../../../../src/validators/identity');
 const { waitUntil }          = require('../../../helpers/waitUntil');
 
-// Canonical format byte-identical to the indexer verifier (cross_settle._canonical).
+// Canonical format byte-identical to the indexer verifier (cross_settle.canonical).
 function canonicalMatch(r) {
     return ['XMATCH', r.match_id, String(r.snapshot_block),
         r.a_chain, String(r.a_action_index), r.a_tick || '', String(r.a_amount), String(r.a_ownership), r.a_payout_addr,
@@ -86,8 +86,8 @@ function rootSuiteBuildMesh(n, opts) {
       capSnapshot: null,
       // opts.canonical simulates the EQUIV-header-active engine, whose
       // canonical folds the view (H-8 regression); default ignores view.
-      _canonicalMatch: opts.canonical || canonicalMatch,
-      _persistCapabilitySnapshot: async () => {},
+      canonicalMatch: opts.canonical || canonicalMatch,
+      persistCapabilitySnapshot: async () => {},
       validateProposedMatch: async () => opts.validate ? opts.validate(self) : true
     };
     self.consensus = new CrossChainDexConsensus(engine);
@@ -163,7 +163,7 @@ async function rootSuiteDrivePropose(bus, victim, mid, proposedRow) {
   let leaderPk = rootSuiteLeaderPubkey(bus, mid, 0);
   let leaderNode = bus.nodes.find(nd => nd.pubkey === leaderPk);
   let sig = leaderNode.identity.sign(canonicalMatch(proposedRow));
-  await victim.consensus._handlePropose({
+  await victim.consensus.handlePropose({
     type: 'XDEX_MATCH_PROPOSE',
     sender: leaderPk,
     data: {
@@ -277,7 +277,7 @@ function registerDirect3Part3() {
 
     // one real signature (below quorum 3) + one garbage signature
     let signer = bus.nodes[1];
-    victim.consensus._handleMessage({
+    victim.consensus.handleMessage({
       type: 'XDEX_MATCH_FINAL_SYNC',
       sender: signer.pubkey,
       data: {
@@ -330,7 +330,7 @@ function registerDirect3Part4() {
     // A real quorum proof (3 of 4) taken at view 0.
     let signers = [bus.nodes[1], bus.nodes[2], bus.nodes[3]];
     let proofCanon = equivCanonical(row, 0);
-    // _handleMessage fires the FINAL_SYNC branch and forgets it (the handler is
+    // handleMessage fires the FINAL_SYNC branch and forgets it (the handler is
     // async: an offered row can declare a different snapshot, which has to be
     // re-resolved before its proof is measured), so drive the handler directly and
     // let its completion be the verdict.

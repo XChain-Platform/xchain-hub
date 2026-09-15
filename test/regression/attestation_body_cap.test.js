@@ -105,10 +105,10 @@ function registerSuitePart3() {
 }
 
 function registerSuitePart4() {
-    describe('_handlePropose()', function () {
+    describe('handlePropose()', function () {
         it('rejects an oversized body before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', MAX_B64 + 1));
+            consensus.handlePropose(envelope('ATTEST_PROPOSE', MAX_B64 + 1));
             // Guard fires before signature verification and before storing.
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').proposals.has(SENDER_PK)).to.equal(false);
@@ -116,7 +116,7 @@ function registerSuitePart4() {
 
         it('lets a legitimately-sized body through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', LEGIT_B64));
+            consensus.handlePropose(envelope('ATTEST_PROPOSE', LEGIT_B64));
             // Size gate passed → signature verification was reached.
             expect(verify.calledOnce).to.equal(true);
         });

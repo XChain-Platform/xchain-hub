@@ -181,7 +181,7 @@ module.exports = {
         let out = null;
         for(let t of (ticks || [])){
             let res;
-            try { res = await this._indexerCall(coin, 'getbridgebalances', { tick: t }); }
+            try { res = await this.indexerCall(coin, 'getbridgebalances', { tick: t }); }
             catch(e){ this.logChainStateDegraded(coin, e); return out; }
             if(!res || res.error) continue;
             out = out || {};

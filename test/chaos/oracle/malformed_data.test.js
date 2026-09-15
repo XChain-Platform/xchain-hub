@@ -231,7 +231,7 @@ function registerOracleRoundFiltersMalformedSubmissionsFromTest() {
             }
         };
 
-        oracle._handleMessage(envelope);
+        oracle.handleMessage(envelope);
 
         // All prices invalid → submission rejected entirely
         let subs = oracle.submissions.get(5);
@@ -263,7 +263,7 @@ function registerOracleRoundAcceptsValidPricesFromTest() {
             }
         };
 
-        oracle._handleMessage(envelope);
+        oracle.handleMessage(envelope);
 
         let subs = oracle.submissions.get(5);
         expect(subs.has('ws://peer:10001')).to.be.true;

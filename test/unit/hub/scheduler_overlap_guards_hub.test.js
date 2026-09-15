@@ -16,7 +16,7 @@
 // whose duration nothing here bounds, so a slow dependency lets the next interval
 // fire on top of the previous pass. Each pass then re-reads shared state the
 // in-flight pass has not written yet, and both act on it. The reference fix is
-// FullNodeChallengeRound._tick (its own tests live in FullNodeChallengeRound.test.js).
+// FullNodeChallengeRound.tick (its own tests live in FullNodeChallengeRound.test.js).
 //
 // Every test below DRIVES the overlap (parks the first pass on a gate, fires the
 // second) and asserts the work that would have been duplicated did not happen. The
@@ -116,7 +116,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
         refreshOwnQualification     = sinon.stub().resolves();
         hub.refreshOwnQualification = refreshOwnQualification;
         hub.btcIndexerHeaders      = () => ({});
-        hub._resolveBtcIndexerUrl   = async () => 'http://indexer.test';
+        hub.resolveBtcIndexerUrl   = async () => 'http://indexer.test';
     });
 
     afterEach(function () {
@@ -126,7 +126,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
     it('a stake poll firing on top of an in-flight poll is skipped', async function () {
         const { gate, release } = makeGate();
         let first = true;
-        hub._resolveBtcIndexerUrl = async () => {
+        hub.resolveBtcIndexerUrl = async () => {
             if (first) { first = false; await gate; }
             return 'http://indexer.test';
         };
@@ -145,11 +145,11 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
     });
 
     it('a rejected stake poll does not wedge the poll loop', async function () {
-        hub._resolveBtcIndexerUrl = async () => { throw new Error('config lookup failed'); };
+        hub.resolveBtcIndexerUrl = async () => { throw new Error('config lookup failed'); };
         await hub.pollOwnStake('pk').catch(() => {});
         expect(hub._stakePollRunning, 'a failed poll must not wedge the timer').to.equal(false);
 
-        hub._resolveBtcIndexerUrl = async () => 'http://indexer.test';
+        hub.resolveBtcIndexerUrl = async () => 'http://indexer.test';
         await hub.pollOwnStake('pk');
         expect(refreshOwnQualification.callCount, 'the next poll runs normally').to.equal(1);
     });
@@ -237,7 +237,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
 
 }
 
-// ── OraclePublisher._processQueue ───────────────────────────────────────────
+// ── OraclePublisher.processQueue ───────────────────────────────────────────
 //
 // Not a timer: this pass is driven per PBFT event (onRoundFinalized awaits it), so
 // the overlap arrives when two rounds finalize inside one pass duration, which is
@@ -301,9 +301,9 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
         });
         pub.setBroadcastHook(bcast);
 
-        const a = pub._processQueue();
+        const a = pub.processQueue();
         await flush();
-        await pub._processQueue();      // the next round:finalized pass, while a is parked
+        await pub.processQueue();      // the next round:finalized pass, while a is parked
         expect(bcast.callCount, 'the guarded pass spent no DOGE').to.equal(1);
 
         release();
@@ -324,10 +324,10 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
         const bcast = sinon.stub().callsFake(async () => { await gate; return { txid: 'tx-7' }; });
         pub.setBroadcastHook(bcast);
 
-        const a = pub._processQueue();
+        const a = pub.processQueue();
         await flush();
         await pub._enqueue(entry(8));
-        await pub._processQueue();      // skipped by the guard
+        await pub.processQueue();      // skipped by the guard
         release();
         await a;
 
@@ -340,13 +340,13 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
         writeQueue([entry(7)]);
         const balance = sinon.stub(pub, 'checkBalance').rejects(new Error('balance source exploded'));
 
-        await pub._processQueue().catch(() => {});
+        await pub.processQueue().catch(() => {});
         expect(pub._sweeping, 'a rejected pass must not wedge the publish path').to.equal(false);
 
         balance.resolves(null);
         const bcast = sinon.stub().resolves({ txid: 'tx-7' });
         pub.setBroadcastHook(bcast);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.callCount, 'the next pass publishes normally').to.equal(1);
     }
 
@@ -364,6 +364,6 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
         it('a rejected pass releases the guard instead of wedging the publisher', aRejectedPassReleasesTheGuardTest17);
     }
 
-    describe('OraclePublisher._processQueue overlap guard', oraclepublisherProcessqueueOverlapGuardSuite14);
+    describe('OraclePublisher.processQueue overlap guard', oraclepublisherProcessqueueOverlapGuardSuite14);
 
 }

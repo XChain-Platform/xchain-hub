@@ -52,7 +52,7 @@ const testCase2 = async function () {
             let h = makePublisher();
             await h.p.start();
             for (let r = 6; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
-            sinon.stub(h.p, '_processQueue').resolves();   // keep the entry on disk to read
+            sinon.stub(h.p, 'processQueue').resolves();   // keep the entry on disk to read
             await h.p.assembleWindow(1);
 
             let queued = readJsonl(h.queuePath);
@@ -89,7 +89,7 @@ const testCase3 = async function () {
                     wire: second.emitWire(split[0], split[1], 800000 + split[1], rounds, sigsOf(3)).wire
                 });
             }
-            await second._processQueue();
+            await second.processQueue();
 
             expect(seen, 'a re-split re-publish must not reach the wire').to.have.length(0);
             // Suppressed on the strength of a marker for a round that is NOT either

@@ -73,9 +73,9 @@ describe('AttestationConsensus harvest sig re-verify (stress-sweep 2026-07-08)',
         await c.propose(RID, roundState(me, [me, p1, p2], BODY));
         await flush();
         // p1: matching body, honest 'ok' status.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY, 'ok'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY, 'ok'));
         // p2: matching body but signed over status='fail' (poison sig).
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY, 'fail'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY, 'fail'));
         await flush();
 
         let pending = c.pending.get(RID);
@@ -90,8 +90,8 @@ describe('AttestationConsensus harvest sig re-verify (stress-sweep 2026-07-08)',
     it('harvests a matching-body proposal signed over the correct status (control)', async function () {
         await c.propose(RID, roundState(me, [me, p1, p2], BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY, 'ok'));
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY, 'ok'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY, 'ok'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY, 'ok'));
         await flush();
 
         let pending = c.pending.get(RID);

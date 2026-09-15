@@ -222,7 +222,7 @@ function snapshotFor(V) {
             oc = new armed.OracleConsensus(hub, oracleRound);
             oc.setValidatorSet(VALIDATORS_3);
             oc.allowUnverifiedPairs = true;
-            leader = oc._getLeader(ROUND);
+            leader = oc.getLeader(ROUND);
         }
 
         function asLeader() { pm.validatorAddr = leader.addr; }
@@ -235,7 +235,7 @@ function snapshotFor(V) {
 
         function envelope(anchor, admitBlocks) {
             let prices = PRICES;
-            let data = { round: ROUND, prices, digest: oc._digest(ROUND, prices), btcBlockHeight: anchor, btcBlockTime: 1700000000 };
+            let data = { round: ROUND, prices, digest: oc.digest(ROUND, prices), btcBlockHeight: anchor, btcBlockTime: 1700000000 };
             if (admitBlocks !== undefined) data.admitBlocks = admitBlocks;
             return { sender: leader.addr, sig_pubkey: leader.pubkey, data };
         }
@@ -294,7 +294,7 @@ function registerTheOracleRoundPinsAnd2Tests1() {
             // Follower tips differ from the leader's; the leader's map is still inside the window.
             build(NETWORK, { BTC: ADMIT_AT - 2, LTC: 2399990, DOGE: 4999980 }); asFollower();
             oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
-            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            await oc.handlePropose(envelope(ADMIT_AT, MAP));
             const pending = oc.pendingRounds.get(ROUND);
             expect(pending, 'follower did not open the round').to.exist;
             expect(pending.admitBlocks).to.deep.equal(MAP);
@@ -314,15 +314,15 @@ function registerTheOracleRoundPinsAnd2Tests5() {
         it('the FOLLOWER refuses an era PROPOSE with no map, a legacy PROPOSE with one, and a map outside its window', async function () {
             build(NETWORK, TIPS); asFollower();
             oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
-            await oc._handlePropose(envelope(ADMIT_AT));                       // era, no map
+            await oc.handlePropose(envelope(ADMIT_AT));                       // era, no map
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
-            await oc._handlePropose(envelope(LEGACY_AT, MAP));                 // legacy, a map
+            await oc.handlePropose(envelope(LEGACY_AT, MAP));                 // legacy, a map
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
-            await oc._handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 40 })));  // BTC window is 6
+            await oc.handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 40 })));  // BTC window is 6
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
-            await oc._handlePropose(envelope(ADMIT_AT, { BTC: ADMIT_AT + 1 }));   // omits LTC and DOGE, which read the row
+            await oc.handlePropose(envelope(ADMIT_AT, { BTC: ADMIT_AT + 1 }));   // omits LTC and DOGE, which read the row
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
-            await oc._handlePropose(envelope(ADMIT_AT, { BTC: '0799001', LTC: 2400001, DOGE: 5000001 }));   // unspellable
+            await oc.handlePropose(envelope(ADMIT_AT, { BTC: '0799001', LTC: 2400001, DOGE: 5000001 }));   // unspellable
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
             expect(pm.broadcast.called).to.equal(false);
         });
@@ -331,24 +331,24 @@ function registerTheOracleRoundPinsAnd2Tests5() {
             build(NETWORK, TIPS); asFollower();
             delete hub.resolveAdmissionTips;
             oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
-            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            await oc.handlePropose(envelope(ADMIT_AT, MAP));
             expect(oc.pendingRounds.has(ROUND)).to.equal(false);
         });
 
         it('a second PROPOSE for a pending round with a DIFFERENT map is refused', async function () {
             build(NETWORK, { BTC: ADMIT_AT - 2, LTC: 2399990, DOGE: 4999980 }); asFollower();
             oracleRound.getSubmissions.returns(submissionsFrom(pm.validatorAddr));
-            await oc._handlePropose(envelope(ADMIT_AT, MAP));
+            await oc.handlePropose(envelope(ADMIT_AT, MAP));
             expect(oc.pendingRounds.get(ROUND).prepares.size).to.be.greaterThan(0);
             const before = pm.broadcast.callCount;
-            await oc._handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 2 })));
+            await oc.handlePropose(envelope(ADMIT_AT, Object.assign({}, MAP, { BTC: ADMIT_AT + 2 })));
             expect(pm.broadcast.callCount).to.equal(before);
             expect(oc.pendingRounds.get(ROUND).admitBlocks).to.deep.equal(MAP);
         });
 
         it('storeSnapshot writes the map into the admission columns, NULL for a legacy round', async function () {
             build(NETWORK, TIPS);
-            oc._persistCapabilitySnapshot = sinon.stub().resolves();
+            oc.persistCapabilitySnapshot = sinon.stub().resolves();
             await oc.storeSnapshot(ROUND, PRICES, 3, '[]', ADMIT_AT, 1700000000, { DOGE: 5000001, BTC: ADMIT_AT + 1 });
             let [sql, params] = queries.find(([q]) => /INSERT INTO price_snapshots/.test(q));
             expect(sql).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge\)/);

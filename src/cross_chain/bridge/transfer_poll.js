@@ -103,7 +103,7 @@ module.exports = {
     // Poll
     // ---------------------------------------------------------------------------
 
-    async _poll(){
+    async poll(){
         if(this._polling) return;               // never overlap a slow poll
         this._polling = true;
         try {
@@ -138,7 +138,7 @@ module.exports = {
     // Discover confirmed source legs on `coin` and run a transfer round for each.
     async pollPendingTransfers(coin, snapshotBlock, pendingOut){
         let res;
-        try { res = await this._indexerCall(coin, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
+        try { res = await this.indexerCall(coin, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
         catch(e){ return; }
         if(!res || !Array.isArray(res.transfers) || !res.network) return;
         let latest = Number(res.latest_block_index);
@@ -285,7 +285,7 @@ module.exports = {
         // The SOURCE CHAIN's own flag day, read at the height this leg was mined, which is
         // the same (block, coin) pair the indexer verdicts the action against. The map is
         // keyed '<COIN>:<network>' and the three chains arm at three heights, so the
-        // BTC-anchored gate in _poll cannot speak for a leg mined on LTC or DOGE: without
+        // BTC-anchored gate in poll cannot speak for a leg mined on LTC or DOGE: without
         // this the hub would sign an LTC leg the moment BTC crossed its instant. The
         // follower re-applies the identical test in validateTransfer, so proposer and
         // validator refuse on the same height rather than disagreeing across the boundary.

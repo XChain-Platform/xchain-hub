@@ -110,7 +110,7 @@ function initPublisherGuards(self, cfg){
     // In-process at-most-once guard. Publications broadcast this process lifetime
     // are recorded here the instant broadcaster(...) succeeds. If the post-broadcast
     // queue rewrite fails (disk full, permissions, transient I/O), the just-published
-    // entry stays on the durable queue file; without this set the next _processQueue
+    // entry stays on the durable queue file; without this set the next processQueue
     // sweep would re-read and RE-BROADCAST it, spending a real BTC fee twice for the
     // same request. Consulted before every (re-)broadcast so a failed rewrite can
     // never become a duplicate on-chain ATTEST. Cleared once the durable queue is

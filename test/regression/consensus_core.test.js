@@ -46,24 +46,24 @@ function registerSuitePart3() {
         it('rotates through validators deterministically @regression-p0', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             consensus.view = 0;
-            expect(consensus._getLeader(0)).to.equal(VALIDATORS_4[0]);
-            expect(consensus._getLeader(1)).to.equal(VALIDATORS_4[1]);
-            expect(consensus._getLeader(2)).to.equal(VALIDATORS_4[2]);
-            expect(consensus._getLeader(3)).to.equal(VALIDATORS_4[3]);
-            expect(consensus._getLeader(4)).to.equal(VALIDATORS_4[0]); // wraps
+            expect(consensus.getLeader(0)).to.equal(VALIDATORS_4[0]);
+            expect(consensus.getLeader(1)).to.equal(VALIDATORS_4[1]);
+            expect(consensus.getLeader(2)).to.equal(VALIDATORS_4[2]);
+            expect(consensus.getLeader(3)).to.equal(VALIDATORS_4[3]);
+            expect(consensus.getLeader(4)).to.equal(VALIDATORS_4[0]); // wraps
         });
 
         it('view offset shifts leader selection @regression-p0', function () {
             consensus.setValidatorSet(VALIDATORS_3);
             consensus.view = 1;
-            expect(consensus._getLeader(0)).to.equal(VALIDATORS_3[1]);
-            expect(consensus._getLeader(1)).to.equal(VALIDATORS_3[2]);
-            expect(consensus._getLeader(2)).to.equal(VALIDATORS_3[0]);
+            expect(consensus.getLeader(0)).to.equal(VALIDATORS_3[1]);
+            expect(consensus.getLeader(1)).to.equal(VALIDATORS_3[2]);
+            expect(consensus.getLeader(2)).to.equal(VALIDATORS_3[0]);
         });
 
         it('returns null for empty validator set @regression-p0', function () {
             consensus.setValidatorSet([]);
-            expect(consensus._getLeader(0)).to.be.null;
+            expect(consensus.getLeader(0)).to.be.null;
         });
     });
 }
@@ -91,7 +91,7 @@ function registerSuitePart5() {
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             // #4168: supply the deterministic snapshot the federation guard now
             // requires for a multi-member set (quorum 3 = getQuorum() at N=4).
@@ -129,7 +129,7 @@ function registerSuitePart6() {
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             consensus.pendingProposals.set(5, {
                 config, digest,
@@ -140,7 +140,7 @@ function registerSuitePart6() {
             });
 
             // Second commit → still only 2, need 3
-            consensus._handleCommit({
+            consensus.handleCommit({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, configDigest: digest }
@@ -214,7 +214,7 @@ function registerSuitePart9() {
             consensus.lastAppliedSeq = 10; // Already applied through seq 10
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             // Attempt with seq 5 (below lastAppliedSeq)
             // (sender is the legit (seq 5, view 0) leader, so the stale-seq guard,
@@ -256,14 +256,14 @@ function registerSuitePart11() {
     describe('REG-CON-009: Digest computation is deterministic', function () {
         it('same payload → same digest @regression-p0', function () {
             let config = { a: 1, b: 'test', c: [1, 2, 3] };
-            let d1 = consensus._digest(config);
-            let d2 = consensus._digest(config);
+            let d1 = consensus.digest(config);
+            let d2 = consensus.digest(config);
             expect(d1).to.equal(d2);
             expect(d1).to.match(/^[0-9a-f]{64}$/);
         });
 
         it('different payload → different digest @regression-p0', function () {
-            expect(consensus._digest({ a: 1 })).to.not.equal(consensus._digest({ a: 2 }));
+            expect(consensus.digest({ a: 1 })).to.not.equal(consensus.digest({ a: 2 }));
         });
     });
 }
@@ -330,14 +330,14 @@ function commitProposal(digest) {
     pending.commits.add(VALIDATORS_4[0].addr);
 
     // Second commit
-    consensus._handleCommit({
+    consensus.handleCommit({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 5, configDigest: digest }
     });
 
     // Third commit → quorum met
-    consensus._handleCommit({
+    consensus.handleCommit({
         sender: VALIDATORS_4[2].addr,
         sig_pubkey: VALIDATORS_4[2].pubkey,
         data: { seq: 5, configDigest: digest }
@@ -355,7 +355,7 @@ function registerNestedSuite1Part1() {
 function registerNestedSuite1Part2() {
     it('full PBFT flow results in config applied @regression-p0', async function () {
             let config = { key: 'regression-test' };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             configureFederationSnapshot();
             await createPendingProposal(config, digest);
             prepareCommitQuorum(digest);

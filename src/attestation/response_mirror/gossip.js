@@ -54,18 +54,18 @@ module.exports = {
     },
 
     // The engine's inbound switch. One case, per §3.3.
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case ATTEST_RESULT:
-                this._handleResult(envelope).catch(e =>
+                this.handleResult(envelope).catch(e =>
                     logger.error('AttestationResponseMirror: ATTEST_RESULT error: ' +
                                   (e && e.message ? e.message : e)));
                 break;
         }
     },
 
-    async _handleResult(envelope){
+    async handleResult(envelope){
         this.stats.received++;
         let row = this.parseGossipRow(envelope.data);
         if(!row){
@@ -275,8 +275,8 @@ module.exports = {
     // drop) and cannot make us verify against a set of its choosing.
     async resolveLocalRequest(row){
         let hub = this.hub;
-        if(!hub || typeof hub._resolveBtcIndexerUrl !== 'function') return null;
-        let url = await hub._resolveBtcIndexerUrl();
+        if(!hub || typeof hub.resolveBtcIndexerUrl !== 'function') return null;
+        let url = await hub.resolveBtcIndexerUrl();
         if(!url) return null;
 
         let params = { limit: REQUEST_LOOKUP_LIMIT };

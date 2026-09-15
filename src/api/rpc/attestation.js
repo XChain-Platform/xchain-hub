@@ -30,7 +30,7 @@ const { validateChain, validateLimit, strictInt } = require('../validate');
 const RESPONSIBLE_SET_LOOKUP_LIMIT = 500;
 const RESPONSIBLE_SET_LOOKUP_PAGES = 20;
 async function findPendingRequestOnIndexer(hub, axios, rid){
-    let url = await hub._resolveBtcIndexerUrl();
+    let url = await hub.resolveBtcIndexerUrl();
     if(!url) return null;
     let cursor = null;
     let latestBlock = 0;

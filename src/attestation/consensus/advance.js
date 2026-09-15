@@ -32,7 +32,7 @@ module.exports = {
     // Once enough proposals are in, run provider.agree() to pick a winner and
     // transition to PREPARE phase. Idempotent by early return, NOT by re-sweeping:
     // once a winner exists this returns at the first statement below, so a PROPOSE
-    // arriving afterwards is stored by _handlePropose but never re-verified against
+    // arriving afterwards is stored by handlePropose but never re-verified against
     // the winner canonical and never counted into pending.signatures. The
     // winner-canonical sweep further down runs exactly once, at the moment the winner
     // is established, and establishNonOkWinner's sweep is guarded the same way.

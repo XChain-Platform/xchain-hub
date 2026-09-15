@@ -145,7 +145,7 @@ function feature6followerVerificationOfAProposedTransferFragment1ProposedRow(eng
   return row;
 }
 function feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, leg) {
-  engine._indexerCall = sinon.stub().resolves({
+  engine.indexerCall = sinon.stub().resolves({
     latest_block_index: 200,
     network: 'regtest',
     transfers: [leg === null ? pendingLeg({
@@ -184,7 +184,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part1()
     expect(await engine.validateTransfer(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine, {
       snapshot_block: 1018
     }))).to.equal(false);
-    expect(engine._indexerCall.called, 'the persisted-record refusal comes before the leg read').to.equal(false);
+    expect(engine.indexerCall.called, 'the persisted-record refusal comes before the leg read').to.equal(false);
   });
 
   // Negative control for the check above: re-validating the SAME row this hub already
@@ -233,7 +233,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part2()
       transfer_id: 'e'.repeat(64)
     });
     expect(await engine.validateTransfer(peerRow), 'must not co-sign a second transfer for a leg this hub already has a round open for').to.equal(false);
-    expect(engine._indexerCall.called, 'the in-flight refusal comes before the leg read').to.equal(false);
+    expect(engine.indexerCall.called, 'the in-flight refusal comes before the leg read').to.equal(false);
   });
 
   // Row 41, the follower half of the one-id-per-leg rule and the exact drive-15 shape:

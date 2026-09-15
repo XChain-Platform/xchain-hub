@@ -97,7 +97,7 @@ module.exports = {
     // owns it is not up. Every caller treats null as "no batch for this window".
     leaderCanonical(first, last, anchor, rounds){
         try {
-            return this._canonical(first, last, anchor, rounds);
+            return this.canonical(first, last, anchor, rounds);
         } catch(e){
             logger.warn('OracleBatchSigner: cannot build the batch canonical for window [' + first + ',' + last +
                          '] (' + (e && e.message) + '); no batch for this window');

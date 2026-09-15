@@ -143,7 +143,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
         let pending = c.pending.get(RID);
         expect(pending.winner).to.equal(null);
 
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('leader-body');
         // My own matching proposal contributes its signature on adoption.
@@ -152,7 +152,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
     }); });
 
 describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('buffers a PREPARE that arrives before the round exists', function () {
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
         expect(c.earlyMessages.get(RID)).to.have.lengthOf(1);
     }); });
 
@@ -160,7 +160,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let outsider = mkIdentity();
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', outsider, BODY));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', outsider, BODY));
         expect(c.pending.get(RID).prepares.has(pub(outsider))).to.equal(false);
     }); });
 
@@ -169,7 +169,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
         await flush();
         let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
         env.data.sig = 'ee'.repeat(64);
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(false);
     }); });
 
@@ -178,7 +178,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
         await flush();
         let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
         delete env.data.sig; // unsigned: must not establish the winner or count as a vote
-        c._handleMessage(env);
+        c.handleMessage(env);
         let pending = c.pending.get(RID);
         expect(pending.prepares.has(pub(p1))).to.equal(false);
         expect(pending.signatures.has(pub(p1))).to.equal(false);
@@ -190,7 +190,7 @@ describe('AttestationConsensus: handlePrepare adoption + guards', function () { 
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let big = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('way-too-large-body'));
-        c._handleMessage(big);
+        c.handleMessage(big);
         expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(false);
     }); });
 }

@@ -57,7 +57,7 @@ function prePrepareEnvelope(consensus, seq) {
             seq:            seq === undefined ? SEQ : seq,
             view:           0,
             config:         CONFIG,
-            configDigest:   consensus._digest(CONFIG),
+            configDigest:   consensus.digest(CONFIG),
             btcBlockHeight: BLOCK
         }
     };
@@ -79,7 +79,7 @@ function registerEarlyVoteHoldingTests() {
     describe('holding a vote for a round that is not open yet', function () {
 
         it('buffers a COMMIT instead of dropping it', function () {
-            consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.pendingProposals.has(SEQ)).to.be.false;
             expect(consensus.earlyVotes.get(SEQ)).to.have.length(1);
         });
@@ -92,7 +92,7 @@ function registerEarlyVoteHoldingTests() {
         it('does not buffer a vote from an unregistered sender', function () {
             // The known-sender guard runs before the buffer, so the buffer can
             // never become a way in for a sender the tally would refuse.
-            consensus._handleCommit({
+            consensus.handleCommit({
                 type: 'PBFT_COMMIT', sender: 'ws://stranger:10009', sig_pubkey: pubkeyForTestSender('ws://stranger:10009'),
                 data: { seq: SEQ, configDigest: digest }
             });
@@ -101,7 +101,7 @@ function registerEarlyVoteHoldingTests() {
 
         it('does not buffer a vote for an already-applied round', function () {
             consensus.lastAppliedSeq = SEQ;
-            consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;
         });
     });
@@ -150,7 +150,7 @@ function registerEarlyVoteReplayTests() {
         it('applies the config from a whale COMMIT that beat the PRE_PREPARE', async function () {
             // The whale-COMMIT race, in order: the leader's COMMIT lands while this
             // hub is still locking its snapshot.
-            consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
+            consensus.handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.earlyVotes.get(SEQ)).to.have.length(1);
 
             await consensus.handlePrePrepare(prePrepareEnvelope(consensus));
@@ -172,7 +172,7 @@ function registerEarlyVoteReplayTests() {
         });
 
         it('ignores a replayed vote whose digest does not match the round', async function () {
-            consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, 'ff'.repeat(32)));
+            consensus.handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, 'ff'.repeat(32)));
 
             await consensus.handlePrePrepare(prePrepareEnvelope(consensus));
             await new Promise((r) => setImmediate(r));
@@ -212,7 +212,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
 
         consensus = new Consensus(hub);
         consensus.setValidatorSet(WEIGHTED_VALIDATORS_4);
-        digest = consensus._digest(CONFIG);
+        digest = consensus.digest(CONFIG);
     });
 
     afterEach(function () {

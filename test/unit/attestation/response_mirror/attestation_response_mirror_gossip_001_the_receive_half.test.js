@@ -197,7 +197,7 @@ function makeHub(overrides){
         },
         providerRegistry:     { getMinStake: () => '1000' },
         btcIndexerHeaders:   () => ({}),
-        _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
+        resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;
     return hub;
@@ -255,7 +255,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest({ block_index: 150000 })]);
             await mirror.start();
 
-            await mirror._handleResult({
+            await mirror.handleResult({
                 type: ATTEST_RESULT,
                 data: gossipPayload({ network: 'testnet', requestBlock: 150000 })
             });
@@ -271,7 +271,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             let post   = stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({ network: 'testnet' }) });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload({ network: 'testnet' }) });
 
             expect(hub.db.table).to.have.length(0);
             expect(post.callCount).to.equal(0);
@@ -284,11 +284,11 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             let post   = stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
             expect(hub.db.table).to.have.length(1);
             let lookupsAfterFirst = post.callCount;
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
             expect(hub.db.table).to.have.length(1);
             expect(hub.db.inserts()).to.have.length(1);
@@ -314,11 +314,11 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
             expect(hub.db.table).to.have.length(1);
 
             let later = EFFECTIVE_TIME + 7;
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload({
                 effectiveTime: later, signCanonical: canonicalFor({ effectiveTime: later })
             }) });
 
@@ -329,7 +329,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             expect(mirror.stats.duplicates).to.equal(0);
 
             // And the SAME variant again is still the ordinary duplicate.
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload({
                 effectiveTime: later, signCanonical: canonicalFor({ effectiveTime: later })
             }) });
             expect(hub.db.table).to.have.length(2);

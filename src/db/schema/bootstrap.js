@@ -81,7 +81,7 @@ module.exports = {
                 this.failFastIfFatal(e, 'checking database existence');
                 logger.info(nodeUtil.format('Database connection error:', e.code || 'unknown'));
                 logger.info("Error checking if " + this.dbName + " exists. Trying again in 5 seconds...");
-                await this._sleep(5000);
+                await this.sleep(5000);
             }
         }
     },
@@ -107,7 +107,7 @@ module.exports = {
                 this.failFastIfFatal(e, 'creating the database');
                 logger.info(nodeUtil.format("Database creation error:", e.code || 'unknown'));
                 logger.info("Error creating " + this.dbName + ". Trying again in 5 seconds...");
-                await this._sleep(5000);
+                await this.sleep(5000);
             }
         }
     },

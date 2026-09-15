@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// RollcallRound engine behaviour, driven through the real _tick() against a
+// RollcallRound engine behaviour, driven through the real tick() against a
 // stubbed indexer pair. Everything signature-shaped uses REAL Ed25519 identities:
 // a stubbed verifier would certify a canonical nobody ever checked.
 //
@@ -112,7 +112,7 @@ function makeHub(o) {
         },
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
-        _resolveBtcIndexerUrl: async () => BTC_URL,
+        resolveBtcIndexerUrl: async () => BTC_URL,
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
@@ -192,7 +192,7 @@ it('an on-chain row under a DIFFERENT ledger_hash does not count as present', as
             for (const pk of order) onChain[pk] = 'c'.repeat(64);
             wireRpc({ tip: 38, onChain });
             const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 1);
         });
 it('publishes nothing when every collected signature is already on chain', async function () {
@@ -200,34 +200,34 @@ it('publishes nothing when every collected signature is already on chain', async
             for (const pk of PKS) onChain[pk] = LEDGER_HASH;
             wireRpc({ tip: 38, onChain });
             const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('on an undecidable DOGE read the leader publishes and a sweeper defers', async function () {
             wireRpc({ tip: 38, dogeFail: true });
             const leader = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await leader._tick();
+            await leader.tick();
             assert.strictEqual(leader.hub.oraclePublisher.broadcastFn.callCount, 1,
                 'the leader publishes every epoch; a duplicate costs a fee the union rule absorbs');
 
             loadModule();
             wireRpc({ tip: 38, dogeFail: true });
             const sweeper = atRank(1, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 2 });
-            await sweeper._tick();
+            await sweeper.tick();
             assert.strictEqual(sweeper.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'a sweeper that cannot see the gaps has nothing to add');
         });
 it('a null hcut is not a positive "nobody signed"', async function () {
             wireRpc({ tip: 38, dogeHcutNull: true });
             const eng = atRank(1, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 2 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('a key outside the elected set never publishes as leader or sweeper', async function () {
             wireRpc({ tip: 42 });
             const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
             assert.strictEqual(eng.rounds.get(EPOCH).myRank, -1);
         });
@@ -253,13 +253,13 @@ it('splits past 41 pairs into several actions', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
+            await eng.tick();
+            const canon = eng.canonical(EPOCH, LEDGER_HASH);
             for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                      data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
             wireRpc({ tip: 38 });
-            await eng._tick();
+            await eng.tick();
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 2);
             assert.deepStrictEqual(bc.getCalls().map(c => parseWire(c.args[0]).sigCount), [41, 4]);
@@ -276,28 +276,28 @@ it('lands a one-signature roll call when our own signature is not on chain', asy
             wireRpc({ tip: 42, onChain: {} });                 // since = 12 >= self-publish 6
             const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
                                    { ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
+            await eng.tick();
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 1);
             const w = parseWire(bc.getCall(0).args[0]);
             assert.strictEqual(w.sigCount, 1);
             assert.strictEqual(w.pairs[0].pubkey, PKS[0]);
             assert.strictEqual(w.publisher, PKS[0]);
-            assert.strictEqual(ValidatorIdentity.verify(eng._canonical(EPOCH, LEDGER_HASH),
+            assert.strictEqual(ValidatorIdentity.verify(eng.canonical(EPOCH, LEDGER_HASH),
                                                         w.pairs[0].sig, PKS[0]), true);
         });
 it('does not self-publish before E + ROLLCALL_SELF_PUBLISH_BLOCKS', async function () {
             wireRpc({ tip: 38 });                              // since = 8 < 9
             const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
                                    { ROLLCALL_SELF_PUBLISH_BLOCKS: 9 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('does not self-publish when our signature is already on chain', async function () {
             wireRpc({ tip: 42, onChain: { [PKS[0]]: LEDGER_HASH } });
             const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
                                    { ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 it('does not self-publish when our own publish already carried it', async function () {
@@ -305,7 +305,7 @@ it('does not self-publish when our own publish already carried it', async functi
             const order = orderFor(PKS, EPOCH);
             const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
+            await eng.tick();
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 1, 'the leader publish, and no second self-publish behind it');
         });
@@ -326,7 +326,7 @@ it('never publishes without a signer module exporting broadcast(payload)', async
                 oraclePublisher: { broadcastFn: null, walletSignFn: sinon.stub(),
                                    getBalanceFn: sinon.stub().resolves(1000), encoder: {} }
             }, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.broadcastCapable(), false);
             assert.strictEqual(eng.rounds.get(EPOCH).txids.length, 0);
             assert.strictEqual(fs.existsSync(process.env.ROLLCALL_SPEND_LOG_PATH), false,

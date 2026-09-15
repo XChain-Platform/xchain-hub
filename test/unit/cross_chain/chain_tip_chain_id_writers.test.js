@@ -13,7 +13,7 @@ const FOREIGN_ID = '000000005c8ba8e1e0a4a2e6f2d3c4b5a6978869fedcba0987654321abcd
 
 function registerUnsignedIdentitySuite() {
 describe('the identity reaches no signed canonical', function () {
-        it('_canonicalMatch is byte-identical with and without btc_chain_id on the row', function () {
+        it('canonicalMatch is byte-identical with and without btc_chain_id on the row', function () {
             const eng = Object.create(CrossChainDexEngine.prototype);
             const row = {
                 match_id: 'm'.repeat(64), snapshot_block: 131, network: 'regtest',
@@ -22,8 +22,8 @@ describe('the identity reaches no signed canonical', function () {
                 effective_time: 1757298240, a_kind: 'swap', a_filled_before: '0', b_kind: 'swap', b_filled_before: '0',
                 a_payout_legs: null, b_payout_legs: null
             };
-            const bare    = eng._canonicalMatch(row, 0);
-            const stamped = eng._canonicalMatch(Object.assign({}, row, { btc_chain_id: FOREIGN_ID }), 0);
+            const bare    = eng.canonicalMatch(row, 0);
+            const stamped = eng.canonicalMatch(Object.assign({}, row, { btc_chain_id: FOREIGN_ID }), 0);
             expect(stamped).to.equal(bare);
             expect(bare).to.not.include(FOREIGN_ID);
         });
@@ -100,7 +100,7 @@ describe('CrossChainCallEngine stamps the call row', function () {
                 doQuery: sinon.stub().resolves({ affectedRows: 1 }),
                 getChainTip: sinon.stub().resolves(chainId === null ? null : { blockHeight: 131, blockTime: 1, chainId: chainId })
             };
-            eng._persistCapabilitySnapshot = sinon.stub().resolves(1);
+            eng.persistCapabilitySnapshot = sinon.stub().resolves(1);
             eng.mirrorCallRow = sinon.stub().resolves();
             eng._inflight = new Map();
             eng.emit = sinon.stub();

@@ -86,7 +86,7 @@ module.exports = {
         if(!arr) return;
         this.earlyMessages.delete(id);
         this.earlyMessageTtl.delete(id);
-        for(let env of arr) this._handleMessage(env);
+        for(let env of arr) this.handleMessage(env);
     },
 
     // Signed control message (VIEW_CHANGE / NEW_VIEW). Authenticated by pubkey +

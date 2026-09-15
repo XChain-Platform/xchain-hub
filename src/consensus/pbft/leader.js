@@ -238,12 +238,12 @@ module.exports = {
         return this.validatorSet[(seq + view) % this.validatorSet.length];
     },
 
-    _getLeader(seq, memberPubkeys) {
+    getLeader(seq, memberPubkeys) {
         return this.leaderAt(seq, this.view, memberPubkeys);
     },
 
     isLeader(seq, memberPubkeys) {
-        let leader = this._getLeader(seq, memberPubkeys);
+        let leader = this.getLeader(seq, memberPubkeys);
         return this.isLeaderIdentity(leader, this.peerManager.validatorAddr, this.selfPubkey());
     }
 };

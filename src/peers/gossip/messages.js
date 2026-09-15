@@ -63,7 +63,7 @@ function verifyCarriedKey(pm, envelope, outcome) {
     // registered to it (the same addr<->pubkey binding handleCapabilityMessage
     // enforces). A sender the registry doesn't know still passes here (an
     // on-chain-active key not yet in the manual registry, or a relayed gossip
-    // origin), but its votes are dropped downstream by _isKnownSender, so
+    // origin), but its votes are dropped downstream by isKnownSender, so
     // consensus attribution stays bound to a registered key either way.
     if (pm.validatorPubkeys) {
         let registeredPk = pm.validatorPubkeys.get(envelope.sender);

@@ -166,7 +166,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
         c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('divergent-body')));
         expect(pending.signatures.has(pub(p1))).to.equal(false);
         expect(pending.signatures.size).to.equal(0);
-        // The PREPARE participation is still recorded (mirrors _handleCommit).
+        // The PREPARE participation is still recorded (mirrors handleCommit).
         expect(pending.prepares.has(pub(p1))).to.equal(true);
     }); });
 
@@ -192,7 +192,7 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
 
         // p1 proposes the WINNER bytes themselves, correctly signed, AFTER the winner
         // is locked: the most favourable case for the "sigs collected" reading.
-        c._handlePropose(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, WINNER));
+        c.handlePropose(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, WINNER));
         await flush();
         expect(pending.proposals.has(pub(p1)), 'the late proposal is still recorded').to.equal(true);
         expect(pending.signatures.has(pub(p1)), 'but its signature is NOT swept in').to.equal(false);
@@ -213,14 +213,14 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
         c.on('request:finalized', e => finalized.push(e));
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.winner.body.toString()).to.equal('agreed-body');
         expect(pending.signatures.size).to.equal(2); // me + p1, both over BODY
 
         // p2 PREPAREs a DIVERGENT body (validly signed over its own bytes).
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('p2-divergent')));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('p2-divergent')));
         await flush();
         // Prepare quorum (2) reached via me+p2 → COMMIT → commit quorum on the
         // 2 winner-body sigs → finalize. p2's divergent sig must be absent.

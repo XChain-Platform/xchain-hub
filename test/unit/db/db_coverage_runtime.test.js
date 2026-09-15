@@ -84,13 +84,13 @@ function registerGetConnectionTests() {
 
         it('retries with backoff then succeeds', async function () {
             const { db, mockPool, mockConn } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
+            sinon.stub(db, 'sleep').resolves();
             mockPool.getConnection
                 .onFirstCall().rejects(new Error('refused'))
                 .onSecondCall().resolves(mockConn);
             const c = await db.getConnection();
             expect(c).to.equal(mockConn);
-            expect(db._sleep.called).to.be.true;
+            expect(db.sleep.called).to.be.true;
             expect(db.circuitFailures).to.equal(0); // reset on success
         });
 
@@ -109,7 +109,7 @@ function registerGetConnectionTests() {
 
         it('throws after exhausting maxAttempts when the circuit stays closed', async function () {
             const { db, mockPool } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
+            sinon.stub(db, 'sleep').resolves();
             db.circuitThreshold = 1000; // keep the breaker from tripping first
             mockPool.getConnection.rejects(new Error('refused'));
             try {

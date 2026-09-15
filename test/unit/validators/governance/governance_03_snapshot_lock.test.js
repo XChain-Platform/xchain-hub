@@ -92,21 +92,21 @@ it('computeTally (legacy, null electorate) excludes votes from validators no lon
         expect(tally.validatorCount).to.equal(3);
     });
 // proposerPubkey must bind to the sender.
-it('_handlePropose drops a proposal whose proposerPubkey does not bind to the sender (GOV-PROPOSER-SPOOF-1)', async function () {
+it('handlePropose drops a proposal whose proposerPubkey does not bind to the sender (GOV-PROPOSER-SPOOF-1)', async function () {
         // The first validator address is registered to kps[0], but the proposal attributes itself to
         // kps[1] (attribution spoof). An authoritative registry drops it.
         hub._peerManager.validatorPubkeys = new Map(valset.map(v => [v.addr, v.pubkey]));
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
-        gov._handlePropose({ sender: 'ws://v0:1', data: {
+        gov.handlePropose({ sender: 'ws://v0:1', data: {
             proposalId: 'gov:P:9', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150',
             proposerPubkey: kps[1].pubkey } });
         await new Promise(r => setImmediate(r));
         expect(insert.callCount).to.equal(0);
     });
-it('_handlePropose records a proposal correctly attributed to its sender (GOV-PROPOSER-SPOOF-1 negative)', async function () {
+it('handlePropose records a proposal correctly attributed to its sender (GOV-PROPOSER-SPOOF-1 negative)', async function () {
         hub._peerManager.validatorPubkeys = new Map(valset.map(v => [v.addr, v.pubkey]));
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
-        gov._handlePropose({ sender: 'ws://v0:1', data: {
+        gov.handlePropose({ sender: 'ws://v0:1', data: {
             proposalId: 'gov:P:10', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150',
             proposerPubkey: kps[0].pubkey } });
         await new Promise(r => setImmediate(r));
@@ -150,7 +150,7 @@ it('tallyProposal broadcasts GOV_RESULT with authenticated vote evidence', async
         expect(bc.args[1].votes[0]).to.include({ voterPubkey: kps[0].pubkey, vote: 'approve' });
     });
 // A follower re-tallies locally and never trusts the wire status.
-it('_handleResult APPLIES local FAILED over a leader forged "passed" with zero approvals', async function () {
+it('handleResult APPLIES local FAILED over a leader forged "passed" with zero approvals', async function () {
         let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: snapshotJson }]);
@@ -160,7 +160,7 @@ it('_handleResult APPLIES local FAILED over a leader forged "passed" with zero a
 
         let emitted = false;
         gov.on('proposal:finalized', () => { emitted = true; });
-        await gov._handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed', votes: [] } });
+        await gov.handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed', votes: [] } });
 
         expect(update.getCall(0).args[1][0], 'local re-tally overrides the forged status').to.equal('failed');
         expect(emitted, 'a forged pass must not finalize').to.equal(false);
@@ -169,7 +169,7 @@ it('_handleResult APPLIES local FAILED over a leader forged "passed" with zero a
 
 describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     installSuiteHooks2();
-it('_handleResult recovers a follower that missed GOV_VOTE gossip via signed evidence', async function () {
+it('handleResult recovers a follower that missed GOV_VOTE gossip via signed evidence', async function () {
         let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: snapshotJson }]);
@@ -184,7 +184,7 @@ it('_handleResult recovers a follower that missed GOV_VOTE gossip via signed evi
         let emitted = null;
         gov.on('proposal:finalized', d => { emitted = d; });
         let evidence = [signedVote(kps[0], 'gov:P:1', 'approve'), signedVote(kps[1], 'gov:P:1', 'approve')];
-        await gov._handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed', votes: evidence } });
+        await gov.handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed', votes: evidence } });
 
         // Both signed votes were ingested, then the local re-tally passed and emitted.
         expect(hub.db.doQuery.withArgs(sinon.match(/INSERT INTO governance_votes/)).callCount).to.equal(2);
@@ -203,7 +203,7 @@ it('ingestResultVotes skips a vote from a non-member and one with a bad signatur
         await gov.ingestResultVotes('gov:P:1', [bad, nonMember, good], electorate);
         expect(insert.callCount, 'only the one valid member vote is ingested').to.equal(1);
     });
-it('_handleResult keeps wire-status behaviour for a legacy NULL-snapshot proposal', async function () {
+it('handleResult keeps wire-status behaviour for a legacy NULL-snapshot proposal', async function () {
         let leader = gov.getProposalLeader('gov:P:1');
         hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
             .resolves([{ voting_end: '2020-01-01T00:00:00Z', validator_snapshot: null }]);
@@ -211,7 +211,7 @@ it('_handleResult keeps wire-status behaviour for a legacy NULL-snapshot proposa
         hub.db.doQuery.withArgs(sinon.match(/SELECT parameter, current_value/))
             .resolves([{ parameter: 'P', current_value: '1', proposed_value: '2', activation_block: null }]);
 
-        await gov._handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed' } });
+        await gov.handleResult({ sender: leader.addr, data: { proposalId: 'gov:P:1', status: 'passed' } });
         // No re-tally SELECT of votes happened on the compatibility path, and the wire status applied.
         expect(hub.db.doQuery.withArgs(sinon.match(/SELECT voter_pubkey, vote FROM governance_votes/)).called).to.equal(false);
         expect(update.getCall(0).args[1][0]).to.equal('passed');
@@ -230,13 +230,13 @@ it('propose() persists a validator_snapshot column and broadcasts the snapshot',
 
 describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
     installSuiteHooks2();
-it('_handlePropose persists NULL snapshot below activation even if the wire snapshot is absent', async function () {
+it('handlePropose persists NULL snapshot below activation even if the wire snapshot is absent', async function () {
         // regtest network default is off here (hub.network undefined -> gate OFF).
         // Map the sender to the declared proposer key so the binding guard treats
         // this as a legitimately attributed proposal.
         hub._peerManager.validatorPubkeys = new Map([['peer', kps[0].pubkey]]);
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
-        gov._handlePropose({ sender: 'peer', data: {
+        gov.handlePropose({ sender: 'peer', data: {
             proposalId: 'gov:P:1', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150', proposerPubkey: kps[0].pubkey } });
         await new Promise(r => setImmediate(r));
         expect(insert.callCount).to.equal(1);

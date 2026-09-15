@@ -311,7 +311,7 @@ function registerFeature5persistenceRetractionFragment1Part1() {
     };
     // The persisted-row COUNT is the money-path precondition signal, so the
     // stub has to answer with one; a bare resolve() now means "degraded set".
-    const persist = sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+    const persist = sinon.stub(engine, 'persistCapabilitySnapshot').resolves(3);
     await engine.writeFinalizedRow({
       row,
       signatures: [{
@@ -346,7 +346,7 @@ function registerFeature5persistenceRetractionFragment1Part2() {
     const row = feature5persistenceRetractionFragment1FinalizeRow();
     const forget = engine.consensus.forgetFinalized;
     engine._inflight.add(row.round_id);
-    sinon.stub(engine, '_persistCapabilitySnapshot').rejects(new Error('db down'));
+    sinon.stub(engine, 'persistCapabilitySnapshot').rejects(new Error('db down'));
     await engine.writeFinalizedRow({
       row,
       signatures: [{

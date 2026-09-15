@@ -31,7 +31,7 @@ module.exports = {
     // feed cannot place there keeps the original refusal, so an unknown key still
     // writes no placeholder row and still names its remedy.
     //
-    // Async and self-catching because _handleMessage is a synchronous handler: this is
+    // Async and self-catching because handleMessage is a synchronous handler: this is
     // fire-and-forget exactly like the registered-sender persist beside it, and an
     // indexer fault must cost an audit row rather than the round.
     async persistFromStakeWeight(round, envelope, prices, senderPubkey) {

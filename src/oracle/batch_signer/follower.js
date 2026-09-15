@@ -129,8 +129,8 @@ module.exports = {
     signIfReproduced(d, first, last, mine, myAnchor, me){
         let ours, theirs;
         try {
-            ours   = this._canonical(first, last, myAnchor, mine);
-            theirs = this._canonical(d.first_round, d.last_round, d.btc_block_height, d.rounds);
+            ours   = this.canonical(first, last, myAnchor, mine);
+            theirs = this.canonical(d.first_round, d.last_round, d.btc_block_height, d.rounds);
         } catch(e){
             this.refuse(first, last, 'canonical build failed (' + (e && e.message) + ')');
             return;

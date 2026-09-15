@@ -134,7 +134,7 @@ async function runQueueWith(pub) {
     let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
     fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
     let dead = sinon.stub(pub, 'deadLetter');
-    await pub._processQueue();
+    await pub.processQueue();
     let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
     return { dead, rewritten };
 }
@@ -167,7 +167,7 @@ oraclePublisherTests('spend gating (item 2676)', function () {
         let broadcastStub = sinon.stub().resolves({ txid: 'x' });
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(3);   // below default floor 10
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false;
     });
 
@@ -178,7 +178,7 @@ oraclePublisherTests('spend gating (item 2676)', function () {
         let broadcastStub = sinon.stub().resolves({ txid: 'x' });
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().rejects(new Error('rpc down'));  // -> null
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false;
     });
 
@@ -194,7 +194,7 @@ oraclePublisherTests('spend gating (item 2676)', function () {
         pub.broadcastFn = broadcastStub;
         pub.dogeAddress = 'D123';
         pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '400000000', amount: '4.00000000' }]) };
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false;   // 4 DOGE, floor 10
     });
 
@@ -214,7 +214,7 @@ oraclePublisherTests('spend gating (item 2676)', function () {
         pub.broadcastFn = broadcastStub;
         pub.dogeAddress = 'D123';
         pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '1500000000', amount: '15.00000000' }]) };
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.true;    // 15 DOGE, floor 10
     });
 
@@ -227,7 +227,7 @@ oraclePublisherTests('spend gating (item 2676)', function () {
         let broadcastStub = sinon.stub().resolves({ txid: 'x' });
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.calledOnce).to.be.true;   // only round 1 sent
         // round 2 stays on the durable queue for the next window
         let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
@@ -249,7 +249,7 @@ oraclePublisherTests('ambiguous send handling (item 2675)', function () {
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
         let dead = sinon.stub(pub, 'deadLetter');
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.calledOnce).to.be.true;
         expect(dead.calledOnce, 'ambiguous send must be dead-lettered').to.be.true;
         // the round must NOT remain on the live queue (no auto re-broadcast)
@@ -265,7 +265,7 @@ oraclePublisherTests('ambiguous send handling (item 2675)', function () {
         pub.broadcastFn  = sinon.stub().rejects(refused);
         pub.getBalanceFn = sinon.stub().resolves(50);
         let dead = sinon.stub(pub, 'deadLetter');
-        await pub._processQueue();
+        await pub.processQueue();
         expect(dead.called, 'definitive error must not dead-letter').to.be.false;
         // round retained with attempts incremented
         let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
@@ -291,7 +291,7 @@ oraclePublisherTests('ambiguous send handling (item 2675)', function () {
         pub.broadcastFn  = sinon.stub().rejects(rejected);
         pub.getBalanceFn = sinon.stub().resolves(50);
         let dead = sinon.stub(pub, 'deadLetter');
-        await pub._processQueue();
+        await pub.processQueue();
         expect(dead.calledOnce, 'a funded payload must never be rebuilt').to.be.true;
         let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
         expect(rewritten).to.not.include('"round":9');
@@ -305,7 +305,7 @@ oraclePublisherTests('ambiguous send handling (item 2675)', function () {
             new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
         pub.getBalanceFn = sinon.stub().resolves(50);
         let dead = sinon.stub(pub, 'deadLetter');
-        await pub._processQueue();
+        await pub.processQueue();
         expect(dead.called, 'an untagged pre-send rejection keeps its retry').to.be.false;
         let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
         expect(rewritten).to.include('"round":9');

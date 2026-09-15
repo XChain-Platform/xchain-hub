@@ -140,8 +140,8 @@ const RID = 'c3'.repeat(16);
         rs.leaderPubkey = pub(p1); rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
         await flush();
         return c.pending.get(RID);
     }
@@ -178,8 +178,8 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
 
         // Remaining PROPOSEs land; the drain replays the buffered PREPARE, which
         // now hash-matches p1's own proposal and is adopted.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
         await flush();
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('p1-body');
@@ -195,8 +195,8 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         rs.leaderPubkey = pub(p1); rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.proposals.size).to.equal(3);

@@ -17,7 +17,7 @@
  * places a live hub actually reaches it, because a bound with no call site refuses nothing:
  *
  *   1. CrossChainCallEngine.validateProposedMatch, the XCALL engine's own follower gate;
- *   2. CrossChainDexConsensus._handlePropose, the ONE proposal handler every engine on that
+ *   2. CrossChainDexConsensus.handlePropose, the ONE proposal handler every engine on that
  *      consensus shares, for any engine that declares an admissionScope.
  *
  * Both must refuse in the same directions, and both must resolve the FOLLOWER'S OWN tips
@@ -110,7 +110,7 @@ const ah                     = require('../../../../src/lib/admission_height.js'
                 JSON.stringify(ah.rowAdmitBlocks(r) || null)].join('|');
     }
 
-    // A round id whose leader is the OTHER identity, so _handlePropose runs for real
+    // A round id whose leader is the OTHER identity, so handlePropose runs for real
     // instead of the follower being its own leader.
     function ridLedBy(pub) {
         const sorted = VALIDATORS.map(v => v.pubkey).sort();
@@ -143,8 +143,8 @@ const ah                     = require('../../../../src/lib/admission_height.js'
             peerManager: { on: () => {}, removeListener: () => {}, broadcast: () => {} },
             identity: followerIdent,
             capSnapshot: null,
-            _canonicalMatch: canonicalMatch,
-            _persistCapabilitySnapshot: async () => {},
+            canonicalMatch: canonicalMatch,
+            persistCapabilitySnapshot: async () => {},
             validateProposedMatch: async () => true
         };
         if (opts.scope !== false) {
@@ -168,7 +168,7 @@ const ah                     = require('../../../../src/lib/admission_height.js'
     async function offerPropose(consensus, row, rid) {
         await consensus.propose(rid, { row, snapshot: { validators: VALIDATORS, count: 2 } });
         const canonical = canonicalMatch(row);
-        await consensus._handlePropose({
+        await consensus.handlePropose({
             type: consensus.types.PROPOSE, sender: LEADER_PUB,
             data: { matchId: rid, view: 0, row, sig_pubkey: LEADER_PUB, sig: leaderIdent.sign(canonical) }
         });

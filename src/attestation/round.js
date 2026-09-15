@@ -138,7 +138,7 @@ class AttestationRound {
         if(this._pollRunning) return;
         this._pollRunning = true;
         try {
-        let url = await this._resolveBtcIndexerUrl();
+        let url = await this.resolveBtcIndexerUrl();
         if(!url) return;
 
         // Drop `seen` entries older than the retry window so transiently-skipped
@@ -176,9 +176,9 @@ class AttestationRound {
         }
     }
 
-    async _resolveBtcIndexerUrl(){
-        if(typeof this.hub._resolveBtcIndexerUrl === 'function'){
-            return await this.hub._resolveBtcIndexerUrl();
+    async resolveBtcIndexerUrl(){
+        if(typeof this.hub.resolveBtcIndexerUrl === 'function'){
+            return await this.hub.resolveBtcIndexerUrl();
         }
         return null;
     }

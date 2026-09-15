@@ -83,10 +83,10 @@ function broadcastOwnAnswer(self, state, myPubkey){
 
 module.exports = {
 
-    async _tick(){
+    async tick(){
         if(this.interval <= 0) return;
-        // In-flight guard (house convention, mirrors StateCheckpointEngine._tick).
-        // A tick makes up to three sequential _indexerCall round trips at a 15s
+        // In-flight guard (house convention, mirrors StateCheckpointEngine.tick).
+        // A tick makes up to three sequential indexerCall round trips at a 15s
         // timeout each, against a 30s poll: under a slow indexer the next interval
         // fires while this one is still awaiting. Two overlapping ticks would both
         // pass the rounds.has(epoch) test below before either reached the
@@ -97,7 +97,7 @@ module.exports = {
         if(this._ticking) return;
         this._ticking = true;
         try {
-            let tip = await this._indexerCall('getblockhashes', {});
+            let tip = await this.indexerCall('getblockhashes', {});
             let tipBlock = tip && tip.block_index != null ? Number(tip.block_index) : null;
             if(tipBlock == null) return;
 
@@ -132,7 +132,7 @@ module.exports = {
     },
 
     async runEpoch(epoch, tipBlock){
-        let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
+        let bh = await this.indexerCall('getblockhashes', { block_index: epoch });
         if(!bh || !bh.ledger_hash){ return; }
         let seed   = String(bh.ledger_hash);
         let target = epoch - this.confirmDepth;
@@ -177,7 +177,7 @@ module.exports = {
                     '... target=' + target + ' eligible=' + eligible.size + ' claimants=' + claimants.size +
                     ' leader=' + (this.isLeader(state, myPubkey) ? 'me' : 'peer'));
 
-        // Collection closes from _tick once the tip reaches epoch + closeDepth
+        // Collection closes from tick once the tip reaches epoch + closeDepth
         // (chain-anchored); the leader then proposes the PASS list and every node
         // evaluates window-based pass-rate eligibility. No wall-clock timer: a hub that detects
         // the epoch earlier must not close before peers (on a slightly later poll)

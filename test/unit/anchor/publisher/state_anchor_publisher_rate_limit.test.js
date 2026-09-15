@@ -28,7 +28,7 @@ function mkPub(){
     pub.ambiguousPollAttempts = 1;
     pub.waits = [];
     // Record instead of waiting: the test asserts the DURATION the publisher chose.
-    pub._sleep = async (ms) => { pub.waits.push(ms); };
+    pub.sleep = async (ms) => { pub.waits.push(ms); };
     return pub;
 }
 

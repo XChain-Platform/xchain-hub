@@ -34,7 +34,7 @@ module.exports = {
     async validateProposedMatch(row){
         if(!row || !ALLOWED_CHAINS.includes(row.source_chain) || !ALLOWED_CHAINS.includes(row.target_chain)) return false;
         if(row.source_chain === row.target_chain) return false;
-        if(String(row.round_id).toLowerCase() !== this._roundId(row.phase, String(row.call_id).toLowerCase())) return false;
+        if(String(row.round_id).toLowerCase() !== this.roundId(row.phase, String(row.call_id).toLowerCase())) return false;
 
         // Canonical integer spellings. These fields are signed verbatim but
         // re-derived from a BIGINT round-trip by xexec.js and the archive verifier, so
@@ -81,7 +81,7 @@ module.exports = {
 
     async validateDispatch(row){
         let res;
-        try { res = await this._indexerCall(row.source_chain, 'getcrosschaincall', { call_id: String(row.call_id) }); }
+        try { res = await this.indexerCall(row.source_chain, 'getcrosschaincall', { call_id: String(row.call_id) }); }
         catch(e){ return false; }
         if(!res || res.exists !== true || !res.call) return false;
         if(String(res.network || '') !== String(row.network || '')) return false;
@@ -145,7 +145,7 @@ module.exports = {
            Number(d[0].push_generation || 0)  !== Number(row.push_generation || 0)) return false;
 
         let res;
-        try { res = await this._indexerCall(row.target_chain, 'getcrosschaincallresult', { call_id: String(row.call_id) }); }
+        try { res = await this.indexerCall(row.target_chain, 'getcrosschaincallresult', { call_id: String(row.call_id) }); }
         catch(e){ return false; }
         if(!res || res.exists !== true) return false;
 
@@ -156,6 +156,6 @@ module.exports = {
         let resultStatus = RESULT_STATUSES.includes(res.status) ? String(res.status) : 'error';
         let payload = (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64);
         return resultStatus === String(row.result_status) &&
-               this._sha256(payload) === this._sha256(String(row.return_payload_b64 == null ? '' : row.return_payload_b64));
+               this.sha256(payload) === this.sha256(String(row.return_payload_b64 == null ? '' : row.return_payload_b64));
     },
 };

@@ -84,7 +84,7 @@ function registerPeerSubmissionHandling2Tests1() {
             await or.executeRound(); // sets currentRound
             let round = or.getCurrentRound();
 
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: {
@@ -103,11 +103,11 @@ function registerPeerSubmissionHandling2Tests1() {
             await or.executeRound();
             let round = or.getCurrentRound();
 
-            or._handleMessage({
+            or.handleMessage({
                 type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '111' }], sources: 1, timestamp: Date.now() }
             });
-            or._handleMessage({
+            or.handleMessage({
                 type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '222' }], sources: 1, timestamp: Date.now() }
             });
@@ -118,7 +118,7 @@ function registerPeerSubmissionHandling2Tests1() {
         });
 
         it('ignores non-ORACLE_PRICE_SUBMIT messages', function () {
-            or._handleMessage({ type: 'HEARTBEAT', sender: 'x', sig_pubkey: pubkeyForTestSender('x'), data: {} });
+            or.handleMessage({ type: 'HEARTBEAT', sender: 'x', sig_pubkey: pubkeyForTestSender('x'), data: {} });
             expect(or.getSubmissions(0)).to.be.undefined;
         });
 
@@ -198,10 +198,10 @@ function registerAdditionalCoverage5Tests10() {
             expect(or.oracleConsensus).to.equal(c);
         });
 
-        it('_handleMessage initializes the submission map for a not-yet-seen round', async function () {
+        it('handleMessage initializes the submission map for a not-yet-seen round', async function () {
             await or.executeRound();              // sets currentRound + its own round map
             let next = or.getCurrentRound() + 1;   // a round with no map yet
-            or._handleMessage({
+            or.handleMessage({
                 type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001', sig_pubkey: pubkeyForTestSender('ws://peer-9:10001'),
                 data: { round: next, prices: [{ coinPair: 'BTC/USD', price: '123' }], sources: 1, timestamp: Date.now() }
             });

@@ -60,7 +60,7 @@ function oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(round) 
     data: {
       round,
       prices: PRICES,
-      digest: oracleConsensusAFederatedRoundNeedsADetermSuite1Oc._digest(round, PRICES),
+      digest: oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.digest(round, PRICES),
       btcBlockHeight: HEIGHT
     }
   };
@@ -70,7 +70,7 @@ function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part1() {
     oracleConsensusAFederatedRoundNeedsADetermSuite1Hub = createMockHub();
     oracleConsensusAFederatedRoundNeedsADetermSuite1Hub.resolveBtcLatestBlock = sinon.stub().resolves(HEIGHT);
     oracleConsensusAFederatedRoundNeedsADetermSuite1Pm = oracleConsensusAFederatedRoundNeedsADetermSuite1Hub._peerManager;
-    oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorPubkeys = new Set(); // size 0: _isKnownSender accepts any sender
+    oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorPubkeys = new Set(); // size 0: isKnownSender accepts any sender
     oracleConsensusAFederatedRoundNeedsADetermSuite1OracleRound = {
       getSubmissions: sinon.stub().returns(new Map())
     };
@@ -135,13 +135,13 @@ function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part2() {
   });
 }
 function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part3() {
-  describe('follower path (_handlePropose)', function () {
+  describe('follower path (handlePropose)', function () {
     it('SECURITY: drops the PROPOSE rather than opening a locally-sized pending round', async function () {
       oracleConsensusAFederatedRoundNeedsADetermSuite1Hub.capabilitySnapshot = oracleConsensusAFederatedRoundNeedsADetermSuite1NullSnapshotSource();
       oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.setValidatorSet(VALIDATORS_3);
       oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorAddr = VALIDATORS_3[1].addr; // a follower for round 0
       oracleConsensusAFederatedRoundNeedsADetermSuite1OracleRound.getSubmissions.returns(oracleConsensusAFederatedRoundNeedsADetermSuite1MemberSubmissions());
-      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc._handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
+      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
       expect(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.pendingRounds.has(0)).to.equal(false);
       expect(oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.broadcast.called).to.equal(false);
     });
@@ -150,7 +150,7 @@ function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part3() {
       oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.setValidatorSet(VALIDATORS_3);
       oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorAddr = VALIDATORS_3[1].addr;
       oracleConsensusAFederatedRoundNeedsADetermSuite1OracleRound.getSubmissions.returns(oracleConsensusAFederatedRoundNeedsADetermSuite1MemberSubmissions());
-      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc._handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
+      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
       expect(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.pendingRounds.has(0)).to.equal(true);
     });
     it('leaves a single-node hub (getQuorum() === 0) on its bootstrap path', async function () {
@@ -159,7 +159,7 @@ function registerOracleConsensusAFederatedRoundNeedsADetermSuite1Part3() {
       sinon.stub(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc, 'getQuorum').returns(0);
       oracleConsensusAFederatedRoundNeedsADetermSuite1Pm.validatorAddr = VALIDATORS_3[1].addr;
       oracleConsensusAFederatedRoundNeedsADetermSuite1OracleRound.getSubmissions.returns(oracleConsensusAFederatedRoundNeedsADetermSuite1MemberSubmissions());
-      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc._handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
+      await oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.handlePropose(oracleConsensusAFederatedRoundNeedsADetermSuite1ProposeEnvelope(0));
       expect(oracleConsensusAFederatedRoundNeedsADetermSuite1Oc.pendingRounds.has(0)).to.equal(true);
     });
   });
@@ -212,14 +212,14 @@ describe('OracleConsensus: a federated follower locks the snapshot quorum from P
     expect(oc.getQuorum()).to.be.above(0).and.not.equal(7);
     hub._peerManager.validatorAddr = VALIDATORS_3[1].addr;
     let leader = VALIDATORS_3[0];
-    await oc._handlePropose({
+    await oc.handlePropose({
       type: 'ORACLE_PROPOSE',
       sender: leader.addr,
       sig_pubkey: leader.pubkey,
       data: {
         round: 0,
         prices: PRICES,
-        digest: oc._digest(0, PRICES),
+        digest: oc.digest(0, PRICES),
         btcBlockHeight: HEIGHT
       }
     });

@@ -192,7 +192,7 @@ class Consensus {
     async start() {
         await this.loadSeq();
 
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this._messageHandler = (envelope) => this.handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
         logger.info('Consensus engine started (seq: ' + this.seq + ')');
@@ -268,11 +268,11 @@ class Consensus {
     // so admitting by address stranded every staked joiner in the denominator.
     // Shared definition and the full security argument in
     // lib/chain_signer_admission.js.
-    _isKnownSender(envelope) {
+    isKnownSender(envelope) {
         return isAdmissibleSigner(this.peerManager, envelope);
     }
 
-    _handleMessage(envelope) {
+    handleMessage(envelope) {
         switch (envelope.type) {
             case PBFT_PRE_PREPARE:
                 // handlePrePrepare is async because it locks the validator-set
@@ -285,7 +285,7 @@ class Consensus {
                         err && err.message ? err.message : err)));
                 break;
             case PBFT_PREPARE:     this.handlePrepare(envelope);    break;
-            case PBFT_COMMIT:      this._handleCommit(envelope);     break;
+            case PBFT_COMMIT:      this.handleCommit(envelope);     break;
             case PBFT_VIEW_CHANGE: this.handleViewChange(envelope); break;
             case PBFT_NEW_VIEW:    this.handleNewView(envelope);    break;
         }
@@ -323,7 +323,7 @@ class Consensus {
         return bftQuorumOrSingle(N, 0);
     }
 
-    _digest(config) {
+    digest(config) {
         let json = JSON.stringify(config);
         return crypto.createHash('sha256').update(json).digest('hex');
     }

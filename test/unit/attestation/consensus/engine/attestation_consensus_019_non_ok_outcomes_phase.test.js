@@ -150,9 +150,9 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
 
         await c.propose(RID, errorRoundState(me, [me, p1, p2], 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, EMPTY, '', 'provider_error'));
         await flush();
 
         let pending = c.pending.get(RID);
@@ -163,8 +163,8 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         expect(pending.signatures.size).to.equal(3);
 
         // Peers' COMMITs land; the round finalizes with the non-ok status.
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, EMPTY, '', 'provider_error'));
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, EMPTY, '', 'provider_error'));
         await flush();
         expect(finalized.length).to.equal(1);
         expect(finalized[0].status).to.equal('provider_error');
@@ -224,7 +224,7 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         await c.propose(RID, rs);
         await flush();
         // Leader's provider_error PREPARE arrives before enough PROPOSEs.
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.winner).to.exist;
@@ -239,7 +239,7 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
         // Adopts the deterministic outcome (sender's sig verified) but does
@@ -259,7 +259,7 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('sneaky'), '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('sneaky'), '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
         expect(pending.winner).to.equal(null);
@@ -270,9 +270,9 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         c = new AttestationConsensus(hub, makeRealProviderRegistry());
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
         await flush();
         expect(hub.slashDetector.recordAttestationDivergence.called).to.equal(false);
     }); });

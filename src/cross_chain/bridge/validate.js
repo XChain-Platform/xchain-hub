@@ -27,7 +27,7 @@ const { ALLOWED_CHAINS, PENDING_PAGE, TRANSFER_CANONICAL_INT_FIELDS, POLICY_CANO
 
 module.exports = {
     // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
-    // id per source leg for the life of the chain, the CrossChainCallEngine._roundId shape
+    // id per source leg for the life of the chain, the CrossChainCallEngine.roundId shape
     // (a tagged preimage over the leg's own identity, nothing a hub reads from its own
     // clock or tip). snapshot_block is deliberately NOT in it. Every hub reads the BTC tip
     // from its own poll tick, so with the height inside the preimage three hubs whose
@@ -99,7 +99,7 @@ module.exports = {
         if(!(await this.transferGuardsHold(row))) return false;
 
         let res;
-        try { res = await this._indexerCall(row.src_chain, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
+        try { res = await this.indexerCall(row.src_chain, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
         catch(e){ return false; }
         if(!res || !Array.isArray(res.transfers)) return false;
         if(String(res.network || '') !== String(row.network || '')) return false;
@@ -188,7 +188,7 @@ module.exports = {
         // FAILURE abstains (no co-signature, the round retries next cycle); it never
         // refuses, because an unreachable indexer is our problem, not the leader's.
         let policy;
-        try { policy = await this._indexerCall(row.origin_chain, 'gettokenpolicy',
+        try { policy = await this.indexerCall(row.origin_chain, 'gettokenpolicy',
                                                { tick: row.tick, origin_block: Number(row.origin_block) }); }
         catch(e){ return false; }
         if(!policy || policy.error) return false;

@@ -176,7 +176,7 @@ describe('LEADER: propose() refuses an over-cap body before broadcasting (legacy
     });
 });
 
-describe('FOLLOWER: _handlePropose refuses an over-cap peer proposal (legacy era)', function () {
+describe('FOLLOWER: handlePropose refuses an over-cap peer proposal (legacy era)', function () {
 
     async function openRound(e) {
         await e.engine.propose(RID, {
@@ -213,7 +213,7 @@ describe('FOLLOWER: _handlePropose refuses an over-cap peer proposal (legacy era
     it('stores a peer proposal exactly at the cap', function () {
         let e = makeEngine('testnet');
         return openRound(e).then((pending) => {
-            e.engine._handlePropose(peerProposeEnvelope(e, AT_CAP_BODY));
+            e.engine.handlePropose(peerProposeEnvelope(e, AT_CAP_BODY));
             expect(pending.proposals.has(e.peerKey)).to.equal(true);
             expect(e.engine.bodyOverCapRejectCount).to.equal(0);
             clearTimer(pending);
@@ -223,7 +223,7 @@ describe('FOLLOWER: _handlePropose refuses an over-cap peer proposal (legacy era
     it('refuses a peer proposal one byte over the cap, and never signs for it', function () {
         let e = makeEngine('testnet');
         return openRound(e).then((pending) => {
-            e.engine._handlePropose(peerProposeEnvelope(e, OVER_CAP_BODY));
+            e.engine.handlePropose(peerProposeEnvelope(e, OVER_CAP_BODY));
             expect(pending.proposals.has(e.peerKey), 'never entered the candidate set').to.equal(false);
             expect(pending.signatures.has(e.peerKey), 'never signed for').to.equal(false);
             expect(e.engine.bodyOverCapRejectCount).to.equal(1);

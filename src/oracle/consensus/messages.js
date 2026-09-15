@@ -83,7 +83,7 @@ module.exports = {
         this.earlyMessages.delete(round);
         this.earlyMessageTtl.delete(round);
         for (let env of arr) {
-            try { this._handleMessage(env); }
+            try { this.handleMessage(env); }
             catch (e) { logger.error(nodeUtil.format('Oracle: error replaying buffered message for round %s:', round, e.message)); }
         }
     },
@@ -93,7 +93,7 @@ module.exports = {
     // envelope.sender: the chain attributes keys, not P2P addresses, so keying on
     // the address is what stranded a staked community validator in the denominator
     // without ever reaching the numerator. Full argument in lib/chain_signer_admission.js.
-    _isKnownSender(envelope) {
+    isKnownSender(envelope) {
         return isAdmissibleSigner(this.peerManager, envelope);
     },
 
@@ -125,7 +125,7 @@ module.exports = {
     },
 
     // Record one peer's vote in a key-keyed prepare/commit set. The envelope has
-    // already cleared _isKnownSender, so it carries a proven key; this is where
+    // already cleared isKnownSender, so it carries a proven key; this is where
     // the forgery bound actually bites, because N envelopes from ONE key collapse
     // to a single Set entry no matter how many distinct senders they name.
     addVote(voteSet, envelope) {
@@ -133,28 +133,28 @@ module.exports = {
         if (pk) voteSet.add(pk);
     },
 
-    _handleMessage(envelope) {
+    handleMessage(envelope) {
         switch (envelope.type) {
             case ORACLE_PROPOSE:
-                // _handlePropose is async because it locks the validator-set
+                // handlePropose is async because it locks the validator-set
                 // snapshot at the round's block boundary via an indexer call.
                 // Errors are caught and logged; they never bubble up to the gossip layer.
-                this._handlePropose(envelope).catch(err =>
+                this.handlePropose(envelope).catch(err =>
                     logger.error(nodeUtil.format('Oracle: PROPOSE handler error for round %s:',
                         (envelope && envelope.data && envelope.data.round),
                         err && err.message ? err.message : err)));
                 break;
             case ORACLE_PREPARE: this.handlePrepare(envelope); break;
-            case ORACLE_COMMIT:  this._handleCommit(envelope);  break;
+            case ORACLE_COMMIT:  this.handleCommit(envelope);  break;
         }
     },
 
     handlePrepare(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
-        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
+        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see handlePropose)
 
         // Only count PREPARE votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'prepare', sender: envelope.sender, envelope });
             return;
         }
@@ -178,12 +178,12 @@ module.exports = {
         this.checkPrepareQuorum(round);
     },
 
-    _handleCommit(envelope) {
+    handleCommit(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
-        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
+        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see handlePropose)
 
         // Only count COMMIT votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'commit', sender: envelope.sender, envelope });
             return;
         }

@@ -197,7 +197,7 @@ function makeHub(overrides){
         },
         providerRegistry:     { getMinStake: () => '1000' },
         btcIndexerHeaders:   () => ({}),
-        _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
+        resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;
     return hub;
@@ -266,7 +266,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
                 let post   = stubRequestLookup([localRequest()]);
                 await mirror.start();
 
-                await mirror._handleResult({ type: ATTEST_RESULT, data: Object.assign(gossipPayload(), CASES[name]) });
+                await mirror.handleResult({ type: ATTEST_RESULT, data: Object.assign(gossipPayload(), CASES[name]) });
 
                 expect(hub.db.table).to.have.length(0);
                 expect(post.callCount).to.equal(0);

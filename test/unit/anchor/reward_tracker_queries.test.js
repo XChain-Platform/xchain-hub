@@ -43,10 +43,10 @@ function registerSplitSuitePart1() {
 }
 function registerSplitSuitePart2() {
   describe('BTC indexer URL resolution (#2652)', function () {
-    it('resolves the endpoint through hub._resolveBtcIndexerUrl when the env field is empty (configs-table hub)', async function () {
+    it('resolves the endpoint through hub.resolveBtcIndexerUrl when the env field is empty (configs-table hub)', async function () {
       // No BTC_INDEXER_API_URL exported: the constructor field is ''.
       rt.btcIndexerApiUrl = '';
-      hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://configs-table-indexer:3000');
+      hub.resolveBtcIndexerUrl = sinon.stub().resolves('http://configs-table-indexer:3000');
       let post = sinon.stub(axios, 'post').resolves({
         data: {
           result: {
@@ -55,13 +55,13 @@ function registerSplitSuitePart2() {
         }
       });
       let result = await rt.resolveSourceByPubkey(hexPk(1), 953190);
-      expect(hub._resolveBtcIndexerUrl.calledOnce).to.be.true;
+      expect(hub.resolveBtcIndexerUrl.calledOnce).to.be.true;
       expect(result).to.equal('bc1qsrc');
       expect(post.getCall(0).args[0]).to.equal('http://configs-table-indexer:3000');
     });
     it('still fails closed (null, no call) when neither env nor the hub resolver yields a URL', async function () {
       rt.btcIndexerApiUrl = '';
-      hub._resolveBtcIndexerUrl = sinon.stub().resolves('');
+      hub.resolveBtcIndexerUrl = sinon.stub().resolves('');
       let post = sinon.stub(axios, 'post').resolves({});
       let result = await rt.resolveSourceByPubkey(hexPk(1), 1);
       expect(result).to.equal(null);
@@ -69,7 +69,7 @@ function registerSplitSuitePart2() {
     });
     it('falls back to the env-captured field when the hub exposes no resolver', async function () {
       rt.btcIndexerApiUrl = 'http://env-indexer:3000';
-      expect(typeof hub._resolveBtcIndexerUrl).to.not.equal('function');
+      expect(typeof hub.resolveBtcIndexerUrl).to.not.equal('function');
       let post = sinon.stub(axios, 'post').resolves({
         data: {
           result: {

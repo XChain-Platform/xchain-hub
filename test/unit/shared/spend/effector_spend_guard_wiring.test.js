@@ -13,7 +13,7 @@
 // wiring proof: the shared SpendGuard's per-capability runtime pause
 // reaches an effector's PRIMARY (broadcast) path, not only its queue sweep, and
 // each effector registers a $2000-clamped spend ceiling. Uses OraclePublisher as
-// the representative effector (its _processQueue is the sole broadcast choke
+// the representative effector (its processQueue is the sole broadcast choke
 // point, so a gated primary path is directly observable).
 
 const sinon      = require('sinon');
@@ -74,12 +74,12 @@ describe('SpendGuard wiring into hub effectors', function () {
 
         // Paused: the broadcast choke point must skip, spending nothing.
         pub.spendGuard.pause('incident');
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called, 'paused effector must not broadcast').to.be.false;
 
         // Resumed: the same queued round now publishes exactly once.
         pub.spendGuard.resume();
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.calledOnce, 'resumed effector broadcasts the queued round').to.be.true;
     });
 
@@ -93,7 +93,7 @@ describe('SpendGuard wiring into hub effectors', function () {
         pub.getBalanceFn = sinon.stub().resolves(50);
 
         expect(SpendGuard.pauseCapability('OraclePublisher', 'ops')).to.equal(true);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false;
         SpendGuard.resumeCapability('OraclePublisher');
     });

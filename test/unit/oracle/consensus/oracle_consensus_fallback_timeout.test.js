@@ -156,7 +156,7 @@ function registerLeaderTimeoutFallback2Tests3() {
             pm.validatorAddr = VALIDATORS_4[1].addr; // elected fallback
 
             // Round 4 leader is VALIDATORS_4[0] (4 % 4 === 0). Round 4 (not 0)
-            // because _handlePropose rejects the falsy round 0.
+            // because handlePropose rejects the falsy round 0.
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_4[0].addr, prices },
@@ -168,8 +168,8 @@ function registerLeaderTimeoutFallback2Tests3() {
             expect(oc.leaderTimers.has(4)).to.be.true;
 
             // The (real) leader's PROPOSE lands mid-grace → pendingRounds populated.
-            let digest = oc._digest(4, prices);
-            await oc._handlePropose({
+            let digest = oc.digest(4, prices);
+            await oc.handlePropose({
                 sender: VALIDATORS_4[0].addr,
                 sig_pubkey: VALIDATORS_4[0].pubkey,
                 data: { round: 4, prices, digest, btcBlockHeight: 900000 }
@@ -194,7 +194,7 @@ function registerLeaderTimeoutFallback2Tests4() {
             pm.validatorAddr = VALIDATORS_4[2].addr;
 
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_4[0].addr, prices },   // leader submitted
                 { sender: VALIDATORS_4[1].addr, prices }    // fallback
@@ -205,7 +205,7 @@ function registerLeaderTimeoutFallback2Tests4() {
             expect(pm.broadcast.called).to.be.false;
 
             // Fallback PROPOSE from validator-2 BEFORE the grace → rejected.
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 4, prices, digest }
@@ -215,7 +215,7 @@ function registerLeaderTimeoutFallback2Tests4() {
 
             // After the grace, the same fallback PROPOSE is accepted.
             clock.tick(oc.leaderTimeout);
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 4, prices, digest, btcBlockHeight: 900000 }
@@ -234,7 +234,7 @@ function registerLeaderTimeoutFallback2Tests5() {
             pm.validatorAddr = VALIDATORS_4[2].addr; // receiver (validator-3)
 
             let prices = [{ coinPair: 'BTC/USD', price: '666666.00000000' }];
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
             // Round 4 leader (v1) submitted; submitters {v1, v2, v4}. Lowest
             // non-leader is v2, so a PROPOSE from v4 must be rejected even after
             // the grace.
@@ -247,7 +247,7 @@ function registerLeaderTimeoutFallback2Tests5() {
             await oc.finalizeRound(4);
             clock.tick(oc.leaderTimeout);
 
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[3].addr,   // v4: not the lowest non-leader
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { round: 4, prices, digest }

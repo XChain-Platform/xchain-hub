@@ -264,20 +264,20 @@ it('stop() unsubscribes, rejects pending proposals, and clears all maps', async 
 
 describe('Consensus (PBFT)', function () {
     installSuiteHooks1();
-// _handleMessage dispatch
-describe('_handleMessage dispatch', function () {
+// handleMessage dispatch
+describe('handleMessage dispatch', function () {
     installSuiteHooks4();
 it('routes PREPARE / COMMIT / VIEW_CHANGE / NEW_VIEW and ignores unknown types', function () {
             let prepare = sinon.spy(consensus, 'handlePrepare');
-            let commit  = sinon.spy(consensus, '_handleCommit');
+            let commit  = sinon.spy(consensus, 'handleCommit');
             let vc      = sinon.spy(consensus, 'handleViewChange');
             let nv      = sinon.spy(consensus, 'handleNewView');
 
-            consensus._handleMessage({ type: 'PBFT_PREPARE',     data: { seq: 1, configDigest: 'd' } });
-            consensus._handleMessage({ type: 'PBFT_COMMIT',      data: { seq: 1, configDigest: 'd' } });
-            consensus._handleMessage({ type: 'PBFT_VIEW_CHANGE', data: { view: 1, seq: 1 } });
-            consensus._handleMessage({ type: 'PBFT_NEW_VIEW',    data: { view: 1, seq: 1 } });
-            expect(() => consensus._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+            consensus.handleMessage({ type: 'PBFT_PREPARE',     data: { seq: 1, configDigest: 'd' } });
+            consensus.handleMessage({ type: 'PBFT_COMMIT',      data: { seq: 1, configDigest: 'd' } });
+            consensus.handleMessage({ type: 'PBFT_VIEW_CHANGE', data: { view: 1, seq: 1 } });
+            consensus.handleMessage({ type: 'PBFT_NEW_VIEW',    data: { view: 1, seq: 1 } });
+            expect(() => consensus.handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
 
             expect(prepare.calledOnce).to.be.true;
             expect(commit.calledOnce).to.be.true;
@@ -290,8 +290,8 @@ it('routes PRE_PREPARE and swallows handler errors', async function () {
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: () => { throw new Error('boom'); }, getQuorum: () => 3 };
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let config = { x: 1 };
-            let digest = consensus._digest(config);
-            consensus._handleMessage({
+            let digest = consensus.digest(config);
+            consensus.handleMessage({
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,

@@ -31,7 +31,7 @@ const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 // Default per-chain confirmation thresholds (Tier B, 2026-06-02): the depth a
 // cross-chain source action must reach before its swap settles. Higher on the
 // lower-hashpower chains to approach BTC-comparable settlement assurance.
-// Enforced in _handlePropose(): a follower verifies the proposed source action
+// Enforced in handlePropose(): a follower verifies the proposed source action
 // against its OWN indexer for that chain and refuses to co-sign below the
 // threshold (see verifySourceAction).
 const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };

@@ -49,7 +49,7 @@ function registerEvenSplitGateMeasuresTheRoundedMedianNotTheExactMidpoint() {
     // These two submissions spread 0.049999997500002625 (inside the 5% band), but
     // the 8-decimal median they produce is 0.10000011, and the low submission sits
     // 0.0500000449999505 from THAT. A follower re-deriving over the proposer-excluded
-    // set lands on 0.09500010, trips the identical band in _handlePropose, and
+    // set lands on 0.09500010, trips the identical band in handlePropose, and
     // rejects the whole proposal, so one boundary pair wedged the entire round.
     it('drops the pair whose rounded median puts a middle submission outside the band', testDropsThePairWhoseRoundedMedianPutsAMiddleSubmissionOutsideThe);
     it('still publishes a pair whose rounded median keeps both middles inside the band', testStillPublishesAPairWhoseRoundedMedianKeepsBothMiddlesInsideThe);

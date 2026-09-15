@@ -212,7 +212,7 @@ class Database {
         this.circuitOpenUntil = 0;
     }
 
-    _sleep(ms) {
+    sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
@@ -270,7 +270,7 @@ class Database {
                 let jitter = Math.floor(Math.random() * delay * 0.3);
                 logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
-                await this._sleep(delay + jitter);
+                await this.sleep(delay + jitter);
             }
         }
         return connection;

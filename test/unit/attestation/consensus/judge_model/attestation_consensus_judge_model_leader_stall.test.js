@@ -23,7 +23,7 @@
 // elected leader may run agree(). So the federation waits on one hub's count.
 //
 // The one way that count falls short leaving NO trace is the responsible-set
-// check at the top of _handlePropose, `return; // Outsider proposal; ignore`. A
+// check at the top of handlePropose, `return; // Outsider proposal; ignore`. A
 // proposal refused there is indistinguishable from one that never arrived.
 
 const sinon                = require('sinon');
@@ -120,9 +120,9 @@ it('reads healthy from every single hub while the sets disagree, which is why pe
         consensus.pending.set(RID, pending);
         pending.proposals.set(pub(leader), { body: BODY, meta: '', status: 'ok' });
 
-        consensus._handlePropose(proposeFrom(fB));
-        consensus._handlePropose(proposeFrom(fC));
-        consensus._handlePropose(proposeFrom(fD));
+        consensus.handlePropose(proposeFrom(fB));
+        consensus.handlePropose(proposeFrom(fC));
+        consensus.handlePropose(proposeFrom(fD));
 
         let admitted = [...pending.proposals.keys()].sort();
         expect(admitted).to.deep.equal([pub(leader), pub(fB), pub(fC), pub(fD)].sort());
@@ -147,9 +147,9 @@ it('admits only the proposers inside its own responsible set, and the three it d
         pending.proposals.set(pub(leader), { body: BODY, meta: '', status: 'ok' });
 
         // All three peers propose an identical ok body, exactly as the live fleet did.
-        consensus._handlePropose(proposeFrom(fB));
-        consensus._handlePropose(proposeFrom(fC));
-        consensus._handlePropose(proposeFrom(fD));
+        consensus.handlePropose(proposeFrom(fB));
+        consensus.handlePropose(proposeFrom(fC));
+        consensus.handlePropose(proposeFrom(fD));
 
         // Constraint 1: assert the admitted SET, not its size.
         let admitted = [...pending.proposals.keys()].sort();
@@ -165,9 +165,9 @@ it('admits only the proposers inside its own responsible set, and the three it d
         consensus.pending.set(RID, pending);
         pending.proposals.set(pub(leader), { body: BODY, meta: '', status: 'ok' });
 
-        consensus._handlePropose(proposeFrom(fB));
-        consensus._handlePropose(proposeFrom(fC));
-        consensus._handlePropose(proposeFrom(fD));
+        consensus.handlePropose(proposeFrom(fB));
+        consensus.handlePropose(proposeFrom(fC));
+        consensus.handlePropose(proposeFrom(fD));
 
         await consensus.maybeAdvanceFromProposals(RID);
 
@@ -182,7 +182,7 @@ it('admits only the proposers inside its own responsible set, and the three it d
 
 describe('AttestationConsensus: judge_model leader stalls when its responsible set omits its proposers', function () {
 
-    // A PROPOSE signed the way _handlePropose verifies it: over the canonical
+    // A PROPOSE signed the way handlePropose verifies it: over the canonical
     // built from the wire values. mirrorEra is false on the round, so
     // readWireEffectiveTime returns null and the canonical takes no stamp.
 

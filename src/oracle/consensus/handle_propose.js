@@ -31,7 +31,7 @@ const { bindAndCoSign } = require('./follower_round.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-// Tells _handlePropose's steps to drop the message; distinct from a legitimate null or 0.
+// Tells handlePropose's steps to drop the message; distinct from a legitimate null or 0.
 const DROP = Symbol('drop this PROPOSE');
 // Tells lockProposeSnapshot to re-resolve the round in count mode rather than drop it.
 const DOWNGRADE_TO_COUNT = Symbol('downgrade to a count quorum');
@@ -47,13 +47,13 @@ function proposalAdmissible(envelope, proposal) {
 
     // Discard proposals from senders that are not registered validators
     // before doing any snapshot/indexer work for them.
-    if (!this._isKnownSender(envelope)) {
+    if (!this.isKnownSender(envelope)) {
         noteDrop({ reason: 'unknown_sender', phase: 'propose', sender: envelope.sender, envelope });
         return false;
     }
 
     // Verify digest
-    let computedDigest = this._digest(round, prices);
+    let computedDigest = this.digest(round, prices);
     if (computedDigest !== digest) {
         logger.warn('Oracle: PROPOSE digest mismatch from ' + envelope.sender + ' for round ' + round);
         return false;
@@ -220,7 +220,7 @@ function judgeProposer(envelope, proposal, locked) {
     // failed but other hubs have prices. The local submission view is
     // filtered to snapshot members (Oracle M1) so the election and the
     // deviation reference only see qualified validators.
-    let leader       = this._getLeader(round, memberPubkeys);
+    let leader       = this.getLeader(round, memberPubkeys);
     let submissions  = this.filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
     // Identify the proposer by the key that PROVABLY signed this envelope
     // (PeerManager verified it, and binds a registered sender to its
@@ -253,7 +253,7 @@ module.exports = {
     // Resolve the round's snapshot anchor from the wire-supplied btcBlockHeight and
     // bound it against this hub's own BTC tip. Returns the height to pin the round at,
     // or null when the PROPOSE must be dropped (the caller returns on null; it has
-    // already logged the reason). Separate from _handlePropose so the bound can run
+    // already logged the reason). Separate from handlePropose so the bound can run
     // ahead of every other reader of the wire height, the clamp-reference activation
     // gate included.
     async boundedProposeHeight(round, btcBlockHeight) {
@@ -285,7 +285,7 @@ module.exports = {
         // above its own tip, so an old-but-indexed block resolves a perfectly
         // valid snapshot. That hands the proposer four choices at once: the
         // quorum denominator (getQuorum(snap)), the member set that
-        // _getLeader elects from (so it can pick a height where it is the
+        // getLeader elects from (so it can pick a height where it is the
         // round's leader and the legitimacy check then validates it against
         // its own choice), the weighted-vs-count mode the snapshot guards call
         // a federation-split hazard, and the side of the clamp-reference
@@ -316,7 +316,7 @@ module.exports = {
         return blockHeight;
     },
 
-    async _handlePropose(envelope) {
+    async handlePropose(envelope) {
         let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig, admitBlocks } = envelope.data;
         // One snapshot of the wire fields, taken once, so every step below judges the
         // same values however long the awaits below take.

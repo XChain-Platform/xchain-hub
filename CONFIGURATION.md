@@ -425,7 +425,7 @@ precedence override.
 
 A commit-quorum-finalized cross-chain attestation used to be **destroyed** by a
 single transient DB error: the store's `.catch` deleted the round, and both
-`_handleCommit` and `checkCommitQuorum` return early once the id is gone, so no
+`handleCommit` and `checkCommitQuorum` return early once the id is gone, so no
 later COMMIT could re-drive persistence. The store is now retried with bounded
 exponential backoff (the `INSERT` upserts on `attestation_id`, so re-running it
 is safe), and on exhaustion the round is **retained** with its finalize flag

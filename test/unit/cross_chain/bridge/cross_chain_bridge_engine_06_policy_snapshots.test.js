@@ -136,7 +136,7 @@ function feature7policySnapshotsWithPolicy(engine, over) {
     origin_block: 900
   }, over || {});
   if (policy.policy_hash === undefined) policy.policy_hash = engine.policyHash(policy.allow_list, policy.block_list, policy.sleeping);
-  engine._indexerCall = sinon.stub().callsFake(async (coin, method) => {
+  engine.indexerCall = sinon.stub().callsFake(async (coin, method) => {
     if (method === 'getlatestblock') return {
       block_index: 906
     };
@@ -244,7 +244,7 @@ function registerFeature7policySnapshotsPart3() {
     const {
       engine
     } = makeEngine();
-    engine._indexerCall = sinon.stub().rejects(new Error('ECONNREFUSED'));
+    engine.indexerCall = sinon.stub().rejects(new Error('ECONNREFUSED'));
     await engine.maybeSnapshotPolicy({
       origin_chain: 'BTC',
       tick: 'FUFU',

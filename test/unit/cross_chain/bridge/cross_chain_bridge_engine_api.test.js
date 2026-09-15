@@ -57,7 +57,7 @@ function makeApiDoubles(hubOverrides) {
         getPeerManager: () => null,
         getAttestationRound: () => null,
         getProviderRegistry: () => null,
-        _resolveBtcIndexerUrl: async () => null,
+        resolveBtcIndexerUrl: async () => null,
         btcIndexerHeaders: () => ({}),
         start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
         startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},

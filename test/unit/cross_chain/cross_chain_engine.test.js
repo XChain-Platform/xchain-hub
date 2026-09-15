@@ -147,41 +147,41 @@ function registerFeature3resolveQuorumFailClosed1223() {
 function registerFeature4getLeaderPart1() {
   it('rotates through validators by seq % N', function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
-    expect(rootSuiteEngine._getLeader(0, null, null)).to.equal(VALIDATORS_3[0]);
-    expect(rootSuiteEngine._getLeader(1, null, null)).to.equal(VALIDATORS_3[1]);
-    expect(rootSuiteEngine._getLeader(3, null, null)).to.equal(VALIDATORS_3[0]);
+    expect(rootSuiteEngine.getLeader(0, null, null)).to.equal(VALIDATORS_3[0]);
+    expect(rootSuiteEngine.getLeader(1, null, null)).to.equal(VALIDATORS_3[1]);
+    expect(rootSuiteEngine.getLeader(3, null, null)).to.equal(VALIDATORS_3[0]);
   });
   it('uses chain-pair set for leader selection', function () {
     let pairSet = [makeValidator(5), makeValidator(6)];
     rootSuiteEngine.chainPairValidators = new Map([['BTC-LTC', pairSet]]);
     rootSuiteEngine.setValidatorSet(VALIDATORS_7);
-    expect(rootSuiteEngine._getLeader(0, 'BTC', 'LTC')).to.equal(pairSet[0]);
-    expect(rootSuiteEngine._getLeader(1, 'BTC', 'LTC')).to.equal(pairSet[1]);
+    expect(rootSuiteEngine.getLeader(0, 'BTC', 'LTC')).to.equal(pairSet[0]);
+    expect(rootSuiteEngine.getLeader(1, 'BTC', 'LTC')).to.equal(pairSet[1]);
   });
   it('returns null for empty set', function () {
     rootSuiteEngine.setValidatorSet([]);
-    expect(rootSuiteEngine._getLeader(0, null, null)).to.be.null;
+    expect(rootSuiteEngine.getLeader(0, null, null)).to.be.null;
   });
 }
 function registerFeature4getLeader() {
-  describe('_getLeader()', function () {
+  describe('getLeader()', function () {
     registerFeature4getLeaderPart1();
   });
 }
 function registerFeature5digestPart1() {
   it('returns 64-char hex hash', function () {
-    let d = rootSuiteEngine._digest('BTC:1:LTC', 3);
+    let d = rootSuiteEngine.digest('BTC:1:LTC', 3);
     expect(d).to.match(/^[0-9a-f]{64}$/);
   });
   it('is deterministic', function () {
-    expect(rootSuiteEngine._digest('X', 3)).to.equal(rootSuiteEngine._digest('X', 3));
+    expect(rootSuiteEngine.digest('X', 3)).to.equal(rootSuiteEngine.digest('X', 3));
   });
   it('different inputs produce different digests', function () {
-    expect(rootSuiteEngine._digest('X', 3)).to.not.equal(rootSuiteEngine._digest('Y', 3));
+    expect(rootSuiteEngine.digest('X', 3)).to.not.equal(rootSuiteEngine.digest('Y', 3));
   });
 }
 function registerFeature5digest() {
-  describe('_digest()', function () {
+  describe('digest()', function () {
     registerFeature5digestPart1();
   });
 }
@@ -246,7 +246,7 @@ function registerFeature6requestAttestationPart2() {
 
   // The id was once built from the RAW argument while the guard
   // parsed it, so every spelling parseInt accepts minted its own id: followers
-  // dropped 'BTC:1junk:LTC' on their canonical-id regex (_handlePropose) and the
+  // dropped 'BTC:1junk:LTC' on their canonical-id regex (handlePropose) and the
   // round timed out, and a single-node hub stored one row per spelling.
 }
 const feature6requestAttestationNested5CANONICAL_ID = /^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/; // the follower's own gate

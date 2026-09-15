@@ -327,7 +327,7 @@ describe('FullNodeChallengeRound runEpoch opens its round after the pinned micro
   function openable(coinRpcUrl, claimants) {
     let eng = makeRound(btcEncoderSpy());
     eng.coinRpcUrl = coinRpcUrl;
-    eng._indexerCall = () => Promise.resolve({
+    eng.indexerCall = () => Promise.resolve({
       ledger_hash: 'ab'.repeat(32)
     });
     eng.eligibleVerifiers = () => Promise.resolve(new Set([ME]));

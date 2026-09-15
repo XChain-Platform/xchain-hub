@@ -173,12 +173,12 @@ function registerAnchorElectionTests() {
         it('unlocks one rank per tolerance window and no sooner', function () {
             const pub   = mkPub();
             const order = ['aa', 'bb', 'cc', 'dd'];
-            expect(pub._rankUnlocked(order, 'aa', 0)).to.equal(true);            // rank 0 always
-            expect(pub._rankUnlocked(order, 'bb', 35)).to.equal(false);
-            expect(pub._rankUnlocked(order, 'bb', 36)).to.equal(true);
-            expect(pub._rankUnlocked(order, 'cc', 71)).to.equal(false);
-            expect(pub._rankUnlocked(order, 'cc', 72)).to.equal(true);
-            expect(pub._rankUnlocked(order, 'dd', 108)).to.equal(true);
+            expect(pub.rankUnlocked(order, 'aa', 0)).to.equal(true);            // rank 0 always
+            expect(pub.rankUnlocked(order, 'bb', 35)).to.equal(false);
+            expect(pub.rankUnlocked(order, 'bb', 36)).to.equal(true);
+            expect(pub.rankUnlocked(order, 'cc', 71)).to.equal(false);
+            expect(pub.rankUnlocked(order, 'cc', 72)).to.equal(true);
+            expect(pub.rankUnlocked(order, 'dd', 108)).to.equal(true);
         });
 
         it('sits above the leader publish latency it must not pre-empt', function () {

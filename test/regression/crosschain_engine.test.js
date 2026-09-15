@@ -47,7 +47,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part2() {
     it('PROPOSE creates pending and broadcasts PREPARE @regression-p0', async function () {
                 let attestationId = 'BTC:1:LTC';
-                let digest = engine._digest(attestationId, 3);
+                let digest = engine.digest(attestationId, 3);
 
                 // A follower now refuses to PREPARE unless the source action
                 // verifies against its own local indexer AND a deterministic
@@ -63,7 +63,7 @@ function registerSuitePart1() {
 
                 // btcBlockHeight is the leader-stamped snapshot block; without
                 // it the follower resolves no snapshot and fails closed.
-                await engine._handlePropose({
+                await engine.handlePropose({
                     sender: VALIDATORS_4[1].addr,
                     sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
@@ -81,7 +81,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part3() {
     it('PREPARE quorum triggers COMMIT @regression-p0', function () {
                 let attestationId = 'BTC:1:LTC';
-                let digest = engine._digest(attestationId, 3);
+                let digest = engine.digest(attestationId, 3);
 
                 engine.pendingAttestations.set(attestationId, {
                     attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
@@ -104,7 +104,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part4() {
     it('COMMIT quorum stores attestation and emits event @regression-p0', async function () {
                 let attestationId = 'BTC:1:LTC';
-                let digest = engine._digest(attestationId, 3);
+                let digest = engine.digest(attestationId, 3);
 
                 let emitted = null;
                 engine.on('attestation:finalized', (a) => { emitted = a; });
@@ -120,7 +120,7 @@ function registerSuitePart1() {
                     reject: () => {}
                 });
 
-                engine._handleCommit({
+                engine.handleCommit({
                     sender: VALIDATORS_4[2].addr,
                     sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }
@@ -137,7 +137,7 @@ function registerSuitePart1() {
 }
           function registerNestedSuite2Part5() {
     it('PROPOSE with wrong digest rejected @regression-p0', function () {
-                engine._handlePropose({
+                engine.handlePropose({
                     sender: VALIDATORS_4[1].addr,
                     sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId: 'BTC:1:LTC', digest: 'wrong', confirmations: 3 }
@@ -148,7 +148,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part6() {
     it('already-finalized attestation ignored @regression-p0', function () {
                 engine.finalized.add('BTC:1:LTC');
-                engine._handlePropose({
+                engine.handlePropose({
                     sender: VALIDATORS_4[1].addr,
                     sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId: 'BTC:1:LTC', digest: 'x', confirmations: 3 }
@@ -270,7 +270,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 pm.validatorAddr = VALIDATORS_4[0].addr;
 
                 let attestationId = 'LTC:10:DOGE';
-                let digest = engine._digest(attestationId, 3);
+                let digest = engine.digest(attestationId, 3);
 
                 let emitted = null;
                 engine.on('attestation:finalized', (a) => { emitted = a; });
@@ -284,7 +284,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                     resolve: () => {}, reject: () => {}
                 });
 
-                engine._handleCommit({
+                engine.handleCommit({
                     sender: VALIDATORS_4[2].addr,
                     sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }
@@ -335,11 +335,11 @@ describe('Regression: CrossChain & SwapTracker', function () {
     function registerNestedSuite1Part11() {
     describe('CrossChain digest determinism', function () {
             it('deterministic for same inputs @regression-p0', function () {
-                expect(engine._digest('X', 3)).to.equal(engine._digest('X', 3));
+                expect(engine.digest('X', 3)).to.equal(engine.digest('X', 3));
             });
 
             it('different inputs → different digest @regression-p0', function () {
-                expect(engine._digest('X', 3)).to.not.equal(engine._digest('Y', 3));
+                expect(engine.digest('X', 3)).to.not.equal(engine.digest('Y', 3));
             });
         });
 }

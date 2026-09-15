@@ -46,8 +46,8 @@ function makeHub(overrides) {
         getIdentity:      () => makeIdentity(),
         capabilitySnapshot: overrides && overrides.capabilitySnapshot !== undefined
             ? overrides.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
-            ? overrides._resolveBtcIndexerUrl
+        resolveBtcIndexerUrl: overrides && overrides.resolveBtcIndexerUrl
+            ? overrides.resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };
@@ -110,7 +110,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 
 // ── pollPending ─────────────────────────────────────────────────────────
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('returns immediately when no BTC indexer URL is available', async function () {
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves(null) });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves(null) });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             await ar.pollPending();
             expect(axiosStub.post.called).to.be.false;
@@ -119,7 +119,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 // ── pollPending ─────────────────────────────────────────────────────────
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('returns on axios error without throwing', async function () {
             axiosStub.post.rejects(new Error('network error'));
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             await ar.pollPending();  // should not throw
         }); }); });
@@ -127,7 +127,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 // ── pollPending ─────────────────────────────────────────────────────────
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('returns when response has no result', async function () {
             axiosStub.post.resolves({ data: { result: null } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             await ar.pollPending();
             expect(ar.seen.size).to.equal(0);
@@ -146,7 +146,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             let warn = sinon.stub(console, 'warn');
             axiosStub.post.resolves({ data: { jsonrpc: '2.0', id: 1,
                 error: { code: -32601, message: 'Method not found' } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
 
             await ar.pollPending();
@@ -163,7 +163,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('logs and counts an error nested in the result', async function () {
             let warn = sinon.stub(console, 'warn');
             axiosStub.post.resolves({ data: { result: { error: { message: 'index not ready' } } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
 
             await ar.pollPending();
@@ -177,7 +177,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('counts every rejection but throttles the warning', async function () {
             let warn = sinon.stub(console, 'warn');
             axiosStub.post.resolves({ data: { error: { message: 'Method not found' } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
 
             await ar.pollPending();
@@ -191,7 +191,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 // ── pollPending ─────────────────────────────────────────────────────────
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('stamps the last successful poll and clears the reported age', async function () {
             axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
 
             expect(ar.getStats().last_successful_poll_age_ms,
@@ -209,7 +209,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('leaves the successful-poll stamp alone when a later poll is rejected', async function () {
             sinon.stub(console, 'warn');
             axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             await ar.pollPending();
             let stampedAt = ar.lastPollOkAt;
@@ -229,7 +229,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         // row to the hub, so the poll has to record it even on a page with no requests.
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending()', function () { it('records the BTC tip the poll reported, and stop() forgets it', async function () {
             axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             expect(ar.getObservedBtcTip()).to.equal(null);
 
@@ -260,7 +260,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                     }
                 }
             });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.seen.set('rid1', Date.now()); // already seen
             let _startRoundSpy = sinon.spy(ar, 'startRound');
@@ -281,7 +281,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                     }
                 }
             });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let spy = sinon.spy(ar, 'startRound');
             await ar.pollPending();
@@ -298,7 +298,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             axiosStub.post.resolves({
                 data: { result: { latest_block_index: 200, requests } }
             });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             // Stub startRound to avoid execution
             sinon.stub(ar, 'startRound').resolves();
@@ -312,7 +312,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             axiosStub.post.resolves({
                 data: { result: { latest_block_index: 200, requests: [{ request_id: 'only1', block_index: 50, action_index: 0 }] } }
             });
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.pollCursor = { block_index: 40, action_index: 0 };
             sinon.stub(ar, 'startRound').resolves();

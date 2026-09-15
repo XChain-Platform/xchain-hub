@@ -89,7 +89,7 @@ function archiveRound(wantLeader) {
     }
     expect(peer, 'a peer producing the requested rank must exist').to.not.equal(null);
     let published = [];
-    pub._getActiveOraclePublishPubkeys = async () => [me, peer];
+    pub.getActiveOraclePublishPubkeys = async () => [me, peer];
     pub.resolveCapabilitySet          = async () => [{ pubkey: me, amount: '1', source: '' }];
     pub.getNextBatchSeq               = async () => BATCH_SEQ;
     pub.publishArchive                = async (round) => { published.push(round); };
@@ -190,8 +190,8 @@ function registerBackupWakeTests() {
             let key   = pub.archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
             let order = StateAnchorPublisher.hashOrder(key, [me, peer]);
             expect(order.indexOf(me), 'this hub is the backup').to.equal(1);
-            expect(pub._rankUnlocked(order, me, 0), 'locked at the anchor point').to.equal(false);
-            expect(pub._rankUnlocked(order, me, pub.electionToleranceBlocks), 'unlocked one step later').to.equal(true);
+            expect(pub.rankUnlocked(order, me, 0), 'locked at the anchor point').to.equal(false);
+            expect(pub.rankUnlocked(order, me, pub.electionToleranceBlocks), 'unlocked one step later').to.equal(true);
         });
     });
 }

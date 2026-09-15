@@ -33,7 +33,7 @@ function registerBeforeEachHook() {
         // Default: reject to prevent infinite loops on unconfigured calls
         poolStub = { getConnection: sinon.stub().rejects(new Error('ECONNREFUSED')) };
         db.pool = poolStub;
-        db._sleep = sinon.stub().resolves();
+        db.sleep = sinon.stub().resolves();
 
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
@@ -194,8 +194,8 @@ function registerExponentialBackoffDelaysIncreaseCorrectlyTest() {
 
         await db.doQuery('SELECT 1');
 
-        expect(db._sleep.callCount).to.equal(4);
-        let delays = db._sleep.getCalls().map(c => c.args[0]);
+        expect(db.sleep.callCount).to.equal(4);
+        let delays = db.sleep.getCalls().map(c => c.args[0]);
         for (let i = 0; i < delays.length; i++) {
             expect(delays[i]).to.be.gt(0);
         }

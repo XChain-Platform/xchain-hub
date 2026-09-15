@@ -50,8 +50,8 @@ function registerFeature10emptySnapshotGuardXCEEMPTYSNAP1Part1() {
       getQuorum: sinon.stub().returns(0)
     };
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -82,8 +82,8 @@ function registerFeature10emptySnapshotGuardXCEEMPTYSNAP1Part2() {
       getQuorum: sinon.stub().returns(3)
     };
     let attestationId = 'BTC:2:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -136,8 +136,8 @@ function feature11snapshotGatedPBFTTallyWire() {
   });
 }
 async function feature11snapshotGatedPBFTTallyOpenRound() {
-  let digest = rootSuiteEngine._digest(feature11snapshotGatedPBFTTallyAttestationId, 3);
-  await rootSuiteEngine._handlePropose({
+  let digest = rootSuiteEngine.digest(feature11snapshotGatedPBFTTallyAttestationId, 3);
+  await rootSuiteEngine.handlePropose({
     sender: feature11snapshotGatedPBFTTallyMEMBERS[1].addr,
     sig_pubkey: feature11snapshotGatedPBFTTallyMEMBERS[1].pubkey,
     data: {
@@ -236,7 +236,7 @@ function registerFeature11snapshotGatedPBFTTallyPart3() {
     // Four COMMIT envelopes, but one is the outsider and one is an alt addr of a key
     // that already committed: two distinct MEMBERS, below the quorum of 3.
     pending.commits.add(feature11snapshotGatedPBFTTallyMEMBERS[0].pubkey);
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: feature11snapshotGatedPBFTTallyMEMBERS[1].addr,
       sig_pubkey: feature11snapshotGatedPBFTTallyMEMBERS[1].pubkey,
       data: {
@@ -244,7 +244,7 @@ function registerFeature11snapshotGatedPBFTTallyPart3() {
         digest
       }
     });
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: feature11snapshotGatedPBFTTallyALT_ADDR,
       sig_pubkey: feature11snapshotGatedPBFTTallyMEMBERS[1].pubkey,
       data: {
@@ -252,7 +252,7 @@ function registerFeature11snapshotGatedPBFTTallyPart3() {
         digest
       }
     });
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: feature11snapshotGatedPBFTTallyOUTSIDER.addr,
       sig_pubkey: feature11snapshotGatedPBFTTallyOUTSIDER.pubkey,
       data: {
@@ -262,7 +262,7 @@ function registerFeature11snapshotGatedPBFTTallyPart3() {
     });
     expect(pending.commits.size).to.equal(3, 'the alt addr collapsed onto its key');
     expect(stored.called).to.be.false;
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: feature11snapshotGatedPBFTTallyMEMBERS[2].addr,
       sig_pubkey: feature11snapshotGatedPBFTTallyMEMBERS[2].pubkey,
       data: {

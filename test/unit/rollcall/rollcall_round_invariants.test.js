@@ -103,11 +103,11 @@ const REQUIRED_SWEEPERS = 3;
         const order  = ['0', '1', '2', '3', '4'].map(n => n.repeat(64));
         const window = rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS.regtest;
 
-        assert.strictEqual(eng._rankUnlocked(order, order[0], 0), true, 'rank 0 leads from the first block');
-        assert.strictEqual(eng._rankUnlocked(order, order[1], 0), false, 'rank 1 must not lead at the epoch');
-        assert.strictEqual(eng._rankUnlocked(order, order[3], window), true,
+        assert.strictEqual(eng.rankUnlocked(order, order[0], 0), true, 'rank 0 leads from the first block');
+        assert.strictEqual(eng.rankUnlocked(order, order[1], 0), false, 'rank 1 must not lead at the epoch');
+        assert.strictEqual(eng.rankUnlocked(order, order[3], window), true,
             'rank 3 must have a slot by the end of the accept window');
-        assert.strictEqual(eng._rankUnlocked(order, 'f'.repeat(64), window), false,
+        assert.strictEqual(eng.rankUnlocked(order, 'f'.repeat(64), window), false,
             'a key outside the elected order never publishes, however long it waits');
     }
 
@@ -204,7 +204,7 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         eng.loadSignLog = () => { eng._started = true; };
         eng.loadSpendLog = () => { eng._started = true; };
         eng.spendGuard = { persistTo: () => { eng._started = true; } };
-        eng._tick = async () => { eng._started = true; };
+        eng.tick = async () => { eng._started = true; };
         // start() logs a summary line that reads both of these on the armed path.
         eng._signatures = new Map();
         eng.broadcastCapable = () => false;
@@ -258,7 +258,7 @@ describe('RollcallRound runEpoch opens its round after the pinned microtask turn
             peerManager: { broadcast: (type) => sent.push(type) },
             identity: { getPubkeyHex: () => me, sign: () => 'd'.repeat(128) },
             capabilitySnapshot: { getActiveWeightSnapshot: () => Promise.resolve({ validators: [{ pubkey: me }] }) } });
-        eng._indexerCall = () => Promise.resolve({ ledger_hash: 'ab'.repeat(32) });
+        eng.indexerCall = () => Promise.resolve({ ledger_hash: 'ab'.repeat(32) });
         eng.recordSignature = () => true;
         const real = console.log;
         console.log = () => {};

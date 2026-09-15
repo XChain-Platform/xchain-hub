@@ -147,9 +147,9 @@ describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307);
         expect(c.earlyCommits.size).to.equal(0);
     }); });
 
-describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('_handleMessage ignores unknown message types', function () {
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('handleMessage ignores unknown message types', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
-        expect(() => c._handleMessage({ type: 'NOT_AN_ATTEST_MESSAGE', data: {} })).to.not.throw();
+        expect(() => c.handleMessage({ type: 'NOT_AN_ATTEST_MESSAGE', data: {} })).to.not.throw();
     }); });
 
 describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('a NEGATIVE ATTESTATION_ROUND_TIMEOUT_MS falls back rather than firing every round on the next tick (#6175)', function () {

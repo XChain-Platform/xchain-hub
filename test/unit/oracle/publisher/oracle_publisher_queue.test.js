@@ -196,13 +196,13 @@ oraclePublisherTests('rewriteQueue()', function () {
 });
 
 
-// ── _getActiveOraclePublishPubkeys ────────────────────────────────────────
+// ── getActiveOraclePublishPubkeys ────────────────────────────────────────
 
-oraclePublisherTests('_getActiveOraclePublishPubkeys()', function () {
+oraclePublisherTests('getActiveOraclePublishPubkeys()', function () {
     it('returns empty array when hub is null', async function () {
         let pub  = new OraclePublisher(makeHub());
         pub.hub  = null;
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         expect(keys).to.deep.equal([]);
     });
 
@@ -214,7 +214,7 @@ oraclePublisherTests('_getActiveOraclePublishPubkeys()', function () {
         };
         let hub = makeHub({ capabilitySnapshot: capSS });
         let pub = new OraclePublisher(hub);
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         // Sorted ascending
         expect(keys[0]).to.equal('bb'.repeat(32));
         expect(keys[1]).to.equal('cc'.repeat(32));
@@ -227,7 +227,7 @@ oraclePublisherTests('_getActiveOraclePublishPubkeys()', function () {
         let capReg = { getActiveValidators: sinon.stub().resolves(['AA'.repeat(32)]) };
         let hub = makeHub({ capabilitySnapshot: capSS, capabilityRegistry: capReg });
         let pub = new OraclePublisher(hub);
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         expect(keys).to.deep.equal([]);
         expect(capReg.getActiveValidators.called).to.equal(false);
     });
@@ -237,7 +237,7 @@ oraclePublisherTests('_getActiveOraclePublishPubkeys()', function () {
         let capReg = { getActiveValidators: sinon.stub().resolves(['pk1']) };
         let hub = makeHub({ capabilitySnapshot: capSS, capabilityRegistry: capReg });
         let pub = new OraclePublisher(hub);
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         expect(keys).to.deep.equal([]);
         expect(capReg.getActiveValidators.called).to.equal(false);
     });
@@ -245,7 +245,7 @@ oraclePublisherTests('_getActiveOraclePublishPubkeys()', function () {
     it('fails closed (empty) with no snapshot configured', async function () {
         let hub = makeHub();
         let pub = new OraclePublisher(hub);
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         expect(keys).to.deep.equal([]);
     });
 

@@ -37,7 +37,7 @@ function makeHub(myPub) {
             // Default: this node + a leader both qualify
             getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     };
 }
@@ -96,7 +96,7 @@ it('defers replay (retains the queue) when the indexer is unreachable', async fu
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(bcast.called).to.equal(false, 'must not broadcast when pending-state is unknown');
         expect(readQueue(replayQueueFile)).to.have.length(1, 'queue retained for a later sweep');
@@ -166,13 +166,13 @@ it('holds a follower entry until the leader-silence window elapses, then steps i
 
         // Fresh entry: within the window, follower must NOT broadcast yet.
         writeQueue(replayQueueFile, [Object.assign({ ts: Date.now() }, baseEntry)]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called).to.equal(false, 'follower must wait out the leader-silence window');
         expect(readQueue(replayQueueFile)).to.have.length(1, 'entry retained while waiting');
 
         // Aged past the window: follower steps in.
         writeQueue(replayQueueFile, [Object.assign({ ts: Date.now() - 5000 }, baseEntry)]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.calledOnce).to.equal(true, 'follower steps in after leader silence');
         expect(readQueue(replayQueueFile)).to.have.length(0);
     });
@@ -194,7 +194,7 @@ it('replays a crash-surviving leader entry whose request is still pending', asyn
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(bcast.calledOnce).to.equal(true, 'leader entry should be re-broadcast');
         expect(readQueue(replayQueueFile)).to.have.length(0, 'entry should be dropped after success');
@@ -215,7 +215,7 @@ it('replays a crash-surviving leader entry whose request is still pending', asyn
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(bcast.called).to.equal(false, 'must not re-broadcast an already-landed response');
         expect(readQueue(replayQueueFile)).to.have.length(0, 'resolved entry should be cleared from the queue');
@@ -256,7 +256,7 @@ it('the sweep drops a stale non-ok entry without re-broadcasting (request still 
             responsible:  [MY_PUB],
             leaderPubkey: MY_PUB
         }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called).to.equal(false);
         expect(readQueue(nonOkQueueFile)).to.have.length(0);
     });
@@ -277,7 +277,7 @@ it('the sweep drops a stale non-ok entry without re-broadcasting (request still 
             responsible:  [MY_PUB],
             leaderPubkey: MY_PUB
         }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.calledOnce).to.equal(true);
         expect(readQueue(nonOkQueueFile)).to.have.length(0);
     });
@@ -322,7 +322,7 @@ describe('AttestationPublisher: non-ok (Phase 4) publication discipline', functi
     registerNonOkSweepTests();
 });
 
-describe('AttestationPublisher: _myRank with a rotated round leader', function () {
+describe('AttestationPublisher: myRank with a rotated round leader', function () {
 
     const OTHER_PUB = 'dd'.repeat(32);
 
@@ -334,11 +334,11 @@ describe('AttestationPublisher: _myRank with a rotated round leader', function (
             responsible:  [MY_PUB, LEADER_PUB, OTHER_PUB],
             leaderPubkey: LEADER_PUB
         };
-        expect(pub._myRank(entry)).to.equal(2);
+        expect(pub.myRank(entry)).to.equal(2);
         const pub2 = new AttestationPublisher(makeHub(LEADER_PUB));
-        expect(pub2._myRank(entry)).to.equal(0);
+        expect(pub2.myRank(entry)).to.equal(0);
         const pub3 = new AttestationPublisher(makeHub(OTHER_PUB));
-        expect(pub3._myRank(entry)).to.equal(1);
+        expect(pub3.myRank(entry)).to.equal(1);
     });
 
     it('keeps hash order when the leader is slot 0 (no rotation)', function () {
@@ -347,6 +347,6 @@ describe('AttestationPublisher: _myRank with a rotated round leader', function (
             responsible:  [LEADER_PUB, MY_PUB],
             leaderPubkey: LEADER_PUB
         };
-        expect(pub._myRank(entry)).to.equal(1);
+        expect(pub.myRank(entry)).to.equal(1);
     });
 });

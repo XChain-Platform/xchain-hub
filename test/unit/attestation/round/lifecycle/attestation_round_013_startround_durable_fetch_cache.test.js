@@ -46,8 +46,8 @@ function makeHub(overrides) {
         getIdentity:      () => makeIdentity(),
         capabilitySnapshot: overrides && overrides.capabilitySnapshot !== undefined
             ? overrides.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
-            ? overrides._resolveBtcIndexerUrl
+        resolveBtcIndexerUrl: overrides && overrides.resolveBtcIndexerUrl
+            ? overrides.resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };
@@ -215,7 +215,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('evicts lapsed rows on the seen-window schedule', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let { ar, hub } = makeRound(fetchStub, null);
-            hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://idx/rpc');
+            hub.resolveBtcIndexerUrl = sinon.stub().resolves('http://idx/rpc');
             axiosStub.post.resolves({ data: { result: { latest_block_index: 200, requests: [] } } });
 
             await ar.pollPending();

@@ -80,7 +80,7 @@ module.exports = {
             };
             if(wantTxid)                 params.txid    = wantTxid;
             if(want.version != null)     params.version = Number(want.version);
-            res = await this._indexerCall('DOGE', 'getanchoraction', params);
+            res = await this.indexerCall('DOGE', 'getanchoraction', params);
         } catch(e){
             logger.warn('StateAnchorPublisher: getanchoraction unreachable for ' + cp.chain + '/' + cp.network +
                          ' @ ' + cp.block_index + '/' + cp.checkpoint_seq + ': ' + (e && e.message));
@@ -150,7 +150,7 @@ module.exports = {
     // JSON-RPC to a per-coin indexer (byte-identical to the ReorgHandler /
     // CrossChainCallEngine helper). The hub attaches its x-api-key; getanchoraction
     // is a FEDERATION_READ_METHOD on the indexer.
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };
@@ -204,7 +204,7 @@ module.exports = {
                 block_index: Number(row.block_index), checkpoint_seq: Number(row.checkpoint_seq)
             };
             if(version != null) params.version = Number(version);
-            let r = await this._indexerCall('DOGE', 'getanchoraction', params);
+            let r = await this.indexerCall('DOGE', 'getanchoraction', params);
             if(!r || r.error) throw new Error('getanchoraction failed: ' + (r && r.error));
             return r;
         };
@@ -294,7 +294,7 @@ module.exports = {
         let ix = this.indexers && this.indexers.DOGE;
         if(!ix || !ix.url)    throw new Error('no DOGE indexer wired');
         if(!this.dogeAddress) throw new Error('no DOGE_ADDRESS configured');
-        let res = await this._indexerCall('DOGE', 'getarchiveanchor', {
+        let res = await this.indexerCall('DOGE', 'getarchiveanchor', {
             chain: String(cp.chain), network: String(cp.network),
             block_index: Number(cp.block_index), checkpoint_seq: Number(cp.checkpoint_seq),
             batch_crc32: String(round.crc).toLowerCase(),

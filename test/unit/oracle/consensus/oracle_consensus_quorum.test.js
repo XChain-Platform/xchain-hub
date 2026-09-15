@@ -120,15 +120,15 @@ function registerGetquorum2Tests1() {
 function registerGetleader3Tests8() {
         it('returns validator at round % N', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._getLeader(0)).to.equal(VALIDATORS_3[0]);
-            expect(oc._getLeader(1)).to.equal(VALIDATORS_3[1]);
-            expect(oc._getLeader(2)).to.equal(VALIDATORS_3[2]);
-            expect(oc._getLeader(3)).to.equal(VALIDATORS_3[0]); // wraps
+            expect(oc.getLeader(0)).to.equal(VALIDATORS_3[0]);
+            expect(oc.getLeader(1)).to.equal(VALIDATORS_3[1]);
+            expect(oc.getLeader(2)).to.equal(VALIDATORS_3[2]);
+            expect(oc.getLeader(3)).to.equal(VALIDATORS_3[0]); // wraps
         });
 
         it('returns null for empty validator set', function () {
             oc.setValidatorSet([]);
-            expect(oc._getLeader(0)).to.be.null;
+            expect(oc.getLeader(0)).to.be.null;
         });
 
 }
@@ -160,18 +160,18 @@ function registerIsemptyfederationsnapshot4Tests10() {
 
 function registerDigest5Tests14() {
         it('returns a hex SHA-256 hash', function () {
-            let d = oc._digest(1, [{ coinPair: 'BTC/USD', price: '100000' }]);
+            let d = oc.digest(1, [{ coinPair: 'BTC/USD', price: '100000' }]);
             expect(d).to.match(/^[0-9a-f]{64}$/);
         });
 
         it('same inputs produce same digest', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-            expect(oc._digest(1, prices)).to.equal(oc._digest(1, prices));
+            expect(oc.digest(1, prices)).to.equal(oc.digest(1, prices));
         });
 
         it('different round produces different digest', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-            expect(oc._digest(1, prices)).to.not.equal(oc._digest(2, prices));
+            expect(oc.digest(1, prices)).to.not.equal(oc.digest(2, prices));
         });
 
 }
@@ -224,9 +224,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _getLeader()
+    // getLeader()
     // -----------------------------------------------------------------
-    describe('_getLeader()', function () {
+    describe('getLeader()', function () {
         registerGetleader3Tests8();
     });
 
@@ -242,9 +242,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _digest()
+    // digest()
     // -----------------------------------------------------------------
-    describe('_digest()', function () {
+    describe('digest()', function () {
         registerDigest5Tests14();
     });
 

@@ -22,7 +22,7 @@
 
 const coins = require('../../coins');
 
-// The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
+// The INT-backed fields canonicalMatch signs VERBATIM while the indexer's
 // settlement pass rebuilds them from the mirrored BIGINT row. The fill and
 // filled-before fields are bcmath DECIMAL strings compared through amountsEqual,
 // and ticks / addresses / kinds / payout legs are string compares, so none of them

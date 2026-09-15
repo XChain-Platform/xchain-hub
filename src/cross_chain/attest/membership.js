@@ -64,7 +64,7 @@ module.exports = {
     // envelope.sender, so a validator that staked on chain is counted without any
     // operator hand-registering it first. Shared definition and the full security
     // argument in lib/chain_signer_admission.js.
-    _isKnownSender(envelope) {
+    isKnownSender(envelope) {
         return isAdmissibleSigner(this.peerManager, envelope);
     },
 
@@ -90,7 +90,7 @@ module.exports = {
     },
 
     // Record one peer's vote in a key-keyed set. The envelope has already cleared
-    // _isKnownSender, so it carries a proven key. N envelopes from ONE key collapse
+    // isKnownSender, so it carries a proven key. N envelopes from ONE key collapse
     // to a single entry however many distinct senders they name, which is what
     // bounds count-mode forgery here.
     addVote(voteSet, envelope) {
@@ -146,7 +146,7 @@ module.exports = {
         return this.validatorSet;
     },
 
-    _getLeader(seq, sourceChain, destChain) {
+    getLeader(seq, sourceChain, destChain) {
         let set = (sourceChain && destChain)
             ? this.getChainPairSet(sourceChain, destChain)
             : this.validatorSet;
@@ -200,7 +200,7 @@ module.exports = {
         return bftQuorumOrSingle(N, 0);
     },
 
-    _digest(attestationId, confirmations) {
+    digest(attestationId, confirmations) {
         let payload = JSON.stringify({ attestationId, confirmations });
         return crypto.createHash('sha256').update(payload).digest('hex');
     },

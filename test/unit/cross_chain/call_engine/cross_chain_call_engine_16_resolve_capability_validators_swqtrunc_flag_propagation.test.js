@@ -289,7 +289,7 @@ function registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart1
     capped.truncated = true;
     engine.resolveCapabilityValidators = async () => capped;
     const seen = feature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationCountSnapshotWrites(engine);
-    await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+    await engine.persistCapabilitySnapshot('cross_chain', 100, 'regtest');
     expect(seen.n, 'a truncated snapshot must not reach the mirrored table').to.equal(0);
   });
 }
@@ -305,7 +305,7 @@ function registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart2
       amount: '1'
     }];
     const seen = feature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationCountSnapshotWrites(engine);
-    await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+    await engine.persistCapabilitySnapshot('cross_chain', 100, 'regtest');
     expect(seen.n).to.equal(1);
   });
 }

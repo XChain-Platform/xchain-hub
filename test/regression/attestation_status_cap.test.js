@@ -88,10 +88,10 @@ function envelope(type, statusLen) {
 }
 
 function registerSuitePart3() {
-    describe('_handlePropose()', function () {
+    describe('handlePropose()', function () {
         it('rejects an oversized status before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', STATUS_MAX + 1));
+            consensus.handlePropose(envelope('ATTEST_PROPOSE', STATUS_MAX + 1));
             // Guard fires before signature verification and before storing.
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').proposals.has(SENDER_PK)).to.equal(false);
@@ -100,7 +100,7 @@ function registerSuitePart3() {
 
         it('lets a max-length status through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', STATUS_MAX));
+            consensus.handlePropose(envelope('ATTEST_PROPOSE', STATUS_MAX));
             // Status gate passed -> signature verification was reached.
             expect(verify.calledOnce).to.equal(true);
             expect(warns.some(m => m.indexOf('oversized') !== -1)).to.equal(false);

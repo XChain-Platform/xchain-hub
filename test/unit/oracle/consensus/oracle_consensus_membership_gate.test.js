@@ -207,7 +207,7 @@ function registerOracleConsensusSnapshotMembershipGateOraclSuite1Part3() {
   });
 }
 function registerOracleConsensusSnapshotMembershipGateOraclSuite1Part4() {
-  it('_handlePropose locks memberPubkeys on the pending round', async function () {
+  it('handlePropose locks memberPubkeys on the pending round', async function () {
     // Follower view: validator-2 is this hub; leader (validator-1) proposes.
     oracleConsensusSnapshotMembershipGateOraclSuite1Pm.validatorAddr = VALIDATORS_3[1].addr;
     oracleConsensusSnapshotMembershipGateOraclSuite1Hub._identity.getPubkeyHex.returns(VALIDATORS_3[1].pubkey);
@@ -219,13 +219,13 @@ function registerOracleConsensusSnapshotMembershipGateOraclSuite1Part4() {
       sender: VALIDATORS_3[1].addr,
       prices: prices
     }]));
-    await oracleConsensusSnapshotMembershipGateOraclSuite1Oc._handlePropose({
+    await oracleConsensusSnapshotMembershipGateOraclSuite1Oc.handlePropose({
       sender: VALIDATORS_3[0].addr,
       sig_pubkey: VALIDATORS_3[0].pubkey,
       data: {
         round: oracleConsensusSnapshotMembershipGateOraclSuite1ROUND,
         prices,
-        digest: oracleConsensusSnapshotMembershipGateOraclSuite1Oc._digest(oracleConsensusSnapshotMembershipGateOraclSuite1ROUND, prices),
+        digest: oracleConsensusSnapshotMembershipGateOraclSuite1Oc.digest(oracleConsensusSnapshotMembershipGateOraclSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }
@@ -271,7 +271,7 @@ describe('OracleRound: submission ingest dedup by verified pubkey (Oracle M1)', 
   // sigPubkey defaults to a key unique to this sender; a test that wants two
   // senders to share ONE signing key passes it explicitly.
   function submit(sender, price, sigPubkey) {
-    round._handleMessage({
+    round.handleMessage({
       type: 'ORACLE_PRICE_SUBMIT',
       sender: sender,
       sig_pubkey: sigPubkey || pubkeyForTestSender(sender),

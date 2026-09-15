@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -161,7 +161,7 @@ const hookAt6849 = function () {
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('materializes a confirmed relay-eligible request onto BTC', async function () {
             const relay = makeRelay();
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.calledOnce).to.equal(true);
             const row = relay.consensus.propose.firstCall.args[1].row;
             expect(row).to.include({
@@ -181,14 +181,14 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('ignores a request that carries no origin_chain stamp', async function () {
             const relay = makeRelay({}, [originRow({ origin_chain: null })]);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('ignores a request stamped for a different origin chain', async function () {
             const relay = makeRelay({}, [originRow({ origin_chain: 'DOGE' })]);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
@@ -196,7 +196,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('holds a request that has not reached the origin confirmation depth', async function () {
             const relay = makeRelay();
             const needed = relay.confirmations.LTC;
-            relay._indexerCall = sinon.stub().callsFake(async (coin) => {
+            relay.indexerCall = sinon.stub().callsFake(async (coin) => {
                 if (coin === 'BTC') return { latest_block_index: 1000, requests: [] };
                 if (coin === 'LTC') return {
                     // One block short of the depth.
@@ -205,19 +205,19 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 };
                 return { latest_block_index: 0, requests: [] };
             });
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('does not re-materialize a request already pending on BTC', async function () {
             const relay = makeRelay();
-            relay._indexerCall = sinon.stub().callsFake(async (coin) => {
+            relay.indexerCall = sinon.stub().callsFake(async (coin) => {
                 if (coin === 'BTC') return { latest_block_index: 1000, requests: [{ request_id: REQ_ID, block_index: 900, action_index: 1 }] };
                 if (coin === 'LTC') return { latest_block_index: 3160099, requests: [originRow()] };
                 return { latest_block_index: 0, requests: [] };
             });
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
@@ -225,21 +225,21 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('does not re-materialize a request the WAL records as already relayed', async function () {
             const relay = makeRelay();
             relay._published.mark(REQ_ID);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('refuses a payload containing a pipe, which the positional wire cannot carry', async function () {
             const relay = makeRelay({}, [originRow({ payload: 'https://example.com/a|b' })]);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('refuses a request whose deadline is not a positive block count', async function () {
             const relay = makeRelay({}, [originRow({ deadline_block: 3160000 })]);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
@@ -250,7 +250,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // until the v4 lands. On the pending view alone that window reads as never
             // materialized, and the duplicate v3 is rejected on-chain after the fee.
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'request')).to.have.length(0);
         }); }); });
 
@@ -258,12 +258,12 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { it('keeps the previous home-pending view when the BTC indexer is unreachable', async function () {
             const relay = makeRelay();
             relay._homePending = new Set([REQ_ID]);
-            relay._indexerCall = sinon.stub().callsFake(async (coin) => {
+            relay.indexerCall = sinon.stub().callsFake(async (coin) => {
                 if (coin === 'BTC') throw new Error('connect ECONNREFUSED');
                 if (coin === 'LTC') return { latest_block_index: 3160099, requests: [originRow()] };
                 return { latest_block_index: 0, requests: [] };
             });
-            await relay._poll();
+            await relay.poll();
             // Relaying while blind to BTC is what double-spends the fee.
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });

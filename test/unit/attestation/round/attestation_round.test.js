@@ -46,8 +46,8 @@ function makeHub(overrides) {
         getIdentity:      () => makeIdentity(),
         capabilitySnapshot: overrides && overrides.capabilitySnapshot !== undefined
             ? overrides.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
-            ? overrides._resolveBtcIndexerUrl
+        resolveBtcIndexerUrl: overrides && overrides.resolveBtcIndexerUrl
+            ? overrides.resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };

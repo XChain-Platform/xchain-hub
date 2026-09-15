@@ -121,7 +121,7 @@ module.exports = {
     },
 
     // Cadence: leader-only initiation; followers only react to SIGN_REQs.
-    async _tick(){
+    async tick(){
         if(this._ticking) return;
         // Before any indexer round trip: an observer's round cannot be signed.
         if(this.observerHold()) return;
@@ -146,7 +146,7 @@ module.exports = {
             // and getcheckpointstats still read clean, which is the silent-cadence
             // shape that cost 18 days on mainnet. Meter it and leave the round retryable.
             try {
-                await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
+                await this.persistCapabilitySnapshot('oracle_publish', btcBlock);
             } catch(e){
                 this.noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
                 return;
@@ -166,7 +166,7 @@ module.exports = {
 
     // Whether this hub leads the cadence round at btcBlock over `validators`. Every way it
     // cannot is metered on the stall record (or, for a moving tip, the not-my-slot
-    // counter) exactly as _tick did inline, and false tells _tick to stop there.
+    // counter) exactly as tick did inline, and false tells tick to stop there.
     leadsCadenceSlot(btcBlock, validators){
         // Dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
         // Set at handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted

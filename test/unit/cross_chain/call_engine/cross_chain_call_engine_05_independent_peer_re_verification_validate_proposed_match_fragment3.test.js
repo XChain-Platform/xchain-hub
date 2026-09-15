@@ -258,7 +258,7 @@ function feature4independentPeerReVerificationValidateProposedMatchFragment3Disp
 }
 function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part1() {
   // #4204. Number()-based field equality accepts '041' against indexer value 41,
-  // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
+  // but canonicalMatch signs the spelling VERBATIM while the row round-trips a
   // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
   // different bytes, reject the quorum, and strand the call permanently (the
   // finalized row still satisfies rowExists, so it is never re-relayed).
@@ -266,7 +266,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       network: 'regtest',
       latest_block_index: 200,
@@ -322,7 +322,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
       return_payload_b64: 'cGF5bG9hZA',
       effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment3HonestEffectiveTime()
     };
-    const stub = sinon.stub(engine, '_indexerCall').resolves({
+    const stub = sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       latest_block_index: 600,
       executed_block_index: 500,

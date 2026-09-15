@@ -110,21 +110,21 @@ function testUsesChainPairSetForLeaderSelection() {
     cc.setChainPairValidators(pairMap);
     cc.setValidatorSet(VALIDATORS_4);
 
-    let leader = cc._getLeader(0, 'BTC', 'LTC');
+    let leader = cc.getLeader(0, 'BTC', 'LTC');
     expect(leader).to.equal(pairSet[0]);
 
-    let leader2 = cc._getLeader(1, 'BTC', 'LTC');
+    let leader2 = cc.getLeader(1, 'BTC', 'LTC');
     expect(leader2).to.equal(pairSet[1]);
 }
 function testUsesFullSetWhenNoChainPairSpecified() {
     cc.setValidatorSet(VALIDATORS_4);
-    let leader = cc._getLeader(0);
+    let leader = cc.getLeader(0);
     expect(leader).to.equal(VALIDATORS_4[0]);
 }
 function testReturnsNullWhenBothSetsAreEmpty() {
     cc.setValidatorSet([]);
     cc.setChainPairValidators(new Map());
-    expect(cc._getLeader(0, 'BTC', 'LTC')).to.be.null;
+    expect(cc.getLeader(0, 'BTC', 'LTC')).to.be.null;
 }
 
 function registerAttestationIDHandling() {
@@ -201,14 +201,14 @@ function registerPBFTMessageValidation() {
     it('PREPARE with mismatched digest is ignored', testPREPAREWithMismatchedDigestIsIgnored);
 }
 function testPROPOSEWithMissingAttestationIdIsIgnored() {
-    cc._handlePropose({
+    cc.handlePropose({
         sender: VALIDATORS_4[1].addr,
         data: { digest: 'abc' }
     });
     expect(cc.pendingAttestations.size).to.equal(0);
 }
 function testPROPOSEWithWrongDigestIsIgnored() {
-    cc._handlePropose({
+    cc.handlePropose({
         sender: VALIDATORS_4[1].addr,
         data: {
             attestationId: 'BTC:1:LTC', sourceChain: 'BTC',
@@ -220,8 +220,8 @@ function testPROPOSEWithWrongDigestIsIgnored() {
 }
 function testPROPOSEForAlreadyFinalizedAttestationIsIgnored() {
     cc.finalized.add('BTC:1:LTC');
-    let digest = cc._digest('BTC:1:LTC', 3);
-    cc._handlePropose({
+    let digest = cc.digest('BTC:1:LTC', 3);
+    cc.handlePropose({
         sender: VALIDATORS_4[1].addr,
         data: {
             attestationId: 'BTC:1:LTC', sourceChain: 'BTC',
@@ -232,7 +232,7 @@ function testPROPOSEForAlreadyFinalizedAttestationIsIgnored() {
     expect(cc.pendingAttestations.size).to.equal(0);
 }
 function testPREPAREWithMismatchedDigestIsIgnored() {
-    let digest = cc._digest('BTC:1:LTC', 3);
+    let digest = cc.digest('BTC:1:LTC', 3);
     cc.pendingAttestations.set('BTC:1:LTC', {
         attestationId: 'BTC:1:LTC', digest,
         prepares: new Set(), commits: new Set(),
@@ -252,16 +252,16 @@ function registerDigest() {
     it('returns 64-char hex string', testReturns64CharHexString);
 }
 function testSameInputsProduceSameDigest() {
-    let d1 = cc._digest('BTC:1:LTC', 3);
-    let d2 = cc._digest('BTC:1:LTC', 3);
+    let d1 = cc.digest('BTC:1:LTC', 3);
+    let d2 = cc.digest('BTC:1:LTC', 3);
     expect(d1).to.equal(d2);
 }
 function testDifferentConfirmationsProduceDifferentDigest() {
-    let d1 = cc._digest('BTC:1:LTC', 3);
-    let d2 = cc._digest('BTC:1:LTC', 6);
+    let d1 = cc.digest('BTC:1:LTC', 3);
+    let d2 = cc.digest('BTC:1:LTC', 6);
     expect(d1).to.not.equal(d2);
 }
 function testReturns64CharHexString() {
-    let d = cc._digest('BTC:1:LTC', 3);
+    let d = cc.digest('BTC:1:LTC', 3);
     expect(d).to.match(/^[0-9a-f]{64}$/);
 }

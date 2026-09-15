@@ -29,7 +29,7 @@ module.exports = {
     // Mirror CrossChainDexEngine.resolveCapabilityValidators (incl. regtest seam).
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM (this.network + block), else legacy
     // count set (source='' , weight=amount). Uses the deployment network so the set is
-    // resolved correctly at _tick, before the per-chain network is known.
+    // resolved correctly at tick, before the per-chain network is known.
     async resolveCapabilityValidators(capability, block){
         let validators = [];
         let weighted = swq.isStakeWeightedQuorumActive(block, this.network);
@@ -70,7 +70,7 @@ module.exports = {
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },
 
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

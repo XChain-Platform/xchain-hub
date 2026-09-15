@@ -33,7 +33,7 @@ class ChainTips {
 
     // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
     // indexer's pushChainTip only when that indexer is configured with HUB_API_URL, on
-    // the network _resolveBtcIndexerUrl picks so the tip matches. Then a direct
+    // the network resolveBtcIndexerUrl picks so the tip matches. Then a direct
     // getlatestblock call, which covers stacks where the tip push is not wired, local
     // regtest development among them, so block-boundary snapshotting still works. Null
     // when both paths fail, and null when the direct path only re-serves a height
@@ -54,7 +54,7 @@ class ChainTips {
             // stale height. Fall through when the tip is stale or unverifiable.
             if(pushedTip && pushedTip.blockHeight && this.btcPushedTipFresh(pushedTip)) return pushedTip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
-        let url = await this._resolveBtcIndexerUrl();
+        let url = await this.resolveBtcIndexerUrl();
         if(!url) return null;
         try {
             let res = await axiosFor(this).post(url, {

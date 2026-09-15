@@ -24,7 +24,7 @@
  * Unlike attestation consensus (divergent provider bodies -> provider.agree()
  * picks a winner), a cross-chain match is DETERMINISTIC: given the same confirmed
  * order books at snapshot_block, every honest validator derives the identical
- * canonical (engine._canonicalMatch). There is no winner to agree on: the
+ * canonical (engine.canonicalMatch). There is no winner to agree on: the
  * round is independent re-derivation + signature collection:
  *   - the match-designated leader broadcasts XDEX_MATCH_PROPOSE(row);
  *   - each peer re-derives + validates the match against its OWN order book
@@ -65,14 +65,14 @@ const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per match round before vi
 
 class CrossChainDexConsensus extends EventEmitter {
 
-    // engine: the CrossChainDexEngine. Used for _canonicalMatch (the signable
+    // engine: the CrossChainDexEngine. Used for canonicalMatch (the signable
     // payload, byte-identical to the indexer verifier), validateProposedMatch
-    // (independent re-derivation), and _persistCapabilitySnapshot (leader path).
+    // (independent re-derivation), and persistCapabilitySnapshot (leader path).
     //
     // opts (optional) lets a second engine reuse this consensus over its own item
     // type without sharing gossip traffic with DEX match rounds. The engine
-    // contract is unchanged (duck-typed _canonicalMatch / validateProposedMatch /
-    // _persistCapabilitySnapshot; rows carry snapshot_block + the id field):
+    // contract is unchanged (duck-typed canonicalMatch / validateProposedMatch /
+    // persistCapabilitySnapshot; rows carry snapshot_block + the id field):
     //   opts.messageTypes: {PROPOSE, PREPARE, COMMIT, VIEW_CHANGE, NEW_VIEW}
     //   opts.controlTags:  {vc, nv} signed-control payload tags
     //   opts.idField:      row field that must equal the round id (default 'match_id')
@@ -128,7 +128,7 @@ class CrossChainDexConsensus extends EventEmitter {
             logger.info('CrossChainDexConsensus: no peer manager; single-node finalize only');
             return;
         }
-        this._messageHandler = (env) => this._handleMessage(env);
+        this._messageHandler = (env) => this.handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
         logger.info('CrossChainDexConsensus: started');
     }
@@ -145,7 +145,7 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     // Sort the snapshot validators by pubkey so every node agrees on ordering,
-    // then index by (matchIdInt + view) % N. Mirrors Consensus._getLeader.
+    // then index by (matchIdInt + view) % N. Mirrors Consensus.getLeader.
     leaderFor(matchId, validators, view){
         if(!validators || validators.length === 0) return null;
         let sorted = validators.map(v => String(v.pubkey).toLowerCase()).sort();
@@ -153,12 +153,12 @@ class CrossChainDexConsensus extends EventEmitter {
         return sorted[(mInt + (view || 0)) % sorted.length];
     }
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => logger.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
+            case this.types.PROPOSE:     this.handlePropose(envelope).catch(e => logger.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
             case this.types.PREPARE:     this.handlePrepare(envelope);    break;
-            case this.types.COMMIT:      this._handleCommit(envelope);     break;
+            case this.types.COMMIT:      this.handleCommit(envelope);     break;
             case this.types.VIEW_CHANGE: this.handleViewChange(envelope); break;
             case this.types.NEW_VIEW:    this.handleNewView(envelope);    break;
             case this.types.FINAL_SYNC:  this.handleFinalSync(envelope).catch(e => logger.error('CrossChainDexConsensus: FINAL_SYNC error: ' + (e && e.message))); break;

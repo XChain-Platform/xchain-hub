@@ -90,7 +90,7 @@ function archiveRound(signingSetFor) {
     });
     let me = identity.getPubkeyHex().toLowerCase();
     let published = [];
-    pub._getActiveOraclePublishPubkeys = async () => [me];
+    pub.getActiveOraclePublishPubkeys = async () => [me];
     pub.resolveCapabilitySet          = async () => signingSetFor(me);
     pub.getNextBatchSeq               = async () => 7;
     pub.publishArchive                = async (round) => { published.push(round); };

@@ -42,7 +42,7 @@ const DROP = Symbol('drop the inbound proposal');
 
 module.exports = {
 
-    async _handlePropose(envelope) {
+    async handlePropose(envelope) {
         let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
 
@@ -87,8 +87,8 @@ module.exports = {
         // this gate an authenticated-but-Byzantine peer could stream unbounded distinct
         // proposalIds (unbounded governance_proposals growth on every hub, a DoS), and
         // any non-validator that slips past a null-registry window could inject
-        // proposals. Mirrors the _isKnownSender gate on GOV_RESULT / GOV_VOTE.
-        if (!this._isKnownSender(envelope.sender)) {
+        // proposals. Mirrors the isKnownSender gate on GOV_RESULT / GOV_VOTE.
+        if (!this.isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'gov_propose', sender: envelope.sender, envelope });
             return false;
         }
@@ -98,11 +98,11 @@ module.exports = {
         // the explorer, so a Byzantine validator could otherwise attribute its proposal to
         // ANOTHER validator's signing key (an attribution spoof). The peer registry maps the
         // sender addr to its registered signing key; when that registry is authoritative
-        // (non-empty, i.e. _isKnownSender is enforcing membership rather than in the genuine
+        // (non-empty, i.e. isKnownSender is enforcing membership rather than in the genuine
         // pre-bootstrap lenient window) require the sender's registered pubkey to equal the
         // declared proposerPubkey, dropping a mismatch (never recorded). An empty registry
         // keeps the legacy record-as-is behaviour so bootstrap is unaffected, matching the
-        // leniency of the _isKnownSender gate above. Honest proposals always pass: propose()
+        // leniency of the isKnownSender gate above. Honest proposals always pass: propose()
         // broadcasts under the proposer's own identity, so the sender's registered key IS the
         // proposerPubkey.
         let proposerRegistry = this.peerManager && this.peerManager.validatorPubkeys;

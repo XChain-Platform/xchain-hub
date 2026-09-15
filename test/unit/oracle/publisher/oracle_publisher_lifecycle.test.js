@@ -211,7 +211,7 @@ oraclePublisherTests('onRoundFinalized()', function () {
         sinon.stub(pub, 'getMyRank').resolves(0);
         sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
         let enqueueStub  = sinon.stub(pub, '_enqueue').resolves();
-        let processStub  = sinon.stub(pub, '_processQueue').resolves();
+        let processStub  = sinon.stub(pub, 'processQueue').resolves();
         let bufferStub   = sinon.stub(pub, 'bufferFinalizedRound').resolves();
         await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0, prices: [], signatures: [{ pubkey: 'pk', sig: 'sig' }] });
         expect(bufferStub.calledOnce).to.be.true;
@@ -330,13 +330,13 @@ oraclePublisherTests('ORACLE_PUBLISH_ENABLED kill switch (item 2677)', function 
         process.env.ORACLE_PUBLISH_ENABLED = 'false';
         let pub = new OraclePublisher(makeHub());
         let enqueue = sinon.stub(pub, '_enqueue');
-        let proc    = sinon.stub(pub, '_processQueue');
+        let proc    = sinon.stub(pub, 'processQueue');
         await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, btcBlockTime: 0, prices: [] });
         expect(enqueue.called).to.be.false;
         expect(proc.called).to.be.false;
     });
 
-    it('_processQueue broadcasts nothing when disabled', async function () {
+    it('processQueue broadcasts nothing when disabled', async function () {
         process.env.ORACLE_PUBLISH_ENABLED = 'false';
         let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
         fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
@@ -344,7 +344,7 @@ oraclePublisherTests('ORACLE_PUBLISH_ENABLED kill switch (item 2677)', function 
         let broadcastStub = sinon.stub().resolves({ txid: 'x' });
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false;
     });
 

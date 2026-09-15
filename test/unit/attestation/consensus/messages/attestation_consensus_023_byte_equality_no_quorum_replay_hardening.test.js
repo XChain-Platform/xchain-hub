@@ -147,9 +147,9 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         // Two of three fetches failed; only this hub holds an ok body.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, EMPTY, '', 'provider_error'));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
         // With N pinned to redundancy=3, agree([1 ok]) needs ceil(4/2)=2 and
@@ -168,7 +168,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         let pending = c.pending.get(RID);
         // A single responsible validator races a signed no_quorum PREPARE before
         // this hub has collected `need` proposals.
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
         await flush();
         expect(pending.winner).to.equal(null);
         expect(pending.signatures.has(pub(me))).to.equal(false);
@@ -181,9 +181,9 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
 describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () { beforeEach(hookAt107990); afterEach(hookAt108336); it('a genuinely split byte_equality round still records no_quorum (2641 liveness)', async function () {
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, Buffer.from('body-b')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, Buffer.from('body-b')));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('body-c')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('body-c')));
         await flush();
         expect(c.pending.get(RID).status).to.equal('no_quorum');
     }); });
@@ -246,7 +246,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         reg.getDef.returns({ max_response_bytes: 4, consensus_strategy: 'byte_equality' });
         // Control: a live read would now reject this body outright.
         expect(c.maxBodyB64Length('http_get')).to.be.below(BODY.toString('base64').length);
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
         // Accepted under the pinned cap: the live read would have rejected a body
         // byte-identical to the one this hub proposed itself.
@@ -257,7 +257,7 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
     // round reopening clears the mark so its own early messages buffer again.
 describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () { beforeEach(hookAt107990); afterEach(hookAt108336); it('suppresses buffering for a torn-down rid until a fresh round reopens (2640)', async function () {
         c.markTornDown(RID);
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         expect(c.earlyMessages.has(RID)).to.equal(false);  // dropped, not parked
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();

@@ -28,7 +28,7 @@ const logger = getLogger();
 const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
 module.exports = {
-    async _handlePropose(envelope){
+    async handlePropose(envelope){
         let proposal = await this.verifiedProposal(envelope);
         if(!proposal) return;
         let { d, rid, pending, senderPubkey, view, row, canonical } = proposal;
@@ -82,7 +82,7 @@ module.exports = {
         // The proposed row must hash to this round's id.
         let row = d.row;
         if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
-        let canonical = this.engine._canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
+        let canonical = this.engine.canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
 
         // Verify the leader's signature over THEIR canonical.
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
@@ -129,7 +129,7 @@ module.exports = {
         // deadlock every commit-phase node out of the new view, starving
         // failover quorum (H-8). PBFT forbids committing to a different
         // value, not re-voting the same value under a new view.
-        let sameValueNewView = (this.engine._canonicalMatch(pending.row, view) === canonical);
+        let sameValueNewView = (this.engine.canonicalMatch(pending.row, view) === canonical);
         if(pending._commitSent && !sameValueNewView) return null;
         // The MEMBERSHIP travels with the row. snapshot_block is a leader-choice
         // field, and the XCALL rail accepts a leader block within its confirmation
@@ -214,7 +214,7 @@ module.exports = {
         this.checkCommitQuorum(rid);
     },
 
-    _handleCommit(envelope){
+    handleCommit(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
         if(!rid || this.finalized.has(rid)) return;

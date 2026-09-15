@@ -255,7 +255,7 @@ function registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part1() {
       source_action_index: 2
     });
     // No result exists on the target for either call: maybeRelayResult returns false.
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: false
     });
 

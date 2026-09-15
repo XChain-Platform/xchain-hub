@@ -52,7 +52,7 @@ module.exports = {
         // wrapper checkpoint's snapshot_block is hours old). This set decides only
         // WHO drives the round + pays the DOGE; it does NOT gate which signatures
         // count on-chain (that is the snapshot_block signing set resolved below).
-        let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return 'none';
 
@@ -105,7 +105,7 @@ module.exports = {
     // Fail closed on an unresolved BTC tip. flush() passes whatever
     // hub.resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
     // is stale, the indexer lags past MAX_INDEXER_LAG_BLOCKS, or the RPC fails. A null
-    // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch, whose
+    // block makes getActiveOraclePublishPubkeys take its block-UNPINNED branch, whose
     // own contract scopes it to the coarse BUNDLE_DONE / FINALIZED sender pre-filter: it
     // answers from the per-hub, gossip-driven capabilityRegistry, so two hubs would
     // elect over different member lists on a path that spends real DOGE. The follower
@@ -157,7 +157,7 @@ module.exports = {
             // or the size trigger, which is the over-anchoring this mode exists to
             // avoid. Backups are exactly who the wake is for.
             if(failoverOnly && this.isRankZero(order)) return true;
-            if(!this._rankUnlocked(order, me, since)){
+            if(!this.rankUnlocked(order, me, since)){
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
                 // indistinguishable from a broken publisher without this.
@@ -187,7 +187,7 @@ module.exports = {
     // recovery verify the wrapper signatures against, oracle_publish @
     // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
     // the stake-weighted gate needs, so the publisher's local quorum decision
-    // must use this set, not _getActiveOraclePublishPubkeys.
+    // must use this set, not getActiveOraclePublishPubkeys.
     // Hands back the resolver's own promise, so the round awaits the read it awaited inline.
     archiveSigningSet(cp){
         return this.resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
@@ -197,7 +197,7 @@ module.exports = {
     // exactly as the two publisher-attestation rounds already do (runPublisherAttestationRound
     // / runArchiveAttestationRound both abstain on snapCount === 0). The election gate
     // above fails closed on an empty set, but it reads a DIFFERENT resolver at a
-    // DIFFERENT height (_getActiveOraclePublishPubkeys @ electionBlock vs
+    // DIFFERENT height (getActiveOraclePublishPubkeys @ electionBlock vs
     // resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
     // snapCount > 0. Without this the `snapCount <= 1` self-sign path below treats 0
     // as single-node: the leader signs an archive whose declared signing set it is

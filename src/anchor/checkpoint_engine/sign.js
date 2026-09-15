@@ -48,7 +48,7 @@ module.exports = {
         // then refuse the finalized checkpoint under the other. Placed before the tip
         // resolve and the validator resolve, like the persist path, so a cross-network
         // record costs no lookups. A throw is caught by the XCHK_SIGN_REQ .catch in
-        // _handleMessage; an unscoped hub (this.network === '') is warned, not refused.
+        // handleMessage; an unscoped hub (this.network === '') is warned, not refused.
         this.assertCheckpointNetwork(cp, 'co-sign');
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
@@ -80,7 +80,7 @@ module.exports = {
 
         // Independent confirmation from our own indexer/replica.
         let bh = null;
-        try { bh = await this._indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
+        try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
         catch(e){ return; }                                        // can't confirm -> don't sign
         if(!bh) return;
         this.coSignAgainstOwnBlock(cp, canonical, bh, myPubkey);
@@ -141,7 +141,7 @@ module.exports = {
         if(!this.claimSeqSignature(cp, canonical)) return;
 
         this.peerManager.broadcast(XCHK_SIGN, {
-            id: this._roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
+            id: this.roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
         });
     },
 

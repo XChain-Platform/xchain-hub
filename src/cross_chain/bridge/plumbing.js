@@ -68,7 +68,7 @@ module.exports = {
     // Persist the qualifying validator set for (capability, block) and mirror each row, so
     // an off-BTC indexer can verify this record's signatures against a set it holds.
     // Returns the number of rows resolved; 0 is the fail-closed money-path signal.
-    async _persistCapabilitySnapshot(capability, block, network){
+    async persistCapabilitySnapshot(capability, block, network){
         let validators = await this.resolveCapabilityValidators(capability, block, network);
         // A TRUNCATED set is never mirrored: the marker fails this hub's own threshold check
         // closed, but it is a JS array property with no column behind it, so persisting the

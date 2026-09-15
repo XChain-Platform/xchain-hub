@@ -83,7 +83,7 @@ module.exports = {
         // are recorded here the instant broadcaster(payload) succeeds. If the
         // post-broadcast queue rewrite fails (disk full, permissions, transient I/O),
         // the just-published round stays on the durable queue file; without this set
-        // the next _processQueue tick would re-read and RE-BROADCAST it, spending real
+        // the next processQueue tick would re-read and RE-BROADCAST it, spending real
         // DOGE twice for the same round. Consulted before every broadcast so a failed
         // rewrite can never turn into a duplicate on-chain PRICE. Cleared once the
         // durable queue is confirmed rewritten (no published round can still be on it).
@@ -196,7 +196,7 @@ module.exports = {
             this.takeoverAmbiguousCooldownMs = this.failoverWindowBlocks * this.approxBlockMs;
         }
         // windowIndex -> ms timestamp of this hub's OWN ambiguous send for that window
-        // (the dead-letter branch in _processQueue). Insertion-ordered and bounded.
+        // (the dead-letter branch in processQueue). Insertion-ordered and bounded.
         this._ambiguousWindows = new Map();
     },
 

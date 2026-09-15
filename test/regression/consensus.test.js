@@ -58,7 +58,7 @@ function registerSuitePart4() {
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             // (seq 5, view 0) → leader is VALIDATORS_4[1]; a PRE_PREPARE from any
             // other validator must not create a proposal; the identity guard stops

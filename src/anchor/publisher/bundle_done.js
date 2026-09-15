@@ -31,7 +31,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XANC_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
@@ -58,7 +58,7 @@ module.exports = {
         let network = String(d.network || '');
         if(!network) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
-        let pubkeys = await this._getActiveOraclePublishPubkeys(null);
+        let pubkeys = await this.getActiveOraclePublishPubkeys(null);
         // Fail CLOSED on an empty set: d.sig_pubkey is self-asserted and the sig is
         // verified against it, so membership in the oracle_publish set is the ONLY
         // thing tying this announcement to a federation member. An empty set (startup /
@@ -88,14 +88,14 @@ module.exports = {
         // sender to be rank-unlocked on the failover ladder. Rejecting a BUNDLE_DONE only
         // ever risks a redundant re-anchor (benign, the direction the code already
         // tolerates), never a fork, so using the receiver's own BTC-tip view is safe here.
-        let electionSet = await this._getActiveOraclePublishPubkeys(snapshotBlock);
+        let electionSet = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(electionSet.length === 0) return;             // fail closed: unresolved election set
         {
             let order = canonicalForms.hashOrder(
                 this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);
             let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
-            if(!this._rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
+            if(!this.rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
         }
         // The election gate proves the SENDER is an elected publisher, NOT that it ever
         // published this anchor. Confirm the bundle is really on DOGE at >=

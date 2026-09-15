@@ -64,7 +64,7 @@ it('(b) follower declines to PREPARE when minValidators>1 and snapshot is null',
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             // seq 5, view 0: (5+0)%4 = 1 → VALIDATORS_4[1] is the legitimate leader.
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
@@ -140,7 +140,7 @@ it('(b2) follower declines to PREPARE over an EMPTY federation snapshot', async 
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -185,7 +185,7 @@ it('follower still PREPAREs with minValidators>1 when a real snapshot IS present
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,

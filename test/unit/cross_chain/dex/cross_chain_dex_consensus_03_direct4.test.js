@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // In-process PBFT mesh: K CrossChainDexConsensus instances share a mock gossip
-// bus (broadcast fans out to every other instance's _handleMessage), each with a
+// bus (broadcast fans out to every other instance's handleMessage), each with a
 // real ValidatorIdentity. Exercises the full round (PROPOSE/PREPARE/COMMIT),
 // single-node fallback, Byzantine-value tolerance, leader-failover via
 // view-change, and the tamper / NEW_VIEW guards. The same properties validated
@@ -22,7 +22,7 @@ const CrossChainDexConsensus = require('../../../../src/cross_chain/dex_consensu
 const ValidatorIdentity      = require('../../../../src/validators/identity');
 const { waitUntil }          = require('../../../helpers/waitUntil');
 
-// Canonical format byte-identical to the indexer verifier (cross_settle._canonical).
+// Canonical format byte-identical to the indexer verifier (cross_settle.canonical).
 function canonicalMatch(r) {
     return ['XMATCH', r.match_id, String(r.snapshot_block),
         r.a_chain, String(r.a_action_index), r.a_tick || '', String(r.a_amount), String(r.a_ownership), r.a_payout_addr,
@@ -86,8 +86,8 @@ function rootSuiteBuildMesh(n, opts) {
       capSnapshot: null,
       // opts.canonical simulates the EQUIV-header-active engine, whose
       // canonical folds the view (H-8 regression); default ignores view.
-      _canonicalMatch: opts.canonical || canonicalMatch,
-      _persistCapabilitySnapshot: async () => {},
+      canonicalMatch: opts.canonical || canonicalMatch,
+      persistCapabilitySnapshot: async () => {},
       validateProposedMatch: async () => opts.validate ? opts.validate(self) : true
     };
     self.consensus = new CrossChainDexConsensus(engine);
@@ -163,7 +163,7 @@ async function rootSuiteDrivePropose(bus, victim, mid, proposedRow) {
   let leaderPk = rootSuiteLeaderPubkey(bus, mid, 0);
   let leaderNode = bus.nodes.find(nd => nd.pubkey === leaderPk);
   let sig = leaderNode.identity.sign(canonicalMatch(proposedRow));
-  await victim.consensus._handlePropose({
+  await victim.consensus.handlePropose({
     type: 'XDEX_MATCH_PROPOSE',
     sender: leaderPk,
     data: {
@@ -197,7 +197,7 @@ function registerDirect4Part1() {
     });
     for (let nd of bus.nodes) {
       if (nd === victim) continue;
-      victim.consensus._handleMessage({
+      victim.consensus.handleMessage({
         type: 'XDEX_MATCH_COMMIT',
         sender: nd.pubkey,
         data: {
@@ -207,7 +207,7 @@ function registerDirect4Part1() {
           sig: 'de'.repeat(64)
         }
       });
-      victim.consensus._handleMessage({
+      victim.consensus.handleMessage({
         type: 'XDEX_MATCH_COMMIT',
         sender: nd.pubkey,
         data: {
@@ -249,7 +249,7 @@ function registerDirect4Part2() {
     for (let nd of bus.nodes) {
       if (nd === victim) continue;
       let prepareSig = nd.identity.sign(canon); // exactly what a PREPARE carries
-      victim.consensus._handleMessage({
+      victim.consensus.handleMessage({
         type: 'XDEX_MATCH_COMMIT',
         sender: nd.pubkey,
         data: {
@@ -261,7 +261,7 @@ function registerDirect4Part2() {
       });
       // A commit_sig phase-tagged for a DIFFERENT engine (the XCALL relay
       // twin) must not verify against this engine's COMMIT payload either.
-      victim.consensus._handleMessage({
+      victim.consensus.handleMessage({
         type: 'XDEX_MATCH_COMMIT',
         sender: nd.pubkey,
         data: {
@@ -299,7 +299,7 @@ function registerDirect4Part3() {
     let canon = canonicalMatch(row);
     for (let nd of bus.nodes) {
       if (nd === victim) continue;
-      victim.consensus._handleMessage({
+      victim.consensus.handleMessage({
         type: 'XDEX_MATCH_COMMIT',
         sender: nd.pubkey,
         data: {
@@ -338,7 +338,7 @@ function registerDirect4Part4() {
     // NEW_VIEW for the next view from a node that is NOT its designated leader → ignored.
     let nextView = startView + 1;
     let nonLeader = bus.nodes.find(nd => nd.pubkey !== rootSuiteLeaderPubkey(bus, mid, nextView));
-    victim.consensus._handleMessage({
+    victim.consensus.handleMessage({
       type: 'XDEX_MATCH_NEW_VIEW',
       sender: nonLeader.pubkey,
       data: {
@@ -354,7 +354,7 @@ function registerDirect4Part4() {
     victim.consensus.pending.get(mid).view = 3;
     let ldPk = rootSuiteLeaderPubkey(bus, mid, 2);
     let ldNode = bus.nodes.find(nd => nd.pubkey === ldPk);
-    victim.consensus._handleMessage({
+    victim.consensus.handleMessage({
       type: 'XDEX_MATCH_NEW_VIEW',
       sender: ldPk,
       data: {

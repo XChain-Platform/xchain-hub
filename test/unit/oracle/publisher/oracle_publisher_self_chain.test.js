@@ -263,7 +263,7 @@ function registerThroughAPublishPassSuite2Part1() {
     throughAPublishPassSuite2Seed({
       queuePath
     }, [101, 102, 103]);
-    await p._processQueue();
+    await p.processQueue();
     expect(state.builds, 'three wires attempted').to.have.length(3);
     expect(p.publishedCount, 'all three published').to.equal(3);
     expect(state.builds[0].unconfirmed, 'the first wire needs no exception').to.equal(false);
@@ -290,7 +290,7 @@ function registerThroughAPublishPassSuite2Part2() {
     throughAPublishPassSuite2Seed({
       queuePath
     }, [201]);
-    await p._processQueue();
+    await p.processQueue();
     expect(p._passSelfChange.size, 'the pass tracked its own send').to.equal(1);
     expect(p._passChainDepth).to.equal(1);
 
@@ -299,7 +299,7 @@ function registerThroughAPublishPassSuite2Part2() {
     throughAPublishPassSuite2Seed({
       queuePath
     }, [202]);
-    await p._processQueue();
+    await p.processQueue();
     expect(p._passChainDepth, 'depth restarted with the pass').to.equal(1);
     expect(state.builds[1].unconfirmed, 'a fresh pass claims no exception').to.equal(false);
   });

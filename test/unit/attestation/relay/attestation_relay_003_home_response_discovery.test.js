@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -161,7 +161,7 @@ const hookAt6849 = function () {
 // ── 3b. Response-leg discovery ─────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('relays a confirmed terminal response back to its origin chain', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             const rows = proposedRows(relay, 'response');
             expect(rows).to.have.length(1);
             expect(rows[0]).to.include({
@@ -187,7 +187,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('relays a terminal expired outcome, which closes the origin request early', async function () {
             const relay = makeRelay({}, [originRow()],
                 [homeRelayedRow({ response_status: 'expired', request_status: 'errored' })]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')[0].status).to.equal('expired');
         }); }); });
 
@@ -197,7 +197,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 [homeRelayedRow({ request_status: 'pending', response_action_index: null,
                                   response_block_index: null, response_hash: null,
                                   response_payload: null, response_status: null, meta: null })]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
@@ -206,20 +206,20 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // The origin flips out of 'pending' exactly when a v4 lands, so this is
             // also how a PEER's broadcast retires our own work.
             const relay = makeRelay({}, [], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
 // ── 3b. Response-leg discovery ─────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('relays nothing when the origin pending view could not be refreshed', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
-            relay._indexerCall = sinon.stub().callsFake(async (coin, method) => {
+            relay.indexerCall = sinon.stub().callsFake(async (coin, method) => {
                 if (coin === 'BTC' && method === 'getrelayedattestation_requests')
                     return { latest_block_index: 1000, requests: [homeRelayedRow()] };
                 if (coin === 'BTC') return { latest_block_index: 1000, requests: [] };
                 throw new Error('connect ECONNREFUSED');
             });
-            await relay._poll();
+            await relay.poll();
             // A view we could not read is not evidence the origin is still waiting.
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
@@ -228,7 +228,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('holds a response that has not reached the BTC confirmation depth', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow({ response_block_index: 1000 })]);
             expect(relay.confirmations.BTC).to.be.greaterThan(1);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
@@ -238,14 +238,14 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // non-UTF-8 attested body cannot cross chains: base64 of the stored text
             // would deliver a MANGLED payload under a quorum signature.
             const relay = makeRelay({}, [originRow()], [homeRelayedRow({ response_hash: 'f'.repeat(64) })]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
 // ── 3b. Response-leg discovery ─────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('refuses a meta containing a pipe, which the positional wire cannot carry', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow({ meta: '200|spoofed' })]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
@@ -254,7 +254,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             const relay = makeRelay(
                 { network: 'mainnet', resolveBtcLatestBlock: sinon.stub().resolves(962999) },
                 [originRow()], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
         }); }); });
 
@@ -262,7 +262,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('relays nothing for an origin chain it has no indexer for', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
             relay.indexers.LTC.url = '';
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
@@ -272,7 +272,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // origin. A disagreement would produce a canonical the origin cannot
             // reproduce, so every peer refuses and the round wedges silently.
             const relay = makeRelay({}, [originRow({ provider_id: 'llm' })], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 
@@ -280,7 +280,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('home response discovery', function () { it('does not re-propose a response it has already relayed', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
             relay._publishedResponses.mark(REQ_ID);
-            await relay._poll();
+            await relay.poll();
             expect(proposedRows(relay, 'response')).to.have.length(0);
         }); }); });
 }

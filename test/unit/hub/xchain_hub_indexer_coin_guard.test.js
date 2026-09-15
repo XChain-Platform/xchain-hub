@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// _resolveBtcIndexerUrl must not hand back an indexer that serves a
+// resolveBtcIndexerUrl must not hand back an indexer that serves a
 // different coin. Capability staking is BTC-only, so every consumer of this URL
 // reads BTC-anchored state; on a DOGE-only venue the configs-table fallback
 // resolved the DOGE indexer and the hub elected publishers off a set that did
@@ -69,7 +69,7 @@ function registerIndexerCoinIdentityTests() {
     it('returns the URL when the indexer confirms it serves BTC', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
         axiosStub.post.resolves(coinReply('BTC'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
+        expect(await hub.resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
         expect(errorLog.called).to.equal(false);
     });
 
@@ -81,7 +81,7 @@ function registerIndexerCoinIdentityTests() {
             bitcoin:  { regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3524 } } }
         });
         axiosStub.post.resolves(coinReply('DOGE'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal(null);
+        expect(await hub.resolveBtcIndexerUrl()).to.equal(null);
         expect(errorLog.calledOnce).to.equal(true);
         let msg = String(errorLog.firstCall.args.join(' '));
         expect(msg).to.contain('DOGE');
@@ -91,20 +91,20 @@ function registerIndexerCoinIdentityTests() {
     it('an explicit env override is verified too (a wrong URL is still wrong)', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3524';
         axiosStub.post.resolves(coinReply('LTC'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal(null);
+        expect(await hub.resolveBtcIndexerUrl()).to.equal(null);
     });
 
     it('an unreachable indexer is unverifiable, not a mismatch', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
         axiosStub.post.rejects(new Error('ECONNREFUSED'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
+        expect(await hub.resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
         expect(errorLog.called).to.equal(false);
     });
 
     it('an indexer that reports no coin (not ready, or auth-gated) is not blocked', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
         axiosStub.post.resolves({ data: { result: { error: 'indexer database not ready' } } });
-        expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
+        expect(await hub.resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
     });
 }
 
@@ -113,19 +113,19 @@ function registerIndexerCoinCacheTests() {
     it('caches the confirmation so the probe costs one round trip, not one per call', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
         axiosStub.post.resolves(coinReply('btc'));                 // case-insensitive
-        await hub._resolveBtcIndexerUrl();
-        await hub._resolveBtcIndexerUrl();
-        await hub._resolveBtcIndexerUrl();
+        await hub.resolveBtcIndexerUrl();
+        await hub.resolveBtcIndexerUrl();
+        await hub.resolveBtcIndexerUrl();
         expect(axiosStub.post.callCount).to.equal(1);
     });
 
     it('re-probes a different URL rather than reusing the previous verdict', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
         axiosStub.post.resolves(coinReply('BTC'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
+        expect(await hub.resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3524';
         axiosStub.post.resolves(coinReply('DOGE'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal(null);
+        expect(await hub.resolveBtcIndexerUrl()).to.equal(null);
         expect(axiosStub.post.callCount).to.equal(2);
     });
 
@@ -133,12 +133,12 @@ function registerIndexerCoinCacheTests() {
         process.env.INDEXER_COIN_CHECK = '0';
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3524';
         axiosStub.post.resolves(coinReply('DOGE'));
-        expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3524');
+        expect(await hub.resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3524');
         expect(axiosStub.post.called).to.equal(false);
     });
 
     it('no configured URL still resolves to null without probing', async function () {
-        expect(await hub._resolveBtcIndexerUrl()).to.equal(null);
+        expect(await hub.resolveBtcIndexerUrl()).to.equal(null);
         expect(axiosStub.post.called).to.equal(false);
     });
 

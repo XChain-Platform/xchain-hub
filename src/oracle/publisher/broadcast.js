@@ -108,7 +108,7 @@ module.exports = {
             // Default: sum the configured address's UTXOs into a DOGE balance.
             // get_utxos reports each output in satoshis (`value`), and every
             // consumer of this figure is whole-DOGE (lowBalanceThreshold, the
-            // fail-closed gate in _processQueue, spendGuard.minBalance, the
+            // fail-closed gate in processQueue, spendGuard.minBalance, the
             // monitor's dogeBalance alert), so the conversion is not optional.
             // Units and the fallback order: lib/utxo_balance.js.
             try {

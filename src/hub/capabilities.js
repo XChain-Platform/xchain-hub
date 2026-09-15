@@ -64,7 +64,7 @@ async function armOwnCapabilityChecks(hub, configFilePath) {
     // qualification tracks STAKE/UNSTAKE without manual intervention. URL from env
     // first, then the hub's own configs table (populated by xchain-node); no timer is
     // attached when no URL resolves.
-    let initialUrl = await hub._resolveBtcIndexerUrl();
+    let initialUrl = await hub.resolveBtcIndexerUrl();
     if(initialUrl){
         hub.pollOwnStake(pubkey).catch(e => {
             logger.error(nodeUtil.format('Initial stake poll failed:', e));
@@ -209,7 +209,7 @@ class Capabilities {
     // Query the BTC indexer for own active stake plus latest block, then feed both into
     // refreshOwnQualification. Best-effort: failures are logged and change no state.
     async pollOwnStakePass(pubkey){
-        let url = await this._resolveBtcIndexerUrl();
+        let url = await this.resolveBtcIndexerUrl();
         if(!url) return;
         let body = {
             jsonrpc: '2.0',

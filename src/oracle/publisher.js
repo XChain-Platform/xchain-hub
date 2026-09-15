@@ -123,7 +123,7 @@ const PARTS = [optionsPart, batchOptionsPart, broadcastPart, landingPart, lifecy
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
 // rejected by createTx with a RangeError, so we drop it before it lands on the durable
 // queue rather than letting the queue retry sweep replay it forever. (Named for
-// what _processQueue does: this class has no failover sweep, see the header.)
+// what processQueue does: this class has no failover sweep, see the header.)
 const PRICE_WIRE_MAX_BYTES = 8189;
 
 class OraclePublisher {
@@ -158,7 +158,7 @@ class OraclePublisher {
         this.walletSignFn = null;
         this.getBalanceFn = null;
 
-        // Publish-pass self-overlap guard, see _processQueue(). Named for the sibling
+        // Publish-pass self-overlap guard, see processQueue(). Named for the sibling
         // publishers' house convention (AttestationPublisher._sweeping,
         // AttestationSpotChecker.schedulerTick).
         this._sweeping = false;

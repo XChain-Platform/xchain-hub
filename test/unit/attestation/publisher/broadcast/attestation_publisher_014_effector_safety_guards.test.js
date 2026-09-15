@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -181,7 +181,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called, 'an unknown-on-chain-state request must await operator replay').to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(0);
     }); });
@@ -195,7 +195,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called, 'must not spend when the request cannot be proven unpublished').to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(1);
     }); });
@@ -252,7 +252,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         pub2.setBroadcastHook(bcast2);
         sinon.stub(pub2, 'fetchPendingRequestIds').resolves(new Set([blocked]));
         writeQueue(pub2.queuePath, readQueue(pub2.queuePath).map(e => Object.assign({}, e, { ts: Date.now() - 60 * 60000 })));
-        await pub2._processQueue();
+        await pub2.processQueue();
         expect(bcast2.called, 'the deferred response must publish in the later window').to.equal(true);
     }); });
 

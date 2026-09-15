@@ -87,7 +87,7 @@ module.exports = {
             // that branch chose so the loop top never double-sleeps it with the flat delay.
             let attempt = 0, delayMs = 0, rateLimitWaits = 0;
             while(attempt < attempts){
-                if(delayMs > 0) await this._sleep(delayMs);
+                if(delayMs > 0) await this.sleep(delayMs);
                 delayMs = this.chunkRetryDelayMs;
                 if(existsCheck){
                     let found;
@@ -262,7 +262,7 @@ module.exports = {
 
     // Sleep indirection so the retry paths above are testable without real waits
     // (the test tree's blind-sleep gate rejects fixed waits in tests).
-    async _sleep(ms){
+    async sleep(ms){
         return new Promise(r => setTimeout(r, ms));
     },
 

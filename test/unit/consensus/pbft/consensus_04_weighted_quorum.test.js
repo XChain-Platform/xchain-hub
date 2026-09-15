@@ -104,13 +104,13 @@ describe('guard branches', function () {
     installSuiteHooks7();
 it('applies a follower proposal (no resolve handler) on commit quorum', async function () {
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             consensus.pendingProposals.set(5, {
                 config, digest, prepares: new Set(),
                 commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => !consensus.pendingProposals.has(5), { label: 'the follower apply to clear round 5' });
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(consensus.pendingProposals.has(5)).to.be.false; // applied and cleared
@@ -123,13 +123,13 @@ it('follower apply error (no reject handler): swallows, keeps proposal pending f
             // the seq unapplied with no recovery path.
             hub.applyConfig.rejects(new Error('db down'));
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             consensus.pendingProposals.set(5, {
                 config, digest, prepares: new Set(),
                 commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             // The catch handler clears the in-flight guard, so `_applying === false`
             // is the failed apply having actually been handled: poll that, then assert
             // the proposal survived it. (A poll on `applyConfig.called` would pass

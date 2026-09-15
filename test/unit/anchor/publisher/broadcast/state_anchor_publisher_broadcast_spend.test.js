@@ -152,7 +152,7 @@ function registerSplitSuitePart3() {
       };
     };
     // The operator halt lands while the retry is sleeping.
-    pub._sleep = async () => {
+    pub.sleep = async () => {
       pub.spendGuard.pause('operator halt');
     };
     let err = null;

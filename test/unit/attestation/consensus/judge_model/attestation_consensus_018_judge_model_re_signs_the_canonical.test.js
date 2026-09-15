@@ -158,9 +158,9 @@ describe('AttestationConsensus: judge_model re-signs the canonical winner', func
 
         // Peers propose their own divergent bodies → 3 proposals → judge_model
         // agree() selects p1's body as canonical.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, P2BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, P2BODY));
         await flush();
 
         let pending = c.pending.get(RID);
@@ -173,10 +173,10 @@ describe('AttestationConsensus: judge_model re-signs the canonical winner', func
         expect(ValidatorIdentity.verify(myCanonical, pending.signatures.get(pub(me)), pub(me))).to.equal(true);
 
         // Peers re-sign the winner too and contribute it on PREPARE/COMMIT.
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, WINNER));
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, WINNER));
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, WINNER));
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, WINNER));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, WINNER));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, WINNER));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, WINNER));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, WINNER));
         await flush();
 
         // Three genuine signatures over the single canonical body → finalizes,

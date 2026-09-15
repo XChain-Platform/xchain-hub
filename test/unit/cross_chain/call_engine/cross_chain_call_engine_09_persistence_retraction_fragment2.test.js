@@ -295,7 +295,7 @@ function registerFeature5persistenceRetractionFragment2Part1() {
     engine._inflight.add(row.round_id);
     // A degraded validator set (indexer RPC error / 401-403) writes no rows,
     // throws nothing, and warns nothing; only the count exposes it.
-    sinon.stub(engine, '_persistCapabilitySnapshot').resolves(0);
+    sinon.stub(engine, 'persistCapabilitySnapshot').resolves(0);
     await engine.writeFinalizedRow({
       row,
       signatures: [{
@@ -328,7 +328,7 @@ function registerFeature5persistenceRetractionFragment2Part2() {
     const row = feature5persistenceRetractionFragment2FinalizeRow();
     const forget = engine.consensus.forgetFinalized;
     engine._inflight.add(row.round_id);
-    sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(engine, 'persistCapabilitySnapshot').resolves(3);
     const real = engine.db.doQuery.bind(engine.db);
     sinon.stub(engine.db, 'doQuery').callsFake(async (sql, params) => {
       if (String(sql).startsWith('INSERT INTO cross_chain_calls')) throw new Error('deadlock');
@@ -362,7 +362,7 @@ function registerFeature5persistenceRetractionFragment2Part3() {
     broadcaster.dropAllForResync = sinon.stub();
     const row = feature5persistenceRetractionFragment2FinalizeRow();
     engine._inflight.add(row.round_id);
-    sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+    sinon.stub(engine, 'persistCapabilitySnapshot').resolves(3);
     const real = engine.db.doQuery.bind(engine.db);
     sinon.stub(engine.db, 'doQuery').callsFake(async (sql, params) => {
       if (String(sql).startsWith('SELECT * FROM cross_chain_calls')) throw new Error('connection lost');

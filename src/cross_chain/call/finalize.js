@@ -130,7 +130,7 @@ module.exports = {
         // kept in lockstep by design; this is the error path that had drifted.
         let persistedRows = 0;
         try {
-            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+            persistedRows = await this.persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
             logger.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
@@ -265,7 +265,7 @@ module.exports = {
         if(!rows.length) return;
         await this.db.updateCrossChainCallsRetractedInRange(chain, bounds);
         for(let r of rows){
-            let rid = this._roundId(r.phase, String(r.call_id));
+            let rid = this.roundId(r.phase, String(r.call_id));
             this._inflight.delete(rid);
             // Clear the consensus finalized-ring entry too (M-13): without this the
             // round can never re-run, so a call re-confirmed after this reorg stays

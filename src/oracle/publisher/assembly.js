@@ -91,7 +91,7 @@ module.exports = {
     // when this hub is the one to publish, and null on every other outcome: an
     // unresolved set, a hub outside it, or a follower (which arms its takeover here).
     async electWindowPublisher(windowIndex, first, last, anchor, takeover) {
-        let pubkeys = await this._getActiveOraclePublishPubkeys(anchor);
+        let pubkeys = await this.getActiveOraclePublishPubkeys(anchor);
         if (pubkeys.length === 0) return null;   // fail closed, already logged by the resolver
         let me     = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         let myRank = me ? pubkeys.indexOf(me) : -1;
@@ -173,7 +173,7 @@ module.exports = {
 
         for (let i = 0; i < wires.length; i++) {
             await this._enqueue({
-                // Identity field stays the FIRST round, so _processQueue's Sets and the
+                // Identity field stays the FIRST round, so processQueue's Sets and the
                 // retention sweep's queue-floor clamp keep working on a scalar (D10).
                 round: wires[i].firstRound,
                 batch: {
@@ -191,7 +191,7 @@ module.exports = {
             });
         }
 
-        await this._processQueue();
+        await this.processQueue();
         await this.pruneObservedWindow(first, last);
     },
 

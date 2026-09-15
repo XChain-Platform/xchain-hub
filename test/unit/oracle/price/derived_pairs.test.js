@@ -129,7 +129,7 @@ function registerProposeGateTests() {
             gateHub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
             oc = new OracleConsensus(gateHub, oracleRound);
             oc.setValidatorSet(VALIDATORS_3);
-            leader = oc._getLeader(ROUND);
+            leader = oc.getLeader(ROUND);
             pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: pm.validatorAddr, prices: [
@@ -141,7 +141,7 @@ function registerProposeGateTests() {
 
         function propose(prices) {
             return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
-                round: ROUND, prices, digest: oc._digest(ROUND, prices),
+                round: ROUND, prices, digest: oc.digest(ROUND, prices),
                 btcBlockHeight: 100, btcBlockTime: 1700000000
             } };
         }
@@ -150,7 +150,7 @@ function registerProposeGateTests() {
             build(new Set([...PriceFetcher.getCoinPairs(), ...DERIVED_PAIRS]));
             const rejects = [];
             oc.on('oracle:propose-rejected', e => rejects.push(e));
-            await oc._handlePropose(propose([
+            await oc.handlePropose(propose([
                 { coinPair: 'BTC/USD',    price: '100000' },
                 { coinPair: 'XCHAIN/USD', price: '2.00000000' },
             ]));
@@ -159,14 +159,14 @@ function registerProposeGateTests() {
 
         it('an un-upgraded hub rejects the SAME proposal, taking BTC/USD down with it', async function () {
             // This is the deploy-ordering constraint made concrete. The whitelist is the
-            // only difference between the two cases, and _handlePropose returns on the
+            // only difference between the two cases, and handlePropose returns on the
             // first rejection, so the whole round is withheld - BTC/USD included - not
             // just the pair the hub does not recognize. Widen every hub BEFORE any
             // leader proposes the pair.
             build(new Set(PriceFetcher.getCoinPairs()));
             const rejects = [];
             oc.on('oracle:propose-rejected', e => rejects.push(e));
-            await oc._handlePropose(propose([
+            await oc.handlePropose(propose([
                 { coinPair: 'BTC/USD',    price: '100000' },
                 { coinPair: 'XCHAIN/USD', price: '2.00000000' },
             ]));

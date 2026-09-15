@@ -51,7 +51,7 @@ function registerGetLeaderTestCases1() {
                     let validators = gen.fc_validatorSet(N);
                     consensus.setValidatorSet(validators);
                     consensus.view = 0;
-                    let leader = consensus._getLeader(seq);
+                    let leader = consensus.getLeader(seq);
                     expect(validators).to.deep.include(leader);
                 }
             ), { numRuns: 200 });
@@ -66,7 +66,7 @@ function registerGetLeaderTestCases1() {
                     let validators = gen.fc_validatorSet(N);
                     consensus.setValidatorSet(validators);
                     consensus.view = view;
-                    expect(consensus._getLeader(seq)).to.deep.equal(consensus._getLeader(seq));
+                    expect(consensus.getLeader(seq)).to.deep.equal(consensus.getLeader(seq));
                 }
             ), { numRuns: 200 });
         });
@@ -74,7 +74,7 @@ function registerGetLeaderTestCases1() {
         it('returns undefined for empty validator set (no crash)', function () {
             fc.assert(fc.property(fc.integer({ min: 0, max: 100000 }), function (seq) {
                 consensus.setValidatorSet([]);
-                let leader = consensus._getLeader(seq);
+                let leader = consensus.getLeader(seq);
                 // Empty set: arr[seq % 0] = arr[NaN] = undefined
                 expect(leader === undefined || leader === null).to.be.true;
             }), { numRuns: 50 });
@@ -92,9 +92,9 @@ function registerGetLeaderTestCases2() {
                     consensus.setValidatorSet(validators);
 
                     consensus.view = 0;
-                    let leader1 = consensus._getLeader(seq);
+                    let leader1 = consensus.getLeader(seq);
                     consensus.view = 1;
-                    let leader2 = consensus._getLeader(seq);
+                    let leader2 = consensus.getLeader(seq);
 
                     // With N >= 2 validators, view change should rotate leader
                     // (unless seq + view wraps to same index, which is N-periodic)
@@ -110,10 +110,10 @@ function registerGetLeaderTestCases2() {
 function registerGetLeaderTests() {
 
     // -----------------------------------------------------------------
-    // _getLeader()
+    // getLeader()
     // -----------------------------------------------------------------
 
-    describe('_getLeader()', function () {
+    describe('getLeader()', function () {
         registerGetLeaderTestCases1();
         registerGetLeaderTestCases2();
     });
@@ -161,21 +161,21 @@ function registerGetQuorumTests() {
 function registerDigestTests() {
 
     // -----------------------------------------------------------------
-    // _digest()
+    // digest()
     // -----------------------------------------------------------------
 
-    describe('_digest()', function () {
+    describe('digest()', function () {
 
         it('always returns a 64-char hex string', function () {
             fc.assert(fc.property(gen.fc_configObject(), function (config) {
-                let d = consensus._digest(config);
+                let d = consensus.digest(config);
                 expect(d).to.match(/^[0-9a-f]{64}$/);
             }), { numRuns: 200 });
         });
 
         it('is deterministic (same input always produces same output)', function () {
             fc.assert(fc.property(gen.fc_configObject(), function (config) {
-                expect(consensus._digest(config)).to.equal(consensus._digest(config));
+                expect(consensus.digest(config)).to.equal(consensus.digest(config));
             }), { numRuns: 200 });
         });
 
@@ -186,7 +186,7 @@ function registerDigestTests() {
                 function (key, value) {
                     let config1 = { [key]: value };
                     let config2 = { [key]: value + 'x' };
-                    expect(consensus._digest(config1)).to.not.equal(consensus._digest(config2));
+                    expect(consensus.digest(config1)).to.not.equal(consensus.digest(config2));
                 }
             ), { numRuns: 200 });
         });

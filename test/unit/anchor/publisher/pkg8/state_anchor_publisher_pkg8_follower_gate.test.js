@@ -113,7 +113,7 @@ function registerSplitSuitePart1() {
       capabilitySnapshot: snapshotHub(calls)
     });
     expect(swq.isStakeWeightedQuorumActive(100, 'regtest'), 'regtest activates at 0').to.equal(true);
-    let set = await pub._getActiveOraclePublishPubkeys(100);
+    let set = await pub.getActiveOraclePublishPubkeys(100);
     expect(calls.map(c => c[0])).to.deep.equal(['weight']);
     expect(set, 'deduped to distinct pubkeys, sorted').to.deep.equal(['bb'.repeat(33), 'cc'.repeat(33)]);
   });
@@ -126,7 +126,7 @@ function registerSplitSuitePart1() {
       capabilitySnapshot: snapshotHub(calls)
     });
     expect(swq.isStakeWeightedQuorumActive(100, 'mainnet'), 'mainnet is unarmed at block 100').to.equal(false);
-    let set = await pub._getActiveOraclePublishPubkeys(100);
+    let set = await pub.getActiveOraclePublishPubkeys(100);
     expect(calls.map(c => c[0])).to.deep.equal(['count']);
     expect(set).to.deep.equal(['aa'.repeat(33)]);
   });
@@ -138,7 +138,7 @@ function registerSplitSuitePart1() {
       network: '',
       capabilitySnapshot: snapshotHub(calls)
     });
-    let set = await pub._getActiveOraclePublishPubkeys(100);
+    let set = await pub.getActiveOraclePublishPubkeys(100);
     expect(calls.map(c => c[0])).to.deep.equal(['count']);
     expect(set).to.deep.equal(['aa'.repeat(33)]);
   });
@@ -158,7 +158,7 @@ function registerSplitSuitePart2() {
         }
       }
     });
-    expect(await pub._getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
+    expect(await pub.getActiveOraclePublishPubkeys(100)).to.deep.equal([]);
   });
   it('the UNPINNED (blockIndex null) membership pre-filter is untouched by the flag-day', async () => {
     let calls = [];
@@ -173,7 +173,7 @@ function registerSplitSuitePart2() {
         }
       }
     });
-    let set = await pub._getActiveOraclePublishPubkeys(null);
+    let set = await pub.getActiveOraclePublishPubkeys(null);
     expect(calls, 'no pinned snapshot read at all').to.deep.equal([]);
     expect(set).to.deep.equal(['dd'.repeat(33)]);
   });

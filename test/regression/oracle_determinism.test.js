@@ -130,11 +130,11 @@ function registerSuitePart4() {
 // re-derived from LOCAL aggregation matches the leader's.
 function registerSuitePart5() {
     it('round digest is invariant to arrival order and to array order @regression-p0', function () {
-        const dFwd = oc._digest(42, oc.aggregateAll(submissions(ENTRIES, FWD)));
-        const dRev = oc._digest(42, oc.aggregateAll(submissions(ENTRIES, REV)));
+        const dFwd = oc.digest(42, oc.aggregateAll(submissions(ENTRIES, FWD)));
+        const dRev = oc.digest(42, oc.aggregateAll(submissions(ENTRIES, REV)));
         assert.strictEqual(dFwd, dRev, 'digest diverged with arrival order');
         const agg = oc.aggregateAll(submissions(ENTRIES, FWD));
-        assert.strictEqual(dFwd, oc._digest(42, agg.slice().reverse()), 'digest diverged with array order');
+        assert.strictEqual(dFwd, oc.digest(42, agg.slice().reverse()), 'digest diverged with array order');
     });
 }
 

@@ -197,7 +197,7 @@ function makeHub(overrides){
         },
         providerRegistry:     { getMinStake: () => '1000' },
         btcIndexerHeaders:   () => ({}),
-        _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
+        resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;
     return hub;
@@ -252,7 +252,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
             expect(hub.db.table).to.have.length(1);
             expect(hub.db.table[0].request_id).to.equal(RID);
@@ -272,7 +272,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             sinon.stub(mirror, '_nowSeconds').returns(1780000000);
 
             // The wire claims a different position; the local request row wins.
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({ requestAction: REQUEST_ACTION }) });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload({ requestAction: REQUEST_ACTION }) });
 
             let stored = hub.db.table[0];
             expect(Number(stored.finalized_at)).to.equal(1780000000);
@@ -287,7 +287,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({
+            await mirror.handleResult({
                 type: ATTEST_RESULT,
                 data: gossipPayload({ signWith: responsibleSplit().responsible })
             });
@@ -306,7 +306,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({
+            await mirror.handleResult({
                 type: ATTEST_RESULT,
                 data: gossipPayload({ signWith: responsibleSplit().outsiders })
             });
@@ -326,7 +326,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             // the signed effective_time, which is exactly the field the applying block
             // is a pure function of.
             let payload = gossipPayload({ signCanonical: canonicalFor({ effectiveTime: EFFECTIVE_TIME + 1 }) });
-            await mirror._handleResult({ type: ATTEST_RESULT, data: payload });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: payload });
 
             expect(hub.db.table).to.have.length(0);
             expect(hub.db.inserts()).to.have.length(0);
@@ -345,7 +345,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             stubRequestLookup([localRequest()]);
             await mirror.start();
 
-            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
 
             expect(hub.db.table).to.have.length(0);
         }); }); });
@@ -359,7 +359,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
 
             let payload = gossipPayload();
             payload.response_payload = 'a different body';
-            await mirror._handleResult({ type: ATTEST_RESULT, data: payload });
+            await mirror.handleResult({ type: ATTEST_RESULT, data: payload });
 
             expect(hub.db.table).to.have.length(0);
         }); }); });

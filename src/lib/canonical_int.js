@@ -15,7 +15,7 @@
  * XChain Hub - canonical integer spelling guard
  *
  * Every hub consensus engine signs its row's integer fields VERBATIM
- * (`String(r.field)` inside _canonicalMatch) but re-checks them NUMERICALLY
+ * (`String(r.field)` inside canonicalMatch) but re-checks them NUMERICALLY
  * (`Number(a) === Number(b)`), and every downstream verifier rebuilds the
  * canonical from a NORMALIZED integer: the XCALL/XMATCH mirrors round-trip
  * through BIGINT columns, and the ATTEST relay legs are re-parsed with

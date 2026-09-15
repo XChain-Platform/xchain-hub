@@ -137,7 +137,7 @@ function registerFallbackProposerElection2Tests3() {
             pm.validatorAddr = VALIDATORS_4[1].addr;
 
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
 
             // Local view {v3, v4}: lowest is v3, so a PROPOSE from v3 is a
             // legitimate fallback by our own observation.
@@ -146,7 +146,7 @@ function registerFallbackProposerElection2Tests3() {
                 { sender: VALIDATORS_4[3].addr, prices }
             ]));
 
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: {
@@ -180,14 +180,14 @@ function registerFallbackProposerElection2Tests4() {
 
             // Round 4 leader is v1 (absent), so the fallback branch is reachable.
             let prices = [{ coinPair: 'BTC/USD', price: '666666.00000000' }]; // attacker's fabricated price
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
 
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_4[1].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] },
                 { sender: VALIDATORS_4[3].addr, prices: [{ coinPair: 'BTC/USD', price: '100002' }] }
             ]));
 
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[3].addr,
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: {
@@ -210,7 +210,7 @@ function registerFallbackProposerElection2Tests5() {
             pm.validatorAddr = VALIDATORS_4[1].addr;
 
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
 
             // Local view {v3, v4}: lowest is v3, so v4 is not a legitimate fallback.
             oracleRound.getSubmissions.returns(buildSubmissions([
@@ -218,7 +218,7 @@ function registerFallbackProposerElection2Tests5() {
                 { sender: VALIDATORS_4[3].addr, prices }
             ]));
 
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[3].addr,
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: {
@@ -240,14 +240,14 @@ function registerFallbackProposerElection2Tests5() {
             pm.validatorAddr = VALIDATORS_4[1].addr;
 
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(4, prices);
+            let digest = oc.digest(4, prices);
 
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_4[1].addr, prices },
                 { sender: VALIDATORS_4[3].addr, prices }
             ]));
 
-            await oc._handlePropose({
+            await oc.handlePropose({
                 sender: VALIDATORS_4[3].addr,
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { round: 4, prices, digest }

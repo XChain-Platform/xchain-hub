@@ -16,7 +16,7 @@
 // whose duration nothing here bounds, so a slow dependency lets the next interval
 // fire on top of the previous pass. Each pass then re-reads shared state the
 // in-flight pass has not written yet, and both act on it. The reference fix is
-// FullNodeChallengeRound._tick (its own tests live in FullNodeChallengeRound.test.js).
+// FullNodeChallengeRound.tick (its own tests live in FullNodeChallengeRound.test.js).
 //
 // Every test below DRIVES the overlap (parks the first pass on a gate, fires the
 // second) and asserts the work that would have been duplicated did not happen. The
@@ -195,7 +195,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
     });
 });
 
-// ── AttestationPublisher._processQueue ──────────────────────────────────────
+// ── AttestationPublisher.processQueue ──────────────────────────────────────
 
 {
 
@@ -213,7 +213,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
             p2pConfig: {},
             attestationConsensus: null,
             capabilitySnapshot: { getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }] }) },
-            _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+            resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
             btcIndexerHeaders: () => ({})
         };
         const pub = new AttestationPublisher(hub);
@@ -250,9 +250,9 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
             return new Set([RID.toLowerCase()]);
         });
 
-        const a = pub._processQueue();
+        const a = pub.processQueue();
         await flush();
-        await pub._processQueue();          // fires while a is parked on the gate
+        await pub.processQueue();          // fires while a is parked on the gate
         expect(bcast.callCount, 'the guarded sweep spent no BTC fee').to.equal(0);
 
         release();
@@ -268,11 +268,11 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
         writeQueue([leaderEntry()]);
 
         const fetchStub = sinon.stub(pub, 'fetchPendingRequestIds').rejects(new Error('indexer exploded'));
-        await pub._processQueue().catch(() => {});     // start()'s wrapper swallows this
+        await pub.processQueue().catch(() => {});     // start()'s wrapper swallows this
         expect(pub._sweeping, 'a rejected sweep must not wedge the failover poll').to.equal(false);
 
         fetchStub.resolves(new Set([RID.toLowerCase()]));
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.callCount, 'the next sweep replays normally').to.equal(1);
     }
 
@@ -288,7 +288,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
         it('a rejected pending-set fetch does not wedge the sweep', aRejectedPendingSetFetchDoesTest6);
     }
 
-    describe('AttestationPublisher._processQueue overlap guard', attestationpublisherProcessqueueOverlapGuardSuite4);
+    describe('AttestationPublisher.processQueue overlap guard', attestationpublisherProcessqueueOverlapGuardSuite4);
 
 }
 

@@ -31,7 +31,7 @@ const logger = getLogger();
 module.exports = {
 
     async handleAlert(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
+        if (!this.isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_alert', sender: envelope.sender, envelope });
             return;
         }
@@ -77,7 +77,7 @@ module.exports = {
     initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs) {
         if (this.pendingReorgs.has(reorgId)) return;
 
-        let digest = this._digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
+        let digest = this.digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
 
         let pending = {
             reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
@@ -134,7 +134,7 @@ module.exports = {
     },
 
     async handlePrepare(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
+        if (!this.isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_prepare', sender: envelope.sender, envelope });
             return;
         }
@@ -159,7 +159,7 @@ module.exports = {
         // The digest is fully derivable from the PREPARE's own fields, so never
         // trust the wire value: a mismatch is either corruption or an attempt to
         // fragment the round with per-follower digests.
-        if (digest !== this._digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash)) return;
+        if (digest !== this.digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash)) return;
 
         if (!this.pendingReorgs.has(reorgId)) {
             if (this.processed.has(reorgId)) return;
@@ -233,8 +233,8 @@ module.exports = {
         this.pendingReorgs.set(reorgId, pending);
     },
 
-    _handleCommit(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
+    handleCommit(envelope) {
+        if (!this.isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_commit', sender: envelope.sender, envelope });
             return;
         }

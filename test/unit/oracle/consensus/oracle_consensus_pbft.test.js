@@ -96,7 +96,7 @@ function registerPbftMessageFlow2Tests1() {
 
         it('PREPARE from peer is recorded', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(1, prices);
+            let digest = oc.digest(1, prices);
 
             oc.pendingRounds.set(1, {
                 prices, digest, prepares: new Set(), commits: new Set(),
@@ -114,7 +114,7 @@ function registerPbftMessageFlow2Tests1() {
 
         it('PREPARE with wrong digest is rejected', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(1, prices);
+            let digest = oc.digest(1, prices);
 
             oc.pendingRounds.set(1, {
                 prices, digest, prepares: new Set(), commits: new Set(),
@@ -135,7 +135,7 @@ function registerPbftMessageFlow2Tests3() {
 
         it('reaching prepare quorum broadcasts COMMIT', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(1, prices);
+            let digest = oc.digest(1, prices);
 
             // N=4, quorum=3. Start with 2 prepares.
             oc.pendingRounds.set(1, {
@@ -163,7 +163,7 @@ function registerPbftMessageFlow2Tests4() {
 
         it('reaching commit quorum stores snapshot and emits event', async function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(1, prices);
+            let digest = oc.digest(1, prices);
 
             oracleRound.getSubmissions.returns(new Map());
 
@@ -180,7 +180,7 @@ function registerPbftMessageFlow2Tests4() {
             oc.on('round:finalized', (data) => { emitted = data; });
 
             // Third commit → quorum met
-            oc._handleCommit({
+            oc.handleCommit({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { round: 1, digest }
@@ -196,7 +196,7 @@ function registerPbftMessageFlow2Tests4() {
 
         it('duplicate votes from same sender are counted once', function () {
             let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-            let digest = oc._digest(1, prices);
+            let digest = oc.digest(1, prices);
 
             oc.pendingRounds.set(1, {
                 prices, digest, prepares: new Set(), commits: new Set(),

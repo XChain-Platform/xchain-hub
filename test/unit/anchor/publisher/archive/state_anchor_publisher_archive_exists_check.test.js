@@ -71,7 +71,7 @@ function mkPub(indexerReply) {
     pub.backfillBatch = async (seq, matches, txid) => { backfills.push({ seq, matches, txid }); };
     pub.recordReward  = () => {};
     pub.indexerCalls   = [];
-    pub._indexerCall   = async (coin, method, params) => {
+    pub.indexerCall   = async (coin, method, params) => {
         pub.indexerCalls.push({ coin, method, params });
         return indexerReply(params);
     };

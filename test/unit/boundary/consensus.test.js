@@ -66,49 +66,49 @@ function registerLeaderRotationWrapAround() {
 function testSeq0Index0FirstValidator() {
     consensus.setValidatorSet(VALIDATORS_3);
     consensus.view = 0;
-    expect(consensus._getLeader(0)).to.equal(VALIDATORS_3[0]);
+    expect(consensus.getLeader(0)).to.equal(VALIDATORS_3[0]);
 }
 function testSeqNWrapsToIndex0() {
     consensus.setValidatorSet(VALIDATORS_3);
     consensus.view = 0;
-    expect(consensus._getLeader(3)).to.equal(VALIDATORS_3[0]);
+    expect(consensus.getLeader(3)).to.equal(VALIDATORS_3[0]);
 }
 function testSeqN1LastValidator() {
     consensus.setValidatorSet(VALIDATORS_3);
     consensus.view = 0;
-    expect(consensus._getLeader(2)).to.equal(VALIDATORS_3[2]);
+    expect(consensus.getLeader(2)).to.equal(VALIDATORS_3[2]);
 }
 function testViewOffsetShiftsLeaderSeqViewN() {
     consensus.setValidatorSet(VALIDATORS_3);
     consensus.view = 2;
     // (0+2) % 3 = 2
-    expect(consensus._getLeader(0)).to.equal(VALIDATORS_3[2]);
+    expect(consensus.getLeader(0)).to.equal(VALIDATORS_3[2]);
     // (1+2) % 3 = 0
-    expect(consensus._getLeader(1)).to.equal(VALIDATORS_3[0]);
+    expect(consensus.getLeader(1)).to.equal(VALIDATORS_3[0]);
 }
 function testLargeSeqValueStillProducesValidLeader() {
     consensus.setValidatorSet(VALIDATORS_4);
     consensus.view = 0;
-    let leader = consensus._getLeader(Number.MAX_SAFE_INTEGER);
+    let leader = consensus.getLeader(Number.MAX_SAFE_INTEGER);
     expect(VALIDATORS_4).to.include(leader);
 }
 function testLargeViewValueStillProducesValidLeader() {
     consensus.setValidatorSet(VALIDATORS_4);
     consensus.view = 999999;
-    let leader = consensus._getLeader(1);
+    let leader = consensus.getLeader(1);
     expect(VALIDATORS_4).to.include(leader);
 }
 function testEmptyValidatorSetNullLeader() {
     consensus.setValidatorSet([]);
-    expect(consensus._getLeader(0)).to.be.null;
+    expect(consensus.getLeader(0)).to.be.null;
 }
 function testSingleValidatorIsAlwaysTheLeader() {
     let single = [makeValidator(1)];
     consensus.setValidatorSet(single);
     consensus.view = 0;
-    expect(consensus._getLeader(0)).to.equal(single[0]);
-    expect(consensus._getLeader(1)).to.equal(single[0]);
-    expect(consensus._getLeader(100)).to.equal(single[0]);
+    expect(consensus.getLeader(0)).to.equal(single[0]);
+    expect(consensus.getLeader(1)).to.equal(single[0]);
+    expect(consensus.getLeader(100)).to.equal(single[0]);
 }
 
 function registerSequenceNumberHandling() {
@@ -209,7 +209,7 @@ function testRejectsMismatchedDigest() {
 }
 async function testAcceptsValidPREPREPAREWithCorrectDigest() {
     let config = { x: 1 };
-    let digest = consensus._digest(config);
+    let digest = consensus.digest(config);
     // #4168: a 4-member validator set is a federation regardless of
     // MIN_VALIDATORS, so the follower needs the block height and the
     // deterministic snapshot a real round carries before it will accept.
@@ -238,7 +238,7 @@ function registerDuplicateVotes() {
 }
 function testDuplicatePREPAREFromSameSenderCountedOnceSetDedup() {
     let config = { x: 1 };
-    let digest = consensus._digest(config);
+    let digest = consensus.digest(config);
 
     consensus.pendingProposals.set(5, {
         config, digest,
@@ -255,7 +255,7 @@ function testDuplicatePREPAREFromSameSenderCountedOnceSetDedup() {
 }
 function testDuplicateCOMMITFromSameSenderCountedOnce() {
     let config = { x: 1 };
-    let digest = consensus._digest(config);
+    let digest = consensus.digest(config);
 
     consensus.pendingProposals.set(5, {
         config, digest,
@@ -265,8 +265,8 @@ function testDuplicateCOMMITFromSameSenderCountedOnce() {
         resolve: null, reject: null
     });
 
-    consensus._handleCommit({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
-    consensus._handleCommit({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
+    consensus.handleCommit({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
+    consensus.handleCommit({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 5, configDigest: digest } });
 
     expect(consensus.pendingProposals.get(5).commits.size).to.equal(1);
 }
@@ -287,7 +287,7 @@ function testRapidViewIncrementsProduceValidLeaders() {
         consensus.initiateViewChange(1);
     }
     expect(consensus.view).to.equal(20);
-    let leader = consensus._getLeader(1);
+    let leader = consensus.getLeader(1);
     // (1 + 20) % 4 = 1
     expect(leader).to.equal(VALIDATORS_4[1]);
 }
@@ -325,7 +325,7 @@ async function testDedupIsKeyedOnProposalAppliedNotTheConfigDigestARepeated() {
     // guard is per-proposal (proposal.applied), so re-seeing a digest does
     // not suppress a genuine new round.
     let config = { x: 1 };
-    let digest = consensus._digest(config);
+    let digest = consensus.digest(config);
 
     consensus.setValidatorSet(VALIDATORS_4);
     pm.validatorAddr = VALIDATORS_4[0].addr;
@@ -339,8 +339,8 @@ async function testDedupIsKeyedOnProposalAppliedNotTheConfigDigestARepeated() {
     });
 
     // Third commit reaches quorum
-    consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
-    // _handleCommit resolves the round asynchronously. The anchor is the
+    consensus.handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
+    // handleCommit resolves the round asynchronously. The anchor is the
     // round CLEARING, not applyConfig being called: the clear happens
     // after that call, so anchoring on the call races the assertion.
     await waitUntil(() => !consensus.pendingProposals.has(5), { label: 'the quorum commit to apply and clear round 5' });

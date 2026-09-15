@@ -308,7 +308,7 @@ it('promotes the next rank as a chain-based failover (state.leadRank)', function
             const ranked = [V1, V2].map(pk => ({ pk, h: crypto.createHash('sha256').update('cid').update(pk).digest('hex') }))
                 .sort((a, b) => a.h < b.h ? -1 : 1).map(r => r.pk);
             const st = state([V1, V2], 0);
-            st.leadRank = 1;                                      // _tick promoted rank 1 (no verdict landed)
+            st.leadRank = 1;                                      // tick promoted rank 1 (no verdict landed)
             expect(eng.isLeader(st, ranked[1])).to.equal(true);
             expect(eng.isLeader(st, ranked[0])).to.equal(false); // rank-0 stood down
         });
@@ -362,7 +362,7 @@ it('ABSTAINS (returns null) rather than degrading to genesis-only when the verif
         });
 it('ABSTAINS (returns null) on an in-band indexer result.error (200 with error body)', async function () {
             // The indexer reports failures as result.error, not the top-level JSON-RPC
-            // error envelope; _indexerCall surfaces it so a degraded indexer causes an
+            // error envelope; indexerCall surfaces it so a degraded indexer causes an
             // abstain, not a silently narrowed (genesis-only) verifier set.
             axiosStub.post.callsFake(async () => ({ data: { result: { error: 'indexer unavailable' } } }));
             const eng = new FullNodeChallengeRound(makeHub());

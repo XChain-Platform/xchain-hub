@@ -73,7 +73,7 @@ module.exports = {
         let depth = latestHomeBlock - Number(res.response_block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[HOME_CHAIN]) return null;
 
-        let roundId = this._roundId('response', rid);
+        let roundId = this.roundId('response', rid);
         if(this._inflight.has(roundId)) return null;
 
         return { rid: rid, coin: coin, originReq: originReq, roundId: roundId };
@@ -225,7 +225,7 @@ module.exports = {
         let depth = latestBlock - Number(req.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return null;
 
-        let roundId = this._roundId('request', rid);
+        let roundId = this.roundId('request', rid);
         if(this._inflight.has(roundId)) return null;
 
         return { rid: rid, coin: coin, roundId: roundId };

@@ -77,7 +77,7 @@ function armProposalTimeout(round, pending) {
     pending.timer = setTimeout(() => {
         if (!pending.finalized) {
             // Count leader-seat quorum loss symmetrically with the follower-side
-            // PROPOSE-round timeout in _handlePropose (review 1469): before this,
+            // PROPOSE-round timeout in handlePropose (review 1469): before this,
             // the eviction left no countable trace, so a leader repeatedly stuck
             // below commit quorum was invisible to the dashboard's oracle stall
             // ladder until lastSuccessAge aged past its warn band. Deliberately
@@ -99,7 +99,7 @@ function broadcastProposal(ctx, submissions, isFallback, mySig) {
     // submissionKeys carries the proposer's own view of the submission set (sorted) purely as a
     // diagnostic/wire-compat hint. Receivers do NOT trust it for fallback-proposer legitimacy;
     // that check is made solely against each receiver's locally-observed submissions (see
-    // _handlePropose), since a peer-supplied set is attacker-controllable.
+    // handlePropose), since a peer-supplied set is attacker-controllable.
     // The leader's map travels in the PROPOSE, because every follower must co-sign
     // the SAME map: a follower pinning its own tips would sign bytes no quorum shares.
     // Absent below the activation, so an un-upgraded peer sees the frame it always saw.
@@ -155,7 +155,7 @@ module.exports = {
             if (this.finalized.has(round) || this.pendingRounds.has(round)) return;   // decided while the tip was read
         }
 
-        let digest = this._digest(round, aggregated);
+        let digest = this.digest(round, aggregated);
 
         // Sign the canonical PRICE v0 payload locally (this validator's contribution
         // to the on-chain anchor). Embedded in the published PRICE v0 transaction along

@@ -50,7 +50,7 @@ async function bootApi({ envOverrides, hubOverrides, axiosPost } = {}) {
         getPeerManager: () => null,
         getAttestationRound: () => null,
         getProviderRegistry: () => null,
-        _resolveBtcIndexerUrl: async () => null,
+        resolveBtcIndexerUrl: async () => null,
         btcIndexerHeaders: () => ({}),
         start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
         startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
@@ -126,7 +126,7 @@ it('pages past a full first page to find a request further back in the queue', a
                 network: 'mainnet',
                 getAttestationRound: () => round,
                 capabilitySnapshot: { getSnapshot: async () => ({ validators: validators }) },
-                _resolveBtcIndexerUrl: async () => 'http://fake-indexer.local'
+                resolveBtcIndexerUrl: async () => 'http://fake-indexer.local'
             },
             axiosPost: post
         });
@@ -160,7 +160,7 @@ it('returns the same set AttestationRound.computeResponsibleSet computes for a s
                 capabilitySnapshot: { getSnapshot: async () => ({ validators: validators }) },
                 // latestBlock === declaredBlock => widenSlots' elapsed <= 0 => widen 0,
                 // regardless of network activation heights.
-                _resolveBtcIndexerUrl: async () => 'http://fake-indexer.local',
+                resolveBtcIndexerUrl: async () => 'http://fake-indexer.local',
             },
             axiosPost: makeIndexerResponse({ requests: [request], latestBlock: declaredBlock })
         });
@@ -192,7 +192,7 @@ it('refuses a missing request_id', async function () {
     });
 
     it('refuses an unknown request id cleanly', async function () {
-        // _resolveBtcIndexerUrl -> null is the "cannot even ask" case; the method
+        // resolveBtcIndexerUrl -> null is the "cannot even ask" case; the method
         // must answer {error}, never throw.
         const { methods } = await bootApi({
             hubOverrides: { getAttestationRound: () => new AttestationRound({ getPeerManager: () => null, db: null, p2pConfig: {} }, null) }

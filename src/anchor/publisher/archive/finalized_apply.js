@@ -46,7 +46,7 @@ module.exports = {
             // re-derivation verifyArchiveAgainstLocal applies to archived reward
             // rows: the credited pubkey must hold oracle_publish AT that block
             // (a fabricated block index fails the membership resolution).
-            let setAtSnap = await this._getActiveOraclePublishPubkeys(Number(d.snapshot_block));
+            let setAtSnap = await this.getActiveOraclePublishPubkeys(Number(d.snapshot_block));
             if(!setAtSnap.includes(sender)){
                 logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') sender not in the ' +
                              'oracle_publish set at announced snapshot_block ' + d.snapshot_block +

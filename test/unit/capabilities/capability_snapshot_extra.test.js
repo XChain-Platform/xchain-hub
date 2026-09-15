@@ -28,7 +28,7 @@ const proxyquire   = require('proxyquire');
 function makeHub(opts) {
     return {
         capabilityRegistry:    (opts && opts.registry) || null,
-        _resolveBtcIndexerUrl: (opts && opts.indexerUrl !== undefined)
+        resolveBtcIndexerUrl: (opts && opts.indexerUrl !== undefined)
             ? async () => opts.indexerUrl
             : async () => 'http://indexer.local/rpc',
         btcIndexerHeaders:    () => ({})

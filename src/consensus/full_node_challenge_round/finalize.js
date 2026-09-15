@@ -103,7 +103,7 @@ function recordVerdictSent(self, state, epoch, quorum, spendToken, res){
     self._committedEpochs.add(epoch);
     // Name the rank this verdict was broadcast at, in the durable spend record
     // and in the log line. A failover verdict (leadRank > 0, the ladder in
-    // _tick promoting the next rank after each closeDepth of height with no
+    // tick promoting the next rank after each closeDepth of height with no
     // verdict) is otherwise byte-identical to a healthy rank-0 verdict in every
     // observable signal, so a dead elected leader stays invisible while the
     // ladder absorbs its rounds. Same marker StateAnchorPublisher carries at

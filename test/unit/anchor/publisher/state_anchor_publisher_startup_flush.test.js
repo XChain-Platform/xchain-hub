@@ -80,7 +80,7 @@ function pendingRow(wantLeader) {
         if ((order[0] === me) === !!wantLeader) peer = candidate;
     }
     expect(peer, 'a peer producing the requested rank must exist').to.not.equal(null);
-    pub._getActiveOraclePublishPubkeys = async () => [me, peer];
+    pub.getActiveOraclePublishPubkeys = async () => [me, peer];
     return { pub, me, peer };
 }
 

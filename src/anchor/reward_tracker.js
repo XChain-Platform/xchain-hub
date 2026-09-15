@@ -247,9 +247,9 @@ class RewardTracker {
     // identical DB config disagree on archive contents. Falls back to the
     // constructor-captured env value if the hub/resolver is unavailable.
     async getBtcIndexerUrl() {
-        if (this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function') {
+        if (this.hub && typeof this.hub.resolveBtcIndexerUrl === 'function') {
             try {
-                let url = await this.hub._resolveBtcIndexerUrl();
+                let url = await this.hub.resolveBtcIndexerUrl();
                 if (url) return String(url);
             } catch (err) {
                 logger.warn(nodeUtil.format('Rewards: BTC indexer URL resolution via hub failed:', err && err.message));

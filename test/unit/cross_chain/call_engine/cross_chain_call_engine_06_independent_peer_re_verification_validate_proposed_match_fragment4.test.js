@@ -281,7 +281,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
       return_payload_b64: 'cGF5bG9hZA',
       effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment4HonestEffectiveTime()
     };
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       latest_block_index: 600,
       executed_block_index: 500,

@@ -98,28 +98,28 @@ it('returns 0 when no peers and no validators', function () {
             expect(consensus.getQuorum()).to.equal(0);
         });
 });
-// _getLeader()
-describe('_getLeader()', function () {
+// getLeader()
+describe('getLeader()', function () {
 it('returns (seq + view) % N', function () {
             consensus.setValidatorSet(VALIDATORS_3);
             consensus.view = 0;
-            expect(consensus._getLeader(0)).to.equal(VALIDATORS_3[0]);
-            expect(consensus._getLeader(1)).to.equal(VALIDATORS_3[1]);
-            expect(consensus._getLeader(3)).to.equal(VALIDATORS_3[0]); // wraps
+            expect(consensus.getLeader(0)).to.equal(VALIDATORS_3[0]);
+            expect(consensus.getLeader(1)).to.equal(VALIDATORS_3[1]);
+            expect(consensus.getLeader(3)).to.equal(VALIDATORS_3[0]); // wraps
         });
 it('view offset changes leader', function () {
             consensus.setValidatorSet(VALIDATORS_3);
             consensus.view = 1;
             // (0 + 1) % 3 = 1
-            expect(consensus._getLeader(0)).to.equal(VALIDATORS_3[1]);
+            expect(consensus.getLeader(0)).to.equal(VALIDATORS_3[1]);
             // (1 + 1) % 3 = 2
-            expect(consensus._getLeader(1)).to.equal(VALIDATORS_3[2]);
+            expect(consensus.getLeader(1)).to.equal(VALIDATORS_3[2]);
             // (2 + 1) % 3 = 0
-            expect(consensus._getLeader(2)).to.equal(VALIDATORS_3[0]);
+            expect(consensus.getLeader(2)).to.equal(VALIDATORS_3[0]);
         });
 it('returns null for empty validator set', function () {
             consensus.setValidatorSet([]);
-            expect(consensus._getLeader(0)).to.be.null;
+            expect(consensus.getLeader(0)).to.be.null;
         });
 });
 });
@@ -141,7 +141,7 @@ it('identical validator set: identical leader for every (seq, view) on two indep
             for (let view = 0; view < 3; view++) {
                 a.view = view; b.view = view;
                 for (let seq = 0; seq < set.length * 2 + 1; seq++) {
-                    expect(a._getLeader(seq)).to.deep.equal(b._getLeader(seq));
+                    expect(a.getLeader(seq)).to.deep.equal(b.getLeader(seq));
                 }
             }
         });
@@ -161,7 +161,7 @@ it('leader election is order-INSENSITIVE: divergent input ordering elects the sa
             for (let view = 0; view < 3; view++) {
                 a.view = view; b.view = view;
                 for (let seq = 0; seq < set.length * 2 + 1; seq++) {
-                    expect(a._getLeader(seq)).to.deep.equal(b._getLeader(seq));
+                    expect(a.getLeader(seq)).to.deep.equal(b.getLeader(seq));
                 }
             }
         });
@@ -200,7 +200,7 @@ it('ties on pubkey are broken by addr, so equal-key sets still order identically
             expect(a.validatorSet.map(v => v.addr)).to.deep.equal(['ws://a:1', 'ws://m:1', 'ws://z:1']);
         });
 // Mixed-case pubkeys for the same key must not sort into two different buckets; the sort key is the
-// lowercased pubkey, matching Governance.buildValidatorSnapshot and OracleConsensus._getLeader.
+// lowercased pubkey, matching Governance.buildValidatorSnapshot and OracleConsensus.getLeader.
 it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set', function () {
             const lower = [
                 { pubkey: 'aa'.repeat(32), addr: 'ws://1:1' },
@@ -215,7 +215,7 @@ it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set', functi
 it('empty set still elects no leader after canonicalization', function () {
             const a = freshConsensus(); a.setValidatorSet([]);
             expect(a.validatorSet).to.deep.equal([]);
-            expect(a._getLeader(0)).to.be.null;
+            expect(a.getLeader(0)).to.be.null;
         });
 });
 });
@@ -234,15 +234,15 @@ it('returns false when this node is not the leader', function () {
             expect(consensus.isLeader(0)).to.be.false;
         });
 });
-// _digest()
-describe('_digest()', function () {
+// digest()
+describe('digest()', function () {
 it('returns a 64-char hex SHA-256 hash', function () {
-            let d = consensus._digest({ foo: 'bar' });
+            let d = consensus.digest({ foo: 'bar' });
             expect(d).to.match(/^[0-9a-f]{64}$/);
         });
 it('is deterministic', function () {
             let config = { a: 1, b: 2 };
-            expect(consensus._digest(config)).to.equal(consensus._digest(config));
+            expect(consensus.digest(config)).to.equal(consensus.digest(config));
         });
 });
 });
@@ -307,7 +307,7 @@ describe('PBFT message flow', function () {
 it('PRE_PREPARE creates follower proposal and broadcasts PREPARE', async function () {
             wireFederationSnapshot(3, 800000);
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             // seq 5, view 0: (5+0)%4 = 1, VALIDATORS_4[1] is the rotation leader.
             await consensus.handlePrePrepare({
@@ -333,7 +333,7 @@ it('PRE_PREPARE from a non-leader for the claimed view is rejected (no proposal,
             // authenticated validator could drive an uncontested seq to commit its
             // own config. (Without the identity guard this would have been accepted.)
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,                       // not the leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[2].pubkey,
@@ -346,7 +346,7 @@ it('PRE_PREPARE with no view field is rejected', async function () {
             // The leader must stamp its view so followers can resolve the rotation
             // leader; a viewless envelope cannot be identity-checked and is dropped.
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -385,7 +385,7 @@ it('federated follower declines to PREPARE when btcBlockHeight is omitted (fail 
             consensus.minValidators = 2;
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,

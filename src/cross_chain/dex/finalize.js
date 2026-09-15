@@ -134,7 +134,7 @@ module.exports = {
         // match cleanly (same defer-and-retry posture retractMatchesForReorg uses).
         let persistedRows = 0;
         try {
-            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+            persistedRows = await this.persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
         } catch(e){
             logger.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
@@ -188,7 +188,7 @@ module.exports = {
     async _insertMatchRow(row){
         // Resolved into the value list rather than onto `row`: the row object is what the
         // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
-        // never consensus. _canonicalMatch enumerates its fields explicitly, so this value has
+        // never consensus. canonicalMatch enumerates its fields explicitly, so this value has
         // no path into a signed preimage. The column list and the statement live in
         // db.createCrossChainMatch.
         let btcChainId = await this.resolveBtcChainId(row.network);

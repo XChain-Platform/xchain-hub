@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// RollcallRound engine behaviour, driven through the real _tick() against a
+// RollcallRound engine behaviour, driven through the real tick() against a
 // stubbed indexer pair. Everything signature-shaped uses REAL Ed25519 identities:
 // a stubbed verifier would certify a canonical nobody ever checked.
 //
@@ -112,7 +112,7 @@ function makeHub(o) {
         },
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
-        _resolveBtcIndexerUrl: async () => BTC_URL,
+        resolveBtcIndexerUrl: async () => BTC_URL,
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
@@ -201,7 +201,7 @@ it('publishes v1 carrying this build\'s gate list, signed over the v1 canonical'
             const order = orderFor(PKS, EPOCH);
             const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
+            await eng.tick();
 
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 1);
@@ -212,8 +212,8 @@ it('publishes v1 carrying this build\'s gate list, signed over the v1 canonical'
             // The signature on the wire must verify over the canonical the DOGE parser
             // rebuilds from the CARRIED gates, and must NOT verify over the v0 form:
             // a site that quietly dropped GATES would still accept it otherwise.
-            const v1 = eng._canonical(EPOCH, LEDGER_HASH, GATES);
-            const v0 = eng._canonical(EPOCH, LEDGER_HASH);
+            const v1 = eng.canonical(EPOCH, LEDGER_HASH, GATES);
+            const v0 = eng.canonical(EPOCH, LEDGER_HASH);
             const mine = w.pairs.find(p => p.pubkey === order[0]);
             assert.ok(mine, 'the publisher signed its own roll call');
             assert.strictEqual(ValidatorIdentity.verify(v1, mine.sig, order[0]), true);
@@ -224,21 +224,21 @@ it('verifies a peer\'s signature against the SAME canonical for the epoch', asyn
             rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
-            await eng._tick();
+            await eng.tick();
             const state = eng.rounds.get(EPOCH);
             assert.strictEqual(state.gates, GATES);
-            assert.strictEqual(state.canonical, eng._canonical(EPOCH, LEDGER_HASH, GATES));
+            assert.strictEqual(state.canonical, eng.canonical(EPOCH, LEDGER_HASH, GATES));
 
             // A peer on the same build: counted.
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+            eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                  data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(state.canonical) } });
             assert.strictEqual(state.sigs.has(PKS[1]), true);
             // A peer still signing the v0 canonical (an un-upgraded build, or one whose
             // gate list differs) verifies against nothing and is simply absent. This is
             // the cost §7.2 names: roll the fleet BETWEEN epochs, never across one.
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+            eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                  data: { epoch: EPOCH, pubkey: PKS[2],
-                                         sig: IDS[2].sign(eng._canonical(EPOCH, LEDGER_HASH)) } });
+                                         sig: IDS[2].sign(eng.canonical(EPOCH, LEDGER_HASH)) } });
             assert.strictEqual(state.sigs.has(PKS[2]), false);
         });
 });
@@ -256,7 +256,7 @@ it('is v0, byte for byte, for an epoch BELOW the gates height', async function (
             const order = orderFor(PKS, EPOCH);
             const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 1);
@@ -264,7 +264,7 @@ it('is v0, byte for byte, for an epoch BELOW the gates height', async function (
             assert.strictEqual(w.version, '0');
             assert.strictEqual(w.sigCount, w.pairs.length);
             const mine = w.pairs.find(p => p.pubkey === order[0]);
-            assert.strictEqual(ValidatorIdentity.verify(eng._canonical(EPOCH, LEDGER_HASH),
+            assert.strictEqual(ValidatorIdentity.verify(eng.canonical(EPOCH, LEDGER_HASH),
                                                         mine.sig, order[0]), true);
         });
 it('stays v0 where the height is the INERT null placeholder', async function () {
@@ -273,7 +273,7 @@ it('stays v0 where the height is the INERT null placeholder', async function () 
             rga.ROLLCALL_GATES_ACTIVATION.regtest = null;
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
         });
 });
@@ -300,13 +300,13 @@ it('splits at the DERIVED v1 cap, not the v0 41', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({ identity: ids[many.indexOf(order[0])], members: many, candidates: many },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH, GATES);
+            await eng.tick();
+            const canon = eng.canonical(EPOCH, LEDGER_HASH, GATES);
             for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                      data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
             wireRpc({ tip: 38 });
-            await eng._tick();
+            await eng.tick();
 
             const bc = eng.hub.oraclePublisher.broadcastFn;
             assert.strictEqual(bc.callCount, 2);
@@ -338,7 +338,7 @@ it('refuses to publish rather than build an action past the ceiling', async func
             const order = orderFor(PKS, EPOCH);
             const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 1, 'the normal list publishes');
 
             loadModule();
@@ -346,7 +346,7 @@ it('refuses to publish rather than build an action past the ceiling', async func
             const eng2 = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                     { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
             eng2.gatesFor = () => 'a.B,'.repeat(3000);
-            await eng2._tick();
+            await eng2.tick();
             assert.strictEqual(eng2.hub.oraclePublisher.broadcastFn.callCount, 0,
                 'an oversize GATES list must stop the publish, not ride out un-decodable');
             assert.strictEqual(eng2.rounds.get(EPOCH).published, false, 'the slot is released for a retry');

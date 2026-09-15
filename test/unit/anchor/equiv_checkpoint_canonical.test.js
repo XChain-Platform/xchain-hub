@@ -81,7 +81,7 @@ const RAW_ON  = 'XCHECKPOINT|BTC|regtest|500|bh|lh|ah|ch|7|480';
 const RAW_OFF = 'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|5';
 // Minimal indexer Anchor (constructor only assigns; canonical uses `d` + eq).
 const anchor = Anchor ? new Anchor({ config:{}, decoderDb:null, indexerDb:null, util:null, mapper:null }) : null;
-// The rootless BASE _canonical builds for any format that adds no extension: it is what
+// The rootless BASE canonical builds for any format that adds no extension: it is what
 // the archive canonical nests and what the hub's rootless checkpoint canonical must equal.
 const dBase = { CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
               BLOCK_HASH:'bh', LEDGER_HASH:'lh', ACTIONS_HASH:'ah', CONTRACT_HASH:'ch',
@@ -158,7 +158,7 @@ const cpRootsMain = Object.assign({}, cpRootsOn, { network:'mainnet', snapshot_b
         // ONE fixture, projected into the indexer's field naming, so a transcription
         // slip cannot make the two sides agree for the wrong reason. `headerNetwork`
         // is the bundle header's NETWORK, which _parseBundle stamps onto every section
-        // before handing it to _canonical; SNAPSHOT_BLOCK is the section's own block,
+        // before handing it to canonical; SNAPSHOT_BLOCK is the section's own block,
         // never the bundle MAX, because that is what the signatures were made over.
 function indexerSection(cp, headerNetwork) {
     return anchor.canonical({
@@ -331,7 +331,7 @@ function registerArchiveBasics() {
         });
         // The publisher tail is attested separately and is NOT part of the wrapper
         // canonical, so a v1 with an ATTEST_SIG_COUNT of 0 and one with a full quorum sign
-        // the same bytes: _canonical takes no tail argument at all, which is what makes the
+        // the same bytes: canonical takes no tail argument at all, which is what makes the
         // always-append-the-tail rule (spec D4) safe for the co-sign round.
         //
         // The retired archive-head number is now INERT: the version set restarted at 0

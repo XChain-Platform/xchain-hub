@@ -32,7 +32,7 @@ module.exports = {
     async getMyRank(blockIndex) {
         if (!this.identity) return null;
         let myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
-        let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
+        let pubkeys = await this.getActiveOraclePublishPubkeys(blockIndex);
         let idx = pubkeys.indexOf(myPubkey);
         return idx >= 0 ? idx : null;
     },
@@ -51,7 +51,7 @@ module.exports = {
 
     // Get the count of active oracle_publish validators
     async getActiveOraclePublishCount(blockIndex) {
-        let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
+        let pubkeys = await this.getActiveOraclePublishPubkeys(blockIndex);
         return pubkeys.length;
     },
 
@@ -61,7 +61,7 @@ module.exports = {
     // returns the same array regardless of when gossip messages arrived.
     // Fails closed (returns []) when the block-pinned snapshot is unresolved.
     // Returns: array of 64-hex pubkey strings, sorted ascending.
-    async _getActiveOraclePublishPubkeys(blockIndex) {
+    async getActiveOraclePublishPubkeys(blockIndex) {
         if (!this.hub) return [];
 
         // Primary: deterministic on-chain snapshot at blockIndex

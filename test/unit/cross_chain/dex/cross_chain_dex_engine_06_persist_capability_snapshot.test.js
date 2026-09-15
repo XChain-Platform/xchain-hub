@@ -133,7 +133,7 @@ function registerFeature14persistCapabilitySnapshotPart1() {
         }]
       })
     };
-    await eng._persistCapabilitySnapshot('cross_chain', 100);
+    await eng.persistCapabilitySnapshot('cross_chain', 100);
     expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
   });
 }
@@ -149,7 +149,7 @@ function registerFeature14persistCapabilitySnapshotPart2() {
       affectedRows: 1
     });
     let eng = new CrossChainDexEngine(hub);
-    let persist = sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
+    let persist = sinon.stub(eng, 'persistCapabilitySnapshot').resolves(1);
     let row = {
       match_id: 'm'.repeat(64),
       snapshot_block: 150,
@@ -193,7 +193,7 @@ function registerFeature14persistCapabilitySnapshotPart3() {
         validators: []
       })
     };
-    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    let n = await eng.persistCapabilitySnapshot('cross_chain', 100);
     expect(hub.db.doQuery.called).to.be.false;
     expect(n).to.equal(0);
   });
@@ -216,7 +216,7 @@ function registerFeature14persistCapabilitySnapshotPart3() {
     }];
     capped.truncated = true;
     sinon.stub(eng, 'resolveCapabilityValidators').resolves(capped);
-    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    let n = await eng.persistCapabilitySnapshot('cross_chain', 100);
     expect(n, 'zero rows is the caller\'s fail-closed signal').to.equal(0);
     expect(hub.db.doQuery.called, 'no capability_snapshots row may be written').to.be.false;
   });
@@ -232,13 +232,13 @@ function registerFeature14persistCapabilitySnapshotPart3() {
     }];
     full.truncated = false;
     sinon.stub(eng, 'resolveCapabilityValidators').resolves(full);
-    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    let n = await eng.persistCapabilitySnapshot('cross_chain', 100);
     expect(n).to.equal(1);
     expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
   });
 }
 function registerFeature14persistCapabilitySnapshot() {
-  describe('_persistCapabilitySnapshot()', function () {
+  describe('persistCapabilitySnapshot()', function () {
     registerFeature14persistCapabilitySnapshotPart1();
     registerFeature14persistCapabilitySnapshotPart2();
     registerFeature14persistCapabilitySnapshotPart3();

@@ -122,7 +122,7 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
         pm.getPeerStatus     = sinon.stub().returns(FEDERATION.map(v => ({ addr: v.addr, state: 'open' })));
 
         hub.network                = 'testnet';
-        hub._resolveBtcIndexerUrl  = async () => 'http://indexer.local/rpc';
+        hub.resolveBtcIndexerUrl  = async () => 'http://indexer.local/rpc';
         hub.btcIndexerHeaders     = () => ({});
         hub.resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
         // A live registry with NO configured thresholds: exactly what a hub booted
@@ -160,7 +160,7 @@ function registerStandaloneStakeFeedResolutionTests() {
     });
 
     it('persists the audit row for a sender no registry row attributes', async function () {
-        for (let v of FEDERATION) oracle._handleMessage(frameFrom(v, ROUND));
+        for (let v of FEDERATION) oracle.handleMessage(frameFrom(v, ROUND));
         // The persist is fire-and-forget off a synchronous handler; let it settle.
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));
@@ -181,7 +181,7 @@ function registerStandaloneStakeFeedQuorumTest() {
         let served = await hub.capabilitySnapshot.getWeightSnapshot('price', BLOCK);
 
         let quorumSpy = sinon.spy(hub.capabilitySnapshot, 'getQuorum');
-        for (let v of FEDERATION) oracle._handleMessage(frameFrom(v, ROUND));
+        for (let v of FEDERATION) oracle.handleMessage(frameFrom(v, ROUND));
         await oc.finalizeRound(ROUND, BLOCK, 1767225600);
 
         // The refusal that stalls the public tier today, asserted before anything
@@ -213,7 +213,7 @@ function registerMissingStakeFeedTest() {
 
         expect(await hub.capabilitySnapshot.getWeightSnapshot('price', BLOCK)).to.equal(null);
 
-        for (let v of FEDERATION) oracle._handleMessage(frameFrom(v, ROUND));
+        for (let v of FEDERATION) oracle.handleMessage(frameFrom(v, ROUND));
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));
         await oc.finalizeRound(ROUND, BLOCK, 1767225600);

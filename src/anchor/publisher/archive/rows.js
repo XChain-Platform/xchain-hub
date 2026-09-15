@@ -34,8 +34,8 @@ const logger = getLogger();
 
 module.exports = {
 
-    // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /
-    // the indexer's cross_settle._canonical (kept local so archive verification
+    // XMATCH canonical: byte-identical to CrossChainDexEngine.canonicalMatch /
+    // the indexer's cross_settle.canonical (kept local so archive verification
     // never depends on the DEX engine being constructed).
     matchCanonical(m){
         let raw = [
@@ -57,7 +57,7 @@ module.exports = {
         return raw;
     },
 
-    // XCALL phase canonicals: byte-identical to CrossChainCallEngine._canonicalMatch
+    // XCALL phase canonicals: byte-identical to CrossChainCallEngine.canonicalMatch
     // / the indexer's verifiers (kept local for the same reason as matchCanonical).
     callCanonical(c){
         let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');

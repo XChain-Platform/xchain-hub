@@ -57,7 +57,7 @@ async function finishStoredRound(round, prices, referenceBlock, blockTimestamp) 
     }
 
     // Update the in-memory last-finalized-price cache so the co-sign gate in
-    // _handlePropose can apply a historical-deviation check for pairs a hub
+    // handlePropose can apply a historical-deviation check for pairs a hub
     // did not price locally in the current round (seq 4083).
     // Retain the reference THIS round's aggregate clamped against, before the round
     // being stored overwrites it. SlashDetector needs it to tell a pair the clamp
@@ -114,7 +114,7 @@ module.exports = {
         // coins/LTC.js declare CAPABILITIES: {}), so a non-BTC indexer resolves the
         // price-capable set from the hub-mirrored capability_snapshots or not at all.
         // Nothing on the oracle path ever wrote a `price` row: finalizeRound and
-        // _handlePropose resolve the set through CapabilitySnapshot, which is a cached
+        // handlePropose resolve the set through CapabilitySnapshot, which is a cached
         // RPC read against the BTC indexer and persists nothing. The mirror therefore
         // carried only cross_chain and oracle_publish rows, and every PRICE action
         // published off BTC resolved an EMPTY set, summed to zero stake and recorded
@@ -138,7 +138,7 @@ module.exports = {
         // (finalizeRound's btcBlockHeight, threaded through pending.btcBlockHeight), so
         // every chain's indexer reads the SAME snapshot block for the same round. Never
         // the local processing height.
-        await this._persistCapabilitySnapshot('price', referenceBlock);
+        await this.persistCapabilitySnapshot('price', referenceBlock);
 
         // Write the whole round in ONE multi-row INSERT (mirrors db.setParams) so the
         // round lands atomically. The per-pair loop this replaced let a getfeequote /

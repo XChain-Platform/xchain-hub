@@ -38,7 +38,7 @@ function registerBeforeEachHook() {
         // Default behavior: reject (prevents infinite loops on unconfigured calls)
         poolStub = { getConnection: sinon.stub().rejects(new Error('default: no connection')) };
         db.pool = poolStub;
-        db._sleep = sinon.stub().resolves();
+        db.sleep = sinon.stub().resolves();
 
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');

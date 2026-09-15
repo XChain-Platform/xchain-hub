@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -111,8 +111,8 @@ const hookAt7601 = function () { sinon.restore(); };
 
 describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() creates the queue file when it does not exist', async function () {
         const pub = makePublisher();
-        // Stub _processQueue to avoid network calls
-        sinon.stub(pub, '_processQueue').resolves();
+        // Stub processQueue to avoid network calls
+        sinon.stub(pub, 'processQueue').resolves();
         await pub.start();
         try {
             expect(fs.existsSync(pub.queuePath)).to.equal(true);
@@ -126,7 +126,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         const pub = makePublisher();
         fs.mkdirSync(path.dirname(pub.queuePath), { recursive: true });
         fs.writeFileSync(pub.queuePath, 'existing content\n');
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
         await pub.start();
         try {
             expect(fs.existsSync(pub.queuePath)).to.equal(true);
@@ -142,7 +142,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         const hub = makeHub(MY_PUB, { attestationConsensus: emitter });
         const pub = new AttestationPublisher(hub);
         pub.queuePath = path.join(os.tmpdir(), 'attest-start-' + process.pid + '.jsonl');
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
 
         await pub.start();
         try {
@@ -160,7 +160,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
 
 describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() sets up the sweep interval', async function () {
         const pub = makePublisher();
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
         await pub.start();
         try {
             expect(pub._sweepTimer).to.not.be.null;
@@ -172,7 +172,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
 
 describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('stop() clears the sweep timer', async function () {
         const pub = makePublisher();
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
         await pub.start();
         expect(pub._sweepTimer).to.not.be.null;
         await pub.stop();
@@ -190,7 +190,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         const pub = makePublisher();
         // Point to an impossible path to trigger the catch branch
         pub.queuePath = '/nonexistent-root/deep/path/queue.jsonl';
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
         const warnStub = sinon.stub(console, 'warn');
         await pub.start();
         try {
@@ -207,7 +207,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         const hub = makeHub(MY_PUB, { attestationConsensus: emitter });
         const pub = new AttestationPublisher(hub);
         pub.queuePath = path.join(os.tmpdir(), 'attest-catch-' + process.pid + '.jsonl');
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
 
         const errStub = sinon.stub(console, 'error');
         await pub.start();
@@ -233,7 +233,7 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         const hub = makeHub(MY_PUB, { attestationConsensus: emitter });
         const pub = new AttestationPublisher(hub);
         pub.queuePath = path.join(os.tmpdir(), 'attest-nonerrorcatch-' + process.pid + '.jsonl');
-        sinon.stub(pub, '_processQueue').resolves();
+        sinon.stub(pub, 'processQueue').resolves();
 
         const errStub = sinon.stub(console, 'error');
         await pub.start();
@@ -250,11 +250,11 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         }
     }); });
 
-describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() catches and logs errors when the sweep interval _processQueue rejects', async function () {
+describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() catches and logs errors when the sweep interval processQueue rejects', async function () {
         const pub = makePublisher();
         pub.failoverPollMs = 20;  // fire quickly for testing
         let firstCall = true;
-        sinon.stub(pub, '_processQueue').callsFake(async () => {
+        sinon.stub(pub, 'processQueue').callsFake(async () => {
             if (firstCall) { firstCall = false; return; }  // startup call succeeds
             throw new Error('sweep exploded');
         });
@@ -275,12 +275,12 @@ describe('AttestationPublisher: start / stop', function () { afterEach(hookAt760
         }
     }); });
 
-describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() sweep logs non-Error (err.message falsy → err branch) when _processQueue rejects with non-Error', async function () {
+describe('AttestationPublisher: start / stop', function () { afterEach(hookAt7601); it('start() sweep logs non-Error (err.message falsy → err branch) when processQueue rejects with non-Error', async function () {
         // Line 131: `err && err.message ? err.message : err` (the `: err` path)
         const pub = makePublisher();
         pub.failoverPollMs = 20;
         let firstCall = true;
-        sinon.stub(pub, '_processQueue').callsFake(async () => {
+        sinon.stub(pub, 'processQueue').callsFake(async () => {
             if (firstCall) { firstCall = false; return; }
             // Throw a non-Error value (plain object without .message)
             throw { code: 'UNKNOWN_ERR' };

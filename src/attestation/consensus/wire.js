@@ -34,11 +34,11 @@ const ATTEST_META_MAX_LENGTH   = 256;
 
 module.exports = {
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         switch(envelope.type){
-            case ATTEST_PROPOSE: this._handlePropose(envelope); break;
+            case ATTEST_PROPOSE: this.handlePropose(envelope); break;
             case ATTEST_PREPARE: this.handlePrepare(envelope); break;
-            case ATTEST_COMMIT:  this._handleCommit(envelope);  break;
+            case ATTEST_COMMIT:  this.handleCommit(envelope);  break;
         }
     },
 

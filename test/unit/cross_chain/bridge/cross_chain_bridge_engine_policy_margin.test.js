@@ -96,7 +96,7 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
         engine.activation = { bridge: () => true, token: () => true, policy: () => true };
         engine.db.getLatestPolicySeq      = async () => 0;
         engine.db.getPolicySnapshotAtSeq  = async () => null;
-        engine._indexerCall = async (coin, method) => {
+        engine.indexerCall = async (coin, method) => {
             if(method === 'getlatestblock')  return { block_index: 500 };
             if(method === 'gettokenpolicy')  return {
                 allow_list: null, block_list: null, sleeping: false,

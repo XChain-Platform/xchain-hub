@@ -88,7 +88,7 @@ module.exports = {
             // the OLD canonical, so they are dropped with it; below the EQUIV
             // flag-day the rebuild is byte-identical and this is a no-op that
             // preserves collected votes.
-            let canonical = this.engine._canonicalMatch(pending.row, pending.view);
+            let canonical = this.engine.canonicalMatch(pending.row, pending.view);
             if(canonical !== pending.canonical){
                 pending.canonical = canonical;
                 pending.signatures.clear();
@@ -109,7 +109,7 @@ module.exports = {
     // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
     //
     // Deliberately NOT bound by the admission map (that guard lives at
-    // _handlePropose via admissionBoundHolds, refusing a PROPOSER that invents
+    // handlePropose via admissionBoundHolds, refusing a PROPOSER that invents
     // a height). Here the row already carries 2f+1 signatures, so refusing it
     // finalizes nothing, it only strands THIS hub outside the federation until
     // an operator intervenes; there is no proposer left to bound.
@@ -123,7 +123,7 @@ module.exports = {
         let row = d.row;
         if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
         let syncView  = Number(d.view) || 0;                                    // the view the offered proof was signed at
-        let canonical = this.engine._canonicalMatch(row, syncView);   // sigs were taken at the finalizing view
+        let canonical = this.engine.canonicalMatch(row, syncView);   // sigs were taken at the finalizing view
 
         // The proof is measured against the set the OFFERED row declares, not the one
         // this stuck round happens to hold. Same reason as the PROPOSE adoption above:

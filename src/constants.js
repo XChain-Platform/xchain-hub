@@ -46,7 +46,7 @@ const PRICE_MAX = 10_000_000_000;
 const XCALL_MAX_HOPS = 2;
 
 // Co-sign deviation band for the oracle PREPARE content-validation gate
-// (OracleConsensus._handlePropose): a follower refuses to co-sign a proposed price
+// (OracleConsensus.handlePropose): a follower refuses to co-sign a proposed price
 // that deviates more than this fraction from its own local aggregate for the pair.
 // MUST be federation-uniform: if hubs used different bands, identical aggregates
 // could yield different accept/withhold decisions (a liveness divergence on the ±band

@@ -130,7 +130,7 @@ function registerFeature16discoverAndMatchConfirmationDepthFloorPart1() {
     }; // per-coin map
     eng.indexers.BTC.url = 'http://btc'; // pass the per-coin URL guard
     // latest tip 20: block 11 is 10 deep (kept), block 19 is 2 deep (dropped at floor 6).
-    sinon.stub(eng, '_indexerCall').resolves({
+    sinon.stub(eng, 'indexerCall').resolves({
       network: 'regtest',
       latest_block_index: 20,
       orders: [{
@@ -161,7 +161,7 @@ function registerFeature16discoverAndMatchConfirmationDepthFloorPart2() {
       DOGE: 1
     }; // XDEX_MIN_CONFIRMATIONS=1 venue pin (defaults are now per-coin 6/12/60)
     eng.indexers.BTC.url = 'http://btc';
-    sinon.stub(eng, '_indexerCall').resolves({
+    sinon.stub(eng, 'indexerCall').resolves({
       network: 'regtest',
       latest_block_index: 20,
       orders: [{
@@ -190,7 +190,7 @@ function registerFeature16discoverAndMatchConfirmationDepthFloor() {
 function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part1() {
   it('follows next_cursor across truncated pages and accumulates the full book', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
-    let call = sinon.stub(eng, '_indexerCall');
+    let call = sinon.stub(eng, 'indexerCall');
     // Page 1: truncated, next_cursor 2. Page 2: truncated, next_cursor 4. Page 3: tail.
     call.onCall(0).resolves({
       network: 'regtest',
@@ -250,7 +250,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part1() {
 function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part2() {
   it('makes a single call when the first page is not truncated (backward compatible)', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
-    let call = sinon.stub(eng, '_indexerCall').resolves({
+    let call = sinon.stub(eng, 'indexerCall').resolves({
       network: 'regtest',
       latest_block_index: 20,
       orders: [{
@@ -266,7 +266,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part2() {
   });
   it('falls back to the batch max action_index when the indexer omits next_cursor', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
-    let call = sinon.stub(eng, '_indexerCall');
+    let call = sinon.stub(eng, 'indexerCall');
     call.onCall(0).resolves({
       network: 'regtest',
       latest_block_index: 9,
@@ -302,7 +302,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part3() {
   it('breaks (never spins) when a truncated page fails to advance the cursor', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
     // Always truncated with a non-advancing cursor: the guard must stop after page 2.
-    let call = sinon.stub(eng, '_indexerCall').resolves({
+    let call = sinon.stub(eng, 'indexerCall').resolves({
       network: 'regtest',
       latest_block_index: 5,
       truncated: true,
@@ -329,7 +329,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part4() {
       DOGE: 1
     };
     eng.indexers.BTC.url = 'http://btc';
-    let call = sinon.stub(eng, '_indexerCall');
+    let call = sinon.stub(eng, 'indexerCall');
     call.onCall(0).resolves({
       network: 'regtest',
       latest_block_index: 50,

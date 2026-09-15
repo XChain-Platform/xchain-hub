@@ -199,7 +199,7 @@ class CrossChainCallEngine extends EventEmitter {
         }
         await this.consensus.start();
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => logger.error(nodeUtil.format('CrossChainCall: poll error:', err && err.message)));
+            this.poll().catch(err => logger.error(nodeUtil.format('CrossChainCall: poll error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
         logger.info('CrossChainCall: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
@@ -252,7 +252,7 @@ class CrossChainCallEngine extends EventEmitter {
     //
     // Returning null means "this row is not in the admission era", which is the legacy
     // binding rule and not a pass: a legacy-era row carrying a map is refused by
-    // _canonicalMatch before the consensus ever asks.
+    // canonicalMatch before the consensus ever asks.
     admissionScope(row){
         let r = row || {};
         if(!ah.isAdmissionEra(r.network, r.snapshot_block)) return null;
@@ -297,13 +297,13 @@ class CrossChainCallEngine extends EventEmitter {
         return true;
     }
 
-    _canonicalMatch(r, view){
+    canonicalMatch(r, view){
         let raw;
         if(r.phase === 'result'){
             raw = [
                 'XCALL', 'RESULT', r.call_id, String(r.snapshot_block), r.network || '',
                 r.target_chain, String(r.result_status || ''),
-                this._sha256(String(r.return_payload_b64 == null ? '' : r.return_payload_b64)),
+                this.sha256(String(r.return_payload_b64 == null ? '' : r.return_payload_b64)),
                 String(r.effective_time)
             ].join('|');
         } else {
@@ -311,7 +311,7 @@ class CrossChainCallEngine extends EventEmitter {
                 'XCALL', 'DISPATCH', r.call_id, String(r.snapshot_block), r.network || '',
                 r.source_chain, String(r.source_action_index), String(r.source_contract_index),
                 r.target_chain, String(r.target_contract_index),
-                r.method, this._sha256(String(r.params_json == null ? '' : r.params_json)),
+                r.method, this.sha256(String(r.params_json == null ? '' : r.params_json)),
                 String(r.gas_limit), String(r.cross_hops), String(r.effective_time)
             ].join('|');
         }
@@ -321,22 +321,22 @@ class CrossChainCallEngine extends EventEmitter {
         // while its sibling bound by height, which is the split this design removes.
         raw += ah.admissionCanonicalField('CrossChainCall', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
-            return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, this._roundId(r.phase, r.call_id), (view != null ? view : 0), raw);
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, this.roundId(r.phase, r.call_id), (view != null ? view : 0), raw);
         return raw;
     }
 
     // Persist + mirror the qualifying validator set (consensus leader path,
-    // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
+    // same contract as CrossChainDexEngine.persistCapabilitySnapshot).
     // Returns the number of capability rows resolved (and persisted) for this
     // (capability, block). A return of 0 means the set degraded to empty (an
     // indexer RPC error / auth mismatch surfaces as a null snapshot, which
     // resolveCapabilityValidators normalizes to []) or was refused as truncated,
     // so money-path callers can fail closed rather than committing a row whose
     // signatures no mirror can verify against capability_snapshots.
-    async _persistCapabilitySnapshot(capability, block, network){
+    async persistCapabilitySnapshot(capability, block, network){
         let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
-        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. Mirroring the
+        // spelled out in CrossChainDexEngine.persistCapabilitySnapshot. Mirroring the
         // capped rows would let the off-BTC cross_chain verifiers finalize over an
         // under-counted stake denominator that this hub's own meetsStakeThreshold rejects.
         // Keep the three engines' guards in lockstep.
@@ -371,15 +371,15 @@ class CrossChainCallEngine extends EventEmitter {
         return validators.length;
     }
 
-    _roundId(phase, callId){
-        return this._sha256('XCALLROUND|' + phase + '|' + callId);
+    roundId(phase, callId){
+        return this.sha256('XCALLROUND|' + phase + '|' + callId);
     }
 
-    _sha256(s){
+    sha256(s){
         return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
     }
 
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

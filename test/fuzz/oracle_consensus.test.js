@@ -305,17 +305,17 @@ function registerGetQuorumTests() {
 function registerDigestTests() {
 
     // -----------------------------------------------------------------
-    // _digest()
+    // digest()
     // -----------------------------------------------------------------
 
-    describe('_digest()', function () {
+    describe('digest()', function () {
 
         it('always returns a 64-char hex string', function () {
             fc.assert(fc.property(
                 fc.integer({ min: 1, max: 1_000_000 }),
                 fc.array(fc.record({ coinPair: gen.fc_knownCoinPair(), price: fc.string({ maxLength: 20 }) }), { maxLength: 10 }),
                 function (round, prices) {
-                    let d = oc._digest(round, prices);
+                    let d = oc.digest(round, prices);
                     expect(d).to.match(/^[0-9a-f]{64}$/);
                 }
             ), { numRuns: 200 });
@@ -326,7 +326,7 @@ function registerDigestTests() {
                 fc.integer({ min: 1, max: 1_000_000 }),
                 fc.array(fc.record({ coinPair: gen.fc_knownCoinPair(), price: fc.string({ maxLength: 20 }) }), { maxLength: 10 }),
                 function (round, prices) {
-                    expect(oc._digest(round, prices)).to.equal(oc._digest(round, prices));
+                    expect(oc.digest(round, prices)).to.equal(oc.digest(round, prices));
                 }
             ), { numRuns: 200 });
         });
@@ -337,7 +337,7 @@ function registerDigestTests() {
                 fc.integer({ min: 500_001, max: 1_000_000 }),
                 function (round1, round2) {
                     let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-                    expect(oc._digest(round1, prices)).to.not.equal(oc._digest(round2, prices));
+                    expect(oc.digest(round1, prices)).to.not.equal(oc.digest(round2, prices));
                 }
             ), { numRuns: 200 });
         });
@@ -347,10 +347,10 @@ function registerDigestTests() {
 function registerGetLeaderTests() {
 
     // -----------------------------------------------------------------
-    // _getLeader()
+    // getLeader()
     // -----------------------------------------------------------------
 
-    describe('_getLeader()', function () {
+    describe('getLeader()', function () {
 
         it('always returns a validator from the set', function () {
             fc.assert(fc.property(
@@ -359,7 +359,7 @@ function registerGetLeaderTests() {
                 function (N, round) {
                     let validators = gen.fc_validatorSet(N);
                     oc.setValidatorSet(validators);
-                    let leader = oc._getLeader(round);
+                    let leader = oc.getLeader(round);
                     expect(validators).to.deep.include(leader);
                 }
             ), { numRuns: 200 });
@@ -372,7 +372,7 @@ function registerGetLeaderTests() {
                 function (N, round) {
                     let validators = gen.fc_validatorSet(N);
                     oc.setValidatorSet(validators);
-                    expect(oc._getLeader(round)).to.deep.equal(oc._getLeader(round));
+                    expect(oc.getLeader(round)).to.deep.equal(oc.getLeader(round));
                 }
             ), { numRuns: 200 });
         });
@@ -380,7 +380,7 @@ function registerGetLeaderTests() {
         it('returns null for empty validator set', function () {
             fc.assert(fc.property(fc.integer({ min: 0, max: 100000 }), function (round) {
                 oc.setValidatorSet([]);
-                expect(oc._getLeader(round)).to.be.null;
+                expect(oc.getLeader(round)).to.be.null;
             }), { numRuns: 50 });
         });
     });

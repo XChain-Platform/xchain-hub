@@ -108,7 +108,7 @@ module.exports = {
     },
 
     // Persist the `capability` set at `block` and mirror it to hub-DB subscribers. The
-    // write and the select-back are OracleConsensus._persistCapabilitySnapshot's, through
+    // write and the select-back are OracleConsensus.persistCapabilitySnapshot's, through
     // the same shared writer, so the rows a chain-only hub produces are byte-identical to
     // a validator hub's for the same block and INSERT IGNORE makes either order a no-op
     // for the other.

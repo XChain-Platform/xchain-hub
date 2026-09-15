@@ -192,9 +192,9 @@ function initRoundState(self){
     // restart, so it cannot answer that question.
     self._committedEpochs = new Set();
     self._timer   = null;
-    self._ticking = false;      // in-flight guard, see _tick()
+    self._ticking = false;      // in-flight guard, see tick()
     self._truncWarnAt = 0;      // throttle for the truncated-set alarm, see eligibleVerifiers()
-    self._handler = (env) => self._handleMessage(env);
+    self._handler = (env) => self.handleMessage(env);
 }
 
 module.exports = { resolvePinnedParams, resolveOperationalKnobs, resolveGenesisVerifiers, initVerdictRail,

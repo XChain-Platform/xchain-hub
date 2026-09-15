@@ -67,7 +67,7 @@ module.exports = {
         return [entry.round];
     },
 
-    // Read all queue entries (used by _processQueue and on restart)
+    // Read all queue entries (used by processQueue and on restart)
     readQueue() {
         let raw = this.readDurableFile(this.queuePath);
         if (raw === null) return [];

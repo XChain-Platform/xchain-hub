@@ -30,7 +30,7 @@ module.exports = {
 
     // This node's rank in the request's responsible set: 0 = leader, ≥1 = follower
     // (step-in order). Returns null if this node holds no identity / isn't listed.
-    _myRank(entry){
+    myRank(entry){
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if (!myPubkey) return null;
         if (Array.isArray(entry.responsible) && entry.responsible.length){

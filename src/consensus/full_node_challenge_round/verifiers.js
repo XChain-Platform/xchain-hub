@@ -96,7 +96,7 @@ module.exports = {
         if(myRank < 0) return false;
         // Rank 0 leads at the chain-anchored close; if no verdict lands, each further
         // closeDepth of chain height promotes the next rank as a failover (chain-based
-        // so all hubs agree on who leads, escalated in _tick via state.leadRank).
+        // so all hubs agree on who leads, escalated in tick via state.leadRank).
         let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
         return myRank === unlockedRank;
     },
@@ -120,7 +120,7 @@ module.exports = {
     async eligibleVerifiers(epoch){
         let set = new Set(this.genesis);
         try {
-            let verified = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
+            let verified = await this.indexerCall('getfullnodeverifiers', { block_index: epoch });
             // Alarm-and-proceed on a TRUNCATED verifier set. getfullnodeverifiers carries
             // `truncated` precisely so a hub can say so (it is set when the indexer's read
             // hit VALIDATOR_QUERY_LIMIT), and this set is the 2/3+1 quorum denominator and

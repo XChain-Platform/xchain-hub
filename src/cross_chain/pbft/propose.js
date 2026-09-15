@@ -102,7 +102,7 @@ module.exports = {
     openPendingRound(rid, row, validators, weighted){
         let snapCount  = validators.length;
         let quorum     = bftQuorumOrSingle(snapCount, 0);   // majority-floored BFT quorum (0 = single-node self-sign)
-        let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
+        let canonical  = this.engine.canonicalMatch(row, 0);   // new round always starts at view 0
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
 
         let pending = {
@@ -153,7 +153,7 @@ module.exports = {
             this.emit('match:abandoned', { matchId: rid });
             return;
         }
-        try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
+        try { await this.engine.persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
         let sig = this.identity.sign(canonical);
         pending.signatures.set(myPubkey, sig);
@@ -191,7 +191,7 @@ module.exports = {
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
     async broadcastPropose(pending){
-        try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
+        try { await this.engine.persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
         catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
         let mySig = this.identity.sign(pending.canonical);
         pending.signatures.set(pending.myPubkey, mySig);

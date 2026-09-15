@@ -99,7 +99,7 @@ class PriceFetcher {
         // quiet (that source is still contributing other pairs), and the
         // total-loss warn fires only when EVERY source dropped the pair and
         // blames the absence rather than the bound. Every sibling rejection site
-        // in this pipeline already says it out loud (OracleRound._handleMessage,
+        // in this pipeline already says it out loud (OracleRound.handleMessage,
         // OracleConsensus.aggregate, XchainPriceSource.entry); this was the
         // last silent one.
         // One entry per source that calls reportBoundRejects. Coinbase was added to

@@ -46,8 +46,8 @@ function makeHub(overrides) {
         getIdentity:      () => makeIdentity(),
         capabilitySnapshot: overrides && overrides.capabilitySnapshot !== undefined
             ? overrides.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
-            ? overrides._resolveBtcIndexerUrl
+        resolveBtcIndexerUrl: overrides && overrides.resolveBtcIndexerUrl
+            ? overrides.resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };
@@ -103,7 +103,7 @@ const hookAt3913 = function () {
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('pollPending in-flight guard (2591)', function () { it('does not stack a second concurrent poll while one is in flight', async function () {
             let resolvePost;
             axiosStub.post.returns(new Promise(r => { resolvePost = r; }));
-            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let first  = ar.pollPending();     // enters, sets _pollRunning, awaits axios
             let second = ar.pollPending();     // must short-circuit on _pollRunning

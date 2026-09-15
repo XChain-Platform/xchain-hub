@@ -12,7 +12,7 @@
 
 // the checkpoint cadence must never fail silently.
 //
-// A pre-leadership bail in `_tick` that is a bare `return` leaves a hub whose
+// A pre-leadership bail in `tick` that is a bare `return` leaves a hub whose
 // oracle_publish capability has gone unqualified producing zero checkpoints,
 // zero log lines, and a getcheckpointstats payload that looks perfectly
 // healthy (round_timeouts 0). The live mainnet hub sat in exactly that
@@ -120,7 +120,7 @@ function buildEngine(opts) {
             resolveBtcLatestBlock: async () => state.btcBlock
         };
         const engine = new StateCheckpointEngine(hub);
-        engine._indexerCall = async () => (state.btcBlock == null ? null : Object.assign({}, TIP));
+        engine.indexerCall = async () => (state.btcBlock == null ? null : Object.assign({}, TIP));
         cadenceEngines.push(engine);
         return { engine, state, db, identity };
     }
@@ -130,7 +130,7 @@ function registerCadenceFailureTests() {
         const { engine, db } = buildEngine({ validators: [] });
         expect(engine.getStats).to.be.a('function');
 
-        await engine._tick();
+        await engine.tick();
 
         expect(db.checkpoints.length, 'no checkpoint can be produced').to.equal(0);
         const stats = await engine.getStats();
@@ -140,8 +140,8 @@ function registerCadenceFailureTests() {
         expect(stats.cadence_stall_block, 'the block the round would have used').to.equal(100);
 
         // Repeat ticks keep counting: this is the 18-day mainnet shape.
-        await engine._tick();
-        await engine._tick();
+        await engine.tick();
+        await engine.tick();
         expect((await engine.getStats()).cadence_stalls).to.equal(3);
     });
 
@@ -151,9 +151,9 @@ function registerCadenceFailureTests() {
         const orig = console.warn;
         console.warn = (m) => seen.push(String(m));
         try {
-            await engine._tick();
-            await engine._tick();
-            await engine._tick();
+            await engine.tick();
+            await engine.tick();
+            await engine.tick();
         } finally { console.warn = orig; }
 
         const stallLines = seen.filter(l => /cadence STALLED/.test(l));
@@ -168,7 +168,7 @@ function registerCadenceFailureTests() {
         const other = new ValidatorIdentity('22'.repeat(32));
         const { engine } = buildEngine({ validators: [{ pubkey: other.getPubkeyHex().toLowerCase(), amount: '1' }] });
 
-        await engine._tick();
+        await engine.tick();
 
         const stats = await engine.getStats();
         expect(stats.cadence_stalls).to.equal(1);
@@ -182,7 +182,7 @@ function registerCadenceRecoveryTests() {
         state.btcBlock = null;
         engine.hub.resolveBtcLatestBlock = async () => null;
 
-        await engine._tick();
+        await engine.tick();
 
         const stats = await engine.getStats();
         expect(stats.cadence_stalls).to.equal(1);
@@ -194,12 +194,12 @@ function registerCadenceRecoveryTests() {
         const { engine, state, db } = buildEngine();
 
         state.btcBlock = 100;
-        await engine._tick();                       // leads the first round
+        await engine.tick();                       // leads the first round
         expect(db.checkpoints.length, 'first round finalizes').to.equal(1);
         expect(engine._lastCheckpointBtcBlock).to.equal(100);
 
         state.btcBlock = 103;                       // interval is 6, so 103 is inside it
-        await engine._tick();
+        await engine.tick();
 
         const stats = await engine.getStats();
         expect(stats.cadence_stalls, 'being inside the interval is normal').to.equal(0);
@@ -210,12 +210,12 @@ function registerCadenceRecoveryTests() {
         const { engine, state, db } = buildEngine({ validators: [] });
         const identity = engine.identity;
 
-        await engine._tick();
+        await engine.tick();
         expect((await engine.getStats()).cadence_stall_reason, 'stalled first').to.be.a('string');
 
         // Operator fixes the capability config; the snapshot qualifies us again.
         state.validators = [{ pubkey: identity.getPubkeyHex().toLowerCase(), amount: '1' }];
-        await engine._tick();
+        await engine.tick();
 
         expect(db.checkpoints.length, 'the round now finalizes').to.equal(1);
         const stats = await engine.getStats();
@@ -238,7 +238,7 @@ function registerCadenceMirrorFailureTest() {
             return realQuery(sql, params);
         };
 
-        await engine._tick();
+        await engine.tick();
 
         expect(db.checkpoints.length, 'no checkpoint was produced').to.equal(0);
         expect(engine._lastCheckpointBtcBlock, 'the latch did not consume the interval').to.equal(null);
@@ -249,7 +249,7 @@ function registerCadenceMirrorFailureTest() {
 
         // The next poll re-enters the same round rather than waiting a whole interval.
         failing = false;
-        await engine._tick();
+        await engine.tick();
         expect(db.checkpoints.length, 'the retried round finalizes').to.equal(1);
         expect((await engine.getStats()).cadence_stall_reason, 'reason clears on success').to.equal(null);
     });
@@ -304,7 +304,7 @@ function buildTwoMember(frozenTipTicks) {
             resolveBtcLatestBlock: async () => state.btcBlock
         };
         const engine = new StateCheckpointEngine(hub);
-        engine._indexerCall = async () => Object.assign({}, TIP);
+        engine.indexerCall = async () => Object.assign({}, TIP);
         frozenTipEngines.push(engine);
         return { engine, state, myRank };
     }
@@ -315,21 +315,21 @@ function registerFrozenTipDetectionTests() {
         const { engine, state, myRank } = buildTwoMember(K);
         expect(state.btcBlock % 2).to.not.equal(myRank);
 
-        await engine._tick();
-        await engine._tick();
+        await engine.tick();
+        await engine.tick();
         let stats = await engine.getStats();
         expect(stats.cadence_stalls, 'below K this is ordinary rotation').to.equal(0);
         expect(stats.frozen_tip_ticks).to.equal(2);
         expect(stats.frozen_tip_block).to.equal(state.btcBlock);
 
-        await engine._tick();                        // tick K
+        await engine.tick();                        // tick K
         stats = await engine.getStats();
         expect(stats.cadence_stalls, 'stall reported within K ticks').to.equal(1);
         expect(stats.cadence_stall_reason).to.match(/frozen at \d+/);
         expect(stats.cadence_stall_reason).to.match(/slot \d+ is not this hub's rank/);
         expect(stats.cadence_stall_block).to.equal(state.btcBlock);
 
-        await engine._tick();                        // stays stalled, keeps counting
+        await engine.tick();                        // stays stalled, keeps counting
         expect((await engine.getStats()).cadence_stalls).to.equal(2);
     });
 
@@ -337,13 +337,13 @@ function registerFrozenTipDetectionTests() {
         const { engine, state, myRank } = buildTwoMember(3);
         const notMine = state.btcBlock;
 
-        await engine._tick();
-        await engine._tick();
+        await engine.tick();
+        await engine.tick();
         expect(engine._notMySlotTicks).to.equal(2);
 
         state.btcBlock = notMine + 2;                // advanced, still not our slot
         expect(state.btcBlock % 2).to.not.equal(myRank);
-        await engine._tick();
+        await engine.tick();
         let stats = await engine.getStats();
         expect(stats.cadence_stalls).to.equal(0);
         expect(stats.frozen_tip_ticks, 'counter restarts at the new block').to.equal(1);
@@ -355,13 +355,13 @@ function registerFrozenTipRecoveryTests() {
     it('the tip advancing to our slot clears the frozen-tip stall and leads the round', async function () {
         const { engine, state, myRank } = buildTwoMember(2);
 
-        await engine._tick();
-        await engine._tick();
+        await engine.tick();
+        await engine.tick();
         expect((await engine.getStats()).cadence_stall_reason).to.match(/frozen/);
 
         state.btcBlock += 1;                         // slot now == myRank
         expect(state.btcBlock % 2).to.equal(myRank);
-        await engine._tick();
+        await engine.tick();
 
         const stats = await engine.getStats();
         expect(engine._lastCheckpointBtcBlock, 'we led the round').to.equal(state.btcBlock);
@@ -389,7 +389,7 @@ function registerFrozenTipRecoveryTests() {
 
         for (let i = 0; i < K; i++) {
             state.btcBlock = (i % 2 === 0) ? frozen : String(frozen);
-            await engine._tick();
+            await engine.tick();
         }
 
         const stats = await engine.getStats();

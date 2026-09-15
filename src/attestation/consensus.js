@@ -90,7 +90,7 @@ class AttestationConsensus extends EventEmitter {
             logger.info('AttestationConsensus: no peer manager; skipping start');
             return;
         }
-        this._messageHandler = (env) => this._handleMessage(env);
+        this._messageHandler = (env) => this.handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
         this.checkNonOkSizingFloor();
         logger.info('AttestationConsensus: started');
@@ -131,7 +131,7 @@ class AttestationConsensus extends EventEmitter {
             myStatus: myStatus, mirrorEra: mirrorEra, myEffective: myEffective, myAdmit: myAdmit, mySig: mySig });
     }
 
-    _handlePropose(envelope){
+    handlePropose(envelope){
         let admitted = this.admittablePropose(envelope);
         if(!admitted) return;
         let { d, rid, pending, senderPubkey } = admitted;
@@ -166,10 +166,10 @@ class AttestationConsensus extends EventEmitter {
         let strategy = pending.pinnedConsensusStrategy;
         // The canonical the on-chain verifier reconstructs binds `status` (hardcoded
         // 'ok' for a winner), but a proposal stores only {body, meta, sig} and its sig
-        // was verified in _handlePropose over the sender's own wire status. A proposer
+        // was verified in handlePropose over the sender's own wire status. A proposer
         // can match the winner body+meta yet have signed over status='fail', so its sig
         // does NOT verify over the winner canonical. Re-verify here before counting it,
-        // mirroring handlePrepare (614) and _handleCommit; an unverifiable sig inflates
+        // mirroring handlePrepare (614) and handleCommit; an unverifiable sig inflates
         // signatures.size and the indexer would deterministically reject the response.
         let winnerCanonical = this.buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
@@ -327,7 +327,7 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Winner already established: a later PREPARE's signature must verify
-    // over the CANONICAL WINNER body/status/meta (mirror _handleCommit),
+    // over the CANONICAL WINNER body/status/meta (mirror handleCommit),
     // NOT over the sender's own (possibly divergent) body. Storing a sig
     // over a divergent body would inflate signatures.size, which is the gate
     // checkCommitQuorum finalizes on, so the emitted on-chain response
@@ -346,7 +346,7 @@ class AttestationConsensus extends EventEmitter {
         }
     }
 
-    _handleCommit(envelope){
+    handleCommit(envelope){
         let admitted = this.admittableCommit(envelope);
         if(!admitted) return;
         let { d, rid, pending, senderPubkey } = admitted;

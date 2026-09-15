@@ -155,7 +155,7 @@ class AttestationResponseMirror {
         // one either.
         let pm = this.hubPeerManager();
         if(pm && typeof pm.on === 'function'){
-            this._peerHandler = (envelope) => this._handleMessage(envelope);
+            this._peerHandler = (envelope) => this.handleMessage(envelope);
             pm.on('message', this._peerHandler);
             this._retryTimer = setInterval(() => {
                 this.drainParked().catch(e =>

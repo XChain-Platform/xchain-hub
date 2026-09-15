@@ -54,7 +54,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part3() {
     it('PREPARE quorum triggers COMMIT broadcast @regression-p0', function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-                let digest = oc._digest(1, prices);
+                let digest = oc.digest(1, prices);
 
                 oc.pendingRounds.set(1, {
                     prices, digest,
@@ -77,7 +77,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part4() {
     it('COMMIT quorum stores snapshot and emits event @regression-p0', async function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-                let digest = oc._digest(1, prices);
+                let digest = oc.digest(1, prices);
 
                 oracleRound.getSubmissions.returns(new Map());
 
@@ -92,7 +92,7 @@ function registerSuitePart1() {
                 let emitted = null;
                 oc.on('round:finalized', (data) => { emitted = data; });
 
-                oc._handleCommit({
+                oc.handleCommit({
                     sender: VALIDATORS_4[2].addr,
                     sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { round: 1, digest }
@@ -109,7 +109,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part5() {
     it('PREPARE with wrong digest is rejected @regression-p0', function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-                let digest = oc._digest(1, prices);
+                let digest = oc.digest(1, prices);
 
                 oc.pendingRounds.set(1, {
                     prices, digest, prepares: new Set(), commits: new Set(),
@@ -129,7 +129,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part6() {
     it('duplicate votes counted once @regression-p0', function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
-                let digest = oc._digest(1, prices);
+                let digest = oc.digest(1, prices);
 
                 oc.pendingRounds.set(1, {
                     prices, digest, prepares: new Set(), commits: new Set(),
@@ -302,12 +302,12 @@ describe('Regression: Oracle Pipeline', function () {
     describe('Oracle digest determinism', function () {
             it('same round+prices → same digest @regression-p0', function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-                expect(oc._digest(1, prices)).to.equal(oc._digest(1, prices));
+                expect(oc.digest(1, prices)).to.equal(oc.digest(1, prices));
             });
 
             it('different round → different digest @regression-p0', function () {
                 let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-                expect(oc._digest(1, prices)).to.not.equal(oc._digest(2, prices));
+                expect(oc.digest(1, prices)).to.not.equal(oc.digest(2, prices));
             });
         });
 }

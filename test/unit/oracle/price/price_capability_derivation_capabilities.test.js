@@ -205,7 +205,7 @@ function registerCapabilityVerdictTests() {
 
 function registerCapabilityParityTest() {
     it('is byte-identical to the consensus writer for EVERY capability, not just price', async function () {
-        // OracleConsensus._persistCapabilitySnapshot(capability, block) is the shared
+        // OracleConsensus.persistCapabilitySnapshot(capability, block) is the shared
         // consensus writer's four-argument shape (StateCheckpointEngine and
         // AttestationBatchPublisher call snapWrite the same way). If the derived rows
         // differ for any capability, the two mirrors disagree about who was capable at
@@ -226,7 +226,7 @@ function registerCapabilityParityTest() {
             derivedHub.capabilitySnapshot = capSnapshot;
             derivedHub.hubDbBroadcaster   = null;
             const derived = new PriceAggregator(derivedHub);
-            await oc._persistCapabilitySnapshot(capability, ANCHOR);
+            await oc.persistCapabilitySnapshot(capability, ANCHOR);
             await derived.persistDerivedCapabilitySnapshot(capability, ANCHOR);
             const ocInsert  = consensusDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
             const devInsert = derivedDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));

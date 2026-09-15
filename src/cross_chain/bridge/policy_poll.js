@@ -83,7 +83,7 @@ module.exports = {
     // unreadable, which ABSTAINS this cycle rather than reading at an unconfirmed height.
     async policyOriginBlock(originChain){
         let res;
-        try { res = await this._indexerCall(originChain, 'getlatestblock', {}); }
+        try { res = await this.indexerCall(originChain, 'getlatestblock', {}); }
         catch(e){ return null; }
         let latest = Number(res && (res.block_index != null ? res.block_index : res.latest_block_index));
         if(!Number.isFinite(latest)) return null;
@@ -151,7 +151,7 @@ module.exports = {
         if(originBlock == null) return;
 
         let policy;
-        try { policy = await this._indexerCall(originChain, 'gettokenpolicy', { tick: pair.tick, origin_block: originBlock }); }
+        try { policy = await this.indexerCall(originChain, 'gettokenpolicy', { tick: pair.tick, origin_block: originBlock }); }
         catch(e){ return; }                       // read failure abstains; never refuses (D16)
         if(!policy || policy.error) return;       // the tick has no native row here
 

@@ -253,7 +253,7 @@ function registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWidePa
     };
     // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|dispatch|'+call_id), VIEW=0.
     const raw = ['XCALL', 'DISPATCH', CALL_ID, '150', 'regtest', 'BTC', '41', '5', 'DOGE', '99', 'onArrival', sha256('["x"]'), '50000', '1', '1700000000'].join('|');
-    expect(engine._canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|dispatch|' + CALL_ID), 0, raw));
+    expect(engine.canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|dispatch|' + CALL_ID), 0, raw));
   });
   it('result canonical hashes the payload and binds result_status', function () {
     const {
@@ -271,7 +271,7 @@ function registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWidePa
     };
     // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|result|'+call_id), VIEW=0.
     const raw = ['XCALL', 'RESULT', CALL_ID, '160', 'regtest', 'DOGE', 'ok', sha256('cGF5bG9hZA'), '1700000050'].join('|');
-    expect(engine._canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|result|' + CALL_ID), 0, raw));
+    expect(engine.canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|result|' + CALL_ID), 0, raw));
   });
 }
 function registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWide() {

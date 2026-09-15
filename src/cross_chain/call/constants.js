@@ -61,7 +61,7 @@ const RESULT_BACKOFF_MAP_MAX    = 10000;            // parked-map cap; FIFO evic
 // Bound on listCalls rows (mirrors the api-side validateLimit ceiling).
 const CALL_LIST_MAX = 10000;
 
-// The INT/BIGINT-backed fields each phase signs VERBATIM into _canonicalMatch and
+// The INT/BIGINT-backed fields each phase signs VERBATIM into canonicalMatch and
 // every verifier re-derives from a normalized integer. Decimal, address, method,
 // payload, chain and status fields are compared as strings and are NOT listed.
 const CANONICAL_INT_FIELDS = {

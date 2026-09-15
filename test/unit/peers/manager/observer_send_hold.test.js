@@ -80,8 +80,8 @@ function registerAHubOutsideTheResolvedSignerSetSuite1Part2() {
   it('attempts no checkpoint round and meters no cadence stall', async function () {
     let held = {on(){},removeListener(){},broadcast(){},authoringHeld:()=>true};
     let {engine,indexerCalls,db} = observerHubDoesNotAuthorIntoRoundsItCannotSuite3BuildCheckpointEngine(held);
-    await engine._tick();
-    await engine._tick();
+    await engine.tick();
+    await engine.tick();
     expect(indexerCalls, 'not even the tip is fetched').to.have.lengthOf(0);
     expect(db.checkpoints, 'no checkpoint is cut').to.have.lengthOf(0);
     let stats = await engine.getStats();
@@ -140,7 +140,7 @@ function registerFailsOpenWhenTheSetCannotSayAbsentSuite2Part2() {
   it('a checkpoint engine whose peer manager predates the gate keeps its old cadence', async function () {
     let old = {on(){},removeListener(){},broadcast(){}};
     let {engine,indexerCalls} = observerHubDoesNotAuthorIntoRoundsItCannotSuite3BuildCheckpointEngine(old);
-    await engine._tick();
+    await engine.tick();
     expect(indexerCalls.length, 'the round ran as before').to.be.greaterThan(0);
     expect((await engine.getStats()).observer_idle).to.equal(false);
   });
@@ -222,7 +222,7 @@ function observerHubDoesNotAuthorIntoRoundsItCannotSuite3BuildCheckpointEngine(p
     resolveBtcLatestBlock: async () => 100
   };
   const engine = new StateCheckpointEngine(hub);
-  engine._indexerCall = async (chain, method) => {
+  engine.indexerCall = async (chain, method) => {
     indexerCalls.push(chain + ':' + method);
     return Object.assign({}, TIP);
   };

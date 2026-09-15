@@ -208,7 +208,7 @@ class ReorgHandler extends EventEmitter {
         // EventEmitter doesn't await listeners, so surface rejections here
         // instead of letting them become unhandled.
         this._messageHandler = (envelope) => {
-            this._handleMessage(envelope).catch(err =>
+            this.handleMessage(envelope).catch(err =>
                 logger.error(nodeUtil.format('Reorg: message handling error:', err && err.message)));
         };
         this.peerManager.on('message', this._messageHandler);
@@ -237,7 +237,7 @@ class ReorgHandler extends EventEmitter {
     // vulnerability scenario); an empty registry stays lenient ONLY until a chain-effective signer set exists (genuine
     // pre-bootstrap, where the sig layer already rejects unknown senders and no
     // peer votes should be arriving).
-    _isKnownSender(sender) {
+    isKnownSender(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         if (!registry) return false;
         if (registry.size === 0) {
@@ -252,11 +252,11 @@ class ReorgHandler extends EventEmitter {
         return registry.has(sender);
     }
 
-    async _handleMessage(envelope) {
+    async handleMessage(envelope) {
         switch (envelope.type) {
             case REORG_ALERT:          await this.handleAlert(envelope);   break;
             case XCHAIN_REORG_PREPARE: await this.handlePrepare(envelope); break;
-            case XCHAIN_REORG_COMMIT:  this._handleCommit(envelope);        break;
+            case XCHAIN_REORG_COMMIT:  this.handleCommit(envelope);        break;
         }
     }
 
@@ -272,7 +272,7 @@ class ReorgHandler extends EventEmitter {
         if (N <= 0) {
             // No authoritative validator set yet (startup, before the hub propagates
             // it to this engine). Reorg co-signs are admitted only from registered
-            // validators (_isKnownSender, keyed on validatorPubkeys), so derive N
+            // validators (isKnownSender, keyed on validatorPubkeys), so derive N
             // from that SAME authenticated registry rather than the raw open-socket
             // count (REORG-QUORUM-PEER-FALLBACK-1): open-peer connections can include
             // unregistered or duplicate sockets and differ per hub, so counting them
@@ -296,7 +296,7 @@ class ReorgHandler extends EventEmitter {
     // The digest binds the OBSERVED HASHES as well as the round identity, so a
     // Byzantine leader cannot swap hashes per-follower: every co-sign commits to
     // one specific (oldHash → newHash) observation at one height.
-    _digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash) {
+    digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash) {
         let payload = JSON.stringify({ reorgId, chain, reorgHeight, timestamp, oldHash, newHash });
         return crypto.createHash('sha256').update(payload).digest('hex');
     }

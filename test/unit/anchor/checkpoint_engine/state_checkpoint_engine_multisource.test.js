@@ -115,7 +115,7 @@ function buildEngine(weightSnapshot, opts) {
         resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
     };
     let engine = new StateCheckpointEngine(hub);
-    engine._indexerCall = async () => Object.assign({}, TIP);
+    engine.indexerCall = async () => Object.assign({}, TIP);
     let finalized = [];
     engine.on('checkpoint:finalized', (ev) => finalized.push(ev));
     return { engine, identity, db, hub, broadcasts, finalized, pubkey: identity.getPubkeyHex().toLowerCase() };
@@ -148,7 +148,7 @@ function registerMultiSourcePersistenceTests() {
         engines.push(ctx.engine);
 
         await ctx.engine.start();
-        await ctx.engine._tick();
+        await ctx.engine.tick();
         await waitUntil(() => ctx.db.checkpoints.length === 1, { label: 'the two-source self-sign to write its checkpoint' });
 
         expect(ctx.db.checkpoints.length, 'checkpoint produced (round not skipped, no stall)').to.equal(1);
@@ -160,7 +160,7 @@ function registerMultiSourcePersistenceTests() {
         expect(ctx.engine.pending.size, 'no pending round left hanging (no stall/timeout)').to.equal(0);
     });
 
-    // 2650: _persistCapabilitySnapshot writes BOTH (source, pubkey) rows AND streams
+    // 2650: persistCapabilitySnapshot writes BOTH (source, pubkey) rows AND streams
     // BOTH to the mirror. Pre-fix the pubkey-only select-back (LIMIT 1) surfaced only one
     // source to the downstream indexer.
     it('both source rows persist and survive the mirror (2650)', async function () {
@@ -171,7 +171,7 @@ function registerMultiSourcePersistenceTests() {
         ], truncated: false });
         engines.push(ctx.engine);
 
-        await ctx.engine._persistCapabilitySnapshot('oracle_publish', 970000);
+        await ctx.engine.persistCapabilitySnapshot('oracle_publish', 970000);
 
         let rows = ctx.db.snapshots.filter(r => r.capability === 'oracle_publish' && r.snapshot_block === 970000);
         expect(rows.length, 'both source rows persisted').to.equal(2);
@@ -200,7 +200,7 @@ function registerMultiSourceArchiveTests() {
         ], truncated: true });
         engines.push(ctx.engine);
 
-        await ctx.engine._persistCapabilitySnapshot('oracle_publish', 970001);
+        await ctx.engine.persistCapabilitySnapshot('oracle_publish', 970001);
 
         let rows = ctx.db.snapshots.filter(r => r.capability === 'oracle_publish' && r.snapshot_block === 970001);
         expect(rows.length, 'a truncated snapshot must not reach the mirrored table').to.equal(0);

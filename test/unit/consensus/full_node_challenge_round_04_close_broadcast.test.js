@@ -120,7 +120,7 @@ function wireEncoder(eng, encoder) {
 // each hub locally detected the epoch) ──────────────────────────────────────
 describe('FullNodeChallengeRound', function () {
     installSuiteHooks1();
-describe('_tick chain-anchored close', function () {
+describe('tick chain-anchored close', function () {
 it('closes a round only once the tip reaches epoch + closeDepth', async function () {
             const hub = makeHub();   // identity V1 (genesis verifier + claimant)
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }] });
@@ -129,18 +129,18 @@ it('closes a round only once the tip reaches epoch + closeDepth', async function
 
             // tip = 288 → round created for epoch 288; close not due until tip ≥ 291.
             wireRpc({ ledgerHash: SEED, tip: 288, verifiers: [], block });
-            await eng._tick();
+            await eng.tick();
             expect(eng.rounds.has(288), 'round started').to.equal(true);
             expect(eng.rounds.get(288).closed, 'open at tip 288').to.equal(false);
 
             // tip = 290 (< epoch + closeDepth) → still open.
             wireRpc({ ledgerHash: SEED, tip: 290, verifiers: [], block });
-            await eng._tick();
+            await eng.tick();
             expect(eng.rounds.get(288).closed, 'open at tip 290').to.equal(false);
 
             // tip = 291 (= epoch + closeDepth) → closes.
             wireRpc({ ledgerHash: SEED, tip: 291, verifiers: [], block });
-            await eng._tick();
+            await eng.tick();
             expect(eng.rounds.get(288).closed, 'closed at tip 291').to.equal(true);
         });
 // The poll is a plain setInterval, so a tick that outruns pollMs (three
@@ -157,16 +157,16 @@ it('a second overlapping tick returns instead of starting the epoch twice', asyn
             // A slow indexer: the first tick is still awaiting when the second fires.
             let release;
             const gate = new Promise((res) => { release = res; });
-            const realCall = eng._indexerCall.bind(eng);
+            const realCall = eng.indexerCall.bind(eng);
             let first = true;
-            eng._indexerCall = async (m, p) => {
+            eng.indexerCall = async (m, p) => {
                 if (first) { first = false; await gate; }
                 return realCall(m, p);
             };
             const runEpoch = sinon.spy(eng, 'runEpoch');
 
-            const a = eng._tick();
-            const b = eng._tick();      // fires while a is parked on the gate
+            const a = eng.tick();
+            const b = eng.tick();      // fires while a is parked on the gate
             await b;                    // returns immediately, guarded
             expect(runEpoch.callCount, 'the guarded tick did no work').to.equal(0);
             release();
@@ -179,12 +179,12 @@ it('a second overlapping tick returns instead of starting the epoch twice', asyn
 
 describe('FullNodeChallengeRound', function () {
     installSuiteHooks1();
-describe('_tick chain-anchored close', function () {
+describe('tick chain-anchored close', function () {
 it('releases the in-flight flag when a tick throws', async function () {
             const hub = makeHub();
             const eng = new FullNodeChallengeRound(hub);
-            eng._indexerCall = async () => { throw new Error('indexer down'); };
-            try { await eng._tick(); } catch (e) { /* start()'s wrapper swallows this */ }
+            eng.indexerCall = async () => { throw new Error('indexer down'); };
+            try { await eng.tick(); } catch (e) { /* start()'s wrapper swallows this */ }
             expect(eng._ticking, 'a rejected indexer call must not wedge the poll').to.equal(false);
         });
 });

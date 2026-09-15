@@ -35,7 +35,7 @@ const logger = getLogger();
 // AttestationConsensus buffers, finding F7).
 //
 // handlePrePrepare is ASYNC (it locks the validator snapshot at the leader's
-// block boundary, an out-of-process call) while handlePrepare/_handleCommit are
+// block boundary, an out-of-process call) while handlePrepare/handleCommit are
 // synchronous and, before this buffer, dropped any vote for a seq this hub had
 // not opened yet. A leader whose own stake already meets the round's threshold
 // broadcasts PRE_PREPARE and COMMIT back to back, so on a busy host the COMMIT
@@ -112,7 +112,7 @@ module.exports = {
         this._replayingSeq = seq;
         try {
             for (let env of bucket) {
-                try { this._handleMessage(env); }
+                try { this.handleMessage(env); }
                 catch (e) {
                     logger.error(nodeUtil.format('PBFT: error replaying a buffered vote for seq %s:', seq,
                         e && e.message ? e.message : e));
@@ -131,7 +131,7 @@ module.exports = {
         if (!seq || !configDigest) return;
 
         // Only count PREPARE votes from registered validators.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'prepare', sender: envelope.sender, envelope });
             return;
         }
@@ -177,12 +177,12 @@ module.exports = {
         }
     },
 
-    _handleCommit(envelope) {
+    handleCommit(envelope) {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
 
         // Only count COMMIT votes from registered validators.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'commit', sender: envelope.sender, envelope });
             return;
         }

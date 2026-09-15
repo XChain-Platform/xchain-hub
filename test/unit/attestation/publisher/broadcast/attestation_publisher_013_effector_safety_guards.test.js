@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -190,7 +190,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         expect(readQueue(pub.queuePath).length).to.equal(0);
     }); });
 
-describe('AttestationPublisher: effector-safety guards', function () { afterEach(hookAt68170); it('disabled: _processQueue does not query the indexer or broadcast (item 2678)', async function () {
+describe('AttestationPublisher: effector-safety guards', function () { afterEach(hookAt68170); it('disabled: processQueue does not query the indexer or broadcast (item 2678)', async function () {
         process.env.ATTEST_ENABLED = 'false';
         const pub = makePublisher(MY_PUB);
         const fetchStub = sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());
@@ -198,7 +198,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         pub.setBroadcastHook(bcast);
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: '33'.repeat(32),
             wire: wireFor('33'.repeat(32)), responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(fetchStub.called).to.equal(false);
         expect(bcast.called).to.equal(false);
     }); });
@@ -228,7 +228,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         const recs = readQueue(pub.spendLogPath);
         expect(recs.length).to.equal(1);
         expect(recs[0].txid).to.equal('txid-123');
@@ -248,7 +248,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
             { ts: Date.now() - 10 * 60000, requestId: rid1, wire: wireFor(rid1), responsible: [MY_PUB], leaderPubkey: MY_PUB },
             { ts: Date.now() - 10 * 60000, requestId: rid2, wire: wireFor(rid2), responsible: [MY_PUB], leaderPubkey: MY_PUB }
         ]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.calledOnce).to.equal(true);
         expect(readQueue(pub.queuePath).length).to.equal(1);
     }); });
@@ -278,7 +278,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called, 'must not re-broadcast within the ambiguous cooldown').to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(1);
     }); });
@@ -293,7 +293,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.calledOnce).to.equal(true);
         expect(pub._ambiguousSends.has(rid)).to.equal(false);
     }); });
@@ -307,7 +307,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());   // landed/expired
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called).to.equal(false);
         expect(pub._ambiguousSends.has(rid)).to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(0);
@@ -364,7 +364,7 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
         writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
             responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called, 'a second BTC fee for an already-sent response').to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(0);
     }); });

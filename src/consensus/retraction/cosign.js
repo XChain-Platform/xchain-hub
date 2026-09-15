@@ -98,7 +98,7 @@ module.exports = {
         if(intentTs === undefined) return;                         // nothing we observed -> never sign
 
         this.peerManager.broadcast(XRETRACT_SIGN, {
-            id: this._roundId(canonical), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
+            id: this.roundId(canonical), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
         });
     },
 
@@ -143,7 +143,7 @@ module.exports = {
         if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
 
         let canonical = retractionClass().canonicalRetraction(evt);
-        let id        = this._roundId(canonical);
+        let id        = this.roundId(canonical);
         if(this.finalized.has(id)) return;                         // already streamed (we initiated it)
 
         let validators = await this.resolveCapabilityValidators('cross_chain', evt.snapshot_block, this.network);

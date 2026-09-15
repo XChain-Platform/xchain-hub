@@ -22,7 +22,7 @@
  *     (`attestation-queue.jsonl`) BEFORE any broadcast attempt, by every node
  *     in the request's responsible set, not just the leader.
  *   - The leader broadcasts immediately and drops its queue entry on success.
- *   - A periodic sweep (_processQueue, also run once on startup, re-broadcasts
+ *   - A periodic sweep (processQueue, also run once on startup, re-broadcasts
  *     any entry whose request is still pending on the indexer:
  *       * the leader's own entry is retried if the live broadcast failed or the
  *         process crashed between the queue write and the send (crash recovery);
@@ -103,7 +103,7 @@ class AttestationPublisher {
         initPublisherFailover(this, cfg);
         initPublisherGuards(this, cfg);
 
-        this._sweeping = false;   // sweep self-overlap guard, see _processQueue()
+        this._sweeping = false;   // sweep self-overlap guard, see processQueue()
     }
 
     // Operator-facing stats for the /health response and status tooling.
@@ -161,13 +161,13 @@ class AttestationPublisher {
 
         // Crash recovery: replay any finalized responses that survived a restart
         // (a leader that crashed between the queue write and the broadcast).
-        await this._processQueue().catch(err =>
+        await this.processQueue().catch(err =>
             logger.error('AttestationPublisher: startup replay error: ' + (err && err.message ? err.message : err)));
 
         // Ongoing failover sweep: retries failed leader broadcasts and lets
         // followers step in once the leader has been silent past the window.
         this._sweepTimer = setInterval(() => {
-            this._processQueue().catch(err =>
+            this.processQueue().catch(err =>
                 logger.error('AttestationPublisher: sweep error: ' + (err && err.message ? err.message : err)));
         }, this.failoverPollMs);
 
@@ -177,7 +177,7 @@ class AttestationPublisher {
 
     async stop(){
         // The queue file is durable WAL state; it is intentionally NOT drained
-        // or truncated here. Surviving entries are replayed by _processQueue on
+        // or truncated here. Surviving entries are replayed by processQueue on
         // the next start(), which is what protects a finalized response across a
         // crash. We only stop the in-process sweep timer.
         if(this._sweepTimer){

@@ -27,7 +27,7 @@ const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('
 
     function proposeEnvelope(prices, round = ROUND) {
         return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
-            round, prices, digest: oc._digest(round, prices),
+            round, prices, digest: oc.digest(round, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } };
     }
@@ -52,12 +52,12 @@ const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('
             return { oc: oc, text: logs.join('\n') };
         }
 
-function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() {                               // must be truthy (_handlePropose: `if (!round) return`)
+function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() {                               // must be truthy (handlePropose: `if (!round) return`)
 
     beforeEach(function () {
         hub = createMockHub();
         pm  = hub._peerManager;
-        pm.validatorPubkeys = new Set();          // size 0 → _isKnownSender accepts any sender
+        pm.validatorPubkeys = new Set();          // size 0 → isKnownSender accepts any sender
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         // A federated hub refuses a round with no deterministic capability snapshot, so the
         // harness models one over the same validators. These cases are about price content,
@@ -65,7 +65,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Hooks() { 
         hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
-        leader = oc._getLeader(ROUND);             // this round's deterministic leader
+        leader = oc.getLeader(ROUND);             // this round's deterministic leader
         // This hub is a follower; pick a validator that is NOT the round leader.
         pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
         // This follower's own locally-observed price for BTC/USD is 100000.

@@ -55,7 +55,7 @@ function acceptViewChange(self, view, seq, vcCtx) {
     // cannot hand the round to a node the rest of the federation would
     // not recognize as leader.
     self.view = view;
-    let newLeader = self._getLeader(seq, vcCtx.memberPubkeys || null);
+    let newLeader = self.getLeader(seq, vcCtx.memberPubkeys || null);
     if (self.isLeaderIdentity(newLeader, self.peerManager.validatorAddr, self.selfPubkey())) {
         logger.info('PBFT: View change to view ' + view + '; this node is the new leader');
         self.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
@@ -104,7 +104,7 @@ module.exports = {
 
         // Only count VIEW_CHANGE votes from registered validators; view-change
         // quorum is the same Set.size tally as PREPARE/COMMIT.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'view_change', sender: envelope.sender, envelope });
             return;
         }

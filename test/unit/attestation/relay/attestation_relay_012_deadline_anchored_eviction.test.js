@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -180,8 +180,8 @@ const hookAt75935 = function () { fs.rmSync(dir, { recursive: true, force: true 
 // A relay whose LTC indexer reports the given tip, everything else as usual.
         function relayAtTip(tip, rows = [originRow()], homeRows = []) {
             const relay = makeRelay({}, rows, homeRows);
-            const inner = relay._indexerCall;
-            relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+            const inner = relay.indexerCall;
+            relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
                 const res = await inner(coin, method, params);
                 if (coin === 'LTC') res.latest_block_index = tip;
                 return res;

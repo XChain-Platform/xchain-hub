@@ -96,7 +96,7 @@ module.exports = {
 
     initFailoverLadder(cfg){
         // Failover-ladder step (see the derivation above; the ladder itself is in
-        // _rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
+        // rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
         // every hub computes the same rank unlock without clock sync; 36 blocks is
         // ~6h at the 10-minute target. The ORDERING is the load-bearing part:
         //   round timeout (120s) + DOGE burial (60 confs, ~1h)
@@ -110,7 +110,7 @@ module.exports = {
         // (1h..24h) preserves both bounds; below the DOGE burial window it burns
         // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
         // Never a divergence risk in either direction: concurrent unlocked
-        // publishers build byte-identical archives (see _rankUnlocked).
+        // publishers build byte-identical archives (see rankUnlocked).
         //
         // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
         // anchors to a STALLED batch, so its `since` grows without bound. On the v0
@@ -242,7 +242,7 @@ module.exports = {
         // Eligibility is a CHECKPOINT ORDINAL, not the raw seq. checkpoint_seq is the
         // round's BTC snapshot_block (deriveCheckpointSeq), and the cadence latch
         // advances it by exactly CHECKPOINT_INTERVAL_BLOCKS per round
-        // (StateCheckpointEngine._tick), so `seq % N` is NOT a 1-in-N sample: it is a
+        // (StateCheckpointEngine.tick), so `seq % N` is NOT a 1-in-N sample: it is a
         // residue class pinned by the first checkpoint after the latch is seeded.
         // Whenever N shares a factor with the interval (N=2 or 3 against the default 6)
         // every round lands in the same residue, so the federation either anchors every

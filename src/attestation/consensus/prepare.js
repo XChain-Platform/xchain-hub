@@ -60,7 +60,7 @@ module.exports = {
         // a Byzantine leader (or, in byte_equality, a corroborating peer) introduces
         // a body: the A-F4 corroboration path below signs over a peer's PREPARE
         // directly and never re-derives it from a stored proposal, so the
-        // _handlePropose gate alone does not cover every path into a signature.
+        // handlePropose gate alone does not cover every path into a signature.
         // Once a winner is already established this hub signs over
         // `pending.winner.body` (already gated at establishment), never over this
         // wire `body`, so a late echo's own decoded length is harmless either way.
@@ -252,7 +252,7 @@ module.exports = {
     // (that no responsible validator proposed) must not be adopted and
     // re-signed on faith. If we haven't collected enough proposals to
     // check yet, buffer the PREPARE (replayed once proposals arrive via
-    // _handlePropose) instead of accepting blind.
+    // handlePropose) instead of accepting blind.
     leaderBodyMatchesProposal(envelope, pending, rid, d, meta, senderPubkey, prepBodyHash){
         let need = Math.min(pending.redundancy, pending.responsible.length);
         if(pending.proposals.size < need){

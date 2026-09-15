@@ -51,8 +51,8 @@ function registerFeature12quorumLockingPart1() {
     rootSuiteEngine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
     rootSuitePm.validatorAddr = VALIDATORS_4[0].addr;
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -75,8 +75,8 @@ function registerFeature12quorumLockingPart2() {
     rootSuiteEngine.setValidatorSet(VALIDATORS_4);
     rootSuitePm.validatorAddr = VALIDATORS_4[0].addr;
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -115,8 +115,8 @@ function registerFeature12quorumLockingPart3() {
     rootSuiteEngine.setValidatorSet(VALIDATORS_7);
     rootSuitePm.validatorAddr = VALIDATORS_7[0].addr;
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_7[1].addr,
       sig_pubkey: VALIDATORS_7[1].pubkey,
       data: {
@@ -163,8 +163,8 @@ function registerFeature12quorumLocking() {
 function feature13sourceActionVerificationPropose(overrides = {}) {
   let attestationId = overrides.attestationId || 'BTC:1:LTC';
   let confirmations = overrides.confirmations || 3;
-  let digest = rootSuiteEngine._digest(attestationId, confirmations);
-  return rootSuiteEngine._handlePropose({
+  let digest = rootSuiteEngine.digest(attestationId, confirmations);
+  return rootSuiteEngine.handlePropose({
     sender: VALIDATORS_4[1].addr,
     sig_pubkey: VALIDATORS_4[1].pubkey,
     data: Object.assign({
@@ -187,7 +187,7 @@ function registerFeature13sourceActionVerificationPart1() {
   it('refuses when the discrete fields do not match the attestationId', async function () {
     // Digest matches the id, but the proposer claims a different source
     // action than the one the id (and digest) commit to.
-    sinon.stub(rootSuiteEngine, '_indexerCall').resolves({
+    sinon.stub(rootSuiteEngine, 'indexerCall').resolves({
       exists: true,
       confirmations: 100
     });
@@ -201,7 +201,7 @@ function registerFeature13sourceActionVerificationPart1() {
   });
   it('refuses when the action does not exist on the source chain', async function () {
     rootSuiteEngine.indexers.BTC.url = 'http://stub:3004/';
-    sinon.stub(rootSuiteEngine, '_indexerCall').resolves({
+    sinon.stub(rootSuiteEngine, 'indexerCall').resolves({
       exists: false,
       confirmations: 0
     });
@@ -210,7 +210,7 @@ function registerFeature13sourceActionVerificationPart1() {
   });
   it('refuses when the action is below the per-chain confirmation threshold', async function () {
     rootSuiteEngine.indexers.BTC.url = 'http://stub:3004/';
-    sinon.stub(rootSuiteEngine, '_indexerCall').resolves({
+    sinon.stub(rootSuiteEngine, 'indexerCall').resolves({
       exists: true,
       confirmations: 5
     }); // BTC needs 6
@@ -219,7 +219,7 @@ function registerFeature13sourceActionVerificationPart1() {
   });
   it('refuses when the indexer lookup fails (fail closed, not fail open)', async function () {
     rootSuiteEngine.indexers.BTC.url = 'http://stub:3004/';
-    sinon.stub(rootSuiteEngine, '_indexerCall').rejects(new Error('ECONNREFUSED'));
+    sinon.stub(rootSuiteEngine, 'indexerCall').rejects(new Error('ECONNREFUSED'));
     await feature13sourceActionVerificationPropose();
     expect(rootSuiteEngine.pendingAttestations.size).to.equal(0);
   });
@@ -227,7 +227,7 @@ function registerFeature13sourceActionVerificationPart1() {
 function registerFeature13sourceActionVerificationPart2() {
   it('co-signs when the action exists at sufficient depth', async function () {
     rootSuiteEngine.indexers.BTC.url = 'http://stub:3004/';
-    let call = sinon.stub(rootSuiteEngine, '_indexerCall').resolves({
+    let call = sinon.stub(rootSuiteEngine, 'indexerCall').resolves({
       exists: true,
       confirmations: 6
     });

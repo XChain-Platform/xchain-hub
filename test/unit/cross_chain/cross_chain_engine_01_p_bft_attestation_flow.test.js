@@ -39,8 +39,8 @@ let rootSuiteHub, rootSuitePm, rootSuiteEngine;
 function registerFeature7pBFTAttestationFlowPart1() {
   it('PROPOSE from peer creates pending and broadcasts PREPARE', async function () {
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
-    await rootSuiteEngine._handlePropose({
+    let digest = rootSuiteEngine.digest(attestationId, 3);
+    await rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -63,7 +63,7 @@ function registerFeature7pBFTAttestationFlowPart1() {
     if (pending.timer) clearTimeout(pending.timer);
   });
   it('PROPOSE with wrong digest is rejected', function () {
-    rootSuiteEngine._handlePropose({
+    rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {
@@ -78,7 +78,7 @@ function registerFeature7pBFTAttestationFlowPart1() {
 function registerFeature7pBFTAttestationFlowPart2() {
   it('PREPARE quorum triggers COMMIT', function () {
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
+    let digest = rootSuiteEngine.digest(attestationId, 3);
 
     // N=4, quorum=3. Start with 2 prepares
     rootSuiteEngine.pendingAttestations.set(attestationId, {
@@ -112,7 +112,7 @@ function registerFeature7pBFTAttestationFlowPart2() {
 function registerFeature7pBFTAttestationFlowPart3() {
   it('COMMIT quorum stores attestation and emits event', async function () {
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
+    let digest = rootSuiteEngine.digest(attestationId, 3);
     let emitted = null;
     rootSuiteEngine.on('attestation:finalized', a => {
       emitted = a;
@@ -138,7 +138,7 @@ function registerFeature7pBFTAttestationFlowPart3() {
     });
 
     // Third commit → quorum met
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: VALIDATORS_4[2].addr,
       sig_pubkey: VALIDATORS_4[2].pubkey,
       data: {
@@ -158,7 +158,7 @@ function registerFeature7pBFTAttestationFlowPart3() {
   });
 
   // a transient DB failure once deleted the round outright, and
-  // both _handleCommit and _checkCommitQuorum return early once the round is
+  // both handleCommit and _checkCommitQuorum return early once the round is
   // gone, so the quorum proof was unrecoverable while peer hubs advanced.
 }
 function feature7pBFTAttestationFlowNested5QuorateRound(attestationId, digest) {
@@ -181,14 +181,14 @@ function feature7pBFTAttestationFlowNested5QuorateRound(attestationId, digest) {
 function registerFeature7pBFTAttestationFlowNested5Part1() {
   it('retries a transient failure and finalizes exactly once', async function () {
     let attestationId = 'BTC:1:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
+    let digest = rootSuiteEngine.digest(attestationId, 3);
     let emitted = [];
     rootSuiteEngine.on('attestation:finalized', a => emitted.push(a));
     rootSuiteHub.db.doQuery.onCall(0).rejects(new Error('ER_LOCK_DEADLOCK'));
     rootSuiteHub.db.doQuery.onCall(1).rejects(new Error('ER_LOCK_DEADLOCK'));
     rootSuiteHub.db.doQuery.resolves([]);
     rootSuiteEngine.pendingAttestations.set(attestationId, feature7pBFTAttestationFlowNested5QuorateRound(attestationId, digest));
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: VALIDATORS_4[2].addr,
       sig_pubkey: VALIDATORS_4[2].pubkey,
       data: {
@@ -208,12 +208,12 @@ function registerFeature7pBFTAttestationFlowNested5Part1() {
 function registerFeature7pBFTAttestationFlowNested5Part2() {
   it('retains the round when every attempt fails, and a later COMMIT re-drives it', async function () {
     let attestationId = 'BTC:2:LTC';
-    let digest = rootSuiteEngine._digest(attestationId, 3);
+    let digest = rootSuiteEngine.digest(attestationId, 3);
     let emitted = [];
     rootSuiteEngine.on('attestation:finalized', a => emitted.push(a));
     rootSuiteHub.db.doQuery.rejects(new Error('ER_CON_COUNT_ERROR'));
     rootSuiteEngine.pendingAttestations.set(attestationId, feature7pBFTAttestationFlowNested5QuorateRound(attestationId, digest));
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: VALIDATORS_4[2].addr,
       sig_pubkey: VALIDATORS_4[2].pubkey,
       data: {
@@ -238,7 +238,7 @@ function registerFeature7pBFTAttestationFlowNested5Part2() {
     // DB recovers; a retransmitted COMMIT re-enters the quorum check.
     rootSuiteHub.db.doQuery.resetBehavior();
     rootSuiteHub.db.doQuery.resolves([]);
-    rootSuiteEngine._handleCommit({
+    rootSuiteEngine.handleCommit({
       sender: VALIDATORS_4[3].addr,
       sig_pubkey: VALIDATORS_4[3].pubkey,
       data: {
@@ -267,7 +267,7 @@ function registerFeature7pBFTAttestationFlowNested5() {
 function registerFeature7pBFTAttestationFlowPart4() {
   it('already-finalized attestation is ignored', function () {
     rootSuiteEngine.finalized.add('BTC:1:LTC');
-    rootSuiteEngine._handlePropose({
+    rootSuiteEngine.handlePropose({
       sender: VALIDATORS_4[1].addr,
       sig_pubkey: VALIDATORS_4[1].pubkey,
       data: {

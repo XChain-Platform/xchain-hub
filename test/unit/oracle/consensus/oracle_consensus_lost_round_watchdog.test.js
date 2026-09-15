@@ -164,13 +164,13 @@ function registerOracleConsensusALostRoundIsDurablyRecordedSuite1Part2() {
     // This seat's own finalizeRound never ran (its round scheduler missed the
     // boundary); the round exists here only because a PROPOSE opened it.
     oracleConsensusALostRoundIsDurablyRecordedSuite1Seat(VALIDATORS_3[2]);
-    await oracleConsensusALostRoundIsDurablyRecordedSuite1Oc._handlePropose({
+    await oracleConsensusALostRoundIsDurablyRecordedSuite1Oc.handlePropose({
       sender: VALIDATORS_3[0].addr,
       sig_pubkey: VALIDATORS_3[0].pubkey,
       data: {
         round: ROUND,
         prices: PRICES,
-        digest: oracleConsensusALostRoundIsDurablyRecordedSuite1Oc._digest(ROUND, PRICES),
+        digest: oracleConsensusALostRoundIsDurablyRecordedSuite1Oc.digest(ROUND, PRICES),
         btcBlockHeight: HEIGHT,
         btcBlockTime: TIME
       }

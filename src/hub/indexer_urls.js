@@ -92,7 +92,7 @@ class IndexerUrls {
     // one error line. A POSITIVE identification of a non-BTC indexer fails loud and
     // closed; an unreachable or silent one keeps the legacy behaviour, because
     // "cannot verify" is not evidence of a misconfiguration.
-    async _resolveBtcIndexerUrl(){
+    async resolveBtcIndexerUrl(){
         let url = await this.resolveIndexerUrl('BTC');
         if(!url) return null;
         if(await this.indexerCoinMismatch(url, 'BTC')) return null;

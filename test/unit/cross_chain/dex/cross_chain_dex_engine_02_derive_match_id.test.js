@@ -206,9 +206,9 @@ function feature7canonicalMatchSampleRow() {
   };
 }
 
-// The indexer's cross_settle._canonical is kept here byte-for-byte so a drift breaks CI.
+// The indexer's cross_settle.canonical is kept here byte-for-byte so a drift breaks CI.
 // EQUIV active in regtest (WI-2 bump 2): TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
-// The indexer's cross_settle._canonical is kept here byte-for-byte so a drift breaks CI.
+// The indexer's cross_settle.canonical is kept here byte-for-byte so a drift breaks CI.
 // EQUIV active in regtest (WI-2 bump 2): TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
 function feature7canonicalMatchIndexerCanonical(m) {
   let raw = ['XMATCH', m.match_id, String(m.snapshot_block), m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr, m.b_chain, String(m.b_action_index), m.b_tick || '', String(m.b_amount), String(m.b_ownership), m.b_payout_addr, String(m.effective_time), m.network || '', m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'), m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
@@ -219,13 +219,13 @@ function feature7canonicalMatchIndexerCanonical(m) {
 }
 function registerFeature7canonicalMatchPart1() {
   it('wraps the XMATCH content in the EQUIV header and appends the fill + royalty fields after network', function () {
-    let canon = feature7canonicalMatchEng._canonicalMatch(feature7canonicalMatchSampleRow());
+    let canon = feature7canonicalMatchEng.canonicalMatch(feature7canonicalMatchSampleRow());
     expect(canon).to.match(/^EQUIV\|XDEX\|abc\|0\|\|XMATCH\|/); // gated (regtest); header then content
     expect(canon.endsWith('|regtest|order|0|order|40||')).to.be.true; // trailing '||' = empty royalty legs
   });
-  it('byte-matches the indexer cross_settle._canonical', function () {
+  it('byte-matches the indexer cross_settle.canonical', function () {
     let row = feature7canonicalMatchSampleRow();
-    expect(feature7canonicalMatchEng._canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
+    expect(feature7canonicalMatchEng.canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
   });
   it('signs non-null royalty legs into the canonical bytes (strip changes the bytes)', function () {
     let row = feature7canonicalMatchSampleRow();
@@ -233,8 +233,8 @@ function registerFeature7canonicalMatchPart1() {
       to: 'mjrCrhL4qjKo1oGYJb78Lp8GoBiF6yFTZM',
       bps: 500
     }]);
-    expect(feature7canonicalMatchEng._canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
-    expect(feature7canonicalMatchEng._canonicalMatch(row)).to.not.equal(feature7canonicalMatchEng._canonicalMatch(feature7canonicalMatchSampleRow()));
+    expect(feature7canonicalMatchEng.canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
+    expect(feature7canonicalMatchEng.canonicalMatch(row)).to.not.equal(feature7canonicalMatchEng.canonicalMatch(feature7canonicalMatchSampleRow()));
   });
   it('defaults kind/filled_before for a legacy (swap) row', function () {
     let row = feature7canonicalMatchSampleRow();
@@ -242,12 +242,12 @@ function registerFeature7canonicalMatchPart1() {
     delete row.a_filled_before;
     delete row.b_kind;
     delete row.b_filled_before;
-    expect(feature7canonicalMatchEng._canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
-    expect(feature7canonicalMatchEng._canonicalMatch(row).endsWith('|swap|0|swap|0||')).to.be.true;
+    expect(feature7canonicalMatchEng.canonicalMatch(row)).to.equal(feature7canonicalMatchIndexerCanonical(row));
+    expect(feature7canonicalMatchEng.canonicalMatch(row).endsWith('|swap|0|swap|0||')).to.be.true;
   });
 }
 function registerFeature7canonicalMatch() {
-  describe('_canonicalMatch()', function () {
+  describe('canonicalMatch()', function () {
     before(function () {
       loadModule();
       feature7canonicalMatchEng = new CrossChainDexEngine(makeDexHub());

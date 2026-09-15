@@ -214,7 +214,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         await this.transferConsensus.start();
         await this.policyConsensus.start();
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => logger.error(nodeUtil.format('CrossChainBridge: poll error:', err && err.message)));
+            this.poll().catch(err => logger.error(nodeUtil.format('CrossChainBridge: poll error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
         logger.info('CrossChainBridge: engine started (poll ' + this.pollMs + 'ms, confirmations ' +
@@ -269,7 +269,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         return true;
     }
 
-    _canonicalMatch(r, view){
+    canonicalMatch(r, view){
         let hasTransfer = !!(r && r.transfer_id);
         let hasPolicy   = !!(r && r.snapshot_id);
         if(hasTransfer === hasPolicy)
@@ -302,7 +302,7 @@ class CrossChainBridgeEngine extends EventEmitter {
         return raw;
     }
 
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

@@ -197,7 +197,7 @@ function makeHub(overrides){
         },
         providerRegistry:     { getMinStake: () => '1000' },
         btcIndexerHeaders:   () => ({}),
-        _resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
+        resolveBtcIndexerUrl: async () => 'http://indexer.invalid/api'
     }, overrides || {});
     consensus.hub = hub;
     return hub;

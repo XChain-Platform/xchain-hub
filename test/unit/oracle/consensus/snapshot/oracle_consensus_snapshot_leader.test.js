@@ -71,25 +71,25 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part1() {
   afterEach(function () {
     sinon.restore();
   });
-  describe('_getLeader()', function () {
+  describe('getLeader()', function () {
     it('derives the leader from sorted snapshot pubkeys, round % N', function () {
       let members = memberSetOf(VALIDATORS_3);
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(0, members).pubkey).to.equal(VALIDATORS_3[0].pubkey);
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(1, members).pubkey).to.equal(VALIDATORS_3[1].pubkey);
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(2, members).pubkey).to.equal(VALIDATORS_3[2].pubkey);
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(3, members).pubkey).to.equal(VALIDATORS_3[0].pubkey); // wraps
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(0, members).pubkey).to.equal(VALIDATORS_3[0].pubkey);
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(1, members).pubkey).to.equal(VALIDATORS_3[1].pubkey);
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(2, members).pubkey).to.equal(VALIDATORS_3[2].pubkey);
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(3, members).pubkey).to.equal(VALIDATORS_3[0].pubkey); // wraps
     });
     it('is unaffected by live validatorSet drift when a snapshot exists', function () {
       let members = memberSetOf(VALIDATORS_3);
       // Registration churn reorders/extends the live set mid-round.
       oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.setValidatorSet([VALIDATORS_3[1], VALIDATORS_3[2], VALIDATORS_3[0], makeValidator(9)]);
-      let leader = oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, members);
+      let leader = oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, members);
       expect(leader.pubkey).to.equal(VALIDATORS_3[0].pubkey);
       expect(leader.addr).to.equal(VALIDATORS_3[0].addr);
     });
     it('falls back to live-set rotation without a snapshot (legacy)', function () {
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, null)).to.equal(VALIDATORS_3[0]);
-      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._getLeader(4, null)).to.equal(VALIDATORS_3[1]);
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, null)).to.equal(VALIDATORS_3[0]);
+      expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.getLeader(4, null)).to.equal(VALIDATORS_3[1]);
     });
   });
 }
@@ -115,7 +115,7 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part2() {
     });
   });
   it('finalizeRound: snapshot leader proposes even when live-set rotation disagrees', async function () {
-    // Live set drifted so live _getLeader(3) over [v2,v3,v1] would pick v2,
+    // Live set drifted so live getLeader(3) over [v2,v3,v1] would pick v2,
     // but the snapshot says round 3's leader is v1 (this hub).
     oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.setValidatorSet([VALIDATORS_3[1], VALIDATORS_3[2], VALIDATORS_3[0]]);
     oracleConsensusBlockLockedSnapshotLeaderSuite1OracleRound.getSubmissions.returns(buildSubmissions([{
@@ -157,9 +157,9 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part3() {
     await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.finalizeRound(4, 100, 1700000000);
     expect(oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.broadcast.called).to.be.false;
   });
-  it('_handlePropose: accepts a PROPOSE from the snapshot leader that live-set rotation would reject', async function () {
+  it('handlePropose: accepts a PROPOSE from the snapshot leader that live-set rotation would reject', async function () {
     // Follower view: this hub is v2; live set drifted to [v2,v3] so legacy
-    // _getLeader(3) = v2 (itself) and v1's PROPOSE would be dropped as
+    // getLeader(3) = v2 (itself) and v1's PROPOSE would be dropped as
     // non-leader. The snapshot elects v1 for round 3.
     oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.validatorAddr = VALIDATORS_3[1].addr;
     oracleConsensusBlockLockedSnapshotLeaderSuite1Hub._identity.getPubkeyHex.returns(VALIDATORS_3[1].pubkey);
@@ -172,13 +172,13 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part3() {
       sender: VALIDATORS_3[1].addr,
       prices: prices
     }]));
-    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._handlePropose({
+    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.handlePropose({
       sender: VALIDATORS_3[0].addr,
       sig_pubkey: VALIDATORS_3[0].pubkey,
       data: {
         round: oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND,
         prices,
-        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
+        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }
@@ -187,9 +187,9 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part3() {
   });
 }
 function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part4() {
-  it('_handlePropose: rejects a PROPOSE from a non-leader the drifted live set would have elected', async function () {
+  it('handlePropose: rejects a PROPOSE from a non-leader the drifted live set would have elected', async function () {
     // Follower view: this hub is v3. Live set drifted to [v2,v1,v3]; legacy
-    // _getLeader(3) over it = v2. The snapshot elects v1 for round 3, so a
+    // getLeader(3) over it = v2. The snapshot elects v1 for round 3, so a
     // PROPOSE from v2 (no fallback grounds: leader v1 HAS a submission and
     // no leader-timeout has elapsed) must be dropped.
     oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.validatorAddr = VALIDATORS_3[2].addr;
@@ -206,13 +206,13 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part4() {
       sender: VALIDATORS_3[1].addr,
       prices: prices
     }]));
-    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._handlePropose({
+    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.handlePropose({
       sender: VALIDATORS_3[1].addr,
       sig_pubkey: VALIDATORS_3[1].pubkey,
       data: {
         round: oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND,
         prices,
-        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
+        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }
@@ -221,7 +221,7 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part4() {
   });
 }
 function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part5() {
-  it('_handlePropose: still accepts the lowest-addr fallback when the snapshot leader has no submission', async function () {
+  it('handlePropose: still accepts the lowest-addr fallback when the snapshot leader has no submission', async function () {
     // Follower view: this hub is v3; snapshot leader v1 never submitted.
     // v2 is the lowest-addr submitter and proposes as fallback.
     oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.validatorAddr = VALIDATORS_3[2].addr;
@@ -237,13 +237,13 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part5() {
       sender: VALIDATORS_3[2].addr,
       prices: prices
     }]));
-    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._handlePropose({
+    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.handlePropose({
       sender: VALIDATORS_3[1].addr,
       sig_pubkey: VALIDATORS_3[1].pubkey,
       data: {
         round: oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND,
         prices,
-        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
+        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }
@@ -252,7 +252,7 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part5() {
   });
 }
 function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part6() {
-  it('_handlePropose: accepts the snapshot leader on its proven sig_pubkey with an EMPTY registry and validator set', async function () {
+  it('handlePropose: accepts the snapshot leader on its proven sig_pubkey with an EMPTY registry and validator set', async function () {
     // Follower view: this hub is v2 and knows nobody by addr (no registry
     // rows, no loaded validator set), only the chain-locked snapshot. The
     // leader's addr cannot be resolved (leader.addr is null), so the match
@@ -271,13 +271,13 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part6() {
       prices: prices,
       pubkey: VALIDATORS_3[1].pubkey
     }]));
-    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._handlePropose({
+    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.handlePropose({
       sender: VALIDATORS_3[0].addr,
       sig_pubkey: VALIDATORS_3[0].pubkey,
       data: {
         round: oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND,
         prices,
-        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
+        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }
@@ -286,7 +286,7 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part6() {
   });
 }
 function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part7() {
-  it('_handlePropose: an empty registry does not let a non-leader in on a proven key that is not the leader\'s', async function () {
+  it('handlePropose: an empty registry does not let a non-leader in on a proven key that is not the leader\'s', async function () {
     oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.validatorAddr = VALIDATORS_3[2].addr;
     oracleConsensusBlockLockedSnapshotLeaderSuite1Pm.validatorPubkeys = new Map();
     oracleConsensusBlockLockedSnapshotLeaderSuite1Hub._identity.getPubkeyHex.returns(VALIDATORS_3[2].pubkey);
@@ -304,13 +304,13 @@ function registerOracleConsensusBlockLockedSnapshotLeaderSuite1Part7() {
       prices: prices,
       pubkey: VALIDATORS_3[1].pubkey
     }]));
-    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._handlePropose({
+    await oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.handlePropose({
       sender: VALIDATORS_3[1].addr,
       sig_pubkey: VALIDATORS_3[1].pubkey,
       data: {
         round: oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND,
         prices,
-        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc._digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
+        digest: oracleConsensusBlockLockedSnapshotLeaderSuite1Oc.digest(oracleConsensusBlockLockedSnapshotLeaderSuite1ROUND, prices),
         btcBlockHeight: 100,
         btcBlockTime: 1700000000
       }

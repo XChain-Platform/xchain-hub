@@ -94,7 +94,7 @@ function initRoundCounters() {
 // The per-round timer and watchdog maps, all keyed by round and cleared by stop().
 function initRoundTimers() {
     // When each round became ready to finalize (Date.now() at finalizeRound's
-    // follower path). The receiver-side leader-timeout grace in _handlePropose
+    // follower path). The receiver-side leader-timeout grace in handlePropose
     // is measured from here so every honest hub applies the same window before
     // accepting a leader-timeout fallback PROPOSE. Pruned when a round
     // finalizes/skips. Map<round, msEpoch>.
@@ -136,8 +136,8 @@ function initFinalizedAndEarlyBuffers() {
     // empty), NOT because the whole federation skipped (stress-sweep #7). These
     // are kept separate from `finalized` so a legitimate later PROPOSE from the
     // federation still processes: without this, a locally-skipped round landed
-    // in `finalized`, _handlePropose dropped the real PROPOSE, and handlePrepare
-    // /_handleCommit refused to buffer, so the hub permanently held a NULL
+    // in `finalized`, handlePropose dropped the real PROPOSE, and handlePrepare
+    // /handleCommit refused to buffer, so the hub permanently held a NULL
     // price_snapshot for a round the rest of the federation finalized. When the
     // round does reach commit quorum here, storeSnapshot's ON DUPLICATE KEY
     // UPDATE upgrades the 'skipped' rows to 'finalized' and markFinalized moves
@@ -149,7 +149,7 @@ function initFinalizedAndEarlyBuffers() {
     this._locallySkippedOrder = [];
 
     // Early-arrival buffer (finding F7). A PREPARE/COMMIT can land while
-    // _handlePropose is still awaiting the block-boundary snapshot, or
+    // handlePropose is still awaiting the block-boundary snapshot, or
     // before the PROPOSE itself arrives. The whole PBFT burst completes in
     // well under a second, so dropping those messages makes this hub miss
     // the round (the federation still finalizes without it, leaving a

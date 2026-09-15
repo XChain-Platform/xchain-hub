@@ -15,7 +15,7 @@
 // capabilities by the operator's dq 2 option (a) ruling, same day).
 //
 // The bug these pin: the only writer of a `price` capability snapshot was
-// OracleConsensus._persistCapabilitySnapshot on the round-FINALIZATION path, so a
+// OracleConsensus.persistCapabilitySnapshot on the round-FINALIZATION path, so a
 // chain-only node's hub mirrored an EMPTY capability_snapshots and its indexer, which
 // off BTC resolves the price set from that mirrored table alone, recorded every landed
 // batch `invalid: insufficient signer stake`.

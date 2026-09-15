@@ -29,7 +29,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    // Canonicalize the set's ORDER on the way in, so _getLeader's
+    // Canonicalize the set's ORDER on the way in, so getLeader's
     // legacy live-set path (`validatorSet[round % N]`, taken whenever a round
     // has no usable block-locked snapshot) elects the same leader on every hub
     // for identical membership. The snapshot path was already fixed by

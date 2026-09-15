@@ -94,7 +94,7 @@ function medianOf(values, mid) {
         // one ulp OUTSIDE the value both middles agree on: two submissions of
         // 0.0000001425 each quantize to 0.00000014, while bcadd(...,8) gave 0.00000029
         // and halving that gave 0.00000015. A co-signer re-deriving over the
-        // proposer-excluded set lands on 0.00000014 and the band in _handlePropose
+        // proposer-excluded set lands on 0.00000014 and the band in handlePropose
         // scores 6.667%, rejecting the WHOLE proposal, so one pair wedged the round.
         // Rounding once restores the invariant the even-split gate below relies on:
         // quantization is monotone, so if both middles quantize to X, so does their
@@ -123,13 +123,13 @@ function medianOf(values, mid) {
 // check missed every set the ceil-trim REDUCES to an even split - N=4 leaves 2
 // values, N=6 and N=8 leave 4 - and there the leader published the unbackable mean
 // while every honest follower, re-deriving over the proposer-excluded (odd) set,
-// landed on a single camp value, tripped the co-sign band in _handlePropose and
+// landed on a single camp value, tripped the co-sign band in handlePropose and
 // rejected the WHOLE proposal, so one pair's disagreement wedged the entire round
 // in the finalization timeout with no skipped-round row. A 2-value set is never
 // trimmed (values.length > 2 * trimCount is false at N=2), so this placement
 // strictly subsumes the old raw N==2 check rather than adding a second gate.
 // Shared deviation_band helper: (hi-lo)/(hi+lo), no rounded intermediate mean.
-// Scale 18, NOT the original inline scale 8: the co-sign gate (_handlePropose) and
+// Scale 18, NOT the original inline scale 8: the co-sign gate (handlePropose) and
 // SlashDetector both round at 18, so a scale-8 publish gate truncates a boundary
 // spread back inside the band and federation-signs a price the other two gates then
 // withhold or slash. Uses the hardcoded constant (not an env value) and bignumber
@@ -144,13 +144,13 @@ function medianOf(values, mid) {
 // 0.049999997500002625 (inside), median 0.10000011, and the low submission then
 // sits 0.0500000449999505 from THAT (outside). A follower re-deriving over the
 // proposer-excluded set lands on 0.09500010, trips the identical band in
-// _handlePropose, and rejects the WHOLE proposal, so one boundary pair wedges the
+// handlePropose, and rejects the WHOLE proposal, so one boundary pair wedges the
 // round in a finalization timeout. Both middles are checked because rounding moves
 // the reference toward one of them and away from the other, so either can be the
 // far side; with 8-decimal submissions (what every producer emits) that is the
 // only difference from the midpoint form, and it is strictly the safe direction.
 // Both SIDES are quantized to 8 decimals first, because that is the comparison
-// _handlePropose actually performs: the follower's local aggregate is itself an
+// handlePropose actually performs: the follower's local aggregate is itself an
 // 8-decimal median, so measuring a raw sub-8-decimal submission against a rounded
 // reference would score quantization error as feed disagreement and drop a pair
 // every submitter agreed on exactly (found by the fuzz property, at 1.05e-8: one
@@ -205,7 +205,7 @@ module.exports = {
         // arrival order). The per-pair VALUES were already order-invariant; the
         // ARRAY was not, and this array is what gets propagated on PROPOSE and
         // stored in price_snapshots, so two hubs with identical prices produced
-        // different bytes for the same round. _digest canonicalizes its own
+        // different bytes for the same round. digest canonicalizes its own
         // preimage independently (defence in depth for wire payloads this
         // method did not build), and buildPriceV0Payload already sorted; this
         // makes the propagated and stored array agree with both.
@@ -306,7 +306,7 @@ module.exports = {
     //
     // Shape: entries sorted by coinPair, projected to exactly [coinPair, price]
     // as strings in fixed order. String coercion mirrors the DEX's
-    // _canonicalMatch discipline (a numeric 80 and the string '80' are the same
+    // canonicalMatch discipline (a numeric 80 and the string '80' are the same
     // price and must hash alike). Projection also means a padded extra field on
     // the wire cannot change the digest; the per-pair semantic validation on the
     // PROPOSE path, and the separately signed PRICE v0 canonical, are what bind
@@ -335,7 +335,7 @@ module.exports = {
             });
     },
 
-    _digest(round, prices) {
+    digest(round, prices) {
         let payload = JSON.stringify({ round: round, prices: this.canonicalDigestPrices(prices) });
         return crypto.createHash('sha256').update(payload).digest('hex');
     }

@@ -31,7 +31,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    async _handleResult(envelope) {
+    async handleResult(envelope) {
         let { proposalId, status } = envelope.data;
         if (!proposalId || !status) return;
 
@@ -74,7 +74,7 @@ module.exports = {
         // a permanent governance split-brain. The tally side is already leader-pinned
         // (isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
         // of its broadcast still passes (sender == leader) and is absorbed by the 0-row guard.
-        if (!this._isKnownSender(envelope.sender)) {
+        if (!this.isKnownSender(envelope.sender)) {
             noteDrop({ reason: 'unknown_sender', phase: 'gov_result', sender: envelope.sender, envelope });
             return false;
         }

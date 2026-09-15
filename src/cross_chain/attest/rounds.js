@@ -69,12 +69,12 @@ module.exports = {
 
         // Check if this node is the leader for this chain pair
         this.seq++;
-        let leader = this._getLeader(this.seq, sourceChain, destChain);
+        let leader = this.getLeader(this.seq, sourceChain, destChain);
         if (leader && leader.addr !== this.peerManager.validatorAddr) {
             throw new Error('Not the leader for attestation (leader: ' + leader.addr + ')');
         }
 
-        let digest = this._digest(attestationId, confirmations);
+        let digest = this.digest(attestationId, confirmations);
 
         // Lock the VOTE POPULATION alongside the quorum, from the same snapshot that
         // sized it, so N's divisor and its numerator read one set (see countedVotes).
@@ -167,24 +167,24 @@ module.exports = {
         this.checkPrepareQuorum(attestationId);
     },
 
-    _handleMessage(envelope) {
+    handleMessage(envelope) {
         switch (envelope.type) {
             case XCHAIN_ATTEST_PROPOSE:
-                // _handlePropose is async because it locks the cross_chain
+                // handlePropose is async because it locks the cross_chain
                 // validator-set snapshot at the round's block boundary via an
                 // indexer call. Errors are caught and logged; they never bubble up
                 // to the gossip layer (mirrors OracleConsensus).
-                this._handlePropose(envelope).catch(err =>
+                this.handlePropose(envelope).catch(err =>
                     logger.error(nodeUtil.format('CrossChain: PROPOSE handler error for %s:',
                         (envelope && envelope.data && envelope.data.attestationId),
                         err && err.message)));
                 break;
             case XCHAIN_ATTEST_PREPARE: this.handlePrepare(envelope); break;
-            case XCHAIN_ATTEST_COMMIT:  this._handleCommit(envelope);  break;
+            case XCHAIN_ATTEST_COMMIT:  this.handleCommit(envelope);  break;
         }
     },
 
-    async _handlePropose(envelope) {
+    async handlePropose(envelope) {
         let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest, btcBlockHeight } = envelope.data;
         if (!attestationId || !digest) return;
         if (!/^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/.test(attestationId)) return;
@@ -192,13 +192,13 @@ module.exports = {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'xchain_propose', sender: envelope.sender, envelope });
             return;
         }
 
         // Verify digest
-        let computedDigest = this._digest(attestationId, confirmations);
+        let computedDigest = this.digest(attestationId, confirmations);
         if (computedDigest !== digest) return;
 
         // The discrete fields are what get stored when the round finalizes, so
@@ -257,7 +257,7 @@ module.exports = {
         }
         // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
         // single-operator fast path (requestAttestation, which self-signs only after
-        // confirming no federation snapshot resolved), reaching _handlePropose means a
+        // confirming no federation snapshot resolved), reaching handlePropose means a
         // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
         // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
         // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
@@ -295,7 +295,7 @@ module.exports = {
         if (!attestationId || !digest) return;
 
         // Only count PREPARE votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'xchain_prepare', sender: envelope.sender, envelope });
             return;
         }
@@ -307,12 +307,12 @@ module.exports = {
         this.checkPrepareQuorum(attestationId);
     },
 
-    _handleCommit(envelope) {
+    handleCommit(envelope) {
         let { attestationId, digest } = envelope.data;
         if (!attestationId || !digest) return;
 
         // Only count COMMIT votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) {
+        if (!this.isKnownSender(envelope)) {
             noteDrop({ reason: 'unknown_sender', phase: 'xchain_commit', sender: envelope.sender, envelope });
             return;
         }

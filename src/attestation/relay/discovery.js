@@ -46,7 +46,7 @@ module.exports = {
                 params.after_action_index = cursor.action_index;
             }
             let res;
-            try { res = await this._indexerCall(coin, method, params); }
+            try { res = await this.indexerCall(coin, method, params); }
             catch(e){ return { ok: false, rows: [], latest: null }; }
             if(!res || !Array.isArray(res[listField])) return { ok: false, rows: [], latest: null };
             if(page === 0) latest = Number(res.latest_block_index);
@@ -192,7 +192,7 @@ module.exports = {
         }
     },
 
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

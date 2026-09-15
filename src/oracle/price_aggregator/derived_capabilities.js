@@ -28,13 +28,13 @@
 // 2026-09-09: 1,148 rows, all `price`, no other capability at any height).
 //
 // The consensus writers this mirrors, one per name:
-//   price          OracleConsensus._persistCapabilitySnapshot (round finalization)
+//   price          OracleConsensus.persistCapabilitySnapshot (round finalization)
 //   oracle_publish StateCheckpointEngine.js:477,866  (the ANCHOR archive-head verifier)
 //   cross_chain    CrossChainCallEngine.js:721, RetractionConsensus.js:393,
 //                  CrossChainDexConsensus.js:326,377, CrossChainDexEngine.js:712
 //   attestation    AttestationBatchPublisher.js:722  (the v5 ATTEST head verifier)
 //
-// `cross_chain` is written by engines whose _persistCapabilitySnapshot takes a third
+// `cross_chain` is written by engines whose persistCapabilitySnapshot takes a third
 // `network` argument, and that argument is NOT a per-row scope this pass cannot supply.
 // capability_snapshots has no network column (lib/capability_snapshot_write.js COLUMNS)
 // and every reader keys on (capability, snapshot_block) alone (xchain-indexer db/index.js

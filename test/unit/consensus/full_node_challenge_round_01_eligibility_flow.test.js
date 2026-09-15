@@ -356,7 +356,7 @@ it('hands the window back when the verdict is definitively rejected', async func
                    'nothing left the process, so nothing is charged').to.equal(0);
             expect(st.finalized, 'and the round unlocks for a later retry').to.equal(false);
         });
-// A failover verdict (state.leadRank > 0, the _tick ladder promoting the next
+// A failover verdict (state.leadRank > 0, the tick ladder promoting the next
 // rank after the elected leader landed nothing) was otherwise byte-identical to a
 // healthy rank-0 verdict in every observable signal, so a dead elected leader
 // stayed invisible while the ladder quietly absorbed its rounds. Pin the rank on
@@ -367,7 +367,7 @@ it('names the broadcast rank on the sent record and marks a failover verdict', a
             const st  = eng.rounds.get(288);
             let seen = [];
             eng.recordSpend = (entry) => { seen.push(entry); return true; };
-            st.leadRank = 2;                   // _tick promoted rank 2: nothing landed at 0 or 1
+            st.leadRank = 2;                   // tick promoted rank 2: nothing landed at 0 or 1
             const logged = sinon.stub(console, 'log');
             try {
                 eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });

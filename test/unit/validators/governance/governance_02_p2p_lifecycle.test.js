@@ -95,8 +95,8 @@ it('handleVote REJECTS a registered validator vote with a forged signature', fun
 describe('Governance', function () {
     installSuiteHooks1();
 describe('P2P message handlers', function () {
-it('_handlePropose defaults a missing proposerPubkey and rationale to empty strings', async function () {
-            await gov._handlePropose({
+it('handlePropose defaults a missing proposerPubkey and rationale to empty strings', async function () {
+            await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -119,10 +119,10 @@ it('handleVote REJECTS an unsigned vote (no signature to authenticate the voter)
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
-it('_handleResult updates proposal status (from the tally leader, post voting_end)', async function () {
+it('handleResult updates proposal status (from the tally leader, post voting_end)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: '2020-01-01T00:00:00Z' }]); // SELECT voting_end
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });                       // UPDATE
-            await gov._handleResult({
+            await gov.handleResult({
                 sender: gov.getProposalLeader('gov:P:1').addr, type: 'GOV_RESULT',
                 data: { proposalId: 'gov:P:1', status: 'passed' }
             });
@@ -131,19 +131,19 @@ it('_handleResult updates proposal status (from the tally leader, post voting_en
             expect(hub.db.doQuery.getCall(1).args[0]).to.include('UPDATE');
         });
 it('ignores messages with missing fields', function () {
-            gov._handlePropose({ sender: 'peer', data: {} });
+            gov.handlePropose({ sender: 'peer', data: {} });
             gov.handleVote({ sender: 'peer', data: {} });
-            gov._handleResult({ sender: 'peer', data: {} });
+            gov.handleResult({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
         });
-it('_handleMessage routes each governance message type and ignores unknown', function () {
-            let p = sinon.spy(gov, '_handlePropose');
+it('handleMessage routes each governance message type and ignores unknown', function () {
+            let p = sinon.spy(gov, 'handlePropose');
             let v = sinon.spy(gov, 'handleVote');
-            let r = sinon.spy(gov, '_handleResult');
-            gov._handleMessage({ type: 'GOV_PROPOSE', data: {} });
-            gov._handleMessage({ type: 'GOV_VOTE', data: {} });
-            gov._handleMessage({ type: 'GOV_RESULT', data: {} });
-            expect(() => gov._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+            let r = sinon.spy(gov, 'handleResult');
+            gov.handleMessage({ type: 'GOV_PROPOSE', data: {} });
+            gov.handleMessage({ type: 'GOV_VOTE', data: {} });
+            gov.handleMessage({ type: 'GOV_RESULT', data: {} });
+            expect(() => gov.handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
             expect(p.calledOnce).to.be.true;
             expect(v.calledOnce).to.be.true;
             expect(r.calledOnce).to.be.true;

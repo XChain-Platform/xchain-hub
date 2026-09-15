@@ -154,7 +154,7 @@ const hookAt4037 = function () {
     }
 
 // Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
+    // handleCommit, so the test asserts vote-counting (commits.add) without
     // needing real validator crypto. The buffering decision under test happens
     // before any signature check regardless.
     function commitEnvelope(rid, peerPubkey) {
@@ -165,11 +165,11 @@ const RID  = 'cafecafecafecafecafecafecafecafe';
 
 const PEER = '22'.repeat(32);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: COMMIT after winner is set', function () { it('applies the vote directly without buffering', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: COMMIT after winner is set', function () { it('applies the vote directly without buffering', function () {
             let pending = seedPendingNoWinner(RID, PEER);
             pending.winner = { body: Buffer.from('winning-body'), meta: '' };
 
-            consensus._handleCommit(commitEnvelope(RID, PEER));
+            consensus.handleCommit(commitEnvelope(RID, PEER));
 
             expect(pending.commits.has(PEER)).to.equal(true);
             expect(consensus.earlyCommits.has(RID)).to.equal(false);

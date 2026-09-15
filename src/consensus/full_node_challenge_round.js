@@ -127,7 +127,7 @@ class FullNodeChallengeRound {
         // the spend window is reloaded here and not lazily.
         this.loadSpendLog();
         this.spendGuard.persistTo();
-        let tick = async () => { try { await this._tick(); } catch(e){ logger.warn(nodeUtil.format('FullNodeChallengeRound tick:', e && e.message ? e.message : e)); } };
+        let tick = async () => { try { await this.tick(); } catch(e){ logger.warn(nodeUtil.format('FullNodeChallengeRound tick:', e && e.message ? e.message : e)); } };
         this._timer = setInterval(tick, this.pollMs);
         await tick();
         logger.info('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
@@ -142,14 +142,14 @@ class FullNodeChallengeRound {
         if(this.peerManager) this.peerManager.removeListener('message', this._handler);
     }
 
-    async _indexerCall(method, params){
+    async indexerCall(method, params){
         // Resolve the BTC indexer URL the same way the rest of the hub does
         // (BTC_INDEXER_API_URL -> BTC_INDEXER_URL -> config), so a standard hub
         // deployment that only sets BTC_INDEXER_API_URL still reaches the indexer.
         // Fall back to the env/cfg value captured at construction.
         let url = this.indexerUrl;
-        if(this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function'){
-            try { url = (await this.hub._resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
+        if(this.hub && typeof this.hub.resolveBtcIndexerUrl === 'function'){
+            try { url = (await this.hub.resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
         }
         if(!url) throw new Error('no BTC indexer URL (set BTC_INDEXER_API_URL / BTC_INDEXER_URL)');
         let headers = (this.hub && typeof this.hub.btcIndexerHeaders === 'function')
@@ -204,7 +204,7 @@ class FullNodeChallengeRound {
         }
     }
 
-    _handleMessage(env){
+    handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
             case XNODE_ANSWER:   return this.onAnswer(env.data);

@@ -31,7 +31,7 @@ const logger = getLogger();
 // follower that only waits. Split out of finalizeRound, which calls it as its last act.
 function takeSeat(round, submissions, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
     let seat = { round, submissions, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys };
-    let leader   = this._getLeader(round, memberPubkeys);
+    let leader   = this.getLeader(round, memberPubkeys);
     let myAddr   = this.peerManager.validatorAddr;
     let isLeader = this.isLeaderIdentity(leader, myAddr, this.resolveSenderPubkey(myAddr));
     // Every return past this point is a seat, not an outcome: stamp it on the
@@ -43,7 +43,7 @@ function takeSeat(round, submissions, btcBlockHeight, btcBlockTime, snapshot, qu
         return;
     }
     // Follower path. Record when this round became ready to finalize so the
-    // receiver-side leader-timeout grace in _handlePropose measures the same
+    // receiver-side leader-timeout grace in handlePropose measures the same
     // window every other hub does.
     this.markRoundReady(round);
 

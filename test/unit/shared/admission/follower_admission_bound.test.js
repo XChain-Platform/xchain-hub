@@ -17,7 +17,7 @@
  * places a live hub actually reaches it, because a bound with no call site refuses nothing:
  *
  *   1. CrossChainCallEngine.validateProposedMatch, the XCALL engine's own follower gate;
- *   2. CrossChainDexConsensus._handlePropose, the ONE proposal handler every engine on that
+ *   2. CrossChainDexConsensus.handlePropose, the ONE proposal handler every engine on that
  *      consensus shares, for any engine that declares an admissionScope.
  *
  * Both must refuse in the same directions, and both must resolve the FOLLOWER'S OWN tips
@@ -120,7 +120,7 @@ let tipCalls;
         // The source-indexer re-derivation the row must also survive: identical fixture to
         // CrossChainCallEngine.test.js's honest dispatch, so a `false` below can only be the
         // admission gate.
-        sinon.stub(engine, '_indexerCall').resolves({
+        sinon.stub(engine, 'indexerCall').resolves({
             exists: true, network: 'regtest', latest_block_index: ERA_BLOCK + 50,
             call: {
                 call_id: CALL_ID, action_index: 41, block_index: 100,
@@ -251,7 +251,7 @@ function registerLegacyCallAdmissionTest() {
         // activation, or a from-genesis replay refuses every historical row.
         const engine = makeEngine({ BTC: OWN_BTC, DOGE: OWN_DOGE });
         sinon.restore();
-        sinon.stub(engine, '_indexerCall').resolves({
+        sinon.stub(engine, 'indexerCall').resolves({
             exists: true, network: 'regtest', latest_block_index: LEGACY_BLK + 50,
             call: {
                 call_id: CALL_ID, action_index: 41, block_index: 100,

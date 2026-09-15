@@ -39,7 +39,7 @@ const ROUND_ABANDON_MAX_REARMS = 3;
 module.exports = {
 
     // Record the first time we saw this round as ready to finalize. The
-    // receiver-side leader-timeout grace in _handlePropose measures from here.
+    // receiver-side leader-timeout grace in handlePropose measures from here.
     // Opportunistically evicts entries for rounds that never finalized (the rare
     // stuck case) so the map can't grow unbounded.
     markRoundReady(round) {

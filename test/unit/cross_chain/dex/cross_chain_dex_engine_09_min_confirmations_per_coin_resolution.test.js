@@ -335,7 +335,7 @@ function registerFeature21eventEmitterPart1() {
     let eng = new CrossChainDexEngine(hub);
     eng._snapshotBlockOverride = 100;
     eng._seedLocalValidator = true;
-    sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
+    sinon.stub(eng, 'persistCapabilitySnapshot').resolves(1);
     let {
       a,
       b

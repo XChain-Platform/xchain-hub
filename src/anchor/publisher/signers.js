@@ -27,7 +27,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    async _getActiveOraclePublishPubkeys(blockIndex){
+    async getActiveOraclePublishPubkeys(blockIndex){
         if(!this.hub) return [];
         if(blockIndex !== undefined && blockIndex !== null){
             // Block-PINNED election query. Fail CLOSED on a miss: the block-unpinned,

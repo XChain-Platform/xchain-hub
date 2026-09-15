@@ -150,7 +150,7 @@ function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHoldsPart1() {
       db
     } = makeEngine();
     db.state.persistedIndexes = [41];
-    engine._indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
+    engine.indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
       src_action_index: 41,
       amount: '5.00000000'
     }), pendingLeg({
@@ -168,7 +168,7 @@ function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHoldsPart1() {
       engine,
       db
     } = makeEngine();
-    engine._indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
+    engine.indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
       src_action_index: 41
     }), pendingLeg({
       src_action_index: 42

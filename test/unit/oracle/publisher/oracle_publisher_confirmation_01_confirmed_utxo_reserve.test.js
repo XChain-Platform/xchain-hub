@@ -29,7 +29,7 @@ const testCase1 = async function () {
                                             utxo('a3'.repeat(32), 0)] });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(0);
             let diag = logs.warn.filter(w => w.includes('NO_CONFIRMED_UTXO'));
@@ -41,9 +41,9 @@ const testCase2 = async function () {
             let h = makePublisher({ utxos: [utxo('b1'.repeat(32), 0)] });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
-            await h.p._processQueue();
-            await h.p._processQueue();
+            await h.p.processQueue();
+            await h.p.processQueue();
+            await h.p.processQueue();
 
             let queued = readJsonl(h.queuePath);
             expect(queued).to.have.length(1);
@@ -59,7 +59,7 @@ const testCase3 = async function () {
             let h = makePublisher({ utxos: [utxo('c1'.repeat(32), 6), utxo('c2'.repeat(32), 0)] });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(1);
             expect(logs.warn.filter(w => w.includes('NO_CONFIRMED_UTXO'))).to.have.length(0);
@@ -73,7 +73,7 @@ const testCase4 = async function () {
             expect(h.p.getStats().noConfirmedUtxoDeferrals).to.equal(0);
             expect(h.p.getStats().confirmedUtxos).to.equal(null);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             let stats = h.p.getStats();
             expect(stats.confirmedUtxos).to.equal(0);
@@ -91,7 +91,7 @@ const testCase5 = async function () {
             h.p.setBalanceHook(async () => 150);
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(1);
             expect(h.p.getStats().noConfirmedUtxoDeferrals).to.equal(0);
@@ -103,7 +103,7 @@ const testCase6 = async function () {
             let h = makePublisher({ utxos: [utxo('e1'.repeat(32), null)] });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(1);
             expect(h.p.getStats().noConfirmedUtxoDeferrals).to.equal(0);
@@ -114,7 +114,7 @@ const testCase7 = async function () {
             h.p.setBalanceHook(async () => 150);
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             expect(h.broadcasts).to.have.length(1);
             expect(logs.warn.filter(w => w.includes('NO_CONFIRMED_UTXO'))).to.have.length(0);

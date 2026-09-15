@@ -14,7 +14,7 @@
 // PEER-led rounds too, not only on the rounds this hub leads.
 //
 // `_loadLastCheckpointLatch` seeds the latch fleet-wide (MAX(snapshot_block)
-// over rows written by ANY leader), and at runtime `_tick` must write it in
+// over rows written by ANY leader), and at runtime `tick` must write it in
 // the follower branch as well as the leader branch. With N validators and
 // leader = btcBlock % N, a latch written only by the leader is stale on the
 // N-1 blocks a hub does not lead, so each hub re-leads at its own residue and
@@ -133,7 +133,7 @@ function buildMesh(n) {
             };
             self.db = db; self.hub = hub;
             self.engine = new StateCheckpointEngine(hub);
-            self.engine._indexerCall = async () => Object.assign({}, TIP);
+            self.engine.indexerCall = async () => Object.assign({}, TIP);
             bus.nodes.push(self);
         }
         meshes.push(bus);
@@ -149,7 +149,7 @@ function registerCadenceLatchTests() {
         // Pre-fix each hub led at its own residue and the mesh produced three.
         for (let b = 100; b <= 104; b++) {
             bus.btcBlock = b;
-            for (let nd of bus.nodes) await nd.engine._tick();
+            for (let nd of bus.nodes) await nd.engine.tick();
             await sleep(20);
         }
 
@@ -163,14 +163,14 @@ function registerCadenceLatchTests() {
 
         // The next round waits for a full interval past that snapshot_block.
         bus.btcBlock = seq + 5;
-        for (let nd of bus.nodes) await nd.engine._tick();
+        for (let nd of bus.nodes) await nd.engine.tick();
         // Every tick is awaited and the latch refuses inside it, so the inside-interval
         // no-op is already decided here.
         for (let nd of bus.nodes)
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' still one round inside the interval').to.equal(1);
 
         bus.btcBlock = seq + 6;
-        for (let nd of bus.nodes) await nd.engine._tick();
+        for (let nd of bus.nodes) await nd.engine.tick();
         await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 2), { label: 'the past-interval round to land on every hub' });
         for (let nd of bus.nodes)
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' second round past the interval').to.equal(2);

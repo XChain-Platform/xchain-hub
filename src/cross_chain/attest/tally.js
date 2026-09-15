@@ -28,7 +28,7 @@ module.exports = {
     // Count a PREPARE/COMMIT vote set against the round's SNAPSHOT population.
     //
     // The quorum N is sized from the stake-qualified block-locked snapshot, so the votes
-    // measured against it must come from that same population. _isKnownSender only proves
+    // measured against it must come from that same population. isKnownSender only proves
     // the sender is in this hub's REGISTERED-validator registry, which admits keys with no
     // qualifying cross_chain stake at the round's block; and the tally is addr-keyed while
     // the registry can bind one signing key to several addrs, so one key could be counted
@@ -115,7 +115,7 @@ module.exports = {
                 })
                 .catch(err => {
                     // Retain the round instead of deleting it. Both
-                    // _handleCommit and this method return early once the id is
+                    // handleCommit and this method return early once the id is
                     // gone from pendingAttestations, so dropping it here destroys
                     // a quorum-signed attestation that peer hubs have already
                     // persisted, with no later COMMIT able to re-drive the store.

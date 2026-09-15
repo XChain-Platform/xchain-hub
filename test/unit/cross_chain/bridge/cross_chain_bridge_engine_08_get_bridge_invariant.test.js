@@ -141,7 +141,7 @@ function registerFeature10getBridgeInvariantPart1() {
     // is the state a hub rolled ahead of its fleet is in. A unit test must not dial
     // out, so the failure is staged here instead of being left to DNS.
     sinon.stub(console, 'warn');
-    engine._indexerCall = async () => {
+    engine.indexerCall = async () => {
       throw new Error('indexer RPC error: {"code":-32601}');
     };
     const inv = await engine.getBridgeInvariant(null);

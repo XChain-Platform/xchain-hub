@@ -43,7 +43,7 @@ const axios = require('axios');
 //
 // The cost of erring long is bounded and the cost of erring short is not: every publisher
 // that awaits this call already carries a sweep re-entrancy guard (OraclePublisher and
-// AttestationPublisher `_sweeping`, the FullNodeChallengeRound._tick house convention), so
+// AttestationPublisher `_sweeping`, the FullNodeChallengeRound.tick house convention), so
 // a slow pass skips ticks rather than stacking overlapping money-path passes, and the
 // round deadlines these effectors honour are counted in BLOCKS, not in this many ms.
 //

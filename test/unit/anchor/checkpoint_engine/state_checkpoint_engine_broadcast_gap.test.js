@@ -121,7 +121,7 @@ function registerBroadcastResyncTests() {
         });
 
         it('fires the repair once, not once per row, when the subscriber set is already empty', async function () {
-            // _persistCapabilitySnapshot broadcasts inside a per-validator loop, so a
+            // persistCapabilitySnapshot broadcasts inside a per-validator loop, so a
             // persistent DB fault would otherwise fire dropAllForResync once per validator.
             const b = {
                 subscribers: new Set(),
@@ -147,7 +147,7 @@ function registerAcceptFinalizedDeliveryTests() {
                 return [];
             } };
             const engine = mkEngine(db, broadcaster);
-            engine._persistCapabilitySnapshot = async () => {};   // isolate the checkpoint leg
+            engine.persistCapabilitySnapshot = async () => {};   // isolate the checkpoint leg
 
             let emitted = null;
             engine.on('checkpoint:finalized', (e) => { emitted = e; });
@@ -165,7 +165,7 @@ function registerAcceptFinalizedDeliveryTests() {
         it('leaves the happy path untouched', async function () {
             const db     = mkDb(() => [{ id: 9, chain: 'BTC', checkpoint_seq: 7 }]);
             const engine = mkEngine(db, broadcaster);
-            engine._persistCapabilitySnapshot = async () => {};
+            engine.persistCapabilitySnapshot = async () => {};
 
             let emitted = null;
             engine.on('checkpoint:finalized', (e) => { emitted = e; });

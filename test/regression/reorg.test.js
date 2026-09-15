@@ -166,8 +166,8 @@ function registerSuitePart8() {
 function registerSuitePart9() {
     describe('Reorg digest determinism', function () {
         it('deterministic for same inputs @regression-p0', function () {
-            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
-            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let a = rh.digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh.digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
             expect(a).to.equal(b);
             expect(a).to.match(/^[0-9a-f]{64}$/);
         });
@@ -240,7 +240,7 @@ describe('Regression: ReorgHandler', function () {
     it('PREPARE from peer is recorded @regression-p0', async function () {
             let ts = Date.now();
             let reorgId = 'BTC:500:' + ts;
-            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+            let digest = rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
@@ -264,7 +264,7 @@ describe('Regression: ReorgHandler', function () {
     it('PREPARE with wrong digest rejected @regression-p0', async function () {
             let ts = Date.now();
             let reorgId = 'BTC:500:' + ts;
-            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+            let digest = rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
@@ -286,7 +286,7 @@ describe('Regression: ReorgHandler', function () {
       function registerNestedSuite1Part4() {
     it('COMMIT quorum executes rollback @regression-p0', async function () {
             let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
+            let digest = rh.digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
@@ -300,7 +300,7 @@ describe('Regression: ReorgHandler', function () {
             let emitted = null;
             rh.on('reorg:confirmed', (d) => { emitted = d; });
 
-            rh._handleCommit({
+            rh.handleCommit({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, digest }
             });

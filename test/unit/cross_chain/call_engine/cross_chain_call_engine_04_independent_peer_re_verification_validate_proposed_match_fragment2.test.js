@@ -268,7 +268,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       network: 'regtest',
       latest_block_index: 200,
@@ -309,7 +309,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
   // while the source has already delivered the terminal 'expired' callback.
   it('refuses a dispatch whose source request has expired or gone terminal', async function () {
     const { engine } = makeEngine();
-    const stub = sinon.stub(engine, '_indexerCall');
+    const stub = sinon.stub(engine, 'indexerCall');
 
     // Deadline already reached at OUR tip: refused (mirrors maybeDispatch's gate).
     stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
@@ -336,7 +336,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
   });
 
   // #4204. Number()-based field equality accepts '041' against indexer value 41,
-  // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
+  // but canonicalMatch signs the spelling VERBATIM while the row round-trips a
   // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
   // different bytes, reject the quorum, and strand the call permanently (the
   // finalized row still satisfies rowExists, so it is never re-relayed).

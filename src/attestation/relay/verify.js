@@ -62,7 +62,7 @@ module.exports = {
         if(!/^[0-9a-f]{64}$/.test(rid)) return false;
         if(ORIGIN_CHAINS.indexOf(String(row.origin_chain)) === -1) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
-        if(String(row.round_id).toLowerCase() !== this._roundId(phase, rid)) return false;
+        if(String(row.round_id).toLowerCase() !== this.roundId(phase, rid)) return false;
         if(!attestRelay.isAttestRelayActive(row.snapshot_block, this.network)) return false;
         let myBlock = await this.resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_DRIFT_BLOCKS) return false;
@@ -103,7 +103,7 @@ module.exports = {
                fields.providerId        === String(row.provider_id) &&
                fields.redundancy        === Number(row.redundancy) &&
                fields.deadlineBlocks    === Number(row.deadline_blocks) &&
-               this._sha256(fields.requestPayload) === this._sha256(String(row.request_payload == null ? '' : row.request_payload));
+               this.sha256(fields.requestPayload) === this.sha256(String(row.request_payload == null ? '' : row.request_payload));
     },
 
     // The response leg's re-verification, which is what replaces the old blanket
@@ -150,7 +150,7 @@ module.exports = {
         if(this.pastEvictionHorizon(coin, originReq.deadline_block)) return false;
 
         let res;
-        try { res = await this._indexerCall(HOME_CHAIN, 'getrelayedattestation_requests', { request_id: rid, limit: 1 }); }
+        try { res = await this.indexerCall(HOME_CHAIN, 'getrelayedattestation_requests', { request_id: rid, limit: 1 }); }
         catch(e){ return false; }
         if(!res || !Array.isArray(res.requests)) return false;
 

@@ -62,7 +62,7 @@ function registerLeaderPrimitiveTests() {
     // The election primitive
     // -----------------------------------------------------------------
 
-    describe('_getLeader() / leaderAt()', function () {
+    describe('getLeader() / leaderAt()', function () {
 
         it('indexes sorted snapshot pubkeys by (seq + view) % N', function () {
             let members = memberSetOf(SNAPSHOT_SET);
@@ -77,22 +77,22 @@ function registerLeaderPrimitiveTests() {
             // Registration churn reorders AND extends the live set mid-round.
             consensus.setValidatorSet([VALIDATORS_4[3], makeValidator(5), VALIDATORS_4[0],
                                        VALIDATORS_4[2], VALIDATORS_4[1]]);
-            expect(consensus._getLeader(SEQ, members).pubkey).to.equal(SNAPSHOT_LEADER.pubkey);
+            expect(consensus.getLeader(SEQ, members).pubkey).to.equal(SNAPSHOT_LEADER.pubkey);
         });
 
         it('resolves the elected pubkey to its local P2P addr (snapshot rows carry none)', function () {
-            let leader = consensus._getLeader(SEQ, memberSetOf(SNAPSHOT_SET));
+            let leader = consensus.getLeader(SEQ, memberSetOf(SNAPSHOT_SET));
             expect(leader.addr).to.equal(SNAPSHOT_LEADER.addr);
         });
 
         it('falls back to live-set rotation when no snapshot population is available', function () {
-            expect(consensus._getLeader(SEQ, null)).to.equal(LIVE_SET_LEADER);
-            expect(consensus._getLeader(SEQ, new Set())).to.equal(LIVE_SET_LEADER);
+            expect(consensus.getLeader(SEQ, null)).to.equal(LIVE_SET_LEADER);
+            expect(consensus.getLeader(SEQ, new Set())).to.equal(LIVE_SET_LEADER);
         });
 
         it('returns null with no snapshot and no live set', function () {
             consensus.setValidatorSet([]);
-            expect(consensus._getLeader(SEQ, null)).to.equal(null);
+            expect(consensus.getLeader(SEQ, null)).to.equal(null);
         });
     });
 }
@@ -261,7 +261,7 @@ function registerPrePrepareTests() {
             // A third validator, following the round.
             pm.validatorAddr = VALIDATORS_4[2].addr;
             config = { cfg: 1 };
-            digest = consensus._digest(config);
+            digest = consensus.digest(config);
         });
         registerPrePrepareLeaderTests();
         registerPrePrepareFilterTests();

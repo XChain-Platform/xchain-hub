@@ -27,7 +27,7 @@
 const { buildRollcallCanonical } = require('../rollcall_canonical.js');
 
 // The one gossip type this engine adds. PeerManager.broadcast has no type
-// registry, so a new type is this constant plus one `case` in _handleMessage.
+// registry, so a new type is this constant plus one `case` in handleMessage.
 const XROLLCALL_SIGN = 'XROLLCALL_SIGN';
 // How many not-yet-opened epochs' gossip a hub holds. One is the normal case
 // (peers a poll ahead); a few more covers a hub catching up after a stall.
@@ -65,7 +65,7 @@ const methods = {
     // real presence proofs and evicts live validators with nothing going red.
     // Omitting `gates` is the v0 form, byte-identical to what this method built
     // before v1 existed.
-    _canonical(epochHeight, ledgerHash, gates){
+    canonical(epochHeight, ledgerHash, gates){
         return buildRollcallCanonical({ network: this.network, epochHeight, ledgerHash, gates });
     },
 

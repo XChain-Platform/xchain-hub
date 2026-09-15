@@ -33,7 +33,7 @@ function registerBeforeEachHook() {
         // Default: reject to prevent infinite loops
         poolStub = { getConnection: sinon.stub().rejects(new Error('pool exhausted')) };
         db.pool = poolStub;
-        db._sleep = sinon.stub().resolves();
+        db.sleep = sinon.stub().resolves();
 
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');

@@ -46,7 +46,7 @@ function sequenceMonotonicitySuite() {
             consensus.lastAppliedSeq = 5;
             let warnStub = sinon.stub(console, 'warn');
             let config = { a: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 3, view 2): (3+2)%4 = 1
@@ -61,7 +61,7 @@ function sequenceMonotonicitySuite() {
         it('accepts PRE_PREPARE with seq > lastAppliedSeq', async function () {
             consensus.lastAppliedSeq = 2;
             let config = { a: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             // Federation guard: with a 4-member validator set this hub is federated
             // regardless of MIN_VALIDATORS, so it declines to PREPARE unless the
             // PRE_PREPARE carries a block height and a deterministic snapshot
@@ -233,7 +233,7 @@ function registerSubmissionFilterTest(getOracleRound) {
                 sources: 3
             }
         };
-        oracleRound._handleMessage(envelope);
+        oracleRound.handleMessage(envelope);
         let subs = oracleRound.submissions.get(5);
         expect(subs.has('ws://peer-1:10001')).to.be.true;
         let sub = subs.get('ws://peer-1:10001');
@@ -275,7 +275,7 @@ function submissionValidationSuite() {
                     sources: 2
                 }
             };
-            oracleRound._handleMessage(envelope);
+            oracleRound.handleMessage(envelope);
             let subs = oracleRound.submissions.get(5);
             expect(subs.has('ws://peer-2:10001')).to.be.false;
         });
@@ -292,7 +292,7 @@ function submissionValidationSuite() {
                 timestamp: Date.now(),
                 data: { round: 5, prices: SAMPLE_PRICES, sources: 2 }
             };
-            oracleRound._handleMessage(envelope);
+            oracleRound.handleMessage(envelope);
             expect(subs.size).to.equal(2);
             expect(subs.has('ws://peer-3:10001')).to.be.false;
         });

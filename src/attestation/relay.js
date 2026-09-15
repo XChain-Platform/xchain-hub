@@ -94,7 +94,7 @@
 // This file keeps the class: construction, the lifecycle and the poll that drives
 // both legs, plus the two methods whose text a structural suite reads from THIS file:
 // defaultBroadcast (test/unit/shared/spend/two_phase_guard.test.js, encoder_utxo_forward.test.js)
-// and _persistCapabilitySnapshot (capability_snapshot_write_atomic.test.js). Everything
+// and persistCapabilitySnapshot (capability_snapshot_write_atomic.test.js). Everything
 // else lives in named parts under ./relay/ and is installed on
 // the prototype below, so `require('./attestation/relay')` and every method name are
 // exactly what they were.
@@ -193,7 +193,7 @@ class AttestationRelay {
         await this.consensus.start();
 
         this._pollTimer = setInterval(() => {
-            this._poll().catch(err => logger.error('AttestationRelay: poll error: ' + (err && err.message)));
+            this.poll().catch(err => logger.error('AttestationRelay: poll error: ' + (err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
 
@@ -243,7 +243,7 @@ class AttestationRelay {
         };
     }
 
-    async _poll(){
+    async poll(){
         if(this._polling) return;
         this._polling = true;
         try {
@@ -276,11 +276,11 @@ class AttestationRelay {
     // Every hub persists the snapshot the row's signatures verify against, not just
     // the leader: indexers read whichever hub DB they mirror, and a follower's may be
     // the only one they see. Deterministic + INSERT IGNORE, so all hubs write the
-    // same rows. Same contract as CrossChainCallEngine._persistCapabilitySnapshot.
-    async _persistCapabilitySnapshot(capability, block, network){
+    // same rows. Same contract as CrossChainCallEngine.persistCapabilitySnapshot.
+    async persistCapabilitySnapshot(capability, block, network){
         let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
-        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. This writer has no
+        // spelled out in CrossChainDexEngine.persistCapabilitySnapshot. This writer has no
         // caller today, which is exactly why the guard goes in now: the next caller would
         // otherwise inherit the fifth unguarded path into the shared capability_snapshots
         // mirror. Keep every writer's guard in lockstep.

@@ -98,7 +98,7 @@ function registerOracleOverlapTest() {
         const broadcastStub = sinon.stub().returns(gate.promise);
         pub.broadcastFn = broadcastStub;
 
-        // Drive the INNER pass directly: _processQueue's own _sweeping guard would
+        // Drive the INNER pass directly: processQueue's own _sweeping guard would
         // hide the spend race behind a skip, and the point here is that the gate
         // holds even when a second pass reaches the send (a future second call
         // site, a sweep timer, or a caller that bypasses the wrapper).

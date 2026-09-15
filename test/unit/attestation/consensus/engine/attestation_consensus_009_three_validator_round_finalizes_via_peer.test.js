@@ -145,9 +145,9 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         expect(pending.winner).to.equal(null); // only my proposal so far (1 of 3)
 
         // Peer proposals arrive → 3 proposals → agree() picks a winner.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
         await flush();
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('consensus-body');
@@ -155,13 +155,13 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         expect(pending.signatures.size).to.equal(3);
 
         // Peer prepares → prepare quorum (3) → we broadcast COMMIT.
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
         expect(pending.prepares.size).to.equal(3);
 
         // Peer commits → commit quorum (3) → finalize.
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, BODY));
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p2, BODY));
         await flush();
 
         expect(finalized).to.have.length(1);
@@ -172,7 +172,7 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let outsider = mkIdentity();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', outsider, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', outsider, BODY));
         expect(c.pending.get(RID).proposals.has(pub(outsider))).to.equal(false);
     }); });
 
@@ -181,7 +181,7 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         await flush();
         let env = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY);
         env.data.sig = 'ff'.repeat(64); // valid hex, wrong signature
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(c.pending.get(RID).proposals.has(pub(p1))).to.equal(false);
     }); });
 
@@ -189,8 +189,8 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let env = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY);
-        c._handleMessage(env);
-        c._handleMessage(env);
+        c.handleMessage(env);
+        c.handleMessage(env);
         // me + p1 only (deduped); p2 absent.
         expect(c.pending.get(RID).proposals.size).to.equal(2);
     }); });
@@ -201,13 +201,13 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let big = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, Buffer.from('way-too-large-body'));
-        c._handleMessage(big);
+        c.handleMessage(big);
         expect(c.pending.get(RID).proposals.has(pub(p1))).to.equal(false);
     }); });
 
 describe('AttestationConsensus: three-validator round finalizes via peer votes', function () { beforeEach(hookAt28432); afterEach(hookAt28750); it('buffers a PROPOSE that arrives before the round starts and drains it in propose()', async function () {
         // Early PROPOSE from p1: no pending yet, buffered.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         expect(c.earlyMessages.get(RID)).to.have.lengthOf(1);
         // Now start our round → drain replays p1's vote.
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));

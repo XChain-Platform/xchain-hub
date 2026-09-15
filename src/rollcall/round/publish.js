@@ -177,7 +177,7 @@ module.exports = {
     async maybePublish(state, myPubkey, since){
         if(state.published) return;
         if(since < this.publishDelayBlocks) return;
-        if(!this._rankUnlocked(state.order, myPubkey, since)) return;
+        if(!this.rankUnlocked(state.order, myPubkey, since)) return;
         if(state.sigs.size === 0) return;
         if(!this.requireBroadcast()) return;
 

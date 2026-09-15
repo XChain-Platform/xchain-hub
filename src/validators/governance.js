@@ -70,7 +70,7 @@ class Governance extends EventEmitter {
     }
 
     async start() {
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this._messageHandler = (envelope) => this.handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
         // Catch the tick's rejection, the same idiom every other periodic loop in the
@@ -283,12 +283,12 @@ class Governance extends EventEmitter {
         return { proposal: proposals[0], votes: votes };
     }
 
-    _handleMessage(envelope) {
+    handleMessage(envelope) {
         switch (envelope.type) {
             case GOV_PROPOSE:
                 // async (a cooldown-window DB lookup): surface rejections instead of
                 // letting them escape the gossip dispatcher as an unhandled rejection.
-                this._handlePropose(envelope).catch(e =>
+                this.handlePropose(envelope).catch(e =>
                     logger.error(nodeUtil.format('Governance: GOV_PROPOSE handler error:', e && e.message ? e.message : e)));
                 break;
             case GOV_VOTE:
@@ -300,7 +300,7 @@ class Governance extends EventEmitter {
             case GOV_RESULT:
                 // async: a rejection out of the gossip dispatcher would be an
                 // unhandled rejection (process exit), so catch and log here.
-                this._handleResult(envelope).catch(e =>
+                this.handleResult(envelope).catch(e =>
                     logger.error(nodeUtil.format('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e)));
                 break;
         }

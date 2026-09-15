@@ -13,7 +13,7 @@
 // Extra OracleRound tests covering branches not already exercised by
 // the existing OracleRound.test.js:
 //   - stop() clears all timers
-//   - _handleMessage: invalid round, late submission, duplicate sender,
+//   - handleMessage: invalid round, late submission, duplicate sender,
 //     max submissions, invalid prices, known validator pubkey → DB persist path
 //   - scheduleFinalization: fallback-suppression branch
 //   - pruneSubmissions: old round eviction
@@ -60,13 +60,13 @@ function registerOracleroundExtraCoverage1Hooks() {
 function registerHandlemessageEdgeCases2Tests1() {
 
         it('ignores messages with missing round/prices', function () {
-            or._handleMessage({ type: 'ORACLE_PRICE_SUBMIT', sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'), data: { round: null, prices: null } });
+            or.handleMessage({ type: 'ORACLE_PRICE_SUBMIT', sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'), data: { round: null, prices: null } });
             expect(or.submissions.size).to.equal(0);
         });
 
         it('ignores submissions for rounds too far in the past', async function () {
             await or.executeRound(); // sets currentRound=N
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
                 data: {
@@ -79,7 +79,7 @@ function registerHandlemessageEdgeCases2Tests1() {
 
         it('ignores submissions for rounds too far in the future', async function () {
             await or.executeRound();
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
                 data: {
@@ -95,7 +95,7 @@ function registerHandlemessageEdgeCases2Tests1() {
             let round = or.currentRound;
             // Simulate late submission: elapsed > submissionWindow
             or.roundStartTime = Date.now() - (or.submissionWindow + 1000);
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'latepeer', sig_pubkey: pubkeyForTestSender('latepeer'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '100' }], sources: 1 }
@@ -117,7 +117,7 @@ function registerHandlemessageEdgeCases2Tests5() {
                 subs.set('peer' + i, { prices: [], sources: 0, timestamp: Date.now() });
             }
             // Now try to add one more
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'overflow_peer', sig_pubkey: pubkeyForTestSender('overflow_peer'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '100' }], sources: 1 }
@@ -128,7 +128,7 @@ function registerHandlemessageEdgeCases2Tests5() {
         it('ignores price submissions where all prices are invalid', async function () {
             await or.executeRound();
             let round = or.currentRound;
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: 'badpeer', sig_pubkey: pubkeyForTestSender('badpeer'),
                 data: {
@@ -154,7 +154,7 @@ function registerHandlemessageEdgeCases2Tests7() {
             pm.validatorPubkeys = new Map([[sender, pubkey]]);
             hub.db.doQuery = sinon.stub().resolves([]);
 
-            or._handleMessage({
+            or.handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: sender,
                 sig_pubkey: pubkey,
@@ -309,8 +309,8 @@ describe('OracleRound (extra coverage)', function () {
 
 
 
-    // ── _handleMessage: edge cases ───────────────────────────────────────────
-    describe('_handleMessage(): edge cases', function () {
+    // ── handleMessage: edge cases ───────────────────────────────────────────
+    describe('handleMessage(): edge cases', function () {
         registerHandlemessageEdgeCases2Tests1();
         registerHandlemessageEdgeCases2Tests5();
         registerHandlemessageEdgeCases2Tests7();

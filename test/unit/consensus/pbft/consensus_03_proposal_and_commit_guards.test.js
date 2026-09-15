@@ -122,7 +122,7 @@ it('a follower on a multi-member set declines to PREPARE without a snapshot', as
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,            // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
-                data: { seq: 5, view: 0, configDigest: consensus._digest(config), config, btcBlockHeight: 800000 }
+                data: { seq: 5, view: 0, configDigest: consensus.digest(config), config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
             expect(pm.broadcast.called).to.be.false;
@@ -160,7 +160,7 @@ describe('PRE_PREPARE replay + follower expiry', function () {
 it('rejects a PRE_PREPARE whose seq is at/below the last applied seq', async function () {
             consensus.lastAppliedSeq = 10;
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -173,7 +173,7 @@ it('expires a follower proposal on its (doubled) timeout', async function () {
             let clock = sinon.useFakeTimers();
             consensus.timeout = 1000;
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -197,7 +197,7 @@ it('rejects the proposer promise and drops the proposal when applyConfig throws'
             hub.applyConfig.rejects(new Error('db down'));
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             let rejected = null;
             consensus.pendingProposals.set(5, {
                 config, digest,
@@ -207,7 +207,7 @@ it('rejects the proposer promise and drops the proposal when applyConfig throws'
                 resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
             });
 
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => rejected, { label: 'the failed apply to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
@@ -236,7 +236,7 @@ it('saveSeq failure: proposal.applied stays false and lastAppliedSeq is not adva
             });
 
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             let rejected = null;
             consensus.lastAppliedSeq = 0;
             consensus.pendingProposals.set(5, {
@@ -247,7 +247,7 @@ it('saveSeq failure: proposal.applied stays false and lastAppliedSeq is not adva
                 resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
             });
 
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
+            consensus.handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => rejected, { label: 'the failed seq write to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
@@ -320,7 +320,7 @@ it('handlePrePrepare uses the snapshot quorum when a snapshot is available', asy
             };
             hub.resolveBtcLatestBlock = sinon.stub().resolves(900000);
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -340,11 +340,11 @@ it('ignores a PREPARE whose digest does not match the proposal', function () {
             expect(consensus.pendingProposals.get(5).prepares.size).to.equal(0);
         });
 it('ignores a COMMIT with no configDigest', function () {
-            expect(() => consensus._handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
+            expect(() => consensus.handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
         });
 it('ignores a COMMIT whose digest does not match the proposal', function () {
             consensus.pendingProposals.set(5, { digest: 'right', commits: new Set(), applied: false, quorum: 3 });
-            consensus._handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
+            consensus.handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
             expect(consensus.pendingProposals.get(5).commits.size).to.equal(0);
         });
 it('checkPrepareQuorum returns when the proposal is resolved', function () {

@@ -154,7 +154,7 @@ const hookAt4037 = function () {
     }
 
 // Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
+    // handleCommit, so the test asserts vote-counting (commits.add) without
     // needing real validator crypto. The buffering decision under test happens
     // before any signature check regardless.
     function commitEnvelope(rid, peerPubkey) {
@@ -165,11 +165,11 @@ const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
 
 const PEER = '11'.repeat(32);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
             let pending = seedPendingNoWinner(RID, PEER);
 
             // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
+            consensus.handleMessage(commitEnvelope(RID, PEER));
 
             // The vote is held, NOT applied yet (winner not known) and, the
             // regression this guards, NOT discarded.
@@ -177,9 +177,9 @@ describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach
             expect(pending.commits.size).to.equal(0);
         }); }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
             let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
+            consensus.handleCommit(commitEnvelope(RID, PEER));
             expect(pending.commits.size).to.equal(0);
 
             // Winner gets established (provider.agree() resolved); drain replays
@@ -191,27 +191,27 @@ describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach
             expect(consensus.earlyCommits.has(RID)).to.equal(false);
         }); }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
             seedPendingNoWinner(RID, PEER);
             let over = consensus.earlyCommitMaxPerRid + 5;
             for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
+                consensus.handleCommit(commitEnvelope(RID, PEER));
             }
             expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
         }); }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
             seedPendingNoWinner(RID, PEER);
             let env = commitEnvelope(RID, PEER);
             env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
+            consensus.handleCommit(env);
             expect(consensus.earlyCommits.has(RID)).to.equal(false);
         }); }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
+describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
             seedPendingNoWinner(RID, PEER);
             const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
+            consensus.handleCommit(commitEnvelope(RID, OUTSIDER));
             expect(consensus.earlyCommits.has(RID)).to.equal(false);
         }); }); });
 }

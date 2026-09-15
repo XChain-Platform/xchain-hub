@@ -270,7 +270,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+    sinon.stub(engine, 'indexerCall').resolves(buildIndexerCallResponse({
       row: xcallsRow(),
       latest: 200,
       pushGeneration: 4,
@@ -284,7 +284,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+    sinon.stub(engine, 'indexerCall').resolves(buildIndexerCallResponse({
       row: xcallsRow(),
       latest: 200,
       pushGeneration: 4,
@@ -311,7 +311,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     } = makeEngine();
     for (const gen of [1, 2, 9]) {
       sinon.restore();
-      sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+      sinon.stub(engine, 'indexerCall').resolves(buildIndexerCallResponse({
         row: xcallsRow(),
         latest: 200,
         pushGeneration: gen,
@@ -329,7 +329,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+    sinon.stub(engine, 'indexerCall').resolves(buildIndexerCallResponse({
       row: xcallsRow(),
       latest: 200,
       pushGeneration: 0,
@@ -365,7 +365,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     };
     for (const [field, value] of Object.entries(divergent)) {
       sinon.restore();
-      sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+      sinon.stub(engine, 'indexerCall').resolves(buildIndexerCallResponse({
         row: xcallsRow({
           [field]: value
         }),

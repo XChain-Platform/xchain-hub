@@ -203,7 +203,7 @@ function registerAggregateTighterPerPairClamp3Tests9() {
 
         it('stays strictly inside the propose-gate band, which keeps the global bound', function () {
             // The load-bearing invariant behind the deliberate asymmetry in
-            // _handlePropose: the follower gate is a strict SUPERSET of every per-pair
+            // handlePropose: the follower gate is a strict SUPERSET of every per-pair
             // clamp, so a maximally-clamped aggregate always passes it. If a future
             // override were ever set LOOSER than the global bound, a clamped proposal
             // could be rejected by every honest follower and wedge the round.

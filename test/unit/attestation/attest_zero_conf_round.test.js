@@ -49,7 +49,7 @@ function makeHub(overrides) {
         getPeerManager:     () => pm,
         getIdentity:        () => makeIdentity(o.pubkey),
         capabilitySnapshot: o.capabilitySnapshot !== undefined ? o.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: o._resolveBtcIndexerUrl || sinon.stub().resolves(null),
+        resolveBtcIndexerUrl: o.resolveBtcIndexerUrl || sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };
     hub._peerManager = pm;
@@ -285,7 +285,7 @@ describe('the poll gate reads confirmationsFor, not this.confirmations', functio
                     { request_id: 'bb'.repeat(32), block_index: blockIndex, action_index: 1 }
                 ] } }
             });
-            let hub = makeHub({ network: network, _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let hub = makeHub({ network: network, resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let spy = sinon.stub(ar, 'startRound').resolves();
             return ar.pollPending().then(() => spy);

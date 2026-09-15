@@ -26,7 +26,7 @@ let oracleRoundIngestGateStressSweepSuite1Hub, oracleRoundIngestGateStressSweepS
 // sigPubkey defaults to a key unique to this sender. Admission keys on the
 // PROVEN signing key now, so an envelope without one is never counted.
 function oracleRoundIngestGateStressSweepSuite1Submit(sender, prices, round, sigPubkey) {
-  oracleRoundIngestGateStressSweepSuite1Or._handleMessage({
+  oracleRoundIngestGateStressSweepSuite1Or.handleMessage({
     type: 'ORACLE_PRICE_SUBMIT',
     sender,
     sig_pubkey: sigPubkey || pubkeyForTestSender(sender),

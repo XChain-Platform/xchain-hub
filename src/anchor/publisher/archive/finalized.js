@@ -32,7 +32,7 @@ module.exports = {
         let d = envelope.data;
         if(!d || !Array.isArray(d.matches)) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
-        let pubkeys = await this._getActiveOraclePublishPubkeys(null);
+        let pubkeys = await this.getActiveOraclePublishPubkeys(null);
         // Fail CLOSED on an empty set (see handleBundleDone): membership is the only tie
         // to a federation member, so an empty set must reject. Otherwise a forged
         // FINALIZED backfills real matches as archived and strands them for recovery.

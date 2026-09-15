@@ -24,7 +24,7 @@ let logs;
 const testCase1 = async function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             seedQueue(h, [queueEntry(5)]);
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             h.encoder.getUtxos = sinon.stub().rejects(new Error('encoder unreachable'));
             await h.p.checkPublishedConfirmations();   // must not throw
@@ -38,7 +38,7 @@ const testCase1 = async function () {
 const testCase2 = async function () {
             let h = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)] });
             seedQueue(h, [queueEntry(5)]);
-            await h.p._processQueue();
+            await h.p.processQueue();
 
             h.encoder.serve([utxo('tx1', null)]);
             await h.p.checkPublishedConfirmations();
@@ -69,7 +69,7 @@ const testCase4 = async function () {
             let h  = makePublisher({ utxos: [utxo('f0'.repeat(32), 9)], db: db });
             seedQueue(h, [queueEntry(5)]);
 
-            await h.p._processQueue();   // must not throw
+            await h.p.processQueue();   // must not throw
 
             expect(h.broadcasts).to.have.length(0);
             expect(readJsonl(h.queuePath)).to.have.length(1);

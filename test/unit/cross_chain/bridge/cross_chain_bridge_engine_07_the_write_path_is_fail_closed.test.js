@@ -149,7 +149,7 @@ function registerFeature8theWritePathIsFailClosedPart1() {
       db,
       broadcaster
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     const row = feature8theWritePathIsFailClosedFinalized(engine);
     engine._inflight.add(row.transfer_id);
     await engine.writeFinalizedTransfer({
@@ -177,7 +177,7 @@ function registerFeature8theWritePathIsFailClosedPart1() {
       db,
       broadcaster
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(0);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(0);
     const row = feature8theWritePathIsFailClosedFinalized(engine);
     engine._inflight.add(row.transfer_id);
     await engine.writeFinalizedTransfer({
@@ -199,7 +199,7 @@ function registerFeature8theWritePathIsFailClosedPart2() {
       db,
       broadcaster
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     db.state.insertAffected = 0; // INSERT IGNORE no-ops against the retracted row
     db.state.reviveAffected = 1;
     await engine.writeFinalizedTransfer({
@@ -220,7 +220,7 @@ function registerFeature8theWritePathIsFailClosedPart2() {
       db,
       broadcaster
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     db.state.insertAffected = 0;
     db.state.reviveAffected = 0; // the row is already 'finalized'
     await engine.writeFinalizedTransfer({
@@ -238,7 +238,7 @@ function registerFeature8theWritePathIsFailClosedPart3() {
       db,
       broadcaster
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     const row = {
       snapshot_id: 'c'.repeat(64),
       snapshot_block: 150,

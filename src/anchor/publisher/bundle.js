@@ -52,13 +52,13 @@ module.exports = {
     // (unresolved/unavailable) set means abstain (fail closed), never a
     // free-for-all where every hub double-anchors the same checkpoint.
     mayPublish(order, sinceBlocks){
-        // Single source of truth for the anchor failover ladder: delegate to _rankUnlocked
+        // Single source of truth for the anchor failover ladder: delegate to rankUnlocked
         // over our own pubkey so the leader-election path and its follower verifiers can
         // never drift. Behaviour is identical to the prior inline form: an empty order or
         // a pubkey absent from it -> rank < 0 -> false; rank 0 (incl. the order.length===1
         // case) -> true; otherwise rank <= unlocked.
         if(!this.identity) return false;
-        return this._rankUnlocked(order, String(this.identity.getPubkeyHex()).toLowerCase(), sinceBlocks);
+        return this.rankUnlocked(order, String(this.identity.getPubkeyHex()).toLowerCase(), sinceBlocks);
     },
 
     // Does this hub LEAD `order` (rank 0)? The failover wake's whole job is to act
@@ -71,7 +71,7 @@ module.exports = {
     // This hub's position in `order`, or -1 when it is absent (or has no identity).
     // Read-only: telemetry only, never a gate. mayPublish stays the single
     // publish decision so a reporting bug can never authorize a spend.
-    _myRank(order){
+    myRank(order){
         if(!this.identity || !order || order.length === 0) return -1;
         return order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
     },
@@ -134,7 +134,7 @@ module.exports = {
         // lagging chain's older un-anchored row rides at its own block.
         let snapshotBlock = sections.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
         let eligible;
-        try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
+        try { eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock); }
         catch(_e){ eligible = []; }
         // Fail closed: an empty/unresolved oracle_publish set is NOT a licence for
         // every hub to anchor independently (a guaranteed N-way double-anchor + DOGE

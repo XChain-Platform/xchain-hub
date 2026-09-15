@@ -46,8 +46,8 @@ function makeHub(overrides) {
         getIdentity:      () => makeIdentity(),
         capabilitySnapshot: overrides && overrides.capabilitySnapshot !== undefined
             ? overrides.capabilitySnapshot : null,
-        _resolveBtcIndexerUrl: overrides && overrides._resolveBtcIndexerUrl
-            ? overrides._resolveBtcIndexerUrl
+        resolveBtcIndexerUrl: overrides && overrides.resolveBtcIndexerUrl
+            ? overrides.resolveBtcIndexerUrl
             : sinon.stub().resolves(null),
         btcIndexerHeaders: () => ({})
     };
@@ -99,22 +99,22 @@ const hookAt3913 = function () {
         sinon.restore();
     };
 
-// ── _resolveBtcIndexerUrl ────────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_resolveBtcIndexerUrl()', function () { it('delegates to hub._resolveBtcIndexerUrl when available', async function () {
+// ── resolveBtcIndexerUrl ────────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('resolveBtcIndexerUrl()', function () { it('delegates to hub.resolveBtcIndexerUrl when available', async function () {
             let stub = sinon.stub().resolves('http://btc/rpc');
-            let hub  = makeHub({ _resolveBtcIndexerUrl: stub });
+            let hub  = makeHub({ resolveBtcIndexerUrl: stub });
             let ar   = new AttestationRound(hub, makeProviderRegistry());
-            let url  = await ar._resolveBtcIndexerUrl();
+            let url  = await ar.resolveBtcIndexerUrl();
             expect(url).to.equal('http://btc/rpc');
             expect(stub.calledOnce).to.be.true;
         }); }); });
 
-// ── _resolveBtcIndexerUrl ────────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_resolveBtcIndexerUrl()', function () { it('returns null when hub has no _resolveBtcIndexerUrl', async function () {
+// ── resolveBtcIndexerUrl ────────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('resolveBtcIndexerUrl()', function () { it('returns null when hub has no resolveBtcIndexerUrl', async function () {
             let hub  = makeHub();
-            delete hub._resolveBtcIndexerUrl;
+            delete hub.resolveBtcIndexerUrl;
             let ar   = new AttestationRound(hub, makeProviderRegistry());
-            let url  = await ar._resolveBtcIndexerUrl();
+            let url  = await ar.resolveBtcIndexerUrl();
             expect(url).to.be.null;
         }); }); });
 }

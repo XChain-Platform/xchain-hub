@@ -25,7 +25,7 @@
  * Canonicalizing here makes the leader a function of the MEMBERSHIP rather
  * than of the query that produced it, which is the property the federation
  * actually needs. The sort key mirrors the one already used by
- * Governance.buildValidatorSnapshot and OracleConsensus._getLeader's
+ * Governance.buildValidatorSnapshot and OracleConsensus.getLeader's
  * snapshot path: lowercased signing pubkey ascending.
  *
  * Consensus-breaking by construction (it moves the leader for any set a hub

@@ -67,7 +67,7 @@ function wire(tip) {
 
 async function send(height) {
                 let config = { x: 1 };
-                let digest = consensus._digest(config);
+                let digest = consensus.digest(config);
                 await consensus.handlePrePrepare({
                     sender: VALIDATORS_4[1].addr,                   // leader for (seq 5, view 0)
                     sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -102,7 +102,7 @@ it('federated follower PREPAREs a PRE_PREPARE carrying a valid btcBlockHeight', 
             // so the assertion below distinguishes the two.
             hub.resolveBtcLatestBlock = sinon.stub().resolves(800004);
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -126,7 +126,7 @@ it('second PRE_PREPARE for an already-pending seq with a conflicting digest is d
             // First PRE_PREPARE establishes a pending proposal at seq 5 with digest A.
             wireFederationSnapshot(3, 800000);
             let configA = { x: 1 };
-            let digestA = consensus._digest(configA);
+            let digestA = consensus.digest(configA);
             await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -140,7 +140,7 @@ it('second PRE_PREPARE for an already-pending seq with a conflicting digest is d
             // internally-valid config (digest B). This can happen when two
             // leaders both propose for seq 5 during a view transition.
             let configB = { x: 2 };
-            let digestB = consensus._digest(configB);
+            let digestB = consensus.digest(configB);
             expect(digestB).to.not.equal(digestA);
 
             // A competing leader from view 1: (5+1)%4 = 2, so VALIDATORS_4[2] is the
@@ -171,7 +171,7 @@ describe('PBFT message flow', function () {
     installSuiteHooks2();
 it('PREPARE quorum triggers COMMIT broadcast', function () {
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             // N=4, quorum=3. Start with 2 prepares
             consensus.pendingProposals.set(5, {
@@ -201,7 +201,7 @@ describe('PBFT message flow', function () {
     installSuiteHooks2();
 it('COMMIT quorum applies config and saves seq', async function () {
             let config = { x: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
 
             let resolved = false;
             // N=4, quorum=3. Start with 2 commits
@@ -215,7 +215,7 @@ it('COMMIT quorum applies config and saves seq', async function () {
             });
 
             // Third commit → quorum met
-            consensus._handleCommit({
+            consensus.handleCommit({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
@@ -247,7 +247,7 @@ it('does NOT apply config twice under a re-entrant COMMIT while the apply is in 
             // resolves, so a second COMMIT reaching quorum mid-apply would re-run
             // applyConfig without the _applying in-flight guard.
             let config = { y: 2 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             let release;
             hub.applyConfig = sinon.stub().returns(new Promise(r => { release = r; })); // held pending
 

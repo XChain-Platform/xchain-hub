@@ -66,7 +66,7 @@ module.exports = {
         // request came from.
         let coin = response ? String(row.origin_chain) : HOME_CHAIN;
         let wire = response ? this.buildResponseWire(row, sigs) : this.buildRequestWire(row, sigs);
-        let rank = this._myRank(rid, ev);
+        let rank = this.myRank(rid, ev);
         this.legState(phase).wire.set(rid, {
             rid: rid, wire: wire, coin: coin, phase: phase, finalizedAt: Date.now(), rank: rank
         });
@@ -86,7 +86,7 @@ module.exports = {
     // This node's position in the hash-ordered signer set for the request. The same
     // sort rule the responsible-set derivations use, so every node computes the same
     // ordering and the step-ins are staggered rather than simultaneous.
-    _myRank(rid, ev){
+    myRank(rid, ev){
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if(!myPubkey) return -1;
         let sigs = (ev && ev.signatures) ? ev.signatures : [];
@@ -151,7 +151,7 @@ module.exports = {
         }
         // RESERVE rather than allow(): the send in broadcast() is AWAITED and broadcast() has
         // two concurrent drivers, the rank-0 broadcast inside the unawaited
-        // 'match:finalized' handler and the _poll sweep, with nothing serializing them.
+        // 'match:finalized' handler and the poll sweep, with nothing serializing them.
         // src/lib/spend_guard.js forbids the pure allow()/record() pair around an
         // awaited send precisely for that shape: every in-flight caller reads the same
         // pre-send budget and they all spend past the ATTEST_RELAY count and USD

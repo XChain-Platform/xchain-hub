@@ -18,7 +18,7 @@
  *
  * capability_snapshots rows are keyed UNIQUE on
  * (snapshot_block, capability, signing_pubkey, source) and every writer
- * inserts with INSERT IGNORE (CrossChainCallEngine._persistCapabilitySnapshot,
+ * inserts with INSERT IGNORE (CrossChainCallEngine.persistCapabilitySnapshot,
  * CrossChainDexEngine, StateCheckpointEngine). That is safe only while every
  * row in the table belongs to the chain the hub is currently following.
  *

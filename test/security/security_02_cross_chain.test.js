@@ -16,23 +16,23 @@ const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_4, pubkeyForTestSender } = require('../helpers/fixtures');
 
 function registerAttestationIdTests(getEngine) {
-    it('_handlePropose rejects invalid attestation ID format', function () {
+    it('handlePropose rejects invalid attestation ID format', function () {
         let engine = getEngine();
-        let digest = engine._digest('invalid-format', 3);
+        let digest = engine.digest('invalid-format', 3);
         let envelope = {
             sender: 'ws://v:1',
             data: { attestationId: 'invalid-format', digest: digest, confirmations: 3 }
         };
-        engine._handlePropose(envelope);
+        engine.handlePropose(envelope);
         expect(engine.pendingAttestations.size).to.equal(0);
     });
 
-    it('_handlePropose accepts valid attestation ID format', async function () {
+    it('handlePropose accepts valid attestation ID format', async function () {
         let engine = getEngine();
         // A follower now also verifies the proposed source action against its own
         // indexer before co-signing (anti-forgery hardening). That path has its own
         // coverage; here we stub it true to exercise the format-acceptance branch this
-        // test targets, mirroring the '_handlePropose rejects invalid format' twin above.
+        // test targets, mirroring the 'handlePropose rejects invalid format' twin above.
         sinon.stub(engine, 'verifySourceAction').resolves(true);
         // A follower also refuses to PREPARE over a 0 quorum (empty cross_chain
         // snapshot / bootstrap fail-closed guard). The mock has no chain-pair set
@@ -40,13 +40,13 @@ function registerAttestationIdTests(getEngine) {
         // quorum so this test exercises the accept branch, not the 0-quorum guard.
         sinon.stub(engine, 'resolveQuorum').resolves(3);
         let attestationId = 'BTC:1:LTC';
-        let digest = engine._digest(attestationId, 3);
+        let digest = engine.digest(attestationId, 3);
         let envelope = {
             sender: 'ws://v:1',
             sig_pubkey: pubkeyForTestSender('ws://v:1'),
             data: { attestationId, digest, confirmations: 3, sourceChain: 'BTC', sourceActionIndex: 1, destChain: 'LTC' }
         };
-        await engine._handlePropose(envelope);
+        await engine.handlePropose(envelope);
         expect(engine.pendingAttestations.has(attestationId)).to.be.true;
         let p = engine.pendingAttestations.get(attestationId);
         if (p.timer) clearTimeout(p.timer);
@@ -222,7 +222,7 @@ function registerCrossChainMembershipTests(CrossChainEngine, Consensus, hubWithR
         let engine = new CrossChainEngine(hub);
         engine.setValidatorSet(VALIDATORS_4);
         let attestationId = 'BTC:1:LTC';
-        let digest = engine._digest(attestationId, 6);
+        let digest = engine.digest(attestationId, 6);
         engine.pendingAttestations.set(attestationId, {
             attestationId, digest, prepares: new Set(), commits: new Set(),
             quorum: 3, finalized: false, timer: null
@@ -236,7 +236,7 @@ function registerCrossChainMembershipTests(CrossChainEngine, Consensus, hubWithR
         let consensus = new Consensus(hub);
         consensus.setValidatorSet(VALIDATORS_4);
         let config = { a: 1 };
-        let digest = consensus._digest(config);
+        let digest = consensus.digest(config);
         consensus.pendingProposals.set(1, {
             config, digest, prepares: new Set(), commits: new Set(),
             quorum: 3, resolved: false, applied: false, timer: null
@@ -272,7 +272,7 @@ function senderMembershipSuite() {
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);
             let config = { a: 1 };
-            let digest = consensus._digest(config);
+            let digest = consensus.digest(config);
             consensus.pendingProposals.set(1, {
                 config, digest, prepares: new Set(), commits: new Set(),
                 quorum: 3, resolved: false, applied: false, timer: null

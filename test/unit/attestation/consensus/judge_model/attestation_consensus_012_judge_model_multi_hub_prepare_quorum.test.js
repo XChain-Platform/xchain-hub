@@ -151,11 +151,11 @@ const P1_BODY   = Buffer.from('p1-body');
         await c.propose(RID, rs);
         await flush();
         // p2 also proposes (byte-divergent per judge_model convention)
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
         await flush();
         // The leader's PROPOSE always precedes its PREPARE on the wire; A-F1
         // requires the follower to hold it so the winner can be hash-checked.
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1_BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1_BODY));
         await flush();
         return c.pending.get(RID);
     }

@@ -61,12 +61,12 @@ const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
         // the FLAG this block once carried is now FIXED.
         //
         // Was: aggregateAll emitted results in coinPairs Set insertion order
-        // (a function of submission ARRIVAL order) and _digest hashed the array
+        // (a function of submission ARRIVAL order) and digest hashed the array
         // in that order via raw JSON.stringify, so a digest re-derived from a
         // hub's OWN aggregation depended on arrival order. Masked only because
         // followers re-hash the LEADER's propagated array.
         //
-        // Now: aggregateAll emits canonical pair order, and _digest
+        // Now: aggregateAll emits canonical pair order, and digest
         // canonicalizes its own preimage independently (sorted by coinPair,
         // projected to String coinPair/price). Both are consensus-breaking and
         // ship ungated with a fleet-wide rebase.
@@ -138,29 +138,29 @@ function registerL4DeterminismTrimmedMedianAggregation2Tests1() {
             expect(fwdAgg.map(a => a.coinPair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
         });
 
-        it('_digest is order-invariant over the RAW local aggregation', function () {
+        it('digest is order-invariant over the RAW local aggregation', function () {
             let fwdAgg = oc.aggregateAll(buildSubmissions(fwd));
             let revAgg = oc.aggregateAll(buildSubmissions(rev));
-            expect(oc._digest(1, fwdAgg)).to.equal(oc._digest(1, revAgg));
+            expect(oc.digest(1, fwdAgg)).to.equal(oc.digest(1, revAgg));
         });
 
         // The digest must survive a payload that arrives in a different order
         // than the local aggregation produced: this is the wire case, where the
         // proposer's array is hashed by every follower.
-        it('_digest ignores array order of an arbitrarily reordered price array', function () {
+        it('digest ignores array order of an arbitrarily reordered price array', function () {
             let agg = oc.aggregateAll(buildSubmissions(fwd));
             expect(agg.length).to.be.greaterThan(1);
-            expect(oc._digest(1, agg)).to.equal(oc._digest(1, agg.slice().reverse()));
+            expect(oc.digest(1, agg)).to.equal(oc.digest(1, agg.slice().reverse()));
         });
 
         // Key order and scalar TYPE are wire-serialization artifacts, not price
-        // content; mirrors the DEX _canonicalMatch discipline.
-        it('_digest is invariant to entry key order and to numeric-vs-string price', function () {
+        // content; mirrors the DEX canonicalMatch discipline.
+        it('digest is invariant to entry key order and to numeric-vs-string price', function () {
             let base     = [{ coinPair: 'BTC/USD', price: '100005' }, { coinPair: 'LTC/USD', price: '81' }];
             let keySwap  = [{ price: '81', coinPair: 'LTC/USD' }, { price: '100005', coinPair: 'BTC/USD' }];
             let numeric  = [{ coinPair: 'BTC/USD', price: 100005 }, { coinPair: 'LTC/USD', price: 81 }];
-            expect(oc._digest(7, base)).to.equal(oc._digest(7, keySwap));
-            expect(oc._digest(7, base)).to.equal(oc._digest(7, numeric));
+            expect(oc.digest(7, base)).to.equal(oc.digest(7, keySwap));
+            expect(oc.digest(7, base)).to.equal(oc.digest(7, numeric));
         });
 }
 
@@ -169,34 +169,34 @@ function registerL4DeterminismTrimmedMedianAggregation2Tests8() {
         // Projection to exactly [coinPair, price] means a padded field cannot
         // move the digest. Values themselves are bound by the per-pair semantic
         // validation on PROPOSE and by the separately signed PRICE v0 canonical.
-        it('_digest ignores fields outside the canonical projection', function () {
+        it('digest ignores fields outside the canonical projection', function () {
             let base   = [{ coinPair: 'BTC/USD', price: '100005' }];
             let padded = [{ coinPair: 'BTC/USD', price: '100005', junk: 'x'.repeat(64) }];
-            expect(oc._digest(3, base)).to.equal(oc._digest(3, padded));
+            expect(oc.digest(3, base)).to.equal(oc.digest(3, padded));
         });
 
-        it('_digest still separates different prices and different rounds', function () {
+        it('digest still separates different prices and different rounds', function () {
             let a = [{ coinPair: 'BTC/USD', price: '100005' }];
             let b = [{ coinPair: 'BTC/USD', price: '100006' }];
-            expect(oc._digest(1, a)).to.not.equal(oc._digest(1, b));
-            expect(oc._digest(1, a)).to.not.equal(oc._digest(2, a));
+            expect(oc.digest(1, a)).to.not.equal(oc.digest(1, b));
+            expect(oc.digest(1, a)).to.not.equal(oc.digest(2, a));
         });
 
         it('two independent hubs derive the identical digest from the same submissions in opposite order', function () {
             const ocA = mkOc(), ocB = mkOc();
-            expect(ocA._digest(11, ocA.aggregateAll(buildSubmissions(fwd))))
-                .to.equal(ocB._digest(11, ocB.aggregateAll(buildSubmissions(rev))));
+            expect(ocA.digest(11, ocA.aggregateAll(buildSubmissions(fwd))))
+                .to.equal(ocB.digest(11, ocB.aggregateAll(buildSubmissions(rev))));
         });
 
         // also canonicalizes the oracle's own live validator set, closing the
-        // legacy (no-snapshot) half of _getLeader that once left it indexing
+        // legacy (no-snapshot) half of getLeader that once left it indexing
         // into whatever order the loader supplied.
-        it('_getLeader legacy live-set path is order-insensitive', function () {
+        it('getLeader legacy live-set path is order-insensitive', function () {
             const set = VALIDATORS_7;
             const ocA = mkOc(); ocA.setValidatorSet(set.slice());
             const ocB = mkOc(); ocB.setValidatorSet(set.slice().reverse());
             for (let round = 0; round < set.length * 2 + 1; round++) {
-                expect(ocA._getLeader(round)).to.deep.equal(ocB._getLeader(round));
+                expect(ocA.getLeader(round)).to.deep.equal(ocB.getLeader(round));
             }
         });
 

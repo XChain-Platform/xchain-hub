@@ -135,28 +135,28 @@ const hookAt75648 = () => {
 
 describe('AttestationConsensus: message guards & internal early-returns', function () { beforeEach(hookAt75441); afterEach(hookAt75648); ['ATTEST_PROPOSE', 'ATTEST_PREPARE', 'ATTEST_COMMIT'].forEach(function (type) {
         it(type + ': ignores an envelope with no data', function () {
-            expect(() => c._handleMessage({ type })).to.not.throw();
+            expect(() => c.handleMessage({ type })).to.not.throw();
             expect(c.earlyMessages.size).to.equal(0);
         });
         it(type + ': ignores an envelope with no requestId', function () {
-            c._handleMessage({ type, data: {} });
+            c.handleMessage({ type, data: {} });
             expect(c.earlyMessages.size).to.equal(0);
         });
         it(type + ': ignores a message for an already-finalized request', function () {
             let rid = '1a'.repeat(16);
             c.markFinalized(rid);
-            c._handleMessage({ type, data: { requestId: rid, sig_pubkey: pub(p1) } });
+            c.handleMessage({ type, data: { requestId: rid, sig_pubkey: pub(p1) } });
             expect(c.earlyMessages.has(rid)).to.equal(false);
             expect(c.pending.has(rid)).to.equal(false);
         });
     }); });
 
-describe('AttestationConsensus: message guards & internal early-returns', function () { beforeEach(hookAt75441); afterEach(hookAt75648); it('_handlePropose ignores a proposal carrying no sig_pubkey', async function () {
+describe('AttestationConsensus: message guards & internal early-returns', function () { beforeEach(hookAt75441); afterEach(hookAt75648); it('handlePropose ignores a proposal carrying no sig_pubkey', async function () {
         let rid = '2b'.repeat(16);
         await c.propose(rid, roundState(me, [me, p1], BODY, 'http_get', 2));
         await flush();
         let before = c.pending.get(rid).proposals.size;
-        c._handleMessage({ type: 'ATTEST_PROPOSE', data: { requestId: rid, body_b64: '', sig: 'x' } });
+        c.handleMessage({ type: 'ATTEST_PROPOSE', data: { requestId: rid, body_b64: '', sig: 'x' } });
         expect(c.pending.get(rid).proposals.size).to.equal(before);
     }); });
 
@@ -205,7 +205,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         });
         await c.propose(RID, roundState(me, [me, p1], BODY, 'http_get', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
         // Round was deleted; no winner survived, no throw.
         expect(c.pending.has(RID)).to.equal(false);
@@ -220,7 +220,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         let env = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY);
         delete env.data.meta;
         delete env.data.status;
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(c.pending.get(RID).proposals.has(pub(p1))).to.equal(true);
     }); });
 
@@ -231,7 +231,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
         delete env.data.meta;
         delete env.data.status;
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(true);
     }); });
 
@@ -251,7 +251,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         await flush();
         let env = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY);
         delete env.data.sig;
-        c._handleMessage(env);
+        c.handleMessage(env);
         expect(c.pending.get(RID).proposals.has(pub(p1))).to.equal(false);
     }); });
 
@@ -259,7 +259,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         const RID = '9c'.repeat(16);
         await c.propose(RID, roundState(me, [me, p1], BODY, 'http_get', 2));
         await flush();
-        c._handleMessage({ type: 'ATTEST_PREPARE', data: { requestId: RID } });
+        c.handleMessage({ type: 'ATTEST_PREPARE', data: { requestId: RID } });
         expect(c.pending.get(RID).prepares.size).to.equal(0);
     }); });
 
@@ -271,7 +271,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
             signatures: new Map(), finalized: false, quorum: 1, redundancy: 2, prepares: new Set()
         };
         c.pending.set(RID, pending);
-        c._handleMessage({ type: 'ATTEST_COMMIT', data: { requestId: RID, body_b64: BODY.toString('base64') } });
+        c.handleMessage({ type: 'ATTEST_COMMIT', data: { requestId: RID, body_b64: BODY.toString('base64') } });
         expect(pending.commits.size).to.equal(0);
     }); });
 
@@ -287,7 +287,7 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
 
         await c.propose(RID, roundState(me, [me, p1], MINE, 'http_get', 2));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, OTHER));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, OTHER));
         await flush();
 
         let pending = c.pending.get(RID);
@@ -301,8 +301,8 @@ describe('AttestationConsensus: message guards & internal early-returns', functi
         // needed = max(quorum=2, redundancy=2) = 2, so the round must NOT
         // finalize on participation alone; emitting a 1-sig payload here is the
         // F-2 defect. The round falls through to deadline expiry instead.
-        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, OTHER));
-        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, OTHER));
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, OTHER));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, OTHER));
         await flush();
         expect(pending.signatures.size).to.equal(1);
         expect(finalized).to.have.length(0);

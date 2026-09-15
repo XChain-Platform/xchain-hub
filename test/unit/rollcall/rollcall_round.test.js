@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// RollcallRound engine behaviour, driven through the real _tick() against a
+// RollcallRound engine behaviour, driven through the real tick() against a
 // stubbed indexer pair. Everything signature-shaped uses REAL Ed25519 identities:
 // a stubbed verifier would certify a canonical nobody ever checked.
 //
@@ -112,7 +112,7 @@ function makeHub(o) {
         },
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
-        _resolveBtcIndexerUrl: async () => BTC_URL,
+        resolveBtcIndexerUrl: async () => BTC_URL,
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
@@ -228,7 +228,7 @@ describe('sign and gossip', function () {
 it('signs the ledger-hash-bound canonical and broadcasts XROLLCALL_SIGN', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
-            await eng._tick();
+            await eng.tick();
 
             const calls = eng.hub._pm.broadcast.getCalls().filter(c => c.args[0] === 'XROLLCALL_SIGN');
             assert.strictEqual(calls.length, 1);
@@ -237,7 +237,7 @@ it('signs the ledger-hash-bound canonical and broadcasts XROLLCALL_SIGN', async 
             assert.strictEqual(d.pubkey, PKS[0]);
             // The broadcast signature must verify over the canonical the landed
             // indexer handler rebuilds, or the whole rail is dead.
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
+            const canon = eng.canonical(EPOCH, LEDGER_HASH);
             assert.strictEqual(ValidatorIdentity.verify(canon, d.sig, PKS[0]), true);
         });
 it('signs even with no DOGE wallet and no broadcast rail', async function () {
@@ -245,7 +245,7 @@ it('signs even with no DOGE wallet and no broadcast rail', async function () {
             // rolled; gating signing on a publish rail would evict exactly those.
             wireRpc({ tip: 36 });
             const eng = makeEngine({ oraclePublisher: null });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.broadcastCapable(), false);
             assert.strictEqual(eng.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN').length, 1);
@@ -253,14 +253,14 @@ it('signs even with no DOGE wallet and no broadcast rail', async function () {
 it('ABSTAINS for the epoch when the federation snapshot is unresolved', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({ members: null });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.size, 0, 'no round state is created');
             assert.strictEqual(eng.hub._pm.broadcast.callCount, 0, 'nothing is gossiped');
         });
 it('does not sign when the BTC indexer has no ledger_hash for the epoch', async function () {
             wireRpc({ tip: 36, ledgerHash: null });
             const eng = makeEngine({});
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.size, 0);
             assert.strictEqual(eng.hub._pm.broadcast.callCount, 0);
         });
@@ -273,7 +273,7 @@ describe('sign and gossip', function () {
 it('writes the signature durably and re-emits it after a restart without re-signing', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
-            await first._tick();
+            await first.tick();
             const emitted = first.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1].sig;
 
@@ -288,7 +288,7 @@ it('writes the signature durably and re-emits it after a restart without re-sign
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
             second.loadSignLog();
-            await second._tick();
+            await second.tick();
             assert.strictEqual(signSpy.callCount, 0, 'a restart must re-emit, not re-sign');
             const reEmitted = second.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1].sig;
@@ -297,7 +297,7 @@ it('writes the signature durably and re-emits it after a restart without re-sign
 it('re-signs after a restart when the epoch ledger_hash changed under it', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
-            await first._tick();
+            await first.tick();
 
             loadModule();
             wireRpc({ tip: 36, ledgerHash: 'b'.repeat(64) });
@@ -305,7 +305,7 @@ it('re-signs after a restart when the epoch ledger_hash changed under it', async
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
             second.loadSignLog();
-            await second._tick();
+            await second.tick();
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
         });
@@ -318,7 +318,7 @@ describe('sign and gossip', function () {
 it('ignores a stored signature another identity wrote and signs fresh under its own key', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
-            await first._tick();
+            await first.tick();
             const foreign = first.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];
 
@@ -329,7 +329,7 @@ it('ignores a stored signature another identity wrote and signs fresh under its 
             const signSpy = sinon.spy(id2, 'sign');
             const second = makeEngine({ identity: id2 });
             second.loadSignLog();
-            await second._tick();
+            await second.tick();
             assert.strictEqual(signSpy.callCount, 1, 'a foreign line must not stand in for this hub\'s own signature');
             const own = second.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];

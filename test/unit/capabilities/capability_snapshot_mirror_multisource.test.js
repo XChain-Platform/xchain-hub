@@ -109,10 +109,10 @@ describe('capability_snapshots mirror: multi-source select-back parity @regressi
     // Each writer persists one row per (source, pubkey) and must stream BOTH.
     // Pre-fix, `mirrored` was ['srcA', 'srcA'] on every one of these.
     const WRITERS = [
-        { name: 'CrossChainCallEngine', persist: (hub) => new CrossChainCallEngine(hub)._persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
-        { name: 'CrossChainDexEngine',  persist: (hub) => new CrossChainDexEngine(hub)._persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
-        { name: 'AttestationRelay',     persist: (hub) => new AttestationRelay(hub)._persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
-        { name: 'RetractionConsensus',  persist: (hub) => new RetractionConsensus(hub)._persistCapabilitySnapshot(CAPABILITY, BLOCK) }
+        { name: 'CrossChainCallEngine', persist: (hub) => new CrossChainCallEngine(hub).persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
+        { name: 'CrossChainDexEngine',  persist: (hub) => new CrossChainDexEngine(hub).persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
+        { name: 'AttestationRelay',     persist: (hub) => new AttestationRelay(hub).persistCapabilitySnapshot(CAPABILITY, BLOCK, 'regtest') },
+        { name: 'RetractionConsensus',  persist: (hub) => new RetractionConsensus(hub).persistCapabilitySnapshot(CAPABILITY, BLOCK) }
     ];
 
     for (const w of WRITERS) {

@@ -260,7 +260,7 @@ oraclePublisherTests('oracle_published_rounds retention', function () {
         pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-30000' });
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();
+        await pub.processQueue();
         await pub._retentionSweep;                     // fire-and-forget handle
 
         expect(pub.publishedRoundsPruned).to.equal(2); // confirmed rounds 10 and 12 aged out
@@ -270,7 +270,7 @@ oraclePublisherTests('oracle_published_rounds retention', function () {
         let before = db.doQuery.getCalls().filter(c => /^\s*DELETE/i.test(c.args[0])).length;
         fsMock.readFileSync.returns('');
         pub._retentionSweep = null;
-        await pub._processQueue();
+        await pub.processQueue();
         await pub._retentionSweep;
         let after = db.doQuery.getCalls().filter(c => /^\s*DELETE/i.test(c.args[0])).length;
         expect(after).to.equal(before);
@@ -299,7 +299,7 @@ oraclePublisherTests('oracle_published_rounds retention', function () {
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();     // must not reject
+        await pub.processQueue();     // must not reject
         await pub._retentionSweep;     // rejection is swallowed inside
 
         expect(broadcastStub.calledOnce).to.be.true;

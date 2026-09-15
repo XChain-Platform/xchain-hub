@@ -261,7 +261,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       network: 'regtest',
       latest_block_index: 200,
@@ -283,7 +283,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    const stub = sinon.stub(engine, '_indexerCall');
+    const stub = sinon.stub(engine, 'indexerCall');
     stub.resolves({
       exists: true,
       network: 'regtest',
@@ -313,7 +313,7 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     const {
       engine
     } = makeEngine();
-    sinon.stub(engine, '_indexerCall').resolves({
+    sinon.stub(engine, 'indexerCall').resolves({
       exists: true,
       network: 'regtest',
       latest_block_index: 200,

@@ -39,7 +39,7 @@ function prePrepareAdmissible(self, envelope, seq, view, config, configDigest) {
 
     // Discard proposals from senders that are not registered validators
     // before doing any snapshot/indexer work for them.
-    if (!self._isKnownSender(envelope)) {
+    if (!self.isKnownSender(envelope)) {
         noteDrop({ reason: 'unknown_sender', phase: 'preprepare', sender: envelope.sender, envelope });
         return false;
     }
@@ -59,7 +59,7 @@ function prePrepareAdmissible(self, envelope, seq, view, config, configDigest) {
         return false;
     }
 
-    let computedDigest = self._digest(config);
+    let computedDigest = self.digest(config);
     if (computedDigest !== configDigest) {
         logger.warn('PBFT: PRE_PREPARE digest mismatch from ' + envelope.sender + ' (seq ' + seq + ')');
         return false;

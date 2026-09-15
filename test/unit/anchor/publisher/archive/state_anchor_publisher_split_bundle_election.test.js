@@ -75,7 +75,7 @@ function registerSplitBundleElectionSetTests() {
     it('resolves the election set at the bundle block, not the caller max block', async function () {
         const { pub, me } = buildPub();
         let asked = [];
-        pub._getActiveOraclePublishPubkeys = async (block) => { asked.push(block); return [me]; };
+        pub.getActiveOraclePublishPubkeys = async (block) => { asked.push(block); return [me]; };
         pub.getAnchorIntent               = async () => null;
         pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
@@ -99,7 +99,7 @@ function registerSplitBundleElectionSetTests() {
         expect(StateAnchorPublisher.hashOrder(key, setAt[OLD_BLOCK])[0]).to.equal(peer);
 
         let reachedMarker = false;
-        pub._getActiveOraclePublishPubkeys = async (block) => setAt[block] || [];
+        pub.getActiveOraclePublishPubkeys = async (block) => setAt[block] || [];
         pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
         pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
@@ -120,7 +120,7 @@ function registerSplitBundleElectionOutcomeTests() {
     it('still publishes when the bundle-height set does rank this hub (control)', async function () {
         const { pub, me } = buildPub();
         let reachedMarker = false;
-        pub._getActiveOraclePublishPubkeys = async () => [me];
+        pub.getActiveOraclePublishPubkeys = async () => [me];
         pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
         pub.runPublisherAttestationRound  = async () => ({ met: false, sigs: [] });
 
@@ -134,7 +134,7 @@ function registerSplitBundleElectionOutcomeTests() {
     it('fails closed on an empty set at the bundle block rather than borrowing the caller\'s', async function () {
         const { pub, me } = buildPub();
         let reachedMarker = false;
-        pub._getActiveOraclePublishPubkeys = async () => [];      // unresolved at this height
+        pub.getActiveOraclePublishPubkeys = async () => [];      // unresolved at this height
         pub.getAnchorIntent               = async () => { reachedMarker = true; return null; };
 
         let skipped = { rows: 0 };

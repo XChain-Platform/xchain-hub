@@ -57,8 +57,8 @@ function withAdmissionActivation(height){
     const out = {
         ah:     require('../../../../src/lib/admission_height.js'),
         act:    require('../../../../src/mirror_admission_activation.js'),
-        DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
-        BRIDGE: require('../../../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
+        DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype.canonicalMatch,
+        BRIDGE: require('../../../../src/cross_chain/bridge_engine.js').prototype.canonicalMatch,
         restore(){
             for(const [p, mod] of saved){
                 if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;

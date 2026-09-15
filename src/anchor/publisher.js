@@ -176,7 +176,7 @@ class StateAnchorPublisher {
     // the file holding the registration, so the registration lives with the class.
     listenToPeers(){
         if(this.peerManager){
-            this._messageHandler = (env) => this._handleMessage(env);
+            this._messageHandler = (env) => this.handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
         }
     }

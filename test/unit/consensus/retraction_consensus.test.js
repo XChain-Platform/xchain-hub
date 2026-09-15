@@ -132,7 +132,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0);
         let roundId = crypto.createHash('sha256').update(GOLDEN_CANONICAL, 'utf8').digest('hex');
         for (let follower of [idB, idC]) {
-            rc._handleMessage({ type: 'XRETRACT_SIGN', data: {
+            rc.handleMessage({ type: 'XRETRACT_SIGN', data: {
                 id: roundId, sig_pubkey: follower.getPubkeyHex().toLowerCase(), sig: follower.sign(GOLDEN_CANONICAL)
             }});
         }
@@ -152,8 +152,8 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99, retraction_generation: 7 });
         let roundId = crypto.createHash('sha256').update(GOLDEN_CANONICAL, 'utf8').digest('hex');
         // stranger (not in snapshot) and a member signing a TAMPERED canonical: both ignored
-        rc._handleMessage({ type: 'XRETRACT_SIGN', data: { id: roundId, sig_pubkey: stranger.getPubkeyHex().toLowerCase(), sig: stranger.sign(GOLDEN_CANONICAL) } });
-        rc._handleMessage({ type: 'XRETRACT_SIGN', data: { id: roundId, sig_pubkey: idB.getPubkeyHex().toLowerCase(), sig: idB.sign(GOLDEN_CANONICAL + 'X') } });
+        rc.handleMessage({ type: 'XRETRACT_SIGN', data: { id: roundId, sig_pubkey: stranger.getPubkeyHex().toLowerCase(), sig: stranger.sign(GOLDEN_CANONICAL) } });
+        rc.handleMessage({ type: 'XRETRACT_SIGN', data: { id: roundId, sig_pubkey: idB.getPubkeyHex().toLowerCase(), sig: idB.sign(GOLDEN_CANONICAL + 'X') } });
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0);
         rc.stop();
@@ -167,13 +167,13 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
             retraction: GOLDEN_EVT, sig_pubkey: leader.getPubkeyHex().toLowerCase(), sig: leader.sign(GOLDEN_CANONICAL)
         }};
         // No local intent -> silent
-        rc._handleMessage(req);
+        rc.handleMessage(req);
         await new Promise(r => setImmediate(r));
         assert.ok(!hub.peerManager.broadcasts.some(b => b.type === 'XRETRACT_SIGN'), 'must not sign without a matching local intent');
         // Local intent arrives (own indexer pushed the same retraction; note its
         // GENERATION differs, which must not matter - instance-local counters)
         rc.localIntents.set(RetractionConsensus.intentKey({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99 }), Date.now());
-        rc._handleMessage(req);
+        rc.handleMessage(req);
         await new Promise(r => setImmediate(r));
         let sign = hub.peerManager.broadcasts.find(b => b.type === 'XRETRACT_SIGN');
         assert.ok(sign, 'must sign once the local intent matches');
@@ -187,7 +187,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         let rc  = new RetractionConsensus(hub);
         rc.localIntents.set(RetractionConsensus.intentKey(GOLDEN_EVT), Date.now());
         let evt = Object.assign({}, GOLDEN_EVT, { snapshot_block: 5000 + 145 });   // > 144 drift
-        rc._handleMessage({ type: 'XRETRACT_SIGN_REQ', data: {
+        rc.handleMessage({ type: 'XRETRACT_SIGN_REQ', data: {
             retraction: evt, sig_pubkey: leader.getPubkeyHex().toLowerCase(),
             sig: leader.sign(RetractionConsensus.canonicalRetraction(evt))
         }});
@@ -202,12 +202,12 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         let rc  = new RetractionConsensus(hub);
         let sigs = [idA, idB, idC].map(i => ({ pubkey: i.getPubkeyHex().toLowerCase(), sig: i.sign(GOLDEN_CANONICAL) }));
         let env  = { type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } };
-        rc._handleMessage(env);
+        rc.handleMessage(env);
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures.length, 3);
         // Redelivery is deduped by the finalized ring
-        rc._handleMessage(env);
+        rc.handleMessage(env);
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         rc.stop();
@@ -218,7 +218,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         let hub = makeHub({ identity: me, validators: vset });
         let rc  = new RetractionConsensus(hub);
         let sigs = [idA, idB].map(i => ({ pubkey: i.getPubkeyHex().toLowerCase(), sig: i.sign(GOLDEN_CANONICAL) }));
-        rc._handleMessage({ type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } });
+        rc.handleMessage({ type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } });
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, '2 of 4 sources (weighted 600<=800*2/3... 3*200>2*400 false) must not stream');
         rc.stop();
@@ -248,7 +248,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         hub.capabilitySnapshot.getWeightSnapshot = async () => ({
             validators: [{ pubkey: pk, source: 'srcA', weight: '100' }], truncated: true });
         let rc = new RetractionConsensus(hub);
-        await rc._persistCapabilitySnapshot('cross_chain', 5000);
+        await rc.persistCapabilitySnapshot('cross_chain', 5000);
         assert.ok(!hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)),
             'no capability_snapshots row may be written from a truncated set');
         assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0, 'nothing may be mirrored either');
@@ -323,15 +323,15 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         let rc   = new RetractionConsensus(hub);
         let sigs = [idA, idB, idC].map(i => ({ pubkey: i.getPubkeyHex().toLowerCase(), sig: i.sign(GOLDEN_CANONICAL) }));
         let env  = { type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } };
-        rc._handleMessage(env);
+        rc.handleMessage(env);
         await waitUntil(() => rc.finalized.size === 0, { label: 'the failed round to be released' });
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'deferred, nothing streamed');
         healthy = true;
-        rc._handleMessage(env);
+        rc.handleMessage(env);
         await waitUntil(() => hub.hubDbBroadcaster.deletions.length === 1, { label: 're-delivery to finalize once the DB recovers' });
         assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures.length, 3);
         // and the ring still dedups a third delivery of the same round
-        rc._handleMessage(env);
+        rc.handleMessage(env);
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
@@ -342,7 +342,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
         let rc  = new RetractionConsensus(hub);
-        await rc._persistCapabilitySnapshot('cross_chain', 5000);
+        await rc.persistCapabilitySnapshot('cross_chain', 5000);
         assert.ok(hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)));
         assert.ok(hub.hubDbBroadcaster.rows.some(r => r.table === 'capability_snapshots'));
         rc.stop();

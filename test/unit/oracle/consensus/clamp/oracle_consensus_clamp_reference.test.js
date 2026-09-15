@@ -198,7 +198,7 @@ function oracleConsensusTheProposeSideClampReferencSuite2Propose(btcBlockHeight,
     data: {
       round: oracleConsensusTheProposeSideClampReferencSuite2ROUND,
       prices,
-      digest: oracleConsensusTheProposeSideClampReferencSuite2Oc._digest(oracleConsensusTheProposeSideClampReferencSuite2ROUND, prices),
+      digest: oracleConsensusTheProposeSideClampReferencSuite2Oc.digest(oracleConsensusTheProposeSideClampReferencSuite2ROUND, prices),
       btcBlockHeight,
       btcBlockTime: 1700000000
     }
@@ -208,14 +208,14 @@ function registerOracleConsensusTheProposeSideClampReferencSuite2Part1() {
   beforeEach(function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub = createMockHub();
     oracleConsensusTheProposeSideClampReferencSuite2Pm = oracleConsensusTheProposeSideClampReferencSuite2Hub._peerManager;
-    oracleConsensusTheProposeSideClampReferencSuite2Pm.validatorPubkeys = new Set(); // size 0, so _isKnownSender accepts any sender
+    oracleConsensusTheProposeSideClampReferencSuite2Pm.validatorPubkeys = new Set(); // size 0, so isKnownSender accepts any sender
     oracleConsensusTheProposeSideClampReferencSuite2OracleRound = {
       getSubmissions: sinon.stub().returns(new Map())
     };
     oracleConsensusTheProposeSideClampReferencSuite2Hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
     oracleConsensusTheProposeSideClampReferencSuite2Oc = new OracleConsensus(oracleConsensusTheProposeSideClampReferencSuite2Hub, oracleConsensusTheProposeSideClampReferencSuite2OracleRound);
     oracleConsensusTheProposeSideClampReferencSuite2Oc.setValidatorSet(VALIDATORS_3);
-    oracleConsensusTheProposeSideClampReferencSuite2Leader = oracleConsensusTheProposeSideClampReferencSuite2Oc._getLeader(oracleConsensusTheProposeSideClampReferencSuite2ROUND);
+    oracleConsensusTheProposeSideClampReferencSuite2Leader = oracleConsensusTheProposeSideClampReferencSuite2Oc.getLeader(oracleConsensusTheProposeSideClampReferencSuite2ROUND);
     oracleConsensusTheProposeSideClampReferencSuite2Pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== oracleConsensusTheProposeSideClampReferencSuite2Leader.addr).addr;
     oracleConsensusTheProposeSideClampReferencSuite2Refresh = sinon.spy(oracleConsensusTheProposeSideClampReferencSuite2Oc, 'refreshLastFinalizedForRound');
     sinon.stub(console, 'warn');
@@ -226,26 +226,26 @@ function registerOracleConsensusTheProposeSideClampReferencSuite2Part1() {
   });
   it('aligns the reference for a PROPOSE at the height', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'testnet';
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(ARMED));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(ARMED));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.calledOnceWithExactly(oracleConsensusTheProposeSideClampReferencSuite2ROUND)).to.be.true;
   });
   it('aligns it on regtest, which is armed at genesis', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'regtest';
     // Any height at or above 0 is armed on regtest; a real BTC height rather than
     // literal block 0, which the snapshot-anchor guard refuses on a federated hub.
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(500));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(500));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.calledOnceWithExactly(oracleConsensusTheProposeSideClampReferencSuite2ROUND)).to.be.true;
   });
   it('does not touch the reference one block below the height', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'testnet';
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(ARMED - 1));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(ARMED - 1));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.called, 'the pre-alignment path reads nothing per round').to.be.false;
   });
 }
 function registerOracleConsensusTheProposeSideClampReferencSuite2Part2() {
   it('does not touch the reference on unratified mainnet', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'mainnet';
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(9999999));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(9999999));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.called).to.be.false;
   });
 
@@ -259,19 +259,19 @@ function registerOracleConsensusTheProposeSideClampReferencSuite2Part2() {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'regtest'; // armed at genesis, so the gate would fire
     const height = 5000;
     const tip = height - oracleConsensusTheProposeSideClampReferencSuite2Oc.snapshotToleranceBlocks - 1;
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(height, tip));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(height, tip));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.called, 'the bound drops the PROPOSE before the gate is read').to.be.false;
     expect(oracleConsensusTheProposeSideClampReferencSuite2Hub.db.doQuery.called, 'and before it can cost this hub a query').to.be.false;
   });
   it('still reads the reference at the far edge of the band, which the refusal is measured against', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'regtest';
     const height = 5000;
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(height, height - oracleConsensusTheProposeSideClampReferencSuite2Oc.snapshotToleranceBlocks));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(height, height - oracleConsensusTheProposeSideClampReferencSuite2Oc.snapshotToleranceBlocks));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.calledOnceWithExactly(oracleConsensusTheProposeSideClampReferencSuite2ROUND), 'an accepted height reaches the gate').to.be.true;
   });
   it('reads nothing when this hub cannot resolve a tip of its own', async function () {
     oracleConsensusTheProposeSideClampReferencSuite2Hub.network = 'regtest';
-    await oracleConsensusTheProposeSideClampReferencSuite2Oc._handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(5000, null));
+    await oracleConsensusTheProposeSideClampReferencSuite2Oc.handlePropose(oracleConsensusTheProposeSideClampReferencSuite2Propose(5000, null));
     expect(oracleConsensusTheProposeSideClampReferencSuite2Refresh.called, 'no tip means no bound, so nothing downstream may run').to.be.false;
     expect(oracleConsensusTheProposeSideClampReferencSuite2Hub.db.doQuery.called).to.be.false;
   });

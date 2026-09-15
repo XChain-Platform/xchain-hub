@@ -139,9 +139,9 @@ async function seedThreeProposals(reg) {
         c = new AttestationConsensus(hub, reg);
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
         await flush();
         return c.pending.get(RID);
     }
@@ -215,9 +215,9 @@ describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', f
         // Two agree on BODY, one (p2) diverges.
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         await flush();
-        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('different')));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('different')));
         await flush();
 
         expect(hub.slashDetector.recordAttestationDivergence.calledOnce).to.equal(true);

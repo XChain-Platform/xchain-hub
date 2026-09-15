@@ -49,7 +49,7 @@ module.exports = {
     // SlashDetector's `parseFloat(...) || DEFAULT` would fall back to the band: the
     // ratio bound already refuses it, and refusing is the safe direction.
     // DEPLOY NOTE: same mixed-version caveat as the follower-path bounds re-check in
-    // _handlePropose - fixed hubs drop a sub-floor Byzantine proposal that unfixed
+    // handlePropose - fixed hubs drop a sub-floor Byzantine proposal that unfixed
     // hubs still record. Honest proposals always clear the floor, so honest traffic
     // never diverges.
     validateSlashBandFloor(parameter, proposedValue) {

@@ -30,7 +30,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    // Deterministic leader for a proposal. Mirrors OracleConsensus._getLeader
+    // Deterministic leader for a proposal. Mirrors OracleConsensus.getLeader
     // (modular index into the validator set) but, since governance has no
     // sequential round counter, derives the round from a hash of the immutable
     // proposal_id. Every hub computes the same leader for a given proposal.
@@ -98,7 +98,7 @@ module.exports = {
         // slow DB lets the next tick re-select the still-'voting' proposal and re-tally
         // it; the status='voting' WHERE clause makes only one UPDATE affect a row, but
         // without this affectedRows check both passes would broadcast GOV_RESULT and
-        // emit proposal:finalized, double-applying on the leader. Mirrors _handleResult.
+        // emit proposal:finalized, double-applying on the leader. Mirrors handleResult.
         let res = await this.db.updateGovernanceProposal(newStatus, proposal.proposal_id);
         if (!res || !res.affectedRows) return;
 

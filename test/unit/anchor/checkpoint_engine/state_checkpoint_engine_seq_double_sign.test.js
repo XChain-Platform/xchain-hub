@@ -159,7 +159,7 @@ function buildMesh(n, opts) {
     // modelled: the process-lifetime state is gone, the durable state is not.
 function newEngine(self, opts) {
         let engine = new StateCheckpointEngine(self.hub);
-        engine._indexerCall = async (coin, method, params) =>
+        engine.indexerCall = async (coin, method, params) =>
             blockAt(params && params.block_index != null ? params.block_index : opts.tip);
         return engine;
     }
@@ -244,7 +244,7 @@ function registerLostRoundRecoveryTest() {
         let leader   = leaderNode(bus, SNAP);
         let follower = bus.nodes.find(nd => nd !== leader);
         let signs    = watchCosign(follower);
-        await leader.engine._tick();
+        await leader.engine.tick();
         await waitUntil(() => signs.length === 1, { label: 'the follower to co-sign the first proposal' });
         expect(bus.nodes.every(nd => nd.db.checkpoints.length === 0),
             'the dropped co-signature leaves the round short of quorum').to.equal(true);
@@ -256,7 +256,7 @@ function registerLostRoundRecoveryTest() {
         dropSigns = false;
         leader.engine = newEngine(leader, opts);
         await leader.engine.start();
-        await leader.engine._tick();
+        await leader.engine.tick();
         await waitUntil(() => follower.engine._seqDoubleSignRefusals === 1,
             { label: 'the follower to refuse the second payload at that sequence' });
 
@@ -267,7 +267,7 @@ function registerLostRoundRecoveryTest() {
         // Next cadence (default interval 6 BTC blocks): a new snapshot_block is a new
         // sequence, so the federation checkpoints normally. The cost was one round.
         opts.btcBlock = SNAP + 6;
-        await leader.engine._tick();
+        await leader.engine.tick();
         await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1),
             { label: 'the next cadence to finalize' });
         expect(follower.db.checkpoints[0].checkpoint_seq,

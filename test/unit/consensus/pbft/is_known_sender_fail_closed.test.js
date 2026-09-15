@@ -39,15 +39,15 @@ const KEY_STRANGER = 'cc'.repeat(32); // in neither
 const CHAIN_KEYED = [{
   name: 'Consensus',
   cls: require('../../../../src/consensus/pbft'),
-  method: '_isKnownSender'
+  method: 'isKnownSender'
 }, {
   name: 'OracleConsensus',
   cls: require('../../../../src/oracle/consensus'),
-  method: '_isKnownSender'
+  method: 'isKnownSender'
 }, {
   name: 'CrossChainEngine',
   cls: require('../../../../src/cross_chain/engine'),
-  method: '_isKnownSender'
+  method: 'isKnownSender'
 }, {
   name: 'OracleRound',
   cls: require('../../../../src/oracle/round'),
@@ -62,11 +62,11 @@ const CHAIN_KEYED = [{
 const REGISTRY_KEYED = [{
   name: 'Governance',
   cls: require('../../../../src/validators/governance'),
-  method: '_isKnownSender'
+  method: 'isKnownSender'
 }, {
   name: 'ReorgHandler',
   cls: require('../../../../src/anchor/reorg_handler'),
-  method: '_isKnownSender'
+  method: 'isKnownSender'
 }];
 function call(cls, method, peerManager, arg) {
   return cls.prototype[method].call({

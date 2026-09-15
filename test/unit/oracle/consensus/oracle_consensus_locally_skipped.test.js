@@ -10,8 +10,8 @@
 //
 // Stress-sweep #7 LOCALLY-SKIPPED DIVERGENCE: a hub whose gossip lagged below
 // minSubmissions at the block boundary stores the round as 'skipped'. That skip
-// must NOT land in `finalized` (which would make _handlePropose drop the
-// federation's legitimate PROPOSE and handlePrepare/_handleCommit refuse to
+// must NOT land in `finalized` (which would make handlePropose drop the
+// federation's legitimate PROPOSE and handlePrepare/handleCommit refuse to
 // buffer, permanently pinning a NULL price_snapshot for a round the rest of the
 // federation finalized). It must land in a separate `locallySkipped` set so a
 // later PROPOSE still processes and can upgrade the skipped rows to finalized.
@@ -49,23 +49,23 @@ function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part1() {
     await oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.finalizeRound(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, 100, 1700000000);
     expect(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.locallySkipped.has(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND)).to.be.true;
 
-    // _handlePropose returns at the `finalized.has(round)` guard (before it ever
-    // calls _isKnownSender). Spying on _isKnownSender therefore proves whether the
+    // handlePropose returns at the `finalized.has(round)` guard (before it ever
+    // calls isKnownSender). Spying on isKnownSender therefore proves whether the
     // PROPOSE was dropped by that guard or allowed to proceed. Return false so the
     // handler still exits promptly (right after the membership gate) without
     // needing a full snapshot/leader setup.
-    let known = sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, '_isKnownSender').returns(false);
+    let known = sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, 'isKnownSender').returns(false);
     let prices = [{
       coinPair: 'BTC/USD',
       price: '100000'
     }];
-    await oracleConsensusLocallySkippedRoundsStayRepSuite1Oc._handlePropose({
+    await oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.handlePropose({
       sender: 'ws://validator-2:10001',
       sig_pubkey: pubkeyForTestSender('ws://validator-2:10001'),
       data: {
         round: oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND,
         prices,
-        digest: oracleConsensusLocallySkippedRoundsStayRepSuite1Oc._digest(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, prices),
+        digest: oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.digest(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, prices),
         btcBlockHeight: 100
       }
     });
@@ -77,18 +77,18 @@ function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part1() {
 function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part2() {
   it('a genuinely finalized round IS still dropped at the finalized guard (contrast)', async function () {
     oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.markFinalized(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND);
-    let known = sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, '_isKnownSender').returns(false);
+    let known = sinon.stub(oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, 'isKnownSender').returns(false);
     let prices = [{
       coinPair: 'BTC/USD',
       price: '100000'
     }];
-    await oracleConsensusLocallySkippedRoundsStayRepSuite1Oc._handlePropose({
+    await oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.handlePropose({
       sender: 'ws://validator-2:10001',
       sig_pubkey: pubkeyForTestSender('ws://validator-2:10001'),
       data: {
         round: oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND,
         prices,
-        digest: oracleConsensusLocallySkippedRoundsStayRepSuite1Oc._digest(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, prices),
+        digest: oracleConsensusLocallySkippedRoundsStayRepSuite1Oc.digest(oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND, prices),
         btcBlockHeight: 100
       }
     });

@@ -243,7 +243,7 @@ class CrossChainDexEngine extends EventEmitter {
     // ROUND_ID=match_id, VIEW=view). Putting <view> in the signed bytes is what lets a
     // legitimate view change (re-sign at a higher view) be told apart from equivocation.
     // The view is NOT a content field; it lives only in the header.
-    _canonicalMatch(r, view){
+    canonicalMatch(r, view){
         let raw = [
             'XMATCH', r.match_id, String(r.snapshot_block),
             r.a_chain, String(r.a_action_index), r.a_tick || '', String(r.a_amount), String(r.a_ownership), r.a_payout_addr,
@@ -278,7 +278,7 @@ class CrossChainDexEngine extends EventEmitter {
     // resolveCapabilityValidators normalizes to []), so callers on the money path
     // can fail closed rather than committing a match whose signatures no mirror can
     // verify against capability_snapshots.
-    async _persistCapabilitySnapshot(capability, block, network){
+    async persistCapabilitySnapshot(capability, block, network){
         let validators = await this.resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored. The `.truncated`
         // marker fails this hub's own meetsStakeThreshold closed, but it is a JS array
@@ -320,7 +320,7 @@ class CrossChainDexEngine extends EventEmitter {
         return validators.length;
     }
 
-    async _indexerCall(coin, method, params){
+    async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

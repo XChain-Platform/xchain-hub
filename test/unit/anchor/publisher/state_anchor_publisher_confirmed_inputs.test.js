@@ -190,7 +190,7 @@ function registerMidFlushDeferralTest() {
                         checkpoint_seq: 100, snapshot_block: 100, state_root: 'e4'.repeat(32), state_root_version: 1, block_merkle_root: 'f5'.repeat(32), block_merkle_version: 1, anchor_txid: null };
             pub.hub.db.doQuery = async (sql) => sql.indexOf('FROM state_checkpoints') !== -1 ? [row] : [];
             let me = pub.identity.getPubkeyHex().toLowerCase();
-            pub._getActiveOraclePublishPubkeys = async () => [me];       // sole member: rank 0, always unlocked
+            pub.getActiveOraclePublishPubkeys = async () => [me];       // sole member: rank 0, always unlocked
             pub.recordAnchorIntent   = async () => {};
             pub.withdrawAnchorIntent = async () => {};
             pub.findExistingCheckpointAnchor = async () => null;

@@ -81,7 +81,7 @@ module.exports = {
     async schedulerTick(){
         if (!this._injector || this.corpus.length === 0) return 0;
         // Scheduler self-overlap guard (house convention:
-        // FullNodeChallengeRound._tick). The injector is an operator-supplied hook that
+        // FullNodeChallengeRound.tick). The injector is an operator-supplied hook that
         // emits a real on-chain ATTEST v0 request, and nothing here bounds its round
         // trip, so a hung encoder/BTC send parks a tick until the socket dies and the
         // next interval fires on top of it. The backpressure test below cannot stop the

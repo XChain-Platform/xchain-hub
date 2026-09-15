@@ -34,7 +34,7 @@ function oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope(prices) {
     data: {
       round: oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND,
       prices,
-      digest: oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._digest(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND, prices),
+      digest: oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.digest(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND, prices),
       btcBlockHeight: 100,
       btcBlockTime: 1700000000
     }
@@ -54,7 +54,7 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part1() {
     oracleConsensusPROPOSEPairCoverageStressSwSuite1Hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
     oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc = new OracleConsensus(oracleConsensusPROPOSEPairCoverageStressSwSuite1Hub, oracleConsensusPROPOSEPairCoverageStressSwSuite1OracleRound);
     oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.setValidatorSet(VALIDATORS_3);
-    oracleConsensusPROPOSEPairCoverageStressSwSuite1Leader = oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._getLeader(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND);
+    oracleConsensusPROPOSEPairCoverageStressSwSuite1Leader = oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.getLeader(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND);
     oracleConsensusPROPOSEPairCoverageStressSwSuite1Pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== oracleConsensusPROPOSEPairCoverageStressSwSuite1Leader.addr).addr;
     // This follower priced BTC/USD locally this round.
     oracleConsensusPROPOSEPairCoverageStressSwSuite1OracleRound.getSubmissions.returns(buildSubmissions([{
@@ -70,7 +70,7 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part1() {
   });
   it('withholds co-sign when the proposal omits a locally-priced pair', async function () {
     // Proposal covers only LTC/USD; this follower priced BTC/USD but it is dropped.
-    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
+    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
       coinPair: 'LTC/USD',
       price: '90'
     }]));
@@ -78,14 +78,14 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part1() {
     expect(oracleConsensusPROPOSEPairCoverageStressSwSuite1Pm.broadcast.called).to.be.false;
   });
   it('withholds co-sign on an empty proposal', async function () {
-    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([]));
+    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([]));
     expect(oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.pendingRounds.has(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND)).to.be.false;
     expect(oracleConsensusPROPOSEPairCoverageStressSwSuite1Pm.broadcast.called).to.be.false;
   });
 }
 function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part2() {
   it('co-signs when the proposal covers the locally-priced pair', async function () {
-    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
+    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
       coinPair: 'BTC/USD',
       price: '100000'
     }]));
@@ -123,7 +123,7 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part2() {
     // The leader aggregates the full set, so LTC/USD drops out of its proposal.
     let leaderPairs = oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.aggregateAll(oracleConsensusPROPOSEPairCoverageStressSwSuite1OracleRound.getSubmissions(oracleConsensusPROPOSEPairCoverageStressSwSuite1ROUND)).map(a => a.coinPair);
     expect(leaderPairs).to.deep.equal(['BTC/USD']);
-    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
+    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
       coinPair: 'BTC/USD',
       price: '100000'
     }]));
@@ -155,7 +155,7 @@ function registerOracleConsensusPROPOSEPairCoverageStressSwSuite1Part3() {
     }]));
     let events = [];
     oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.on('oracle:propose-rejected', e => events.push(e));
-    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc._handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
+    await oracleConsensusPROPOSEPairCoverageStressSwSuite1Oc.handlePropose(oracleConsensusPROPOSEPairCoverageStressSwSuite1Envelope([{
       coinPair: 'BTC/USD',
       price: '100000'
     }]));

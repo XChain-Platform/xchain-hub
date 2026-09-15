@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -209,7 +209,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             };
             // The on-chain action carries no VIEW field, so a verifier replaying it
             // cannot learn one; the canonical must be view-independent.
-            expect(relay._canonicalMatch(row, 7)).to.equal(relay._canonicalMatch(row, 0));
+            expect(relay.canonicalMatch(row, 7)).to.equal(relay.canonicalMatch(row, 0));
         }); }); });
 
 // ── 1. The cross-service canonical ──────────────────────────────────────
@@ -233,7 +233,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             }
 
             const Attest = require(attestPath);
-            // Both canonicals touch only this._sha256 and the module-scoped
+            // Both canonicals touch only this.sha256 and the module-scoped
             // equivocation header, so a bare prototype exercises the real code.
             const ix    = Object.create(Attest.prototype);
             const relay = new AttestationRelay(makeHub());

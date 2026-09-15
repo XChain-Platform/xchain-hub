@@ -227,7 +227,7 @@ class RollcallRound {
         this.loadSpendLog();
         this.spendGuard.persistTo();
         let tick = async () => {
-            try { await this._tick(); }
+            try { await this.tick(); }
             catch(e){ logger.warn(nodeUtil.format('RollcallRound tick:', e && e.message ? e.message : e)); }
         };
         this._timer = setInterval(tick, this.pollMs);
@@ -259,10 +259,10 @@ class RollcallRound {
 
     // ── indexer transports ───────────────────────────────────────────────────
 
-    async _indexerCall(method, params){
+    async indexerCall(method, params){
         let url = this.indexerUrl;
-        if(this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function'){
-            try { url = (await this.hub._resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
+        if(this.hub && typeof this.hub.resolveBtcIndexerUrl === 'function'){
+            try { url = (await this.hub.resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
         }
         if(!url) throw new Error('no BTC indexer URL (set BTC_INDEXER_API_URL / BTC_INDEXER_URL)');
         let headers = (this.hub && typeof this.hub.btcIndexerHeaders === 'function')
@@ -341,7 +341,7 @@ function initRoundState(self){
     self._timer         = null;
     self._ticking       = false;
     self._loggedNoBroadcast = false;
-    self._handler       = (env) => self._handleMessage(env);
+    self._handler       = (env) => self.handleMessage(env);
 }
 
 

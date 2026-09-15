@@ -145,7 +145,7 @@ function feature6followerVerificationOfAProposedTransferFragment2ProposedRow(eng
   return row;
 }
 function feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, leg) {
-  engine._indexerCall = sinon.stub().resolves({
+  engine.indexerCall = sinon.stub().resolves({
     latest_block_index: 200,
     network: 'regtest',
     transfers: [leg === null ? pendingLeg({
@@ -178,7 +178,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment2Part1()
     const {
       engine
     } = makeEngine();
-    engine._indexerCall = sinon.stub().resolves({
+    engine.indexerCall = sinon.stub().resolves({
       latest_block_index: 103,
       network: 'regtest',
       transfers: [pendingLeg()]

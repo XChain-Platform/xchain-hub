@@ -56,7 +56,7 @@ module.exports = {
 
         let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
         let canonical = retractionClass().canonicalRetraction(signedEvt);
-        let id        = this._roundId(canonical);
+        let id        = this.roundId(canonical);
         if(this.pending.has(id) || this.finalized.has(id)) return;   // duplicate submit (e.g. per-row DEX loop)
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();

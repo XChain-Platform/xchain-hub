@@ -73,7 +73,7 @@ module.exports = {
     // Execute a single round: fetch prices, broadcast submission.
     //
     // Round self-overlap guard (house convention:
-    // FullNodeChallengeRound._tick). The round-number test below looks like a guard but
+    // FullNodeChallengeRound.tick). The round-number test below looks like a guard but
     // is not one: it fences a REPEAT of the same round, and the next interval fires with
     // a NEW round number, so it passes. Everything after it reads and writes
     // this.currentRound across several awaits (network resolve, chain-tip read, the
@@ -82,7 +82,7 @@ module.exports = {
     // round that fired on top: the slow round then broadcasts ITS prices stamped with the
     // NEW round number, records them over the newer round's own entry in the submission
     // map, and persists the audit row under that number. Peers keep only the first
-    // submission per sender per round (_handleMessage), so the federation aggregates one
+    // submission per sender per round (handleMessage), so the federation aggregates one
     // price set while this hub's own map, DB row and finalization see the other: it
     // disagrees with the quorum about what it submitted. The reassignment also clobbers
     // currentBtcBlockHeight, so both rounds anchor to a height neither of them read.

@@ -12,7 +12,7 @@
 //
 // Finding F7 (standing-federation Phase 1, 2026-06-11): PREPARE/COMMIT
 // arrives before this hub's pendingRounds entry exists, and gets silently
-// dropped. _handlePropose awaits the block-boundary snapshot fetch, and
+// dropped. handlePropose awaits the block-boundary snapshot fetch, and
 // the whole PBFT burst completes inside that window. The hub then never
 // reached commit quorum locally and the round vanished from its
 // price_snapshots even though the federation finalized. These tests pin
@@ -103,24 +103,24 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part1() {
     sinon.restore();
   });
   it('buffers a PREPARE that arrives before any pending round exists', function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePrepare(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_PREPARE', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.pendingRounds.has(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.be.false;
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessages.get(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.have.length(1);
   });
   it('buffers a COMMIT that arrives before any pending round exists', function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
-    oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    oracleConsensusEarlyMessageBufferForF7Suite1Oc.handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessages.get(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.have.length(1);
   });
   it('does NOT buffer for rounds already finalized', function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.finalized.add(oracleConsensusEarlyMessageBufferForF7Suite1ROUND);
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePrepare(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_PREPARE', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessages.has(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.be.false;
   });
   it('caps the buffer per round', function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
     for (let i = 0; i < oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessageMaxPerRound + 10; i++) {
       oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePrepare(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
     }
@@ -129,15 +129,15 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part1() {
 }
 function registerOracleConsensusEarlyMessageBufferForF7Suite1Part2() {
   it('drains buffered votes into the pending round once the PROPOSE lands', async function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
 
     // Votes from val-c beat the proposal (the F7 race).
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePrepare(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_PREPARE', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
-    oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
+    oracleConsensusEarlyMessageBufferForF7Suite1Oc.handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessages.get(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.have.length(2);
 
     // Leader's PROPOSE arrives late.
-    await oracleConsensusEarlyMessageBufferForF7Suite1Oc._handlePropose(oracleConsensusEarlyMessageBufferForF7Suite1ProposeEnvelope(digest));
+    await oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePropose(oracleConsensusEarlyMessageBufferForF7Suite1ProposeEnvelope(digest));
     expect(oracleConsensusEarlyMessageBufferForF7Suite1Oc.earlyMessages.has(oracleConsensusEarlyMessageBufferForF7Suite1ROUND)).to.be.false; // drained
     let pending = oracleConsensusEarlyMessageBufferForF7Suite1Oc.pendingRounds.get(oracleConsensusEarlyMessageBufferForF7Suite1ROUND);
     expect(pending, 'pending round must exist').to.exist;
@@ -145,12 +145,12 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part2() {
     expect(pending.commits.has(oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].pubkey)).to.be.true; // replayed
   });
   it('reaches commit quorum from replayed votes alone (the missed-round scenario)', async function () {
-    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
+    let digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, oracleConsensusEarlyMessageBufferForF7Suite1PRICES);
 
     // Both peers' COMMITs arrive while our PROPOSE handling is delayed.
-    oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[0].addr, digest));
-    oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
-    await oracleConsensusEarlyMessageBufferForF7Suite1Oc._handlePropose(oracleConsensusEarlyMessageBufferForF7Suite1ProposeEnvelope(digest));
+    oracleConsensusEarlyMessageBufferForF7Suite1Oc.handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[0].addr, digest));
+    oracleConsensusEarlyMessageBufferForF7Suite1Oc.handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
+    await oracleConsensusEarlyMessageBufferForF7Suite1Oc.handlePropose(oracleConsensusEarlyMessageBufferForF7Suite1ProposeEnvelope(digest));
     // checkCommitQuorum stores via async db call; let it settle.
     await new Promise(r => setImmediate(r));
 
@@ -167,8 +167,8 @@ function registerOracleConsensusEarlyMessageBufferForF7Suite1Part2() {
     // Buffer a vote keyed by the round before proposing. Digest must match
     // what proposeRound computes over its own aggregation.
     let aggregated = oracleConsensusEarlyMessageBufferForF7Suite1Oc.aggregateAll(subs);
-    digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc._digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, aggregated);
-    oracleConsensusEarlyMessageBufferForF7Suite1Oc._handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
+    digest = oracleConsensusEarlyMessageBufferForF7Suite1Oc.digest(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, aggregated);
+    oracleConsensusEarlyMessageBufferForF7Suite1Oc.handleCommit(oracleConsensusEarlyMessageBufferForF7Suite1VoteEnvelope('ORACLE_COMMIT', oracleConsensusEarlyMessageBufferForF7Suite1VALSET[2].addr, digest));
     oracleConsensusEarlyMessageBufferForF7Suite1Oc.proposeRound(oracleConsensusEarlyMessageBufferForF7Suite1ROUND, subs, false, 1000, 1700000000, null, 2);
     let pending = oracleConsensusEarlyMessageBufferForF7Suite1Oc.pendingRounds.get(oracleConsensusEarlyMessageBufferForF7Suite1ROUND);
     expect(pending).to.exist;

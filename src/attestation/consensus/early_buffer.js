@@ -96,7 +96,7 @@ module.exports = {
         // prior-attempt votes into the fresh round. Drop an expired buffer, don't replay it.
         if(expiresAt !== undefined && Date.now() > expiresAt) return;
         for(let env of arr){
-            this._handleMessage(env);
+            this.handleMessage(env);
         }
     },
 
@@ -123,14 +123,14 @@ module.exports = {
 
     // Replay COMMITs buffered before the winner was known. Called from the two
     // sites that set pending.winner. Deletes the queue up-front so re-entrant
-    // _handleCommit calls (now with a winner) process normally rather than
+    // handleCommit calls (now with a winner) process normally rather than
     // re-buffering.
     drainEarlyCommits(rid){
         let arr = this.earlyCommits.get(rid);
         if(!arr) return;
         this.earlyCommits.delete(rid);
         for(let env of arr){
-            this._handleCommit(env);
+            this.handleCommit(env);
         }
     }
 

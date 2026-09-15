@@ -123,11 +123,11 @@ class StateCheckpointEngine extends EventEmitter {
         // intervalBlocks should.
         await this.loadLastCheckpointLatch();
         if(this.peerManager){
-            this._messageHandler = (env) => this._handleMessage(env);
+            this._messageHandler = (env) => this.handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
         }
         this._pollTimer = setInterval(() => {
-            this._tick().catch(err => logger.error(nodeUtil.format('StateCheckpointEngine: tick error:', err && err.message)));
+            this.tick().catch(err => logger.error(nodeUtil.format('StateCheckpointEngine: tick error:', err && err.message)));
         }, this.pollMs);
         if(this._pollTimer.unref) this._pollTimer.unref();
         logger.info('StateCheckpointEngine started (every ' + this.intervalBlocks + ' BTC blocks, chains ' + this.chains.join('/') + ')');
@@ -143,7 +143,7 @@ class StateCheckpointEngine extends EventEmitter {
         this.pending.clear();
     }
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XCHK_SIGN_REQ:  this.handleSignReq(envelope).catch(e => logger.error('StateCheckpointEngine: SIGN_REQ error: ' + (e && e.message))); break;
@@ -152,9 +152,9 @@ class StateCheckpointEngine extends EventEmitter {
         }
     }
 
-    // Mirror CrossChainDexEngine._persistCapabilitySnapshot: the ANCHOR verifier
+    // Mirror CrossChainDexEngine.persistCapabilitySnapshot: the ANCHOR verifier
     // on the DOGE indexer resolves oracle_publish from the mirrored snapshots.
-    async _persistCapabilitySnapshot(capability, block){
+    async persistCapabilitySnapshot(capability, block){
         let validators = await this.resolveCapabilityValidators(capability, block);
         // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated`
         // marker resolveCapabilityValidators carries is what makes this hub's own
@@ -210,7 +210,7 @@ class StateCheckpointEngine extends EventEmitter {
     // log line and the checkpoint:finalized emit must still run. Only DELIVERY becomes
     // non-fatal here; the INSERTs above and the rootless-checkpoint refusal stay fail-closed.
     // The empty-subscriber short-circuit also keeps the per-validator loop in
-    // _persistCapabilitySnapshot from re-firing the repair once the first drop emptied the set.
+    // persistCapabilitySnapshot from re-firing the repair once the first drop emptied the set.
     //
     // `readRows` is the caller's committed-row re-read (a named db method bound to the row's
     // key), called only when there is a subscriber to deliver to, so no statement runs for

@@ -62,8 +62,8 @@ const observability     = require('../../../src/observability');
 
 function registerDigestDropTests() {
     it('records a PREPARE whose digest disagrees with the pending round', async function () {
-        const digest = oc._digest(ROUND, PRICES);
-        await oc._handlePropose(proposeEnvelope(digest));
+        const digest = oc.digest(ROUND, PRICES);
+        await oc.handlePropose(proposeEnvelope(digest));
         expect(oc.pendingRounds.has(ROUND)).to.equal(true);
 
         oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));
@@ -74,9 +74,9 @@ function registerDigestDropTests() {
     });
 
     it('records a COMMIT whose digest disagrees with the pending round', async function () {
-        const digest = oc._digest(ROUND, PRICES);
-        await oc._handlePropose(proposeEnvelope(digest));
-        oc._handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, 'e'.repeat(64)));
+        const digest = oc.digest(ROUND, PRICES);
+        await oc.handlePropose(proposeEnvelope(digest));
+        oc.handleCommit(voteEnvelope('ORACLE_COMMIT', VALSET[2].addr, 'e'.repeat(64)));
         expect(counterValue('digest_mismatch', 'commit')).to.equal(1);
     });
 
@@ -95,7 +95,7 @@ function registerDigestDropTests() {
 
 function registerBufferDropTests() {
     it('records an early-buffer entry that ages out unread, with how many votes were lost', function () {
-        const digest = oc._digest(ROUND, PRICES);
+        const digest = oc.digest(ROUND, PRICES);
         oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
         expect(oc.earlyMessages.get(ROUND)).to.have.length(1);
 
@@ -110,7 +110,7 @@ function registerBufferDropTests() {
     });
 
     it('records the per-round buffer ceiling turning votes away', function () {
-        const digest = oc._digest(ROUND, PRICES);
+        const digest = oc.digest(ROUND, PRICES);
         for (let i = 0; i < oc.earlyMessageMaxPerRound + 3; i++) {
             oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://flood-' + i + ':1', digest));
         }
@@ -123,8 +123,8 @@ function registerBufferDropTests() {
 function registerDistinctDropTest() {
     it('gives the three AT2 reasons distinct records and distinct counter series', async function () {
         hub._peerManager.validatorPubkeys = new Map(VALSET.map(v => [v.addr, v.pubkey]));
-        const digest = oc._digest(ROUND, PRICES);
-        await oc._handlePropose(proposeEnvelope(digest));
+        const digest = oc.digest(ROUND, PRICES);
+        await oc.handlePropose(proposeEnvelope(digest));
 
         oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, 'f'.repeat(64)));   // digest_mismatch
         oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', 'ws://stranger:1', digest));        // unknown_sender

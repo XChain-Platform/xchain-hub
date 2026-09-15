@@ -123,12 +123,12 @@ module.exports = {
         return true;
     },
 
-    // True if `sender` is a registered validator. Mirrors OracleConsensus._isKnownSender:
+    // True if `sender` is a registered validator. Mirrors OracleConsensus.isKnownSender:
     // the P2P sig layer already authenticates the sender, but a forged sender that slipped
     // past a null-registry window must not be trusted. Null registry fails closed; an empty
     // registry stays lenient ONLY until a chain-effective signer set exists
     // (genuine pre-bootstrap, where the sig layer rejects unknowns).
-    _isKnownSender(sender) {
+    isKnownSender(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         if (!registry) return false;
         if (registry.size === 0) {

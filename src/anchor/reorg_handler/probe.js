@@ -59,7 +59,7 @@ module.exports = {
         let ix = this.indexers[chain];
         if (!ix || !ix.url) return false;                    // cannot verify → abstain
 
-        let tip = await this._indexerCall(chain, 'getblockhashes', {});
+        let tip = await this.indexerCall(chain, 'getblockhashes', {});
         if (!tip || tip.block_index == null) return false;
         let tipIndex = Number(tip.block_index);
         if (!Number.isFinite(tipIndex)) return false;
@@ -68,7 +68,7 @@ module.exports = {
 
         let bh = (reorgHeight === tipIndex)
             ? tip
-            : await this._indexerCall(chain, 'getblockhashes', { block_index: reorgHeight });
+            : await this.indexerCall(chain, 'getblockhashes', { block_index: reorgHeight });
         if (!bh || !bh.block_hash) return false;
         // Refuse a network-agnostic or cross-network answer (mirrors
         // StateCheckpointEngine's checkpoint refusal).
@@ -107,7 +107,7 @@ module.exports = {
     async confirmOldHashOrphaned(chain, reorgHeight, oldHash) {
         let hist;
         try {
-            hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
+            hist = await this.indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
         } catch (err) {
             logger.warn(nodeUtil.format('Reorg: getreorghistory probe failed for %s:%s:',
                 chain, reorgHeight, err && err.message));
@@ -148,7 +148,7 @@ module.exports = {
         return false;
     },
 
-    async _indexerCall(coin, method, params) {
+    async indexerCall(coin, method, params) {
         let ix = this.indexers[coin];
         if (!ix || !ix.url) throw new Error('no indexer url for ' + coin);
         let headers = { 'Content-Type': 'application/json' };

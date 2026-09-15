@@ -80,7 +80,7 @@ function mkPub(db) {
   pub.network = null; // no network filter on the pending select
   pub.identity = null; // skips the publisher-attestation round
   pub.peerManager = null; // skips the XANC_BUNDLE_DONE announce
-  pub._getActiveOraclePublishPubkeys = async () => ['aa'];
+  pub.getActiveOraclePublishPubkeys = async () => ['aa'];
   pub.mayPublish = () => true;
   return pub;
 }

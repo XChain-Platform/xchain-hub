@@ -165,7 +165,7 @@ module.exports = {
     // snapshot_block = anchor`, mirrored from the hub it follows; with nobody writing
     // those rows every v5 head on DOGE read `invalid: insufficient signer stake`
     // (regtest ladder, AT5, 2026-09-05). Same contract as the PRICE batch
-    // (OracleConsensus._persistCapabilitySnapshot): every signing hub writes, not just
+    // (OracleConsensus.persistCapabilitySnapshot): every signing hub writes, not just
     // the leader; the natural-key INSERT IGNORE makes the rows identical and a re-write
     // free; a TRUNCATED set is never mirrored (SWQ-TRUNC-MIRROR). Once per anchor per
     // process, because the same anchor recurs every window while the tip sits still.

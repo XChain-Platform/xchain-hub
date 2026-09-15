@@ -296,7 +296,7 @@ function registerFeature4proposingATransferRecordPart4() {
       engine,
       db
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({
       src_action_index: 95
     }));
@@ -342,7 +342,7 @@ function registerFeature4proposingATransferRecordPart5() {
     const {
       engine
     } = makeEngine();
-    engine._persistCapabilitySnapshot = sinon.stub().resolves(1);
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
     await engine.maybeFinalizeTransfer('BTC', 'regtest', 200, 1017, pendingLeg({
       src_action_index: 95
     }));

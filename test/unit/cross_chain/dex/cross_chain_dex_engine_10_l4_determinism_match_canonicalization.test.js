@@ -146,14 +146,14 @@ function registerFeature22l4DeterminismMatchCanonicalizationPart1() {
   it('two independent engines produce the identical canonical for the same match', function () {
     const e1 = new CrossChainDexEngine(makeDexHub());
     const e2 = new CrossChainDexEngine(makeDexHub());
-    expect(e1._canonicalMatch(feature22l4DeterminismMatchCanonicalizationBaseMatch(), 0)).to.equal(e2._canonicalMatch(feature22l4DeterminismMatchCanonicalizationBaseMatch(), 0));
+    expect(e1.canonicalMatch(feature22l4DeterminismMatchCanonicalizationBaseMatch(), 0)).to.equal(e2.canonicalMatch(feature22l4DeterminismMatchCanonicalizationBaseMatch(), 0));
   });
   it('is invariant to object key order', function () {
     const eng = new CrossChainDexEngine(makeDexHub());
     const r = feature22l4DeterminismMatchCanonicalizationBaseMatch();
     const shuffled = {};
     for (const k of Object.keys(r).reverse()) shuffled[k] = r[k];
-    expect(eng._canonicalMatch(shuffled, 0)).to.equal(eng._canonicalMatch(r, 0));
+    expect(eng.canonicalMatch(shuffled, 0)).to.equal(eng.canonicalMatch(r, 0));
   });
   it('is invariant to numeric field TYPE (String-coerced)', function () {
     const eng = new CrossChainDexEngine(makeDexHub());
@@ -169,7 +169,7 @@ function registerFeature22l4DeterminismMatchCanonicalizationPart1() {
       a_amount: 100,
       snapshot_block: '800000'
     };
-    expect(eng._canonicalMatch(v1, 0)).to.equal(eng._canonicalMatch(v2, 0));
+    expect(eng.canonicalMatch(v1, 0)).to.equal(eng.canonicalMatch(v2, 0));
   });
   it('treats an absent optional tick as empty consistently (null vs undefined)', function () {
     const eng = new CrossChainDexEngine(makeDexHub());
@@ -181,7 +181,7 @@ function registerFeature22l4DeterminismMatchCanonicalizationPart1() {
       ...feature22l4DeterminismMatchCanonicalizationBaseMatch()
     };
     delete withUndef.a_tick;
-    expect(eng._canonicalMatch(withNull, 0)).to.equal(eng._canonicalMatch(withUndef, 0));
+    expect(eng.canonicalMatch(withNull, 0)).to.equal(eng.canonicalMatch(withUndef, 0));
   });
 }
 function registerFeature22l4DeterminismMatchCanonicalization() {

@@ -76,7 +76,7 @@ module.exports = {
         return await this.db.findCrossChainCallsForSurface({sourceChain, targetChain, status, phase}, n);
     },
 
-    async _poll(){
+    async poll(){
         if(this._polling) return;                       // never overlap slow polls
         this._polling = true;
         try {
@@ -94,7 +94,7 @@ module.exports = {
     // and have no dispatch row yet, and run a dispatch round for each.
     async pollSourceRequests(coin){
         let res;
-        try { res = await this._indexerCall(coin, 'getpendingcrosschaincalls', { limit: 100 }); }
+        try { res = await this.indexerCall(coin, 'getpendingcrosschaincalls', { limit: 100 }); }
         catch(e){ return; }
         if(!res || !Array.isArray(res.calls) || !res.network) return;
         let latest = Number(res.latest_block_index);
@@ -128,7 +128,7 @@ module.exports = {
         // PBFT round and a stale dispatch row.
         if((Number(call.cross_hops) || 0) > XCALL_MAX_HOPS) return;
 
-        let roundId = this._roundId('dispatch', callId);
+        let roundId = this.roundId('dispatch', callId);
         if(this._inflight.has(roundId)) return;
         if(await this.rowExists(callId, 'dispatch')) return;
 
@@ -236,11 +236,11 @@ module.exports = {
     // target indexer, or not yet at confirmation depth) so the caller can park it (M-14).
     async maybeRelayResult(coin, dispatch){
         let callId = String(dispatch.call_id).toLowerCase();
-        let roundId = this._roundId('result', callId);
+        let roundId = this.roundId('result', callId);
         if(this._inflight.has(roundId)) return true;   // round already progressing; don't park
 
         let res;
-        try { res = await this._indexerCall(coin, 'getcrosschaincallresult', { call_id: callId }); }
+        try { res = await this.indexerCall(coin, 'getcrosschaincallresult', { call_id: callId }); }
         catch(e){ return false; }
         if(!res || res.exists !== true) return false;
 

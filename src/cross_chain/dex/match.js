@@ -28,7 +28,7 @@ const logger = getLogger();
 
 module.exports = {
     async discoverAndMatch(){
-        // Poll self-overlap guard (house convention: FullNodeChallengeRound._tick,
+        // Poll self-overlap guard (house convention: FullNodeChallengeRound.tick,
         // AttestationRound.pollPending). The poll is a bare setInterval at 15s while one
         // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
         // so a slow indexer lets the next interval fire on top of this one. Two overlapping
@@ -345,7 +345,7 @@ module.exports = {
         for(let page = 0; page < MAX_PAGES; page++){
             let params = { limit };
             if(after !== undefined) params.after_action_index = after;
-            let res = await this._indexerCall(coin, 'getopencrosschainorders', params);
+            let res = await this.indexerCall(coin, 'getopencrosschainorders', params);
             if(!res) break;
             if(page === 0){
                 network = res.network ? String(res.network) : '';

@@ -101,7 +101,7 @@ module.exports = {
 
     // ── the tick ─────────────────────────────────────────────────────────────
 
-    async _tick(){
+    async tick(){
         // In-flight guard, the house convention: a tick makes several sequential
         // RPC round trips at a 15s timeout against a 30s poll, so under a slow
         // indexer the next interval fires while this one is still awaiting, and
@@ -110,7 +110,7 @@ module.exports = {
         if(this._ticking) return;
         this._ticking = true;
         try {
-            let tip = await this._indexerCall('getblockhashes', {});
+            let tip = await this.indexerCall('getblockhashes', {});
             let tipBlock = (tip && tip.block_index != null) ? Number(tip.block_index) : null;
             if(!Number.isFinite(tipBlock)) return;
             this.lastTip = tipBlock;
@@ -153,7 +153,7 @@ module.exports = {
     // ── sign + gossip ────────────────────────────────────────────────────────
 
     async runEpoch(epoch, tipBlock){
-        let bh = await this._indexerCall('getblockhashes', { block_index: epoch });
+        let bh = await this.indexerCall('getblockhashes', { block_index: epoch });
         let ledgerHash = (bh && bh.ledger_hash) ? String(bh.ledger_hash).toLowerCase() : '';
         if(!/^[0-9a-f]{64}$/.test(ledgerHash)){
             logger.warn('RollcallRound: epoch=' + epoch + ' skipped (no ledger_hash from the BTC indexer)');
@@ -186,7 +186,7 @@ module.exports = {
         // same form, and re-deriving the form at each of those sites is how they
         // would come to disagree mid-epoch.
         let gates     = this.gatesFor(epoch);
-        let canonical = this._canonical(epoch, ledgerHash, gates);
+        let canonical = this.canonical(epoch, ledgerHash, gates);
         let myPubkey  = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
 
         let state = newRoundState({ epoch, ledgerHash, canonical, members, gates });

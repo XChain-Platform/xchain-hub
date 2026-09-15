@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -118,7 +118,7 @@ const hookAt54960 = function () {
         try { fs.unlinkSync(queueFile); } catch (_) {}
     };
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs a warning and retains entry when no broadcaster is configured during sweep', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs a warning and retains entry when no broadcaster is configured during sweep', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         // No broadcast hook configured
@@ -133,7 +133,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(warnStub.called).to.equal(true);
         const msg = warnStub.args.find(a => String(a[0]).match(/no broadcast pipeline/));
@@ -143,19 +143,19 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         warnStub.restore();
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('returns immediately (no error) when the queue is empty', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('returns immediately (no error) when the queue is empty', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         // Write an empty queue
         fs.writeFileSync(queueFile, '');
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set());
-        await pub._processQueue();  // should return immediately, no throw
+        await pub.processQueue();  // should return immediately, no throw
         // Verify fetchPendingRequestIds was NOT called (early return)
         // (We can check by seeing the stub was not called)
         // Actually the stub is set up; the early return happens before fetchPendingRequestIds
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('uses singular "entry" in the unreachable-indexer log when exactly 1 entry is queued', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('uses singular "entry" in the unreachable-indexer log when exactly 1 entry is queued', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(null);  // indexer unreachable
@@ -169,14 +169,14 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
         expect(warnStub.called).to.equal(true);
         const msg = warnStub.args.find(a => String(a[0]).match(/1 entry retained/));
         expect(msg).to.exist;
         warnStub.restore();
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('skips a queue entry whose responsible set does not include this node (rank === null continue)', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('skips a queue entry whose responsible set does not include this node (rank === null continue)', async function () {
         // Line 360: `if (rank === null) continue`
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
@@ -184,7 +184,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         pub.setBroadcastHook(bcast);
         sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set(['cc'.repeat(32)]));
 
-        // responsible array does NOT include MY_PUB → _myRank returns null → skip
+        // responsible array does NOT include MY_PUB → myRank returns null → skip
         writeQueue(queueFile, [{
             ts:           Date.now() - 10 * 60000,
             requestId:    'cc'.repeat(32),
@@ -193,12 +193,12 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             leaderPubkey: LEADER_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
         expect(bcast.called).to.equal(false);
         expect(readQueue(queueFile)).to.have.length(1);  // entry retained (not our responsibility)
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('handles queue entry with no ts field (ts || 0 branch) as not-yet-eligible', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('handles queue entry with no ts field (ts || 0 branch) as not-yet-eligible', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         pub.leaderRetryMs = 999999;  // very long; entry without ts treated as ts=0 so age=now >= very-long is false
@@ -220,13 +220,13 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             // no ts, falls back to 0 in the eligibility formula
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
         // With MAX_SAFE_INTEGER retryMs, age (now - 0 = ~1.7e12ms) is less than MAX_SAFE_INTEGER
         // so the entry is NOT eligible; broadcast should not be called
         expect(bcast.called).to.equal(false);
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs "?" txid in the replay sweep log when broadcaster returns no txid', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs "?" txid in the replay sweep log when broadcaster returns no txid', async function () {
         // Line 382: `result.txid ? result.txid : '?'`
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
@@ -244,7 +244,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(bcast.calledOnce).to.equal(true);
         const logged = logStub.args.find(a => String(a[0]).match(/txid=\?/));
@@ -252,7 +252,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
         logStub.restore();
     }); });
 
-describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs an error and retains entry when replay broadcast throws', async function () {
+describe('AttestationPublisher: processQueue (no broadcaster + replay error)', function () { beforeEach(hookAt54798); afterEach(hookAt54960); it('logs an error and retains entry when replay broadcast throws', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
         // Definitive (never-sent) error so this exercises the plain-retry path, not
@@ -271,7 +271,7 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
             leaderPubkey: MY_PUB
         }]);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(errStub.called).to.equal(true);
         const msg = errStub.args.find(a => String(a[0]).match(/replay broadcast failed/));

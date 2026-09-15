@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -172,8 +172,8 @@ const hookAt75935 = function () { fs.rmSync(dir, { recursive: true, force: true 
 // A relay whose LTC indexer reports the given tip, everything else as usual.
         function relayAtTip(tip, rows = [originRow()], homeRows = []) {
             const relay = makeRelay({}, rows, homeRows);
-            const inner = relay._indexerCall;
-            relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+            const inner = relay.indexerCall;
+            relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
                 const res = await inner(coin, method, params);
                 if (coin === 'LTC') res.latest_block_index = tip;
                 return res;
@@ -202,7 +202,7 @@ const hookAt75935 = function () { fs.rmSync(dir, { recursive: true, force: true 
         // ── the record-shape change ──────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('deadline-anchored eviction', function () { beforeEach(hookAt75731); afterEach(hookAt75935); it('threads the origin absolute deadline and its chain onto the response round row', async function () {
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
-            await relay._poll();
+            await relay.poll();
             const row = proposedRows(relay, 'response')[0];
             expect(row.origin_deadline_block).to.equal(DEADLINE);
             expect(row.origin_chain).to.equal('LTC');
@@ -299,7 +299,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
             relay._published.mark(REQ_ID);
             relay._publishedResponses.mark(REQ_ID);
-            await relay._poll();
+            await relay.poll();
             expect(relay._deadlines.get(REQ_ID)).to.deep.equal({ coin: 'LTC', block: DEADLINE });
             expect(relay.getStats().tracked_deadlines).to.equal(1);
         }); }); });
@@ -353,7 +353,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             relay._published.mark(REQ_ID);
             relay._publishedResponses.mark(REQ_ID);
 
-            await relay._poll();
+            await relay.poll();
             expect(relay._published.size).to.equal(0);
             expect(relay._publishedResponses.size).to.equal(0);
             expect(relay._deadlines.size).to.equal(0);
@@ -362,7 +362,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // The whole safety argument: the row is STILL pending on the stubbed origin,
             // so without the matching horizon guard on the re-entry paths this poll would
             // propose a fresh v3 and v4 for a request it has already relayed.
-            await relay._poll();
+            await relay.poll();
             expect(relay.consensus.propose.called).to.equal(false);
             expect(relay._published.size).to.equal(0);
         }); }); });

@@ -35,7 +35,7 @@ module.exports = {
     // Re-broadcast any queued finalized response whose request is still pending.
     // Run once at startup (crash replay) and on an interval (failover + leader retry).
     //
-    // Sweep self-overlap guard (house convention: FullNodeChallengeRound._tick).
+    // Sweep self-overlap guard (house convention: FullNodeChallengeRound.tick).
     // The sweep is a bare setInterval at 30s while one pass pages the indexer's whole
     // pending set (5s per page) and then awaits a real BTC broadcast per eligible entry,
     // so a slow indexer or a slow node lets the next interval fire on top of this one.
@@ -49,7 +49,7 @@ module.exports = {
     // wrapper rather than inline so the finally cannot be skipped by any of the body's
     // early returns; a rejected fetchPendingRequestIds must not wedge the sweep, since
     // only this timer ever drains the WAL.
-    async _processQueue(){
+    async processQueue(){
         if (this._sweeping){
             logger.warn('AttestationPublisher: queue sweep still in flight; skipping this pass');
             return;
@@ -187,7 +187,7 @@ module.exports = {
             return null;
         }
 
-        let rank = this._myRank(entry);
+        let rank = this.myRank(entry);
         if (rank === null) return null;  // not our responsibility; leave it
 
         // Eligibility: the leader entry is only retried after a short grace
@@ -269,7 +269,7 @@ module.exports = {
     // Returns null on any failure (indexer unreachable / error) so callers can
     // distinguish "nothing pending" (empty Set) from "couldn't determine".
     async fetchPendingRequestIds(){
-        let url = await this._resolveBtcIndexerUrl();
+        let url = await this.resolveBtcIndexerUrl();
         if (!url) return null;
 
         let ids = new Set();
@@ -307,9 +307,9 @@ module.exports = {
         return ids;
     },
 
-    async _resolveBtcIndexerUrl(){
-        if (typeof this.hub._resolveBtcIndexerUrl === 'function'){
-            return await this.hub._resolveBtcIndexerUrl();
+    async resolveBtcIndexerUrl(){
+        if (typeof this.hub.resolveBtcIndexerUrl === 'function'){
+            return await this.hub.resolveBtcIndexerUrl();
         }
         return null;
     }

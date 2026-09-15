@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// RollcallRound engine behaviour, driven through the real _tick() against a
+// RollcallRound engine behaviour, driven through the real tick() against a
 // stubbed indexer pair. Everything signature-shaped uses REAL Ed25519 identities:
 // a stubbed verifier would certify a canonical nobody ever checked.
 //
@@ -112,7 +112,7 @@ function makeHub(o) {
         },
         stateAnchorPublisher: o.stateAnchorPublisher || null,
         p2pConfig: {},
-        _resolveBtcIndexerUrl: async () => BTC_URL,
+        resolveBtcIndexerUrl: async () => BTC_URL,
         btcIndexerHeaders: () => ({ 'Content-Type': 'application/json' }),
     };
     hub._pm = pm;
@@ -188,10 +188,10 @@ async function twoChunkLeader(env) {
             const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
                                    Object.assign({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 8,
                                                    ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
+            await eng.tick();
+            const canon = eng.canonical(EPOCH, LEDGER_HASH);
             for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                eng.handleMessage({ type: 'XROLLCALL_SIGN',
                                      data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
             wireRpc({ tip: 38 });
             return { eng, many, myPubkey: many[leaderIdx] };
@@ -214,7 +214,7 @@ it('records how many signatures had already landed when a batch failed', async f
             bc.onCall(0).resolves({ txid: 'txid-a' });
             bc.onCall(1).rejects(bad);
             eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
+            await eng.tick();
             const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
                             .trim().split('\n').map(JSON.parse);
             assert.deepStrictEqual(lines.map(l => l.phase), ['intent', 'sent', 'failed']);
@@ -230,7 +230,7 @@ it('an operator pause landing mid-batch stops the actions that have not gone out
             });
             bc.resolves({ txid: 'txid-b' });
             eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(bc.callCount, 1, 'a paused hub broadcasts nothing further');
             const state = eng.rounds.get(EPOCH);
             assert.strictEqual(state.sent.size, 41, 'the action that already landed still counts as sent');
@@ -256,7 +256,7 @@ it('reports publisher state and NO ledger facts', async function () {
             const order = orderFor(PKS, EPOCH);
             const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
+            await eng.tick();
             const s = eng.getStatus();
             assert.deepStrictEqual(Object.keys(s).sort(),
                 ['broadcast_capable', 'epoch', 'gossiped_count', 'leader', 'on_chain_count',
@@ -307,16 +307,16 @@ it('ROLLCALL_ENABLED=false keeps the engine entirely idle', async function () {
 it('prunes rounds once the window and its retention have passed', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.has(EPOCH), true);
             wireRpc({ tip: 200 });
-            await eng._tick();
+            await eng.tick();
             assert.strictEqual(eng.rounds.has(EPOCH), false);
         });
 it('a BTC indexer failure is survived, not fatal', async function () {
             wireRpc({ tip: 36, btcFail: true });
             const eng = makeEngine({});
-            await assert.rejects(() => eng._indexerCall('getblockhashes', {}));
+            await assert.rejects(() => eng.indexerCall('getblockhashes', {}));
             assert.strictEqual(eng._ticking, false, 'the in-flight guard must not wedge on a rejection');
         });
 });

@@ -106,7 +106,7 @@ class OracleBatchSigner {
 
     start(){
         if(this.peerManager && !this._messageHandler){
-            this._messageHandler = (env) => this._handleMessage(env);
+            this._messageHandler = (env) => this.handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
         }
     }
@@ -187,7 +187,7 @@ class OracleBatchSigner {
 
     // ---------------------------------------------------------------- peers
 
-    _handleMessage(envelope){
+    handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
             case XPRICEB_SIGN_REQ:
@@ -225,7 +225,7 @@ class OracleBatchSigner {
     // is exactly the drift that would make the bytes this hub signs differ from the
     // bytes the indexer verifies. Throws when the engine is not up, and every caller
     // treats that as a refusal.
-    _canonical(firstRound, lastRound, btcBlockHeight, rounds){
+    canonical(firstRound, lastRound, btcBlockHeight, rounds){
         let oc = this.hub ? this.hub.oracleConsensus : null;
         if(!oc || typeof oc.buildPriceBatchPayload !== 'function')
             throw new Error('OracleConsensus.buildPriceBatchPayload is unavailable');

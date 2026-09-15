@@ -37,7 +37,7 @@ module.exports = {
         return isAdmissibleSigner(this.peerManager, envelope);
     },
 
-    _handleMessage(envelope) {
+    handleMessage(envelope) {
         if (envelope.type !== ORACLE_PRICE_SUBMIT) return;
 
         let { round, prices, sources } = envelope.data;
@@ -195,7 +195,7 @@ function persistPeerSubmission(round, envelope, validPrices, senderPubkey) {
         this.persistFromStakeWeight(round, envelope, validPrices, senderPubkey);
         return;
     }
-    // Remote peer submission: _handleMessage is a synchronous message handler, so this
+    // Remote peer submission: handleMessage is a synchronous message handler, so this
     // stays fire-and-forget, but persistSubmissions now counts its own failures
     // internally (via allSettled) and never rejects, so the drop is still observable.
     this.persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);

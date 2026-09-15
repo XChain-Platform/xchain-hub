@@ -152,14 +152,14 @@ function registerSplitSuitePart1() {
         return [];
       }
     });
-    pub._getActiveOraclePublishPubkeys = async () => [me];
+    pub.getActiveOraclePublishPubkeys = async () => [me];
     pub.getNextBatchSeq = async () => 3;
     let captured = null;
     pub.archiveElectionKey = (cp, batchSeq) => {
       captured = cp;
       return 'k|' + batchSeq;
     };
-    pub._rankUnlocked = () => false; // bail right after the wrapper pick
+    pub.rankUnlocked = () => false; // bail right after the wrapper pick
 
     let r = await pub.startArchiveRound({}, 100);
     expect(r).to.equal('none');
@@ -187,9 +187,9 @@ function registerSplitSuitePart2() {
         return [];
       }
     });
-    pub._getActiveOraclePublishPubkeys = async () => [me];
+    pub.getActiveOraclePublishPubkeys = async () => [me];
     pub.getNextBatchSeq = async () => 3;
-    pub._rankUnlocked = () => false;
+    pub.rankUnlocked = () => false;
     await pub.startArchiveRound({}, 100);
     expect(seen.length).to.be.at.least(1);
     for (let sql of seen) {

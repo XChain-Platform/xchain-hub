@@ -177,7 +177,7 @@ class OracleRound {
         await this.hydrateFreshnessCounters();
 
         // Subscribe to gossip messages
-        this._messageHandler = (envelope) => this._handleMessage(envelope);
+        this._messageHandler = (envelope) => this.handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
         // Reset the stall gauges only when a round actually finalizes (reaches
@@ -248,7 +248,7 @@ function initConfigKnobs() {
     // Per-round cap on collected peer submissions. api.js passes the env value
     // through unparsed, so the parse and the default live here only. Unlike the
     // retention window below, 0 is NOT a "disable" setting: maxSubmissionsPerRound
-    // gates ingest in _handleMessage, so 0 (or a negative) would drop every peer
+    // gates ingest in handleMessage, so 0 (or a negative) would drop every peer
     // submission and stall the round silently. Both fall back to the default.
     this.maxSubmissionsPerRound = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND);
     if (!Number.isFinite(this.maxSubmissionsPerRound) || this.maxSubmissionsPerRound <= 0) {

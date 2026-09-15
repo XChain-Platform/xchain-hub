@@ -15,8 +15,8 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -48,7 +48,7 @@ function makeHub(myPub, overrides) {
         capabilitySnapshot: {
             getSnapshot: async () => ({ validators: [{ pubkey: myPub }, { pubkey: LEADER_PUB }] })
         },
-        _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+        resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
         btcIndexerHeaders: () => ({})
     }, overrides);
 }
@@ -81,17 +81,17 @@ function readQueue(file) {
 
 // ---------- getBroadcaster -------------------------------------------------
 
-// ---------- _myRank ---------------------------------------------------------
+// ---------- myRank ---------------------------------------------------------
 
 // ---------- computeResponsible ---------------------------------------------
 
-// ---------- _resolveBtcIndexerUrl -------------------------------------------
+// ---------- resolveBtcIndexerUrl -------------------------------------------
 
 // ---------- fetchPendingRequestIds -----------------------------------------
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-// ---------- _processQueue extra paths not covered by replay suite -----------
+// ---------- processQueue extra paths not covered by replay suite -----------
 
 // ---------- defaultBroadcast -----------------------------------------------
 
@@ -107,18 +107,18 @@ function readQueue(file) {
 // request, which is the longest provider deadline_window_blocks.
 
 {
-describe('AttestationPublisher: _resolveBtcIndexerUrl', function () { it('delegates to hub._resolveBtcIndexerUrl when present', async function () {
+describe('AttestationPublisher: resolveBtcIndexerUrl', function () { it('delegates to hub.resolveBtcIndexerUrl when present', async function () {
         const pub = makePublisher(MY_PUB);
-        const url = await pub._resolveBtcIndexerUrl();
+        const url = await pub.resolveBtcIndexerUrl();
         expect(url).to.equal('http://indexer.local/rpc');
     }); });
 
-describe('AttestationPublisher: _resolveBtcIndexerUrl', function () { it('returns null when hub has no _resolveBtcIndexerUrl method', async function () {
+describe('AttestationPublisher: resolveBtcIndexerUrl', function () { it('returns null when hub has no resolveBtcIndexerUrl method', async function () {
         const hub = makeHub(MY_PUB);
-        delete hub._resolveBtcIndexerUrl;
+        delete hub.resolveBtcIndexerUrl;
         const pub = new AttestationPublisher(hub);
         pub.queuePath = path.join(os.tmpdir(), 'test-' + process.pid + '.jsonl');
-        const url = await pub._resolveBtcIndexerUrl();
+        const url = await pub.resolveBtcIndexerUrl();
         expect(url).to.be.null;
     }); });
 }

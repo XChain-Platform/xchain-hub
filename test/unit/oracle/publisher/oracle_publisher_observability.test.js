@@ -136,7 +136,7 @@ oraclePublisherTests('capability-snapshot dark logging (item 2391)', function ()
         let warn = sinon.stub(console, 'warn');
         let capSS = { getSnapshot: sinon.stub().resolves(null) };
         let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
-        let keys = await pub._getActiveOraclePublishPubkeys(100);
+        let keys = await pub.getActiveOraclePublishPubkeys(100);
         expect(keys).to.deep.equal([]);          // fail-closed unchanged
         expect(warn.called).to.be.true;
         expect(pub._snapshotDark).to.be.true;
@@ -146,7 +146,7 @@ oraclePublisherTests('capability-snapshot dark logging (item 2391)', function ()
         let warn = sinon.stub(console, 'warn');
         let capSS = { getSnapshot: sinon.stub().rejects(new Error('indexer down')) };
         let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
-        await pub._getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(100);
         expect(warn.calledWithMatch(/indexer down/)).to.be.true;
     });
 
@@ -154,15 +154,15 @@ oraclePublisherTests('capability-snapshot dark logging (item 2391)', function ()
         let warn = sinon.stub(console, 'warn');
         let capSS = { getSnapshot: sinon.stub().resolves(null) };
         let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
-        await pub._getActiveOraclePublishPubkeys(100);
-        await pub._getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(100);
         expect(warn.callCount).to.equal(1);       // second dark round is quiet
         // Recovery clears the guard so a subsequent dark spell logs again.
         capSS.getSnapshot.resolves({ validators: [{ pubkey: 'aa'.repeat(32) }] });
-        await pub._getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(100);
         expect(pub._snapshotDark).to.be.false;
         capSS.getSnapshot.resolves(null);
-        await pub._getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(100);
         expect(warn.callCount).to.equal(2);
     });
 

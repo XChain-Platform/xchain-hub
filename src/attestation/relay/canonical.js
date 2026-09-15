@@ -66,7 +66,7 @@ module.exports = {
     // the on-chain action carries no view field, so a verifier replaying the action
     // has no way to learn one. The signature therefore stays valid across a PBFT view
     // change, which is correct here: the round's VALUE never changes with the view.
-    _canonicalMatch(row, view){   // eslint-disable-line no-unused-vars
+    canonicalMatch(row, view){   // eslint-disable-line no-unused-vars
         if(row.phase === 'response') return this.relayResponseCanonical(row);
         return this.relayRequestCanonical(row);
     },
@@ -75,12 +75,12 @@ module.exports = {
         let raw = [
             'ATTEST', 'RELAY_REQUEST', String(r.request_id), String(r.snapshot_block), String(r.network),
             String(r.origin_chain), String(r.origin_action_index), String(r.provider_id),
-            this._sha256(r.request_payload == null ? '' : r.request_payload),
+            this.sha256(r.request_payload == null ? '' : r.request_payload),
             String(r.redundancy), String(r.deadline_blocks)
         ].join('|');
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST,
-                this._sha256('ATTESTRELAY|request|' + String(r.request_id)), 0, raw);
+                this.sha256('ATTESTRELAY|request|' + String(r.request_id)), 0, raw);
         return raw;
     },
 
@@ -96,7 +96,7 @@ module.exports = {
         ].join('|');
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST,
-                this._sha256('ATTESTRELAY|response|' + String(r.request_id)), 0, raw);
+                this.sha256('ATTESTRELAY|response|' + String(r.request_id)), 0, raw);
         return raw;
     },
 
@@ -140,11 +140,11 @@ module.exports = {
         return parts.join('|');
     },
 
-    _roundId(phase, requestId){
-        return this._sha256('ATTESTRELAYROUND|' + phase + '|' + String(requestId).toLowerCase());
+    roundId(phase, requestId){
+        return this.sha256('ATTESTRELAYROUND|' + phase + '|' + String(requestId).toLowerCase());
     },
 
-    _sha256(s){
+    sha256(s){
         return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
     }
 

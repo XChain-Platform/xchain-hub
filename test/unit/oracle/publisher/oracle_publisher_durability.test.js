@@ -124,14 +124,14 @@ function oraclePublisherTests(title, registerTests) {
 }
 
 
-// ── _processQueue ─────────────────────────────────────────────────────────
+// ── processQueue ─────────────────────────────────────────────────────────
 
-oraclePublisherTests('_processQueue()', function () {
+oraclePublisherTests('processQueue()', function () {
     it('returns early when queue is empty', async function () {
         fsMock.readFileSync.returns('');
         let hub = makeHub();
         let pub = new OraclePublisher(hub);
-        await pub._processQueue();  // must not throw
+        await pub.processQueue();  // must not throw
     });
 
     it('calls custom broadcastFn for each queued entry', async function () {
@@ -142,7 +142,7 @@ oraclePublisherTests('_processQueue()', function () {
         let broadcastStub = sinon.stub().resolves({ txid: 'abc123' });
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.calledOnce).to.be.true;
     });
 
@@ -153,7 +153,7 @@ oraclePublisherTests('_processQueue()', function () {
         let pub = new OraclePublisher(hub);
         pub.broadcastFn  = sinon.stub().rejects(new Error('network down'));
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();
+        await pub.processQueue();
         // Rewrite should have been called with the entry (attempts=1)
         expect(fsMock.writeSync.called).to.be.true;
     });
@@ -165,14 +165,14 @@ oraclePublisherTests('_processQueue()', function () {
         let pub = new OraclePublisher(hub);
         pub.broadcastFn  = sinon.stub().resolves({ txid: 'abc' });
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();
+        await pub.processQueue();
         // Broadcast should NOT have been called (entry already exceeded maxAttempts=5)
         expect(pub.broadcastFn.called).to.be.false;
     });
 
 });
 
-oraclePublisherTests('_processQueue()', function () {
+oraclePublisherTests('processQueue()', function () {
 
     it('logs warning when no broadcast pipeline is configured', async function () {
         let entry = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
@@ -181,7 +181,7 @@ oraclePublisherTests('_processQueue()', function () {
         let pub = new OraclePublisher(hub);
         // No broadcastFn, no encoder, no walletSignFn
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub._processQueue();  // must not throw
+        await pub.processQueue();  // must not throw
     });
 
 });
@@ -191,7 +191,7 @@ oraclePublisherTests('_processQueue()', function () {
 // Regression for the swallowed rewriteQueue failure that let an already-
 // published round stay on the durable queue and be re-broadcast on the next
 // tick, spending real DOGE twice for the same PRICE v0 round.
-oraclePublisherTests('_processQueue() at-most-once under rewrite failure', function () {
+oraclePublisherTests('processQueue() at-most-once under rewrite failure', function () {
     it('broadcasts a round exactly once even when the post-broadcast queue rewrite keeps failing', async function () {
         let entry = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         // The queue file durably retains the entry on every read, simulating a
@@ -206,8 +206,8 @@ oraclePublisherTests('_processQueue() at-most-once under rewrite failure', funct
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue(); // tick 1: broadcasts round 7, rewrite fails
-        await pub._processQueue(); // tick 2: entry still on queue; must NOT re-broadcast
+        await pub.processQueue(); // tick 1: broadcasts round 7, rewrite fails
+        await pub.processQueue(); // tick 2: entry still on queue; must NOT re-broadcast
 
         expect(broadcastStub.calledOnce).to.be.true;
         expect(pub._publishedRounds.has(7)).to.be.true;
@@ -223,7 +223,7 @@ oraclePublisherTests('_processQueue() at-most-once under rewrite failure', funct
         pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-8' });
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(pub._publishedRounds.has(8)).to.be.true;
         let loggedCritical = errStub.getCalls().some(c => String(c.args[0]).includes('CRITICAL'));
@@ -239,7 +239,7 @@ oraclePublisherTests('_processQueue() at-most-once under rewrite failure', funct
         pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-9' });
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(pub._publishedRounds.size).to.equal(0);
     });
@@ -252,7 +252,7 @@ oraclePublisherTests('_processQueue() at-most-once under rewrite failure', funct
 // Set but the round still on the durable JSONL queue re-broadcast an already-paid
 // PRICE v0 round, spending DOGE twice. The durable marker table makes the guard
 // survive the restart.
-oraclePublisherTests('_processQueue() durable at-most-once', function () {
+oraclePublisherTests('processQueue() durable at-most-once', function () {
     it('records a durable intent before broadcast and a sent marker after (happy path)', async function () {
         let entry = { round: 20, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
         fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
@@ -262,7 +262,7 @@ oraclePublisherTests('_processQueue() durable at-most-once', function () {
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(broadcastStub.calledOnce).to.be.true;
         // Intent (INSERT) must precede the send, and the sent marker (UPDATE) follow it.
@@ -287,14 +287,14 @@ oraclePublisherTests('_processQueue() durable at-most-once', function () {
 
         expect(pub._publishedRounds.has(21)).to.be.false; // fresh process, empty in-memory guard
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(broadcastStub.called).to.be.false; // no duplicate DOGE spend
     });
 
 });
 
-oraclePublisherTests('_processQueue() durable at-most-once', function () {
+oraclePublisherTests('processQueue() durable at-most-once', function () {
 
     it('survives the ENOSPC rewrite-failure path across a restart (durable marker, not just in-memory)', async function () {
         // Tick 1 on process A: broadcast succeeds, then the queue rewrite fails
@@ -307,7 +307,7 @@ oraclePublisherTests('_processQueue() durable at-most-once', function () {
         let pubA = new OraclePublisher(makeHub({ db: db }));
         pubA.broadcastFn  = sinon.stub().resolves({ txid: 'tx-22' });
         pubA.getBalanceFn = sinon.stub().resolves(50);
-        await pubA._processQueue();
+        await pubA.processQueue();
         expect(db.markers[22] && db.markers[22].sent_at).to.not.be.null;
 
         // Process A dies. Process B starts fresh (empty in-memory Set) with the round
@@ -317,7 +317,7 @@ oraclePublisherTests('_processQueue() durable at-most-once', function () {
         pubB.broadcastFn  = broadcastB;
         pubB.getBalanceFn = sinon.stub().resolves(50);
         await pubB.start();       // hydrate loads the sent marker into the guard
-        await pubB._processQueue();
+        await pubB.processQueue();
 
         expect(broadcastB.called).to.be.false; // NOT re-broadcast after restart
     });
@@ -332,7 +332,7 @@ oraclePublisherTests('_processQueue() durable at-most-once', function () {
         pub.broadcastFn  = broadcastStub;
         pub.getBalanceFn = sinon.stub().resolves(50);
 
-        await pub._processQueue();
+        await pub.processQueue();
 
         expect(broadcastStub.called).to.be.false; // fail closed: no spend when the marker is unknowable
     });
@@ -368,7 +368,7 @@ oraclePublisherTests('start() durable-marker hydration', function () {
         expect(pub._quarantinedRounds.has(32)).to.be.true;
         expect(pub._publishedRounds.has(32)).to.be.false;
 
-        await pub._processQueue();
+        await pub.processQueue();
         expect(broadcastStub.called).to.be.false; // quarantined round is never re-broadcast
     });
 

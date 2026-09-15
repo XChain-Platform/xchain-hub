@@ -173,7 +173,7 @@ function registerOracleRoundSubmissionsUnaffectedByReorgTest() {
                 sources: 2
             }
         };
-        oracle._handleMessage(envelope);
+        oracle.handleMessage(envelope);
 
         // Process a reorg (on a chain, unrelated to oracle prices)
         await reorgHandler.reportReorg('DOGE', 100000, Date.now() - 120000, 'a'.repeat(64), 'b'.repeat(64));

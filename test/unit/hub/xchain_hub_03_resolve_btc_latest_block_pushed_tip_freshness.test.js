@@ -32,7 +32,7 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockHeight: 800000,
       blockTime: now - 60
     });
-    let direct = sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null);
+    let direct = sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, 'resolveBtcIndexerUrl').resolves(null);
     expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(800000);
     // Fresh tip short-circuits path 1; the direct path is never consulted.
     expect(direct.called).to.equal(false);
@@ -44,7 +44,7 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockHeight: 800000,
       blockTime: now - 7200
     });
-    sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null); // direct path unavailable → null
+    sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, 'resolveBtcIndexerUrl').resolves(null); // direct path unavailable → null
     expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(null);
   });
   it('falls through when the pushed tip has no block_time (unverifiable)', async function () {
@@ -52,7 +52,7 @@ function registerFeature14resolveBtcLatestBlockPushedTipFreshnessPart1() {
       blockHeight: 800000,
       blockTime: 0
     });
-    sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, '_resolveBtcIndexerUrl').resolves(null);
+    sinon.stub(feature14resolveBtcLatestBlockPushedTipFreshnessHub, 'resolveBtcIndexerUrl').resolves(null);
     expect(await feature14resolveBtcLatestBlockPushedTipFreshnessHub.resolveBtcLatestBlock()).to.equal(null);
   });
 }

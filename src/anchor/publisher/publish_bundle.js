@@ -44,7 +44,7 @@ module.exports = {
         // caller's max-height set keeps its two jobs (the pre-split fail-closed gate and
         // the split's attestation-tail sizing) and is deliberately not passed down here.
         let eligible;
-        try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
+        try { eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock); }
         catch(_e){ eligible = []; }
         // Fail closed per bundle, the twin of the caller's gate: an unresolved set is no
         // licence for every hub to anchor independently. Defer rather than borrow a set
@@ -217,7 +217,7 @@ module.exports = {
         // signal, so a dead rank-0 stays invisible while the ladder absorbs its work.
         // Computed from the SAME `order` mayPublish decided on, so the label can
         // never disagree with the decision that produced the spend.
-        let myRank = this._myRank(order);
+        let myRank = this.myRank(order);
         // Gate the publish counters and the log verb on whether this call actually
         // spent: an adopted bundle was paid for by a prior broadcast of ours or by a
         // peer, and must never read as an anchor this hub bought.

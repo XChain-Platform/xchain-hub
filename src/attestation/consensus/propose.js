@@ -113,7 +113,7 @@ module.exports = {
         let quorum      = bftQuorumOrSingle(baseSize, 0);
         // Unfinalizable-round guard. The finalization gates require
         // max(quorum, redundancy) VALID signatures, and signatures can only ever
-        // come from responsible-set members (_handleCommit rejects non-members).
+        // come from responsible-set members (handleCommit rejects non-members).
         // When the block-anchored snapshot or weighted source-dedup shrinks the
         // responsible set below that threshold (AttestationRound.computeResponsibleSet
         // slices to max(1, redundancy) + widen and can return fewer), signatures.size can
@@ -181,7 +181,7 @@ module.exports = {
         // Replay messages that arrived before our round was set up. With
         // staggered hub polls, the first proposer's PROPOSE typically lands
         // before peers create their pending entry; without this drain,
-        // _handlePropose's `if(!pending) return` loses those votes.
+        // handlePropose's `if(!pending) return` loses those votes.
         this.drainEarlyMessages(rid);
 
         // For single-validator stacks (N=1) we already have everything we need

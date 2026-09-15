@@ -122,7 +122,7 @@ function homeRelayedRow(overrides = {}) {
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
-    relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+    relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
         if (coin === 'BTC' && method === 'getrelayedattestation_requests') {
             const filtered = params && params.request_id
                 ? homeRows.filter(r => r.request_id === params.request_id)
@@ -291,8 +291,8 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('validateProposedMatch, response leg', function () { it('refuses when either indexer is unreachable', async function () {
             for (const down of ['BTC', 'LTC']) {
                 const relay = relayForResponse();
-                const good  = relay._indexerCall;
-                relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+                const good  = relay.indexerCall;
+                relay.indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
                     if (coin === down) throw new Error('connect ECONNREFUSED');
                     return good(coin, method, params);
                 });

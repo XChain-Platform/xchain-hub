@@ -66,7 +66,7 @@ function wireBus(engines) {
         e.pm.broadcast = sinon.spy((type, data) => {
             for (let other of engines) {
                 if (other === e) continue;
-                other.consensus._handleMessage({
+                other.consensus.handleMessage({
                     sender: e.pm.validatorAddr, sig_pubkey: e.v.pubkey,
                     type: type, data: data
                 });
