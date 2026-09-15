@@ -34,9 +34,42 @@ function captureWarn(fn) {
     return lines;
 }
 
-describe('signer-loader', function () {
+let tmpDir;
 
-    let tmpDir;
+function writeModule(name, source) {
+    let p = path.join(tmpDir, name);
+    fs.writeFileSync(p, source);
+    return p;
+}
+
+function fakeBasicPublisher() {
+    return {
+        walletSignFn: null, broadcastFn: null, getBalanceFn: null,
+        setWalletSignHook(fn) { this.walletSignFn = fn; },
+        setBroadcastHook(fn)  { this.broadcastFn  = fn; },
+        setBalanceHook(fn)    { this.getBalanceFn = fn; }
+    };
+}
+
+function fakeChainPublisher(signingChain) {
+    function OraclePublisher() {}
+    let pub = new OraclePublisher();
+    Object.assign(pub, {
+        walletSignFn: null, broadcastFn: null, getBalanceFn: null, wiredChain: null,
+        setWalletSignHook(fn, chain) { this.walletSignFn = fn; this.wiredChain = chain; },
+        setBroadcastHook(fn)  { this.broadcastFn  = fn; },
+        setBalanceHook(fn)    { this.getBalanceFn = fn; }
+    });
+    if (signingChain) pub.signingChain = signingChain;
+    return pub;
+}
+
+const dogeHooks = () => ({
+    source: '/operator/signer.js', chains: ['DOGE'],
+    walletSignFn: async () => 'tx', broadcastFn: async () => ({ txid: 't' }), getBalanceFn: async () => 5
+});
+
+describe('signer-loader', function () {
 
     before(function () {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-signer-test-'));
@@ -46,15 +79,22 @@ describe('signer-loader', function () {
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { /* best-effort */ }
     });
 
-    function writeModule(name, source) {
-        let p = path.join(tmpDir, name);
-        fs.writeFileSync(p, source);
-        return p;
-    }
+    registerLoadSignerSuite();
+    registerApplySignerSuite();
+    registerSignerChainGateSuite();
+    registerBuildSignerSuite();
+});
+
+function registerLoadSignerSuite() {
 
     describe('loadSignerHooks()', function () {
+        registerSignerModuleLoadTests();
+        registerSignerModuleChainTests();
+    });
+}
 
-        it('returns null when HUB_SIGNER_MODULE is unset', function () {
+function registerSignerModuleLoadTests() {
+    it('returns null when HUB_SIGNER_MODULE is unset', function () {
             assert.strictEqual(loadSignerHooks({}), null);
             assert.strictEqual(loadSignerHooks({ HUB_SIGNER_MODULE: '' }), null);
         });
@@ -109,7 +149,9 @@ describe('signer-loader', function () {
                 () => loadSignerHooks({ HUB_SIGNER_MODULE: p }),
                 /"getBalance" must be a function/);
         });
+}
 
+function registerSignerModuleChainTests() {
         // The chain declaration. Absent means DOGE only, because the hub's
         // one historical signer holds the DOGE key and silence must mean the narrow
         // answer, never "this key is good for every rail".
@@ -148,26 +190,19 @@ describe('signer-loader', function () {
                     /"chains" must contain only non-empty coin ticker strings/, bad);
             }
         });
-    });
+}
+
+function registerApplySignerSuite() {
 
     describe('applySignerHooks()', function () {
 
-        function fakePublisher() {
-            return {
-                walletSignFn: null, broadcastFn: null, getBalanceFn: null,
-                setWalletSignHook(fn) { this.walletSignFn = fn; },
-                setBroadcastHook(fn)  { this.broadcastFn  = fn; },
-                setBalanceHook(fn)    { this.getBalanceFn = fn; }
-            };
-        }
-
         it('returns false for null hooks or publisher', function () {
-            assert.strictEqual(applySignerHooks(fakePublisher(), null), false);
+            assert.strictEqual(applySignerHooks(fakeBasicPublisher(), null), false);
             assert.strictEqual(applySignerHooks(null, { walletSignFn: () => {} }), false);
         });
 
         it('wires walletSign and skips absent optional hooks', function () {
-            let pub = fakePublisher();
+            let pub = fakeBasicPublisher();
             let sign = async () => 'tx';
             assert.strictEqual(
                 applySignerHooks(pub, { walletSignFn: sign, broadcastFn: null, getBalanceFn: null }),
@@ -178,7 +213,7 @@ describe('signer-loader', function () {
         });
 
         it('wires all hooks when present', function () {
-            let pub = fakePublisher();
+            let pub = fakeBasicPublisher();
             let hooks = { walletSignFn: async () => 'tx', broadcastFn: async () => ({}), getBalanceFn: async () => 1 };
             applySignerHooks(pub, hooks);
             assert.strictEqual(pub.walletSignFn, hooks.walletSignFn);
@@ -186,39 +221,29 @@ describe('signer-loader', function () {
             assert.strictEqual(pub.getBalanceFn, hooks.getBalanceFn);
         });
     });
+}
+
+function registerSignerChainGateSuite() {
 
     // The chain gate. A DOGE signer wired into a BTC-rail publisher signed and
     // broadcast BTC-intended payloads on Dogecoin (measured 2026-09-04): DOGE fees
     // spent, invalid REQUEST_ID and zero responses on the BTC side.
     describe('applySignerHooks() chain gate', function () {
+        registerSignerChainRefusalTests();
+        registerSignerChainAcceptanceTests();
+    });
+}
 
-        function fakePublisher(signingChain) {
-            function OraclePublisher() {}
-            let pub = new OraclePublisher();
-            Object.assign(pub, {
-                walletSignFn: null, broadcastFn: null, getBalanceFn: null, wiredChain: null,
-                setWalletSignHook(fn, chain) { this.walletSignFn = fn; this.wiredChain = chain; },
-                setBroadcastHook(fn)  { this.broadcastFn  = fn; },
-                setBalanceHook(fn)    { this.getBalanceFn = fn; }
-            });
-            if (signingChain) pub.signingChain = signingChain;
-            return pub;
-        }
-
-        const dogeHooks = () => ({
-            source: '/operator/signer.js', chains: ['DOGE'],
-            walletSignFn: async () => 'tx', broadcastFn: async () => ({ txid: 't' }), getBalanceFn: async () => 5
-        });
-
-        it('wires a DOGE publisher from a DOGE module and tags the hook with the chain', function () {
-            let pub = fakePublisher();
+function registerSignerChainRefusalTests() {
+    it('wires a DOGE publisher from a DOGE module and tags the hook with the chain', function () {
+            let pub = fakeChainPublisher();
             assert.strictEqual(applySignerHooks(pub, dogeHooks(), 'DOGE'), true);
             assert.strictEqual(typeof pub.walletSignFn, 'function');
             assert.strictEqual(pub.wiredChain, 'DOGE');
         });
 
         it('refuses a BTC publisher and leaves sign, broadcast AND balance unwired', function () {
-            let pub = fakePublisher();
+            let pub = fakeChainPublisher();
             let lines = captureWarn(() => {
                 assert.strictEqual(applySignerHooks(pub, dogeHooks(), 'BTC'), false);
             });
@@ -233,9 +258,11 @@ describe('signer-loader', function () {
             assert.match(lines[0], /declares chains \[DOGE\]/); // names what the module declares
             assert.match(lines[0], /UNWIRED/);
         });
+}
 
+function registerSignerChainAcceptanceTests() {
         it('reads the publisher-declared signingChain when the caller names none', function () {
-            let pub = fakePublisher('BTC');
+            let pub = fakeChainPublisher('BTC');
             let refused = captureWarn(() => {
                 assert.strictEqual(applySignerHooks(pub, dogeHooks()), false);
             });
@@ -244,26 +271,28 @@ describe('signer-loader', function () {
         });
 
         it('treats an undeclared module as DOGE-only at the wiring site too', function () {
-            let pub = fakePublisher();
+            let pub = fakeChainPublisher();
             let hooks = { source: '/legacy.js', walletSignFn: async () => 'tx' };  // pre-`chains` module
             assert.strictEqual(applySignerHooks(pub, hooks, 'DOGE'), true);
-            let pubBtc = fakePublisher();
+            let pubBtc = fakeChainPublisher();
             captureWarn(() => assert.strictEqual(applySignerHooks(pubBtc, hooks, 'BTC'), false));
         });
 
         it('wires a BTC publisher from a module that declares BTC', function () {
-            let pub = fakePublisher('BTC');
+            let pub = fakeChainPublisher('BTC');
             let hooks = Object.assign(dogeHooks(), { chains: ['DOGE', 'BTC'] });
             assert.strictEqual(applySignerHooks(pub, hooks), true);
             assert.strictEqual(pub.wiredChain, 'BTC');
         });
 
         it('matches the declaration case-insensitively', function () {
-            let pub = fakePublisher();
+            let pub = fakeChainPublisher();
             assert.strictEqual(applySignerHooks(pub, dogeHooks(), 'doge'), true);
             assert.strictEqual(pub.wiredChain, 'DOGE');
         });
-    });
+}
+
+function registerBuildSignerSuite() {
 
     // buildSignerHooks is the validation half of loadSignerHooks, exported so a test
     // can drive a module it cannot require() (the reference template needs operator
@@ -276,4 +305,4 @@ describe('signer-loader', function () {
                 /"chains" must be a non-empty array/);
         });
     });
-});
+}
