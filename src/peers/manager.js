@@ -22,6 +22,7 @@
 
 const EventEmitter     = require('events');
 const coins            = require('../coins');
+const hubConfig        = require('../config');
 const { positiveIntConfig } = require('../lib/config_int.js');
 // The roster below credits RollcallRound only where the engine would really start,
 // so it reads the engine's own activation source rather than a copy of it.
@@ -215,7 +216,7 @@ class PeerManager extends EventEmitter {
     // rather than to Infinity, so one subscriber that registers twice is still one
     // listener too many and still warns.
     static messageSubscribers(config, env) {
-        const e      = env || process.env;
+        const e      = hubConfig.env(env);
         const roster = [...UNCONDITIONAL_SUBSCRIBERS];
         for (const sub of CONDITIONAL_SUBSCRIBERS) {
             if (sub.attaches(config, e)) roster.push(sub.entry);
@@ -228,7 +229,7 @@ class PeerManager extends EventEmitter {
     // whose gate is open or unresolvable. It is the roster's widest honest reading, and
     // what the source-parity derivation in peer_manager_listener_ceiling.test.js compares
     // module names against. A CONFIGURED hub's ceiling comes from messageSubscribers().
-    static get MESSAGE_SUBSCRIBERS()   { return PeerManager.messageSubscribers(null, process.env); }
+    static get MESSAGE_SUBSCRIBERS()   { return PeerManager.messageSubscribers(null, hubConfig.env()); }
     static get MAX_MESSAGE_LISTENERS() { return PeerManager.MESSAGE_SUBSCRIBERS.length; }
 
     // Default seed list for a network, or [] when there is none to offer
@@ -261,7 +262,7 @@ class PeerManager extends EventEmitter {
         // of listeners its own configuration will attach, so a hub that arms roll call
         // or the relay makes room for them and a hub that does not still hears about
         // the first listener past its real boot load.
-        this.setMaxListeners(PeerManager.messageSubscribers(config, process.env).length);
+        this.setMaxListeners(PeerManager.messageSubscribers(config, hubConfig.env()).length);
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;
