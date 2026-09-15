@@ -41,21 +41,10 @@ function utxos(n) {
     return Array.from({ length: n }, (_, i) => ({ txid: String(i), vout: 0, value: 1 }));
 }
 
-describe('encoder_utxo_forward', function () {
+let warnings;
+let realWarn;
 
-    let warnings;
-    let realWarn;
-
-    beforeEach(function () {
-        warnings = [];
-        realWarn = console.warn;
-        console.warn = (...args) => warnings.push(args.join(' '));
-    });
-
-    afterEach(function () {
-        console.warn = realWarn;
-    });
-
+function registerForwardingLimitTests() {
     it('pins the cap to the encoder validator MAX_UTXO_COUNT', function () {
         // Duplicated from xchain-encoder/src/validator.js by design (the encoder is a
         // separate service over JSON-RPC). A silent drift here re-opens the -32602 loop.
@@ -80,7 +69,9 @@ describe('encoder_utxo_forward', function () {
         assert.ok(warnings[0].includes(String(ENCODER_MAX_UTXO_COUNT + 1)), 'the warning names the actual count');
         assert.ok(warnings[0].includes(String(ENCODER_MAX_UTXO_COUNT)), 'the warning names the cap');
     });
+}
 
+function registerForwardingShapeTests() {
     it('falls back to a generic label when none is supplied', function () {
         assert.strictEqual(forwardableUtxos(utxos(ENCODER_MAX_UTXO_COUNT + 1)), undefined);
         assert.strictEqual(forwardableUtxos(utxos(ENCODER_MAX_UTXO_COUNT + 1), ''), undefined);
@@ -112,4 +103,19 @@ describe('encoder_utxo_forward', function () {
                 rel + ' builds create_tx utxos without forwardableUtxos(); the encoder cap is unguarded there');
         }
     });
+}
+
+describe('encoder_utxo_forward', function () {
+    beforeEach(function () {
+        warnings = [];
+        realWarn = console.warn;
+        console.warn = (...args) => warnings.push(args.join(' '));
+    });
+
+    afterEach(function () {
+        console.warn = realWarn;
+    });
+
+    registerForwardingLimitTests();
+    registerForwardingShapeTests();
 });
