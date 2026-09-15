@@ -122,6 +122,13 @@ function parse(payload) {
 
 describe('StateAnchorPublisher: content-addressed archive-anchor existence check', () => {
 
+    registerArchiveExistencePublishTests();
+    registerArchiveExistenceRecoveryTests();
+    registerArchiveLookupTests();
+});
+
+function registerArchiveExistencePublishTests() {
+
     it('the guard exists and is threaded through the v1 head broadcast', () => {
         const { pub } = mkPub(() => ABSENT);
         expect(typeof pub.findExistingArchiveAnchor, 'findExistingArchiveAnchor must exist').to.equal('function');
@@ -163,6 +170,9 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
         // against it); only the on-chain chunk addressing follows the adopted head.
         expect(backfills[0].seq).to.equal(ROUND_SEQ);
     });
+}
+
+function registerArchiveExistenceRecoveryTests() {
 
     it('resumes a PARTIAL archive: only the missing chunk is sent, under the ADOPTED seq', async () => {
         const { pub, sent } = mkPub(() => onChain([0, 1]));      // head + chunk 1 landed, chunk 2 did not
@@ -221,6 +231,9 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
         await pub._publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
     });
+}
+
+function registerArchiveLookupTests() {
 
     describe('archiveAnchorLookup', () => {
         it('throws (undetermined) rather than reporting absent when no indexer is wired', async () => {
@@ -243,4 +256,4 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
             expect(pub.indexerCalls[0].params.author).to.equal('DsomeOtherAddress');
         });
     });
-});
+}
