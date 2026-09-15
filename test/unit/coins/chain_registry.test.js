@@ -22,10 +22,10 @@ const crypto     = require('crypto');
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const coins      = require('../../src/coins');
-const { waitUntil } = require('../helpers/waitUntil');
+const coins      = require('../../../src/coins');
+const { waitUntil } = require('../../helpers/waitUntil');
 
-const SNAPSHOT_PATH = path.join(__dirname, '../../src/chain-registry.json');
+const SNAPSHOT_PATH = path.join(__dirname, '../../../src/chain-registry.json');
 const SNAPSHOT = JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
 
 // Boot src/api.js with heavy deps stubbed; capture app.get routes and return
@@ -62,7 +62,7 @@ async function bootRoute({ identity } = {}) {
         HUB_ALLOW_UNAUTHENTICATED: 'true'
     });
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),
@@ -189,7 +189,7 @@ describe('chain-registry snapshot consistency', function () {
     // suite when the two disagree, with no checkout of this repo present.
     it('matches the wallet bundled descriptors byte-for-byte (skip if sibling absent)', async function () {
         const walletDescriptors = path.join(__dirname,
-            '../../../xchain-wallet/packages/core/src/registry/descriptors/index.js');
+            '../../../../xchain-wallet/packages/core/src/registry/descriptors/index.js');
         if (!fs.existsSync(walletDescriptors)) {
             if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
                 throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the wallet bundled descriptors are missing at '

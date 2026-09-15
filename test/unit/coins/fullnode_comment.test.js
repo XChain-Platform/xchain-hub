@@ -26,8 +26,8 @@ const path   = require('path');
 // Three levels up is the platform root from test/unit, the same depth it was
 // from src/coins; the canonical source is now named by path because the suite
 // no longer sits beside it.
-const REPO_ROOT = path.join(__dirname, '..', '..', '..');
-const SRC_TEXT  = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'coins', 'BTC.js'), 'utf8');
+const REPO_ROOT = path.join(__dirname, '..', '..', '..', '..');
+const SRC_TEXT  = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'coins', 'BTC.js'), 'utf8');
 
 // Pull just the FULLNODE block's leading comment so the assertions are scoped
 // to the block this item is about, not incidental text elsewhere in the file.

@@ -23,8 +23,8 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const XChainHub = require('../../src/XChainHub.js');
-const coins = require('../../src/coins');
+const XChainHub = require('../../../src/XChainHub.js');
+const coins = require('../../../src/coins');
 const CANONICAL = coins.getCoinConfig('BTC', 'mainnet').STAKING.CAPABILITIES;
 function makeHub(network) {
   return new XChainHub(null, null, null, null, null, network === undefined ? null : {

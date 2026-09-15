@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const coins      = require('../../src/coins');
+const coins      = require('../../../src/coins');
 
 // Golden consensus hashes for the canonical coin files. These freeze the
 // consensus-critical subset: any unintended change to a network byte-prefix,

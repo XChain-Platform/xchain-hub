@@ -11,11 +11,11 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const coins      = require('../../src/coins');
+const coins      = require('../../../src/coins');
 
 function registerConsensusPinTests() {
     describe('consensus config pin', () => {
-        const { CONSENSUS_CONFIG_PIN } = require('../../src/coins/consensus_pin.js');
+        const { CONSENSUS_CONFIG_PIN } = require('../../../src/coins/consensus_pin.js');
 
         it('pins match the canonical hashes for every armed network/coin', () => {
             for(const net of coins.NETWORKS){

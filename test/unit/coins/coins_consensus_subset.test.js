@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const coins      = require('../../src/coins');
+const coins      = require('../../../src/coins');
 
     // Every top-level coin key that is deliberately NOT part of the hashed
     // consensus subset. Shared classification source for the completeness guard:
@@ -56,7 +56,7 @@ const coins      = require('../../src/coins');
     // truth, so a new field must be consciously placed in consensusSubset or in
     // NON_CONSENSUS_TOP_LEVEL_KEYS. Same pattern as DISPLAY_ONLY_ADDRESS_ROLES.
     function coinFileTopLevelKeys(tick, net){
-        const coinFile = require(`../../src/coins/${tick}.js`);
+        const coinFile = require(`../../../src/coins/${tick}.js`);
         // The per-network block's own keys count as top-level coin data: they are
         // flattened into the resolved config (net / firstBlock / addresses / genesis).
         return [...new Set(Object.keys(coinFile).concat(Object.keys(coinFile.networks[net])))];
@@ -82,7 +82,7 @@ function registerCompletenessTests() {
         // consensusSubset. Anchored on the resolved object the guard never saw it
         // (and the golden hash cannot detect an omission); anchored on the coin file
         // it fails loudly until someone classifies it.
-        const BTC = require('../../src/coins/BTC.js');
+        const BTC = require('../../../src/coins/BTC.js');
         BTC.NEW_CONSENSUS_FIELD = 42;
         try {
             expect(coins.getCoinConfig('BTC', 'mainnet'), 'the resolved allowlist drops it')
@@ -113,7 +113,7 @@ function registerChainGenesisTests() {
     describe('chainGenesisHash (endpoint chain identity)', () => {
         it('every coin/network declares the field, unpinned (null) or a 64-char hex hash', () => {
             for(const tick of coins.ALLOWED_COINS){
-                const coinFile = require(`../../src/coins/${tick}.js`);
+                const coinFile = require(`../../../src/coins/${tick}.js`);
                 for(const net of coins.NETWORKS){
                     const v = coinFile.networks[net].chainGenesisHash;
                     expect(coinFile.networks[net], `${tick}/${net}`).to.have.property('chainGenesisHash');
@@ -144,7 +144,7 @@ function registerChainGenesisTests() {
         // hash without moving CONSENSUS_CONFIG_PIN, so no flag-day and no lockstep
         // re-pin of the nine per-service bundles is needed to close the wrong-coin hole.
         it('pinning a real hash does not move the consensus hash (no flag-day to arm it)', () => {
-            const BTC = require('../../src/coins/BTC.js');
+            const BTC = require('../../../src/coins/BTC.js');
             const before = coins.consensusHash('BTC', 'mainnet');
             BTC.networks.mainnet.chainGenesisHash =
                 '000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f';
@@ -162,7 +162,7 @@ function registerChainGenesisTests() {
 function registerAddressSubsetTests() {
     it('derives the address exclusion from each coin file\'s DISPLAY_ONLY_ADDRESS_ROLES (no magic string)', () => {
         for(const tick of coins.ALLOWED_COINS){
-            const coinFile = require(`../../src/coins/${tick}.js`);
+            const coinFile = require(`../../../src/coins/${tick}.js`);
             // Behavior freeze: today exactly EXPLORER is display-only. Changing this
             // list changes the consensus hash and requires a coordinated pin bump.
             expect(coinFile.DISPLAY_ONLY_ADDRESS_ROLES, tick).to.deep.equal(['EXPLORER']);
@@ -175,7 +175,7 @@ function registerAddressSubsetTests() {
     });
 
     it('a newly-declared display-only role is excluded and cannot shift the consensus hash', () => {
-        const BTC = require('../../src/coins/BTC.js');
+        const BTC = require('../../../src/coins/BTC.js');
         const before = coins.consensusHash('BTC', 'mainnet');
         BTC.networks.mainnet.addresses.TESTONLY = '1TestDisplayOnlyRoleXXXXXXXXXXXXXX';
         BTC.DISPLAY_ONLY_ADDRESS_ROLES.push('TESTONLY');
