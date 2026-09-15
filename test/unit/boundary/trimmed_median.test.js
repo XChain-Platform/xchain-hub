@@ -63,7 +63,7 @@ function registerEvenSplitGateMeasuresTheRoundedMedianNotTheExactMidpoint() {
 }
 
 function testDropsThePairWhoseRoundedMedianPutsAMiddleSubmissionOutsideThe() {
-    const devband = require('../../../src/lib/deviation_band.js');
+    const devband = require('../../../src/consensus/deviation_band.js');
     const lo = '0.09500010', hi = '0.10500011';
     // The premise, executed rather than asserted: the OLD gate passed this pair.
     expect(devband.twoSourceSpreadExceeds(lo, hi, 0.05, 18)).to.be.false;
@@ -89,7 +89,7 @@ function testDropsAPairWhoseAggregateRoundsToZeroAt8Decimals() {
     // Two IDENTICAL sub-8-decimal values: spread 0, so the even-split gate has
     // nothing to object to and the pair reaches the median unchallenged. Before
     // this guard the aggregate published was the string '0.00000000'.
-    const devband = require('../../../src/lib/deviation_band.js');
+    const devband = require('../../../src/consensus/deviation_band.js');
     expect(devband.twoSourceSpreadExceeds('0.000000002', '0.000000002', 0.05, 18)).to.be.false;
     let subs = submissionsForPair(['0.000000002', '0.000000002'], 'BTC/USD');
     expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;

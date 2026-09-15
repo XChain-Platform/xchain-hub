@@ -25,7 +25,7 @@
 const crypto            = require('crypto');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD } = require('../../constants.js');
 const bcmath            = require('../../bcmath.js');
-const devband           = require('../../lib/deviation_band.js');
+const devband           = require('../../consensus/deviation_band.js');
 const { maxChangeForPair } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

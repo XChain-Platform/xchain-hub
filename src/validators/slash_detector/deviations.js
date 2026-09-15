@@ -21,7 +21,7 @@
  ********************************************************************/
 
 const bcmath = require('../../bcmath.js');
-const devband = require('../../lib/deviation_band.js');
+const devband = require('../../consensus/deviation_band.js');
 // The per-round move bound the aggregation clamp applies, read from its one definition
 // in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
 // does not require this file, so there is no cycle.

@@ -16,7 +16,7 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const devband         = require('../../src/lib/deviation_band');
+const devband         = require('../../src/consensus/deviation_band');
 const bcmath          = require('../../src/bcmath');
 const OracleConsensus = require('../../src/oracle/consensus');
 const { ORACLE_DEVIATION_THRESHOLD } = require('../../src/constants');
