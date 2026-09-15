@@ -38,7 +38,7 @@ const REFUSED_METHODS = [
     'resumeeffectorspend', 'getallconfigs', 'getvalidators', 'ping'
 ];
 
-async function bootApi() {
+function makeBootDoubles() {
     const useCalls = [];
     const mockApp = {
         use:  sinon.stub().callsFake((fn) => { useCalls.push(fn); }),
@@ -61,7 +61,10 @@ async function bootApi() {
             return target[prop];
         }
     });
+    return { useCalls, mockExpress, mockServer, mockHub };
+}
 
+function saveFeedEnvironment() {
     const saved = {};
     for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
                      'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
@@ -73,61 +76,78 @@ async function bootApi() {
         HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
         HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999', HUB_API_KEY: 'test-hub-key'
     });
+    return saved;
+}
 
-    try {
-        proxyquire('../../src/api', {
-            'dotenv': { config: sinon.stub() },
-            'express': mockExpress,
-            'helmet': sinon.stub().returns(function helmetMw() {}),
-            'cors': sinon.stub().returns(function corsMw() {}),
-            'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
-            'express-json-rpc-router': () => function routerMw() {},
-            'http': { createServer: sinon.stub().returns(mockServer) },
-            'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-            'geoip-lite': { lookup: sinon.stub().returns(null) },
-            './XChainHub': function () { return mockHub; }
-        });
-    } finally {
-        for (const [k, v] of Object.entries(saved)) {
-            if (v === undefined) delete process.env[k];
-            else process.env[k] = v;
-        }
+function restoreEnvironment(saved) {
+    for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
     }
-    await waitUntil(() => mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
+}
 
-    function drive(mw, opts) {
-        const res = {
-            statusCode: 200,
-            status(code) { this.statusCode = code; return this; },
-            json(body) { this.body = body; return this; }
-        };
-        const body = Array.isArray(opts.method)
-            ? opts.method.map((m, i) => ({ method: m, id: i + 1 }))
-            : (opts.method === undefined ? {} : { method: opts.method, id: 1 });
-        const req = {
-            body: body,
-            headers: { 'x-api-key': 'test-hub-key' },
-            method: opts.httpMethod || 'POST'
-        };
-        if (opts.feed) req.xchainFeedOrigin = true;
-        let nexted = false;
-        mw(req, res, () => { nexted = true; });
-        return { nexted, res };
-    }
+function loadApi(mockExpress, mockServer, mockHub) {
+    proxyquire('../../src/api', {
+        'dotenv': { config: sinon.stub() },
+        'express': mockExpress,
+        'helmet': sinon.stub().returns(function helmetMw() {}),
+        'cors': sinon.stub().returns(function corsMw() {}),
+        'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
+        'express-json-rpc-router': () => function routerMw() {},
+        'http': { createServer: sinon.stub().returns(mockServer) },
+        'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+        'geoip-lite': { lookup: sinon.stub().returns(null) },
+        './XChainHub': function () { return mockHub; }
+    });
+}
 
+function driveMiddleware(mw, opts) {
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+    const body = Array.isArray(opts.method)
+        ? opts.method.map((m, i) => ({ method: m, id: i + 1 }))
+        : (opts.method === undefined ? {} : { method: opts.method, id: 1 });
+    const req = {
+        body: body,
+        headers: { 'x-api-key': 'test-hub-key' },
+        method: opts.httpMethod || 'POST'
+    };
+    if (opts.feed) req.xchainFeedOrigin = true;
+    let nexted = false;
+    mw(req, res, () => { nexted = true; });
+    return { nexted, res };
+}
+
+function findAllowlistMiddleware(useCalls) {
     // Identify the allowlist middleware behaviourally: it refuses a stamped
     // administrative method with -32601 and passes the same call unstamped.
     const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3);
     let mw = null;
     for (const fn of candidates) {
         try {
-            const stamped   = drive(fn, { method: 'updateconfig', feed: true });
-            const unstamped = drive(fn, { method: 'updateconfig' });
+            const stamped   = driveMiddleware(fn, { method: 'updateconfig', feed: true });
+            const unstamped = driveMiddleware(fn, { method: 'updateconfig' });
             if (!stamped.nexted && stamped.res.statusCode === 404 && unstamped.nexted) { mw = fn; break; }
         } catch (_) { /* not this middleware */ }
     }
     expect(mw, 'feed allowlist middleware not found among app.use() calls').to.not.equal(null);
-    return { drive: (opts) => drive(mw, opts) };
+    return mw;
+}
+
+async function bootApi() {
+    const { useCalls, mockExpress, mockServer, mockHub } = makeBootDoubles();
+    const saved = saveFeedEnvironment();
+    try {
+        loadApi(mockExpress, mockServer, mockHub);
+    } finally {
+        restoreEnvironment(saved);
+    }
+    await waitUntil(() => mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
+    const mw = findAllowlistMiddleware(useCalls);
+    return { drive: (opts) => driveMiddleware(mw, opts) };
 }
 
 describe('hub public-port rpc allowlist (P2P feed)', function () {
