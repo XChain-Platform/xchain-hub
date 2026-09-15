@@ -32,7 +32,7 @@ const sinon      = require('sinon');
 let savedCredsCacheEntry;
 
 function reloadWithAuthStub(authResult) {
-    const credsKey = require.resolve('../../src/lib/hub_credentials.js');
+    const credsKey = require.resolve('../../../../src/lib/hub_credentials.js');
     savedCredsCacheEntry = require.cache[credsKey];
 
     const fakeResolve = sinon.stub().returns(authResult);
@@ -51,9 +51,9 @@ function reloadWithAuthStub(authResult) {
     };
 
     // Reload llm.js so it picks up our fake hub-credentials
-    delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
-    const llm = require('../../src/providers/llm.js');
+    delete require.cache[require.resolve('../../../../src/providers/llm.js')];
+    delete require.cache[require.resolve('../../../../src/providers/llm/claude_spawn.js')];
+    const llm = require('../../../../src/providers/llm.js');
     return { llm, stub: fakeResolve };
 }
 
@@ -61,7 +61,7 @@ describe('llm provider, auth credential fallback chain', function () {
 
     afterEach(function () {
         sinon.restore();
-        const credsKey = require.resolve('../../src/lib/hub_credentials.js');
+        const credsKey = require.resolve('../../../../src/lib/hub_credentials.js');
         if (savedCredsCacheEntry !== undefined) {
             require.cache[credsKey] = savedCredsCacheEntry;
             savedCredsCacheEntry = undefined;

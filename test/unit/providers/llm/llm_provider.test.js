@@ -82,10 +82,10 @@ function _withEnv(extra, fn){
 // Reload the module under each scenario so its env-dependent require-time
 // state is fresh. cache-bust the dependency chain too.
 function _reloadProvider(){
-    delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-    delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
-    return require('../../src/providers/llm.js');
+    delete require.cache[require.resolve('../../../../src/providers/llm.js')];
+    delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
+    delete require.cache[require.resolve('../../../../src/providers/llm/claude_spawn.js')];
+    return require('../../../../src/providers/llm.js');
 }
 
 // max_completion_tokens was the one governance key installed on a bare
@@ -1751,8 +1751,8 @@ function registerMultiVendorHealthTests() {
 describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () {
 
     function freshCreds() {
-        delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-        return require('../../src/lib/hub_credentials.js');
+        delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
+        return require('../../../../src/lib/hub_credentials.js');
     }
 
     it('resolves HUB_OPENAI_API_KEY ahead of OPENAI_API_KEY', function () {

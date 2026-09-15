@@ -29,7 +29,7 @@ const os = require('os');
 const path = require('path');
 const {
   resolveHubLlmAuth
-} = require('../../src/lib/hub_credentials');
+} = require('../../../src/lib/hub_credentials');
 function _tmpDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubcred-'));
   return dir;

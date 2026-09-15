@@ -70,10 +70,10 @@ function _withEnv(extra, fn){
 // Reload the module under each scenario so its env-dependent require-time
 // state is fresh. cache-bust the dependency chain too.
 function _reloadProvider(){
-    delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-    delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
-    return require('../../src/providers/llm.js');
+    delete require.cache[require.resolve('../../../../src/providers/llm.js')];
+    delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
+    delete require.cache[require.resolve('../../../../src/providers/llm/claude_spawn.js')];
+    return require('../../../../src/providers/llm.js');
 }
 
 // item 3535: the reasoning predicate gates BOTH the temperature on the OpenAI

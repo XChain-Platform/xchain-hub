@@ -39,7 +39,7 @@ let sinkPath, savedSink;
 // Inject a fake claude-spawn module into the cache, reload llm.js so its
 // destructured binding picks up our stub, then restore after the test.
 function reloadWithSpawnStub(spawnResolveValue) {
-    const spawnKey = require.resolve('../../src/providers/llm/claude_spawn.js');
+    const spawnKey = require.resolve('../../../../src/providers/llm/claude_spawn.js');
     savedCacheEntry = require.cache[spawnKey];
 
     const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
@@ -50,9 +50,9 @@ function reloadWithSpawnStub(spawnResolveValue) {
     };
 
     // Now reload llm.js; its `const { runClaudePrint }` will pick up our stub
-    delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-    const llm = require('../../src/providers/llm.js');
+    delete require.cache[require.resolve('../../../../src/providers/llm.js')];
+    delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
+    const llm = require('../../../../src/providers/llm.js');
     return { llm, stub: fakeRunClaudePrint };
 }
 
@@ -94,7 +94,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     afterEach(function () {
         sinon.restore();
         // Restore any patched cache entry
-        const spawnKey = require.resolve('../../src/providers/llm/claude_spawn.js');
+        const spawnKey = require.resolve('../../../../src/providers/llm/claude_spawn.js');
         if (savedCacheEntry !== undefined) {
             require.cache[spawnKey] = savedCacheEntry;
             savedCacheEntry = undefined;

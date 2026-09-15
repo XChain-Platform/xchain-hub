@@ -69,10 +69,10 @@ function _withEnv(extra, fn){
 // Reload the module under each scenario so its env-dependent require-time
 // state is fresh. cache-bust the dependency chain too.
 function _reloadProvider(){
-    delete require.cache[require.resolve('../../src/providers/llm.js')];
-    delete require.cache[require.resolve('../../src/lib/hub_credentials.js')];
-    delete require.cache[require.resolve('../../src/providers/llm/claude_spawn.js')];
-    return require('../../src/providers/llm.js');
+    delete require.cache[require.resolve('../../../../src/providers/llm.js')];
+    delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
+    delete require.cache[require.resolve('../../../../src/providers/llm/claude_spawn.js')];
+    return require('../../../../src/providers/llm.js');
 }
 
 describe('llm provider, _setConfig', function () {
@@ -184,7 +184,7 @@ function registerUnconsumedKeyDefaultsTests() {
     // The knob this warning was built for is gone from the shipped defaults, so a
     // fresh hub does not advertise a governance value the runtime cannot read.
     it('no longer ships judge_equivalence_threshold in the llm provider defaults', function () {
-        const { DEFAULTS } = require('../../src/validators/provider_registry');
+        const { DEFAULTS } = require('../../../../src/validators/provider_registry');
         let ac = DEFAULTS && DEFAULTS.llm && DEFAULTS.llm.additional_config;
         expect(ac).to.be.an('object');
         expect(ac).to.not.have.property('judge_equivalence_threshold');

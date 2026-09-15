@@ -32,13 +32,13 @@ const { expect } = require('chai');
 const fs         = require('fs');
 const path       = require('path');
 
-const DOCKERFILE  = path.join(__dirname, '..', '..', 'Dockerfile');
+const DOCKERFILE  = path.join(__dirname, '..', '..', '..', '..', 'Dockerfile');
 const CLI_PACKAGE = '@anthropic-ai/claude-code';
 
 // The name claude-spawn.js falls back to when CLAUDE_BIN is unset. Read from the
 // module rather than restated, so a rename there fails this guard instead of
 // leaving it asserting a string the code no longer uses.
-const { CLAUDE_BIN } = require('../../src/providers/llm/claude_spawn.js');
+const { CLAUDE_BIN } = require('../../../../src/providers/llm/claude_spawn.js');
 
 describe('Dockerfile: the llm provider CLI is in the image', () => {
     let dockerfile;

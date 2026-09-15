@@ -22,7 +22,7 @@ const { expect } = require('chai');
 const sinon      = require('sinon');
 const nock       = require('nock');
 const dns        = require('dns');
-const httpGet    = require('../../src/providers/http_get.js');
+const httpGet    = require('../../../src/providers/http_get.js');
 
 // Resolve every hostname to a public address so unit tests never touch real
 // DNS (the SSRF guard resolves before nock's request interception kicks in).
