@@ -51,8 +51,15 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
 
     afterEach(function () { sinon.restore(); });
 
-    // SC-2.1: Single-validator round
-    describe('SC-2.1: Single-validator round', function () {
+    describe('SC-2.1: Single-validator round', registerSingleValidatorRoundTests);
+    describe('SC-2.2: Multi-validator PBFT consensus', registerMultiValidatorRoundTests);
+    describe('SC-2.3: Price deviation slash', registerPriceDeviationTests);
+    describe('SC-2.4: No price data', registerNoPriceDataTests);
+    describe('SC-2.5: Reward distribution', registerRewardDistributionTests);
+});
+
+// SC-2.1: Single-validator round
+function registerSingleValidatorRoundTests() {
         it('stores snapshot directly without consensus', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -88,25 +95,13 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             let subs = await db.doQuery("SELECT * FROM oracle_submissions WHERE round_number = ?", [oracleRound.getCurrentRound()]);
             expect(subs.length).to.be.greaterThan(0);
         });
-    });
+}
 
-    // SC-2.2: Multi-validator PBFT consensus
-    describe('SC-2.2: Multi-validator PBFT consensus', function () {
+// SC-2.2: Multi-validator PBFT consensus
+function registerMultiValidatorRoundTests() {
         it('finalizes round after PREPARE and COMMIT quorum', async function () {
             let db = testDb.getDb();
-            let hub = createTestHub(db, VALIDATORS_4[0].addr);
-
-            // Register validator pubkeys
-            for (let v of VALIDATORS_4) {
-                hub._peerManager.validatorPubkeys.set(v.addr, v.pubkey);
-            }
-
-            mockApi.mockCoinGeckoSuccess();
-
-            let oracleRound = new OracleRound(hub);
-            let oracleConsensus = new OracleConsensus(hub, oracleRound);
-            oracleConsensus.setValidatorSet(VALIDATORS_4);
-            oracleRound.setConsensus(oracleConsensus);
+            let { hub, oracleRound, oracleConsensus } = createMultiValidatorRound(db);
 
             // Track finalization event
             let finalized = null;
@@ -116,64 +111,15 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             await oracleConsensus.start();
 
             // Execute round (leader is validator at round % 4)
-            await oracleRound._executeRound();
-            await waitUntil(async () => {
-                let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
-                    [oracleRound.getCurrentRound()]);
-                return rows.length > 0;
-            }, { timeoutMs: 5000, label: 'the round submission row to land' });
+            await executeRoundAndWait(db, oracleRound);
 
             let round = oracleRound.getCurrentRound();
-
-            // The oracle leader is set[round % N] and `round` is derived from the wall
-            // clock, so which validator leads is effectively random per run: this test
-            // only ever proposed (and only ever finalized) when the dice landed on
-            // index 0. Rotate the set so THIS node occupies the elected slot for the
-            // round we actually got. Membership is unchanged, only the ordering.
-            let leaderIdx = round % VALIDATORS_4.length;
-            let rotated   = VALIDATORS_4.slice();
-            [rotated[0], rotated[leaderIdx]] = [rotated[leaderIdx], rotated[0]];
-            oracleConsensus.setValidatorSet(rotated);
-
-            // Simulate submissions from other validators
-            for (let i = 1; i < VALIDATORS_4.length; i++) {
-                hub._peerManager.emit('message', buildEnvelope('ORACLE_PRICE_SUBMIT', {
-                    round: round,
-                    prices: SAMPLE_PRICES,
-                    sources: 2
-                }, VALIDATORS_4[i].addr));
-            }
+            rotateValidatorSet(oracleConsensus, round);
+            submitValidatorPrices(hub, round);
 
             // Finalize the round
             await oracleConsensus.finalizeRound(round);
-
-            // Leader should have proposed; get the digest
-            let pending = oracleConsensus.pendingRounds.get(round);
-            if (pending) {
-                // Inject PREPARE from other validators
-                for (let i = 1; i < 3; i++) {
-                    hub._peerManager.emit('message', buildEnvelope('ORACLE_PREPARE', {
-                        round: round,
-                        digest: pending.digest
-                    }, VALIDATORS_4[i].addr));
-                }
-
-                await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
-
-                // Inject COMMIT from other validators
-                for (let i = 1; i < 3; i++) {
-                    hub._peerManager.emit('message', buildEnvelope('ORACLE_COMMIT', {
-                        round: round,
-                        digest: pending.digest
-                    }, VALIDATORS_4[i].addr));
-                }
-
-                await waitUntil(async () => {
-                    let rows = await db.doQuery(
-                        "SELECT 1 FROM price_snapshots WHERE status = 'finalized' AND round_number = ?", [round]);
-                    return rows.length > 0;
-                }, { timeoutMs: 5000, label: 'the commit quorum to persist the finalized snapshot' });
-            }
+            await completePendingRound(db, hub, oracleConsensus, round);
 
             // Verify finalization
             let snapshots = await db.doQuery("SELECT * FROM price_snapshots WHERE status = 'finalized' AND round_number = ?", [round]);
@@ -181,10 +127,78 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
 
             await oracleConsensus.stop();
         });
-    });
+}
 
-    // SC-2.3: Price deviation triggers slash proposal
-    describe('SC-2.3: Price deviation slash', function () {
+function createMultiValidatorRound(db) {
+    let hub = createTestHub(db, VALIDATORS_4[0].addr);
+    // Register validator pubkeys
+    for (let v of VALIDATORS_4) hub._peerManager.validatorPubkeys.set(v.addr, v.pubkey);
+    mockApi.mockCoinGeckoSuccess();
+    let oracleRound = new OracleRound(hub);
+    let oracleConsensus = new OracleConsensus(hub, oracleRound);
+    oracleConsensus.setValidatorSet(VALIDATORS_4);
+    oracleRound.setConsensus(oracleConsensus);
+    return { hub, oracleRound, oracleConsensus };
+}
+
+async function executeRoundAndWait(db, oracleRound) {
+    await oracleRound._executeRound();
+    await waitUntil(async () => {
+        let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
+            [oracleRound.getCurrentRound()]);
+        return rows.length > 0;
+    }, { timeoutMs: 5000, label: 'the round submission row to land' });
+}
+
+function rotateValidatorSet(oracleConsensus, round) {
+    // The oracle leader is set[round % N] and `round` is derived from the wall
+    // clock, so which validator leads is effectively random per run: this test
+    // only ever proposed (and only ever finalized) when the dice landed on
+    // index 0. Rotate the set so THIS node occupies the elected slot for the
+    // round we actually got. Membership is unchanged, only the ordering.
+    let leaderIdx = round % VALIDATORS_4.length;
+    let rotated   = VALIDATORS_4.slice();
+    [rotated[0], rotated[leaderIdx]] = [rotated[leaderIdx], rotated[0]];
+    oracleConsensus.setValidatorSet(rotated);
+}
+
+function submitValidatorPrices(hub, round) {
+    // Simulate submissions from other validators
+    for (let i = 1; i < VALIDATORS_4.length; i++) {
+        hub._peerManager.emit('message', buildEnvelope('ORACLE_PRICE_SUBMIT', {
+            round: round,
+            prices: SAMPLE_PRICES,
+            sources: 2
+        }, VALIDATORS_4[i].addr));
+    }
+}
+
+async function completePendingRound(db, hub, oracleConsensus, round) {
+    // Leader should have proposed; get the digest
+    let pending = oracleConsensus.pendingRounds.get(round);
+    if (!pending) return;
+    // Inject PREPARE from other validators
+    for (let i = 1; i < 3; i++) {
+        hub._peerManager.emit('message', buildEnvelope('ORACLE_PREPARE', {
+            round: round, digest: pending.digest
+        }, VALIDATORS_4[i].addr));
+    }
+    await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
+    // Inject COMMIT from other validators
+    for (let i = 1; i < 3; i++) {
+        hub._peerManager.emit('message', buildEnvelope('ORACLE_COMMIT', {
+            round: round, digest: pending.digest
+        }, VALIDATORS_4[i].addr));
+    }
+    await waitUntil(async () => {
+        let rows = await db.doQuery(
+            "SELECT 1 FROM price_snapshots WHERE status = 'finalized' AND round_number = ?", [round]);
+        return rows.length > 0;
+    }, { timeoutMs: 5000, label: 'the commit quorum to persist the finalized snapshot' });
+}
+
+// SC-2.3: Price deviation triggers slash proposal
+function registerPriceDeviationTests() {
         it('records slash proposal when validator deviates > 5%', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -217,10 +231,10 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             expect(slashes.length).to.be.greaterThan(0);
             expect(slashes[0].validator_pubkey).to.equal('dd'.repeat(32));
         });
-    });
+}
 
-    // SC-2.4: No price data available
-    describe('SC-2.4: No price data', function () {
+// SC-2.4: No price data available
+function registerNoPriceDataTests() {
         it('does not broadcast when both APIs fail', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db);
@@ -232,10 +246,10 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
 
             expect(hub._peerManager.broadcast.called).to.be.false;
         });
-    });
+}
 
-    // SC-2.5: Reward distribution
-    describe('SC-2.5: Reward distribution', function () {
+// SC-2.5: Reward distribution
+function registerRewardDistributionTests() {
         it('distributes rewards to participants after finalization', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -256,5 +270,4 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             let unclaimed = await rewardTracker.getUnclaimedRewards(VALIDATORS_1[0].pubkey);
             expect(parseFloat(unclaimed)).to.equal(10);
         });
-    });
-});
+}
