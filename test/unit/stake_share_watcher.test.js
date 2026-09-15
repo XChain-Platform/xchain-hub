@@ -95,6 +95,15 @@ function makeWatcher(venue, env, hubOpts, opts) {
 
 describe('StakeShareWatcher', function () {
 
+    registerStakeShareDrillTests();
+    registerStakeShareReadTests();
+    registerStakeShareChainTests();
+    registerStakeShareFailureTests();
+    registerStakeShareLifecycleTests();
+});
+
+function registerStakeShareDrillTests() {
+
     describe('the drill: a competing stake raises the alert before any round fails', function () {
 
         it('goes from a quiet WARNING to an alerting CRITICAL on one new community stake', async function () {
@@ -151,6 +160,9 @@ describe('StakeShareWatcher', function () {
             expect(lines.join('\n')).to.contain('STAKE SHARE ALERT CLEARED');
         });
     });
+}
+
+function registerStakeShareReadTests() {
 
     describe('reading the same set the gate reads', function () {
 
@@ -190,6 +202,9 @@ describe('StakeShareWatcher', function () {
             expect(watcher.monitor.isAlerting()).to.equal(true);
         });
     });
+}
+
+function registerStakeShareChainTests() {
 
     describe('per chain', function () {
 
@@ -226,6 +241,9 @@ describe('StakeShareWatcher', function () {
             expect(Object.keys(watcher.getStats().chains)).to.deep.equal(['BTC']);
         });
     });
+}
+
+function registerStakeShareFailureTests() {
 
     describe('when the read fails', function () {
 
@@ -262,6 +280,9 @@ describe('StakeShareWatcher', function () {
             expect(entry.reason).to.contain('capability not configured');
         });
     });
+}
+
+function registerStakeShareLifecycleTests() {
 
     describe('lifecycle', function () {
 
@@ -319,4 +340,4 @@ describe('StakeShareWatcher', function () {
             expect(watcher.pollMs).to.equal(StakeShareWatcher.DEFAULT_POLL_MS);
         });
     });
-});
+}
