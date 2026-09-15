@@ -19,18 +19,24 @@ const { createMockHub }        = require('../../helpers/mockHub');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
-describe('Chaos: Malformed Price Data (API-4)', function () {
-    this.timeout(10000);
 
-    let fetcher;
+
+let fetcher;
+function registerBeforeHook() {
 
     before(function () {
         mockApi.setup();
     });
+}
+
+function registerAfterHook() {
 
     after(function () {
         mockApi.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         mockApi.reset();
@@ -42,10 +48,16 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerNegativePricesRejectedValidSourceUsedTest() {
 
     it('negative prices rejected, valid source used', async function () {
         mockApi.mockCoinGeckoSuccess({
@@ -64,6 +76,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(parseFloat(p.price)).to.be.gt(0);
         }
     });
+}
+
+function registerZeroPricesRejectedTest() {
 
     it('zero prices rejected', async function () {
         mockApi.mockCoinGeckoSuccess({
@@ -79,6 +94,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerPricesAbove10MRejectedTest() {
 
     it('prices above 10M rejected', async function () {
         mockApi.mockCoinGeckoSuccess({
@@ -95,6 +113,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(parseFloat(p.price)).to.be.lt(10000000);
         }
     });
+}
+
+function registerNaNPricesRejectedTest() {
 
     it('NaN prices rejected', async function () {
         mockApi.mockCoinGeckoSuccess({
@@ -110,6 +131,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerInfinityPricesRejectedTest() {
 
     it('Infinity prices rejected', async function () {
         mockApi.mockCoinGeckoSuccess({
@@ -125,6 +149,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerMissingCoinPairFieldsPartialResultsTest() {
 
     it('missing coin pair fields → partial results from valid source', async function () {
         // CoinGecko returns only BTC
@@ -143,6 +170,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
         expect(btc.sources).to.equal(2);
         expect(ltc.sources).to.equal(1);
     });
+}
+
+function registerCompletelyEmptyResponseBodyTreatedAsTest() {
 
     it('completely empty response body → treated as failure', async function () {
         nock('https://api.coingecko.com')
@@ -157,6 +187,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerTruncatedJSONResponseHandledAsErrorTest() {
 
     it('truncated JSON response → handled as error', async function () {
         nock('https://api.coingecko.com')
@@ -171,6 +204,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerOracleRoundFiltersMalformedSubmissionsFromTest() {
 
     it('oracle round filters malformed submissions from peers', async function () {
         let hub = createMockHub();
@@ -201,6 +237,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
         let subs = oracle.submissions.get(5);
         expect(subs.has('ws://peer:10001')).to.be.false;
     });
+}
+
+function registerOracleRoundAcceptsValidPricesFromTest() {
 
     it('oracle round accepts valid prices from malformed batch', async function () {
         let hub = createMockHub();
@@ -231,6 +270,9 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
         let sub = subs.get('ws://peer:10001');
         expect(sub.prices).to.have.length(2); // Only BTC and DOGE
     });
+}
+
+function registerNoNaNInfinityStoredInPriceTest() {
 
     it('no NaN/Infinity stored in price snapshots after malformed data', async function () {
         let hub = createMockHub();
@@ -253,4 +295,22 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
             }
         }
     });
+}
+describe('Chaos: Malformed Price Data (API-4)', function () {
+    this.timeout(10000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerNegativePricesRejectedValidSourceUsedTest();
+    registerZeroPricesRejectedTest();
+    registerPricesAbove10MRejectedTest();
+    registerNaNPricesRejectedTest();
+    registerInfinityPricesRejectedTest();
+    registerMissingCoinPairFieldsPartialResultsTest();
+    registerCompletelyEmptyResponseBodyTreatedAsTest();
+    registerTruncatedJSONResponseHandledAsErrorTest();
+    registerOracleRoundFiltersMalformedSubmissionsFromTest();
+    registerOracleRoundAcceptsValidPricesFromTest();
+    registerNoNaNInfinityStoredInPriceTest();
 });
