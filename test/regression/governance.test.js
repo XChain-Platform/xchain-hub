@@ -16,11 +16,9 @@ const Governance   = require('../../src/validators/governance');
 const ValidatorIdentity = require('../../src/validators/identity');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3 }    = require('../helpers/fixtures');
+let hub, pm, identity, gov;
 
-describe('Regression: Governance', function () {
-
-    let hub, pm, identity, gov;
-
+function registerSuitePart1() {
     beforeEach(function () {
         hub      = createMockHub();
         pm       = hub._peerManager;
@@ -29,16 +27,19 @@ describe('Regression: Governance', function () {
         gov = new Governance(hub);
         gov.setValidatorSet(VALIDATORS_3);
     });
+}
 
+function registerSuitePart2() {
     afterEach(function () {
         if (gov._tallyTimer) clearInterval(gov._tallyTimer);
         sinon.restore();
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-001: Proposal lifecycle
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-001: Proposal lifecycle
-    // -----------------------------------------------------------------
-
+function registerSuitePart3() {
     describe('REG-GOV-001: Proposal lifecycle PROPOSE → VOTING → TALLY', function () {
         it('creates proposal and broadcasts GOV_PROPOSE @regression-p1', async function () {
             hub.db.doQuery
@@ -73,11 +74,12 @@ describe('Regression: Governance', function () {
             }
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-002: Vote collection
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-002: Vote collection
-    // -----------------------------------------------------------------
-
+function registerSuitePart4() {
     describe('REG-GOV-002: Vote collection via GOV_VOTE', function () {
         it('records vote and broadcasts @regression-p1', async function () {
             hub.db.doQuery.onFirstCall().resolves([{
@@ -115,11 +117,12 @@ describe('Regression: Governance', function () {
             }
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-003: Tally requires 2/3+ approval AND 50% quorum
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-003: Tally requires 2/3+ approval AND 50% quorum
-    // -----------------------------------------------------------------
-
+function registerSuitePart5() {
     describe('REG-GOV-003: Tally 2/3+ approval and 50% quorum', function () {
         it('passes with 2/3 approval and full quorum @regression-p0', async function () {
             hub.db.doQuery.onFirstCall().resolves([
@@ -170,11 +173,12 @@ describe('Regression: Governance', function () {
             expect(updateCall.args[1][0]).to.equal('failed');
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-004: Parameter change bounds ±50% increase, ±33% decrease
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-004: Parameter change bounds ±50% increase, ±33% decrease
-    // -----------------------------------------------------------------
-
+function registerSuitePart6() {
     describe('REG-GOV-004: Parameter change bounds (normal)', function () {
         it('allows 50% increase @regression-p0', function () {
             expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
@@ -192,11 +196,12 @@ describe('Regression: Governance', function () {
             expect(() => gov.validateChangeBounds('SOME_PARAM', '100', '66')).to.throw(/exceeds maximum/);
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-005: Slashing param bounds ±25% increase, ±20% decrease
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-005: Slashing param bounds ±25% increase, ±20% decrease
-    // -----------------------------------------------------------------
-
+function registerSuitePart7() {
     describe('REG-GOV-005: Slashing parameter bounds', function () {
         it('allows 25% increase for SLASH_DEVIATION_THRESHOLD @regression-p1', function () {
             expect(() => gov.validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
@@ -214,11 +219,12 @@ describe('Regression: Governance', function () {
             expect(() => gov.validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-006: 14-day cooldown on rejected parameters
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-006: 14-day cooldown on rejected parameters
-    // -----------------------------------------------------------------
-
+function registerSuitePart8() {
     describe('REG-GOV-006: 14-day cooldown after rejection', function () {
         it('throws when cooldown has not expired @regression-p1', async function () {
             hub.db.doQuery
@@ -244,11 +250,12 @@ describe('Regression: Governance', function () {
             expect(result.status).to.equal('voting');
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-007: Approved parameter applied
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-007: Approved parameter applied
-    // -----------------------------------------------------------------
-
+function registerSuitePart9() {
     describe('REG-GOV-007: Tally broadcasts GOV_RESULT', function () {
         it('broadcasts result after tally @regression-p1', async function () {
             hub.db.doQuery.onFirstCall().resolves([
@@ -263,11 +270,12 @@ describe('Regression: Governance', function () {
             expect(pm.broadcast.getCall(0).args[0]).to.equal('GOV_RESULT');
         });
     });
+}
+// -----------------------------------------------------------------
+// REG-GOV-008: Edge cases
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // REG-GOV-008: Edge cases
-    // -----------------------------------------------------------------
-
+function registerSuitePart10() {
     describe('REG-GOV-008: Edge cases', function () {
         it('skips validation for non-numeric values @regression-p2', function () {
             expect(() => gov.validateChangeBounds('P', 'abc', 'def')).to.not.throw();
@@ -290,11 +298,12 @@ describe('Regression: Governance', function () {
             }
         });
     });
+}
+// -----------------------------------------------------------------
+// P2P message handlers
+// -----------------------------------------------------------------
 
-    // -----------------------------------------------------------------
-    // P2P message handlers
-    // -----------------------------------------------------------------
-
+function registerSuitePart11() {
     describe('P2P message handlers', function () {
         it('_handlePropose stores proposal locally @regression-p2', async function () {
             await gov._handlePropose({
@@ -347,8 +356,9 @@ describe('Regression: Governance', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
     });
-
-    // Query methods
+}
+// Query methods
+function registerSuitePart12() {
     describe('Query methods', function () {
         it('getProposals filters by status @regression-p2', async function () {
             hub.db.doQuery.resolves([]);
@@ -371,4 +381,20 @@ describe('Regression: Governance', function () {
             expect(result).to.be.null;
         });
     });
+}
+
+describe('Regression: Governance', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+    registerSuitePart5();
+    registerSuitePart6();
+    registerSuitePart7();
+    registerSuitePart8();
+    registerSuitePart9();
+    registerSuitePart10();
+    registerSuitePart11();
+    registerSuitePart12();
+
 });
