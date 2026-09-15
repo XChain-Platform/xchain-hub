@@ -216,29 +216,6 @@ class Database {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    // Throw immediately on errors that retrying will never fix (bad credentials,
-    // missing privilege). Transient errors (DB still booting, connection refused)
-    // are NOT fatal; callers keep waiting on those. Without this, a misconfigured
-    // DB user (e.g. one lacking CREATE DATABASE) makes startup hang forever on a
-    // 5s retry loop instead of surfacing the real problem.
-    failFastIfFatal(e, action){
-        const FATAL = new Set([
-            'ER_ACCESS_DENIED_ERROR',          // wrong user/password
-            'ER_DBACCESS_DENIED_ERROR',        // user has no rights on this database
-            'ER_SPECIFIC_ACCESS_DENIED_ERROR', // user lacks a required privilege (e.g. CREATE)
-            'ER_PASSWORD_NO_MATCH'
-        ]);
-        if(e && FATAL.has(e.code)){
-            throw new Error(
-                'Fatal DB error while ' + action + ' (' + e.code + '): the configured DB user (' +
-                this.user + '@' + this.host + ':' + this.port + ') lacks the required privilege. ' +
-                'Check HUB_DB_USER/HUB_DB_PASS and that the user has CREATE DATABASE (for first-run) ' +
-                'or pre-create the hub database and grant ALL on it. ' +
-                'Retrying will not fix a credentials/privilege error.'
-            );
-        }
-    }
-
     // Idempotent: safe to run every startup.
     //
     // The steps themselves are the three lists in schema/migrations.js, awaited here
