@@ -19,1225 +19,288 @@ const observability      = require('../../src/observability');
 const { waitUntil }      = require('../helpers/waitUntil');
 const { DB_METHODS }     = require('../helpers/mockHub');
 
-describe('PeerManager', function () {
-
-    let config, dbStub, pm, keypair;
-
+let rootSuiteConfig, rootSuiteDbStub, rootSuitePm, rootSuiteKeypair;
+function registerFeature1buildEnvelopePart1() {
+  it('creates envelope with required fields', function () {
+    let env = rootSuitePm.buildEnvelope('TEST', {
+      foo: 'bar'
+    });
+    expect(env).to.have.property('id');
+    expect(env.type).to.equal('TEST');
+    expect(env.sender).to.equal('ws://self:10001');
+    expect(env).to.have.property('timestamp');
+    expect(env.data).to.deep.equal({
+      foo: 'bar'
+    });
+  });
+  it('includes signature when identity is set', function () {
+    let identity = new ValidatorIdentity(rootSuiteKeypair.privkeyHex);
+    rootSuitePm.setIdentity(identity);
+    let env = rootSuitePm.buildEnvelope('TEST', {
+      x: 1
+    });
+    expect(env.sig).to.be.a('string');
+    expect(env.sig.length).to.equal(128);
+  });
+  it('has no signature when identity is not set', function () {
+    let env = rootSuitePm.buildEnvelope('TEST', {});
+    expect(env.sig).to.be.undefined;
+  });
+  it('generates unique IDs', function () {
+    let a = rootSuitePm.buildEnvelope('T', {});
+    let b = rootSuitePm.buildEnvelope('T', {});
+    expect(a.id).to.not.equal(b.id);
+  });
+}
+function registerFeature1buildEnvelope() {
+  describe('buildEnvelope()', function () {
+    registerFeature1buildEnvelopePart1();
+  });
+}
+let feature2messageDeduplicationMockWs;
+function feature2messageDeduplicationMakePeerEnvelope(type, data) {
+  // Build envelope with a different sender (not self) to avoid self-connection guard
+  return {
+    id: 'msg-' + Date.now() + '-' + Math.random(),
+    type: type,
+    sender: 'ws://peer:10001',
+    timestamp: Date.now(),
+    data: data || {}
+  };
+}
+function registerFeature2messageDeduplicationPart1() {
+  it('accepts first occurrence of a message ID', function () {
+    let emitted = 0;
+    rootSuitePm.on('message', () => emitted++);
+    let env = feature2messageDeduplicationMakePeerEnvelope('TEST', {});
+    let raw = JSON.stringify(env);
+    rootSuitePm.handleInbound(feature2messageDeduplicationMockWs, raw, 'ws://peer:10001');
+    expect(emitted).to.equal(1);
+  });
+  it('rejects duplicate message ID', function () {
+    let emitted = 0;
+    rootSuitePm.on('message', () => emitted++);
+    let env = feature2messageDeduplicationMakePeerEnvelope('TEST', {});
+    let raw = JSON.stringify(env);
+    rootSuitePm.handleInbound(feature2messageDeduplicationMockWs, raw, 'ws://peer:10001');
+    rootSuitePm.handleInbound(feature2messageDeduplicationMockWs, raw, 'ws://peer:10001');
+    expect(emitted).to.equal(1);
+  });
+}
+function registerFeature2messageDeduplication() {
+  describe('message deduplication', function () {
     beforeEach(function () {
-        keypair = ValidatorIdentity.generate();
-        config = {
-            P2P_VALIDATOR_ADDR: 'ws://self:10001',
-            P2P_PORT: 0,    // Don't bind
-            P2P_HOST: '127.0.0.1',
-            SEED_NODES: [],
-            REQUIRE_SIGNATURES: false,
-            P2P_MSG_DEDUP_TTL: 60000,
-            P2P_MAX_PAYLOAD: 1048576,
-            P2P_HEARTBEAT_INTERVAL: 15000,
-            P2P_RECONNECT_BASE: 2000,
-            P2P_RECONNECT_MAX: 60000
-        };
-        // DB_METHODS gives the double the real named query methods (setP2pPeer
-        // among them), each routing through the doQuery stub the tests assert on.
-        dbStub = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
-        pm = new PeerManager(config, dbStub);
+      feature2messageDeduplicationMockWs = {
+        _peerAddr: 'ws://peer:10001',
+        send: sinon.stub()
+      };
+    });
+    registerFeature2messageDeduplicationPart1();
+  });
+}
+function registerFeature3verifySignaturePart1() {
+  it('returns true for valid signature when REQUIRE_SIGNATURES is true', function () {
+    rootSuitePm.requireSigs = true;
+    let identity = new ValidatorIdentity(rootSuiteKeypair.privkeyHex);
+    rootSuitePm.setValidatorPubkeys(new Map([['ws://peer:10001', rootSuiteKeypair.pubkeyHex]]));
+    let env = {
+      id: 'msg-1',
+      type: 'TEST',
+      sender: 'ws://peer:10001',
+      timestamp: Date.now(),
+      data: {
+        x: 1
+      }
+    };
+    env.sig = identity.signEnvelope(env);
+    expect(rootSuitePm.verifySignature(env)).to.be.true;
+  });
+  it('returns false for invalid signature when REQUIRE_SIGNATURES is true', function () {
+    rootSuitePm.requireSigs = true;
+    rootSuitePm.setValidatorPubkeys(new Map([['ws://peer:10001', rootSuiteKeypair.pubkeyHex]]));
+    let env = {
+      id: 'msg-1',
+      type: 'TEST',
+      sender: 'ws://peer:10001',
+      timestamp: Date.now(),
+      data: {},
+      sig: 'aa'.repeat(64)
+    };
+    expect(rootSuitePm.verifySignature(env)).to.be.false;
+  });
+  it('returns true when REQUIRE_SIGNATURES is false (no sig)', function () {
+    rootSuitePm.requireSigs = false;
+    let env = {
+      id: 'msg-1',
+      type: 'TEST',
+      sender: 'ws://peer:10001',
+      timestamp: Date.now(),
+      data: {}
+    };
+    expect(rootSuitePm.verifySignature(env)).to.be.true;
+  });
+  it('rejects when signatures are required but missing', function () {
+    rootSuitePm.requireSigs = true;
+    expect(rootSuitePm.verifySignature({
+      sender: 'x'
+    })).to.be.false;
+  });
+}
+function registerFeature3verifySignaturePart2() {
+  it('rejects a signed message when the validator registry is null (fail closed)', function () {
+    // A null registry means no sender can be authenticated, so a signed
+    // envelope must be rejected, not trusted; accepting here would let
+    // any self-signed message through while the registry is unloaded.
+    rootSuitePm.requireSigs = true;
+    rootSuitePm.validatorPubkeys = null;
+    expect(rootSuitePm.verifySignature({
+      sender: 'x',
+      sig: 'aa'
+    })).to.be.false;
+  });
+  it('null registry still accepts when signatures are not required', function () {
+    rootSuitePm.requireSigs = false;
+    rootSuitePm.validatorPubkeys = null;
+    expect(rootSuitePm.verifySignature({
+      sender: 'x',
+      sig: 'aa'
+    })).to.be.true;
+  });
+  it('defers to the requireSigs policy for an unknown sender', function () {
+    rootSuitePm.setValidatorPubkeys(new Map([['known', 'pk']]));
+    rootSuitePm.requireSigs = true;
+    expect(rootSuitePm.verifySignature({
+      sender: 'unknown',
+      sig: 'aa'
+    })).to.be.false;
+    rootSuitePm.requireSigs = false;
+    expect(rootSuitePm.verifySignature({
+      sender: 'unknown',
+      sig: 'aa'
+    })).to.be.true;
+  });
+}
+function registerFeature3verifySignature() {
+  describe('verifySignature()', function () {
+    registerFeature3verifySignaturePart1();
+    registerFeature3verifySignaturePart2();
+  });
+}
+let feature4verifySignatureOptionAIdentity;
+// Build a signed Option-A envelope (sig_pubkey carried) from `identity`.
+function feature4verifySignatureOptionASignedEnv(id) {
+  let env = {
+    id: id || 'oa-1',
+    type: 'TEST',
+    sender: 'ws://peer:10001',
+    timestamp: Date.now(),
+    data: {
+      x: 1
+    },
+    sig_pubkey: rootSuiteKeypair.pubkeyHex
+  };
+  env.sig = feature4verifySignatureOptionAIdentity.signEnvelope(env);
+  return env;
+}
+function registerFeature4verifySignatureOptionAPart1() {
+  it('accepts when sig_pubkey is in the chain-effective signer set', function () {
+    rootSuitePm.setEffectiveSignerSet(new Set([rootSuiteKeypair.pubkeyHex.toLowerCase()]));
+    // Registry is empty; admission must come purely from the effective set.
+    rootSuitePm.setValidatorPubkeys(new Map());
+    expect(rootSuitePm.verifySignature(feature4verifySignatureOptionASignedEnv())).to.be.true;
+  });
+  it('accepts when sig_pubkey is in the registry pubkey set (addr-independent)', function () {
+    // Registry maps a DIFFERENT addr to this pubkey; membership is by
+    // pubkey value, not by envelope.sender.
+    rootSuitePm.setValidatorPubkeys(new Map([['ws://other-addr:9', rootSuiteKeypair.pubkeyHex]]));
+    rootSuitePm.setEffectiveSignerSet(null);
+    expect(rootSuitePm.verifySignature(feature4verifySignatureOptionASignedEnv())).to.be.true;
+  });
+  it('rejects (sigs required) when sig_pubkey is in neither set', function () {
+    rootSuitePm.setValidatorPubkeys(new Map());
+    rootSuitePm.setEffectiveSignerSet(new Set(['deadbeef'.repeat(8)]));
+    expect(rootSuitePm.verifySignature(feature4verifySignatureOptionASignedEnv())).to.be.false;
+  });
+  it('rejects a bad signature even for a member key', function () {
+    rootSuitePm.setEffectiveSignerSet(new Set([rootSuiteKeypair.pubkeyHex.toLowerCase()]));
+    let env = feature4verifySignatureOptionASignedEnv();
+    env.sig = 'aa'.repeat(64); // corrupt
+    expect(rootSuitePm.verifySignature(env)).to.be.false;
+  });
+  it('checks membership BEFORE running the Ed25519 verify (DoS guard)', function () {
+    let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
+    rootSuitePm.setValidatorPubkeys(new Map());
+    rootSuitePm.setEffectiveSignerSet(new Set()); // not a member
+    expect(rootSuitePm.verifySignature(feature4verifySignatureOptionASignedEnv())).to.be.false;
+    expect(verifySpy.called).to.be.false; // never reached verify
+  });
+  it('rejects a denylisted pubkey before verify, even if otherwise a member', function () {
+    let pk = rootSuiteKeypair.pubkeyHex.toLowerCase();
+    rootSuitePm.denyPubkeys = new Set([pk]);
+    rootSuitePm.setEffectiveSignerSet(new Set([pk])); // in the set...
+    rootSuitePm.setValidatorPubkeys(new Map([['a', rootSuiteKeypair.pubkeyHex]])); // ...and registry
+    let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
+    expect(rootSuitePm.verifySignature(feature4verifySignatureOptionASignedEnv())).to.be.false;
+    expect(verifySpy.called).to.be.false; // denylist short-circuits before verify
+  });
+  it('backward-compat: a pre-A envelope (no sig_pubkey) still uses the addr→pubkey map', function () {
+    let env = {
+      id: 'bc-1',
+      type: 'TEST',
+      sender: 'ws://peer:10001',
+      timestamp: Date.now(),
+      data: {}
+    };
+    env.sig = feature4verifySignatureOptionAIdentity.signEnvelope(env); // signed without sig_pubkey in canonical
+    rootSuitePm.setValidatorPubkeys(new Map([['ws://peer:10001', rootSuiteKeypair.pubkeyHex]]));
+    rootSuitePm.setEffectiveSignerSet(null);
+    expect(rootSuitePm.verifySignature(env)).to.be.true;
+  });
+}
+function registerFeature4verifySignatureOptionA() {
+  describe('verifySignature(): Option A', function () {
+    beforeEach(function () {
+      rootSuitePm.requireSigs = true;
+      feature4verifySignatureOptionAIdentity = new ValidatorIdentity(rootSuiteKeypair.privkeyHex);
     });
 
-    afterEach(function () {
-        sinon.restore();
-    });
-
-    // -----------------------------------------------------------------
-    // buildEnvelope()
-    // -----------------------------------------------------------------
-
-    describe('buildEnvelope()', function () {
-        it('creates envelope with required fields', function () {
-            let env = pm.buildEnvelope('TEST', { foo: 'bar' });
-            expect(env).to.have.property('id');
-            expect(env.type).to.equal('TEST');
-            expect(env.sender).to.equal('ws://self:10001');
-            expect(env).to.have.property('timestamp');
-            expect(env.data).to.deep.equal({ foo: 'bar' });
-        });
-
-        it('includes signature when identity is set', function () {
-            let identity = new ValidatorIdentity(keypair.privkeyHex);
-            pm.setIdentity(identity);
-
-            let env = pm.buildEnvelope('TEST', { x: 1 });
-            expect(env.sig).to.be.a('string');
-            expect(env.sig.length).to.equal(128);
-        });
-
-        it('has no signature when identity is not set', function () {
-            let env = pm.buildEnvelope('TEST', {});
-            expect(env.sig).to.be.undefined;
-        });
-
-        it('generates unique IDs', function () {
-            let a = pm.buildEnvelope('T', {});
-            let b = pm.buildEnvelope('T', {});
-            expect(a.id).to.not.equal(b.id);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Message deduplication
-    // -----------------------------------------------------------------
-
-    describe('message deduplication', function () {
-        let mockWs;
-        beforeEach(function () {
-            mockWs = { _peerAddr: 'ws://peer:10001', send: sinon.stub() };
-        });
-
-        function makePeerEnvelope(type, data) {
-            // Build envelope with a different sender (not self) to avoid self-connection guard
-            return {
-                id:        'msg-' + Date.now() + '-' + Math.random(),
-                type:      type,
-                sender:    'ws://peer:10001',
-                timestamp: Date.now(),
-                data:      data || {}
-            };
-        }
-
-        it('accepts first occurrence of a message ID', function () {
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-
-            let env = makePeerEnvelope('TEST', {});
-            let raw = JSON.stringify(env);
-
-            pm.handleInbound(mockWs, raw, 'ws://peer:10001');
-            expect(emitted).to.equal(1);
-        });
-
-        it('rejects duplicate message ID', function () {
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-
-            let env = makePeerEnvelope('TEST', {});
-            let raw = JSON.stringify(env);
-
-            pm.handleInbound(mockWs, raw, 'ws://peer:10001');
-            pm.handleInbound(mockWs, raw, 'ws://peer:10001');
-            expect(emitted).to.equal(1);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // verifySignature()
-    // -----------------------------------------------------------------
-
-    describe('verifySignature()', function () {
-
-        it('returns true for valid signature when REQUIRE_SIGNATURES is true', function () {
-            pm.requireSigs = true;
-            let identity = new ValidatorIdentity(keypair.privkeyHex);
-            pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
-
-            let env = {
-                id: 'msg-1', type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: { x: 1 }
-            };
-            env.sig = identity.signEnvelope(env);
-
-            expect(pm.verifySignature(env)).to.be.true;
-        });
-
-        it('returns false for invalid signature when REQUIRE_SIGNATURES is true', function () {
-            pm.requireSigs = true;
-            pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
-
-            let env = {
-                id: 'msg-1', type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: {}, sig: 'aa'.repeat(64)
-            };
-
-            expect(pm.verifySignature(env)).to.be.false;
-        });
-
-        it('returns true when REQUIRE_SIGNATURES is false (no sig)', function () {
-            pm.requireSigs = false;
-            let env = {
-                id: 'msg-1', type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: {}
-            };
-            expect(pm.verifySignature(env)).to.be.true;
-        });
-
-        it('rejects when signatures are required but missing', function () {
-            pm.requireSigs = true;
-            expect(pm.verifySignature({ sender: 'x' })).to.be.false;
-        });
-
-        it('rejects a signed message when the validator registry is null (fail closed)', function () {
-            // A null registry means no sender can be authenticated, so a signed
-            // envelope must be rejected, not trusted; accepting here would let
-            // any self-signed message through while the registry is unloaded.
-            pm.requireSigs = true;
-            pm.validatorPubkeys = null;
-            expect(pm.verifySignature({ sender: 'x', sig: 'aa' })).to.be.false;
-        });
-
-        it('null registry still accepts when signatures are not required', function () {
-            pm.requireSigs = false;
-            pm.validatorPubkeys = null;
-            expect(pm.verifySignature({ sender: 'x', sig: 'aa' })).to.be.true;
-        });
-
-        it('defers to the requireSigs policy for an unknown sender', function () {
-            pm.setValidatorPubkeys(new Map([['known', 'pk']]));
-            pm.requireSigs = true;
-            expect(pm.verifySignature({ sender: 'unknown', sig: 'aa' })).to.be.false;
-            pm.requireSigs = false;
-            expect(pm.verifySignature({ sender: 'unknown', sig: 'aa' })).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // verifySignature(): Option A (sig_pubkey union membership)
-    // -----------------------------------------------------------------
-
-    describe('verifySignature(): Option A', function () {
-
-        let identity;
-        beforeEach(function () {
-            pm.requireSigs = true;
-            identity = new ValidatorIdentity(keypair.privkeyHex);
-        });
-
-        // Build a signed Option-A envelope (sig_pubkey carried) from `identity`.
-        function signedEnv(id) {
-            let env = {
-                id: id || 'oa-1', type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: { x: 1 }, sig_pubkey: keypair.pubkeyHex
-            };
-            env.sig = identity.signEnvelope(env);
-            return env;
-        }
-
-        it('accepts when sig_pubkey is in the chain-effective signer set', function () {
-            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
-            // Registry is empty; admission must come purely from the effective set.
-            pm.setValidatorPubkeys(new Map());
-            expect(pm.verifySignature(signedEnv())).to.be.true;
-        });
-
-        it('accepts when sig_pubkey is in the registry pubkey set (addr-independent)', function () {
-            // Registry maps a DIFFERENT addr to this pubkey; membership is by
-            // pubkey value, not by envelope.sender.
-            pm.setValidatorPubkeys(new Map([['ws://other-addr:9', keypair.pubkeyHex]]));
-            pm.setEffectiveSignerSet(null);
-            expect(pm.verifySignature(signedEnv())).to.be.true;
-        });
-
-        it('rejects (sigs required) when sig_pubkey is in neither set', function () {
-            pm.setValidatorPubkeys(new Map());
-            pm.setEffectiveSignerSet(new Set(['deadbeef'.repeat(8)]));
-            expect(pm.verifySignature(signedEnv())).to.be.false;
-        });
-
-        it('rejects a bad signature even for a member key', function () {
-            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
-            let env = signedEnv();
-            env.sig = 'aa'.repeat(64); // corrupt
-            expect(pm.verifySignature(env)).to.be.false;
-        });
-
-        it('checks membership BEFORE running the Ed25519 verify (DoS guard)', function () {
-            let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
-            pm.setValidatorPubkeys(new Map());
-            pm.setEffectiveSignerSet(new Set()); // not a member
-            expect(pm.verifySignature(signedEnv())).to.be.false;
-            expect(verifySpy.called).to.be.false; // never reached verify
-        });
-
-        it('rejects a denylisted pubkey before verify, even if otherwise a member', function () {
-            let pk = keypair.pubkeyHex.toLowerCase();
-            pm.denyPubkeys = new Set([pk]);
-            pm.setEffectiveSignerSet(new Set([pk]));         // in the set...
-            pm.setValidatorPubkeys(new Map([['a', keypair.pubkeyHex]])); // ...and registry
-            let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
-            expect(pm.verifySignature(signedEnv())).to.be.false;
-            expect(verifySpy.called).to.be.false; // denylist short-circuits before verify
-        });
-
-        it('backward-compat: a pre-A envelope (no sig_pubkey) still uses the addr→pubkey map', function () {
-            let env = {
-                id: 'bc-1', type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: {}
-            };
-            env.sig = identity.signEnvelope(env); // signed without sig_pubkey in canonical
-            pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
-            pm.setEffectiveSignerSet(null);
-            expect(pm.verifySignature(env)).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Reject reason: membership miss vs bad crypto
-    // -----------------------------------------------------------------
-    //
-    // A membership miss and a failed Ed25519 verify are different operator
-    // problems (stake not active yet vs a genuinely bad key), so they must
-    // read apart on both surfaces a peer's counterpart can see: the console
-    // line and the PEER_REJECT record.
-
-    describe('reject reason for a dropped inbound message', function () {
-
-        let identity, mockWs, warnings, sink;
-
-        beforeEach(function () {
-            observability._resetObservability();
-            sink = { lines: [] };
-            const push = (m) => sink.lines.push(m);
-            observability.installObservability(null, {
-                service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
-            });
-
-            pm.requireSigs = true;
-            pm.config.HUB_NETWORK = 'testnet';
-            pm.setValidatorPubkeys(new Map());
-            identity = new ValidatorIdentity(keypair.privkeyHex);
-            mockWs   = { _peerAddr: 'ws://peer:10001', _remoteIp: '203.0.113.9', send: sinon.stub() };
-
-            // Observed through the logger, which is where the rejection line
-            // goes now that PeerManager no longer calls console. The stub calls
-            // through rather than swallowing, because the PEER_REJECT record
-            // rides the same method and rejects() reads it off the sink.
-            warnings = [];
-            const log = observability.getLogger();
-            const through = log.warn.bind(log);
-            sinon.stub(log, 'warn').callsFake((m, f) => { warnings.push(String(m)); return through(m, f); });
-        });
-
-        afterEach(function () {
-            observability._resetObservability();
-        });
-
-        function signedRaw() {
-            let env = {
-                id: 'xc2016-' + Math.random(), type: 'TEST', sender: 'ws://peer:10001',
-                timestamp: Date.now(), data: { x: 1 }, sig_pubkey: keypair.pubkeyHex
-            };
-            env.sig = identity.signEnvelope(env);
-            return env;
-        }
-
-        function rejects(reason) {
-            return sink.lines.filter(l => l.includes('PEER_REJECT') && l.includes('reason=' + reason));
-        }
-
-        it('names the signer set (not the signature) for a valid signature from a non-member', function () {
-            pm.setEffectiveSignerSet(new Set());   // staked by nobody: the joining-validator state
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-
-            pm.handleInbound(mockWs, JSON.stringify(signedRaw()), null);
-
-            expect(emitted, 'the message is still dropped').to.equal(0);
-            expect(warnings.join('\n')).to.match(/sender not in signer set \(no active stake or registry entry\)/);
-            expect(warnings.join('\n'), 'never blames the signature').to.not.match(/Invalid signature/);
-            expect(rejects('not_in_signer_set'), 'records the membership reason').to.have.lengthOf(1);
-            expect(rejects('invalid_signature')).to.have.lengthOf(0);
-        });
-
-        it('quotes the canonical stake activation delay in the non-member line', function () {
-            pm.setEffectiveSignerSet(new Set());
-            pm.handleInbound(mockWs, JSON.stringify(signedRaw()), null);
-
-            let blocks = PeerManager.stakeActivationBlocks('testnet');
-            expect(blocks, 'the coins registry resolves the delay').to.be.a('number');
-            expect(warnings.join('\n')).to.include('a STAKE activates ' + blocks + ' blocks after the transaction confirms');
-        });
-
-        it('a member key with a bad signature still reports invalid_signature', function () {
-            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
-            let env = signedRaw();
-            env.sig = 'aa'.repeat(64);   // corrupt: membership passes, crypto fails
-
-            pm.handleInbound(mockWs, JSON.stringify(env), null);
-
-            expect(warnings.join('\n')).to.match(/Invalid signature from ws:\/\/peer:10001/);
-            expect(warnings.join('\n')).to.not.match(/not in signer set/);
-            expect(rejects('invalid_signature')).to.have.lengthOf(1);
-            expect(rejects('not_in_signer_set')).to.have.lengthOf(0);
-        });
-
-        it('a pre-A envelope from a sender the registry does not know is a membership miss', function () {
-            let env = {
-                id: 'xc2016-preA', type: 'TEST', sender: 'ws://stranger:10001',
-                timestamp: Date.now(), data: {}
-            };
-            env.sig = identity.signEnvelope(env);   // no sig_pubkey: backward-compat path
-
-            pm.handleInbound(mockWs, JSON.stringify(env), null);
-
-            expect(rejects('not_in_signer_set')).to.have.lengthOf(1);
-            expect(rejects('invalid_signature')).to.have.lengthOf(0);
-        });
-
-        it('verifySignature keeps its boolean verdict and only annotates the out-param', function () {
-            pm.setEffectiveSignerSet(new Set());
-            let outcome = {};
-            expect(pm.verifySignature(signedRaw(), outcome), 'fail closed is unchanged').to.be.false;
-            expect(outcome.reason).to.equal('not_in_signer_set');
-
-            // Permissive mode is unchanged too: the reason is reported, the verdict is not.
-            pm.requireSigs = false;
-            let permissive = {};
-            expect(pm.verifySignature(signedRaw(), permissive)).to.be.true;
-            expect(permissive.reason).to.equal('not_in_signer_set');
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Invalid JSON handling
-    // -----------------------------------------------------------------
-
-    describe('invalid JSON handling', function () {
-        it('does not crash on non-JSON message', function () {
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-
-            expect(() => pm.handleInbound(null, 'not json', 'ws://peer:10001')).to.not.throw();
-            expect(emitted).to.equal(0);
-        });
-
-        it('does not crash on empty string', function () {
-            expect(() => pm.handleInbound(null, '', 'ws://peer:10001')).to.not.throw();
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // broadcast()
-    // -----------------------------------------------------------------
-
-    describe('broadcast()', function () {
-        it('returns an envelope', function () {
-            let result = pm.broadcast('TEST', { val: 1 });
-            expect(result).to.have.property('id');
-            expect(result.type).to.equal('TEST');
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // getPeerStatus()
-    // -----------------------------------------------------------------
-
-    describe('getPeerStatus()', function () {
-        it('returns empty array when no peers', function () {
-            expect(pm.getPeerStatus()).to.deep.equal([]);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // setIdentity() / setValidatorPubkeys()
-    // -----------------------------------------------------------------
-
-    describe('setter methods', function () {
-        it('setIdentity stores identity', function () {
-            let identity = new ValidatorIdentity(keypair.privkeyHex);
-            pm.setIdentity(identity);
-            expect(pm.identity).to.equal(identity);
-        });
-
-        it('setValidatorPubkeys stores map', function () {
-            let map = new Map([['addr1', 'pk1']]);
-            pm.setValidatorPubkeys(map);
-            expect(pm.validatorPubkeys).to.equal(map);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // broadcast() / sendToPeer() with peers
-    // -----------------------------------------------------------------
-
-    describe('broadcast() / sendToPeer() over peers', function () {
-        it('broadcast sends only to OPEN peers', function () {
-            let openWs   = { readyState: 1, send: sinon.stub() };
-            let closedWs = { readyState: 3, send: sinon.stub() };
-            pm.peers.set('a', { ws: openWs });
-            pm.peers.set('b', { ws: closedWs });
-            pm.broadcast('T', { x: 1 });
-            expect(openWs.send.calledOnce).to.be.true;
-            expect(closedWs.send.called).to.be.false;
-        });
-
-        it('sendToPeer returns false for unknown/closed peers and true on success', function () {
-            expect(pm.sendToPeer('nope', 'T', {})).to.be.false;
-            let ws = { readyState: 1, send: sinon.stub() };
-            pm.peers.set('a', { ws });
-            expect(pm.sendToPeer('a', 'T', {})).to.be.true;
-            expect(ws.send.calledOnce).to.be.true;
-        });
-
-        it('_send reports a send error via the callback', function () {
-            let ws = { readyState: 1, send: (data, cb) => cb(new Error('boom')) };
-            expect(() => pm._send(ws, '{}')).to.not.throw();
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // handleInbound: guards, events, self-connection, rate limit, sig
-    // -----------------------------------------------------------------
-
-    describe('handleInbound() branches', function () {
-        function mk(type, id, sender) {
-            return JSON.stringify({ id, type, sender: sender || 'ws://peer:10001', timestamp: Date.now(), data: {} });
-        }
-
-        it('ignores non-object JSON and malformed envelopes', function () {
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-            pm.handleInbound({}, 'null', 'a');
-            pm.handleInbound({}, '123', 'a');
-            pm.handleInbound({}, '[1,2]', 'a');
-            pm.handleInbound({}, JSON.stringify({ type: 'T' }), 'a');                 // missing id/sender/ts
-            pm.handleInbound({}, JSON.stringify({ id: 'x', type: 'T', sender: 's', timestamp: 'nan' }), 'a');
-            expect(emitted).to.equal(0);
-        });
-
-        it('drops an envelope whose timestamp is outside the freshness window (anti-replay)', function () {
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-            let stale = JSON.stringify({
-                id: 'stale1', type: 'T', sender: 'ws://peer:10001',
-                timestamp: Date.now() - 400000, data: {}  // > default 300s skew
-            });
-            pm.handleInbound({ _peerAddr: 'ws://peer:10001' }, stale, 'ws://peer:10001');
-            expect(emitted).to.equal(0);
-        });
-
-        it('closes a fresh self-connection', function () {
-            let closed = null;
-            let ws = { _peerAddr: null, close: (code, reason) => { closed = { code, reason }; } };
-            pm.handleInbound(ws, mk('T', 'self1', pm.validatorAddr), null);
-            expect(closed.code).to.equal(1000);
-        });
-
-        it('drops messages once a peer exceeds the rate limit', function () {
-            pm.msgRateLimit = 1;
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-            let ws = { _peerAddr: 'ws://peer:10001' };
-            pm.handleInbound(ws, mk('T', 'a'), 'ws://peer:10001');
-            pm.handleInbound(ws, mk('T', 'b'), 'ws://peer:10001');
-            expect(emitted).to.equal(1);
-        });
-
-        it('an established federation peer gets the higher known-peer ceiling (consensus burst not dropped)', function () {
-            // The tight anti-spam limit would drop all but the first message; an
-            // established peer carrying a PBFT burst must use the higher ceiling so
-            // consensus liveness is not throttled.
-            pm.msgRateLimit = 1;
-            pm.knownMsgRateLimit = 5;
-            pm.peers.set('ws://peer:10001', { lastSeen: Date.now() });   // established
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-            let ws = { _peerAddr: 'ws://peer:10001' };
-            for (let i = 0; i < 5; i++) pm.handleInbound(ws, mk('T', 'k' + i), 'ws://peer:10001');
-            expect(emitted, 'all 5 within the known ceiling (would be 1 at the spam limit)').to.equal(5);
-            pm.handleInbound(ws, mk('T', 'k5'), 'ws://peer:10001');
-            expect(emitted, '6th exceeds even the known ceiling').to.equal(5);
-        });
-
-        it('drops messages with an invalid signature when signatures are required', function () {
-            pm.requireSigs = true;
-            pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
-            let emitted = 0;
-            pm.on('message', () => emitted++);
-            let env = { id: 'sigbad', type: 'T', sender: 'ws://peer:10001', timestamp: Date.now(), data: {}, sig: 'aa'.repeat(64) };
-            pm.handleInbound({ _peerAddr: 'ws://peer:10001' }, JSON.stringify(env), 'ws://peer:10001');
-            expect(emitted).to.equal(0);
-        });
-
-        it('emits heartbeat and capability events for the matching message types', function () {
-            let hb = null, cap = null;
-            pm.on('heartbeat', (s, t) => { hb = { s, t }; });
-            pm.on('capability', (e) => { cap = e; });
-            pm.handleInbound({ _peerAddr: 'ws://peer:10001' }, mk('HEARTBEAT', 'h1'), 'ws://peer:10001');
-            pm.handleInbound({ _peerAddr: 'ws://peer:10001' }, mk('CAPABILITY_ACTIVATED', 'c1'), 'ws://peer:10001');
-            expect(hb).to.not.be.null;
-            expect(cap).to.not.be.null;
-            expect(cap.type).to.equal('CAPABILITY_ACTIVATED');
-        });
-
-        it('registers a previously-unknown inbound peer from the first message', function () {
-            let ws = { _peerAddr: null };
-            let connected = null;
-            pm.on('peer:connect', (a) => { connected = a; });
-            pm.handleInbound(ws, mk('T', 'reg1'), null);
-            expect(ws._peerAddr).to.equal('ws://peer:10001');
-            expect(pm.peers.get('ws://peer:10001').inbound).to.be.true;
-            expect(connected).to.equal('ws://peer:10001');
-        });
-
-        it('updates lastSeen for an already-known peer', function () {
-            let ws = { _peerAddr: 'ws://peer:10001' };
-            pm.peers.set('ws://peer:10001', { ws, inbound: true, state: 'open', lastSeen: 0 });
-            pm.handleInbound(ws, mk('T', 'ls1'), 'ws://peer:10001');
-            expect(pm.peers.get('ws://peer:10001').lastSeen).to.be.greaterThan(0);
-        });
-
-        it('unknown-sig inbound naming a known peer in envelope.sender is bounded by msgRateLimit, not knownMsgRateLimit', function () {
-            // An attacker with no established transport identity (knownAddr=null,
-            // ws._peerAddr=null) sets envelope.sender to a known peer's address.
-            // The CEILING decision must use only transport-verified identifiers; the
-            // spoofed envelope.sender must be excluded. We verify this by checking
-            // the ceiling argument checkMsgRate is called with: it must be
-            // msgRateLimit (tight), never knownMsgRateLimit (wide).
-            pm.msgRateLimit      = 5;
-            pm.knownMsgRateLimit = 100;
-
-            // Register a known peer by address so peers.has() returns true for it.
-            pm.peers.set('ws://known-peer:10001', { lastSeen: Date.now() });
-
-            let ceilingSeen = null;
-            let origCheck = pm.checkMsgRate.bind(pm);
-            sinon.stub(pm, 'checkMsgRate').callsFake(function (peer, ceil) {
-                ceilingSeen = ceil;
-                return origCheck(peer, ceil);
-            });
-
-            // Fresh WS connection with no established transport identity.
-            let ws = { _peerAddr: null };
-            let env = JSON.stringify({
-                id: 'sp1', type: 'T',
-                sender: 'ws://known-peer:10001',   // spoofed
-                timestamp: Date.now(), data: {}
-            });
-            pm.handleInbound(ws, env, null);
-
-            // The ceiling must be the tight msgRateLimit, not the known-peer ceiling.
-            expect(ceilingSeen).to.equal(pm.msgRateLimit);
-            expect(ceilingSeen).to.not.equal(pm.knownMsgRateLimit);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // relay()
-    // -----------------------------------------------------------------
-
-    describe('relay()', function () {
-        it('sends to other open peers, skipping the original sender and the source ws', function () {
-            let sourceWs = { readyState: 1, send: sinon.stub() };
-            let otherWs  = { readyState: 1, send: sinon.stub() };
-            let senderWs = { readyState: 1, send: sinon.stub() };
-            pm.peers.set('ws://sender:1', { ws: senderWs });  // original sender, skipped
-            pm.peers.set('ws://src:1',    { ws: sourceWs });  // source ws, skipped
-            pm.peers.set('ws://other:1',  { ws: otherWs });
-            pm.relay({ id: 'm', type: 'T', sender: 'ws://sender:1', timestamp: 1, data: {} }, sourceWs);
-            expect(otherWs.send.calledOnce).to.be.true;
-            expect(sourceWs.send.called).to.be.false;
-            expect(senderWs.send.called).to.be.false;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // inbound peer registration / removal
-    // -----------------------------------------------------------------
-
-    describe('registerInboundPeer() / removeInboundPeer()', function () {
-        it('keeps an existing outbound connection when an inbound arrives for the same addr', function () {
-            let outboundWs = { readyState: 1 };
-            pm.peers.set('ws://p:1', { ws: outboundWs, inbound: false, state: 'open' });
-            let inboundWs = {};
-            pm.registerInboundPeer(inboundWs, 'ws://p:1');
-            expect(pm.peers.get('ws://p:1').ws).to.equal(outboundWs); // outbound preserved
-            expect(inboundWs._peerAddr).to.equal('ws://p:1');
-        });
-
-        it('registers a brand-new inbound peer', function () {
-            let connected = null;
-            pm.on('peer:connect', (a) => { connected = a; });
-            pm.registerInboundPeer({}, 'ws://p:2');
-            expect(pm.peers.get('ws://p:2').inbound).to.be.true;
-            expect(connected).to.equal('ws://p:2');
-        });
-
-        it('removeInboundPeer returns quietly when the ws has no addr', function () {
-            expect(() => pm.removeInboundPeer({ _peerAddr: null })).to.not.throw();
-        });
-
-        it('removeInboundPeer deletes the peer, emits disconnect, and decrements the IP count', function () {
-            let ws = { _peerAddr: 'ws://p:1', _remoteIp: '1.2.3.4' };
-            pm.peers.set('ws://p:1', { ws, inbound: true, state: 'open' });
-            pm.ipConnectionCounts.set('1.2.3.4', 2);
-            let dis = null;
-            pm.on('peer:disconnect', (a) => { dis = a; });
-            pm.removeInboundPeer(ws);
-            expect(pm.peers.has('ws://p:1')).to.be.false;
-            expect(dis).to.equal('ws://p:1');
-            expect(pm.ipConnectionCounts.get('1.2.3.4')).to.equal(1);
-        });
-
-        it('removeInboundPeer clears the IP entry when the count reaches zero', function () {
-            let ws = { _peerAddr: 'ws://p:1', _remoteIp: '5.6.7.8' };
-            pm.peers.set('ws://p:1', { ws, inbound: true, state: 'open' });
-            pm.ipConnectionCounts.set('5.6.7.8', 1);
-            pm.removeInboundPeer(ws);
-            expect(pm.ipConnectionCounts.has('5.6.7.8')).to.be.false;
-        });
-
-        // The per-IP count is incremented for every ACCEPTED socket, but ws._peerAddr
-        // is only set once a frame has passed signature verification, so a socket that
-        // closes before authenticating used to keep its increment forever and march the
-        // IP to maxConnectionsPerIp.
-        it('removeInboundPeer releases the IP count for a socket that closed before authenticating', function () {
-            let ws = { _peerAddr: null, _remoteIp: '9.9.9.9' };
-            pm.ipConnectionCounts.set('9.9.9.9', 1);
-            pm.removeInboundPeer(ws);
-            expect(pm.ipConnectionCounts.has('9.9.9.9')).to.be.false;
-        });
-
-        it('removeInboundPeer does not double-decrement when invoked twice for one socket', function () {
-            let ws = { _peerAddr: null, _remoteIp: '7.7.7.7' };
-            pm.ipConnectionCounts.set('7.7.7.7', 2);
-            pm.removeInboundPeer(ws);
-            pm.removeInboundPeer(ws);
-            expect(pm.ipConnectionCounts.get('7.7.7.7')).to.equal(1);
-        });
-
-        it('repeated pre-auth connect/close cycles never reach the per-IP cap', function () {
-            let ip = '203.0.113.77';
-            for (let i = 0; i < pm.maxConnectionsPerIp + 5; i++) {
-                let count = pm.ipConnectionCounts.get(ip) || 0;
-                expect(count).to.be.below(pm.maxConnectionsPerIp);
-                pm.ipConnectionCounts.set(ip, count + 1);
-                pm.removeInboundPeer({ _peerAddr: null, _remoteIp: ip });
-            }
-            expect(pm.ipConnectionCounts.has(ip)).to.be.false;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // connectToPeer() / scheduleReconnect() (no real sockets)
-    // -----------------------------------------------------------------
-
-    describe('connectToPeer() / scheduleReconnect()', function () {
-        it('connectToPeer rejects an invalid address format', function () {
-            pm.connectToPeer('not-an-addr');
-            expect(pm.peers.has('not-an-addr')).to.be.false;
-        });
-
-        it('connectToPeer is a no-op when already connected/connecting', function () {
-            pm.peers.set('ws://p:1', { state: 'open' });
-            pm.connectToPeer('ws://p:1');
-            expect(pm.peers.get('ws://p:1').state).to.equal('open'); // untouched
-        });
-
-        it('scheduleReconnect does nothing when not running', function () {
-            pm.running = false;
-            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 2000 });
-            pm.scheduleReconnect('ws://p:1');
-            expect(pm.peers.get('ws://p:1').reconnectTimer).to.be.undefined;
-        });
-
-        it('scheduleReconnect skips inbound peers', function () {
-            pm.running = true;
-            pm.peers.set('ws://p:1', { inbound: true });
-            pm.scheduleReconnect('ws://p:1');
-            expect(pm.peers.get('ws://p:1').reconnectTimer).to.be.undefined;
-        });
-
-        it('scheduleReconnect arms a timer, doubles the backoff, and reconnects', function () {
-            let clock = sinon.useFakeTimers();
-            pm.running = true;
-            let connect = sinon.stub(pm, 'connectToPeer');
-            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 2000 });
-            pm.scheduleReconnect('ws://p:1');
-            expect(pm.peers.get('ws://p:1').reconnectDelay).to.equal(4000); // doubled
-            clock.tick(3000); // delay+jitter ∈ [2000,2500) → fires
-            expect(connect.calledWith('ws://p:1')).to.be.true;
-            clock.restore();
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Unreachable-peer backoff. A federation port whose validators
-    // are staged but not launched refuses every dial by design. The defect was
-    // a production hub dialling each of them once a minute forever and writing
-    // an error line per refusal, which drowns real errors.
-    // -----------------------------------------------------------------
-
-    describe('unreachable-peer backoff and logging', function () {
-        const TEN_MINUTES = 10 * 60 * 1000;
-
-        it('holds the fast ceiling while a peer has only just started failing', function () {
-            let clock = sinon.useFakeTimers();
-            sinon.stub(console, 'warn');
-            pm.running = true;
-            sinon.stub(pm, 'connectToPeer');
-            // At the fast ceiling already, but only one failure deep.
-            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 0 });
-            pm.scheduleReconnect('ws://p:1');
-            expect(pm.peers.get('ws://p:1').reconnectDelay).to.equal(60000);
-            clearTimeout(pm.peers.get('ws://p:1').reconnectTimer);
-            clock.restore();
-        });
-
-        it('lifts the ceiling past a minute once a peer has refused every dial in a row', function () {
-            let clock = sinon.useFakeTimers();
-            sinon.stub(console, 'warn');
-            pm.running = true;
-            sinon.stub(pm, 'connectToPeer');
-            // One short of the escalation threshold; this call crosses it.
-            pm.peers.set('ws://p:1', { inbound: false, reconnectDelay: 60000, failures: 4 });
-            pm.scheduleReconnect('ws://p:1');
-            expect(pm.peers.get('ws://p:1').reconnectDelay).to.be.above(60000);
-            clearTimeout(pm.peers.get('ws://p:1').reconnectTimer);
-            clock.restore();
-        });
-
-        it('costs a handful of log lines over ten minutes of refusal, not one a minute', function () {
-            let clock = sinon.useFakeTimers();
-            let warn  = sinon.stub(console, 'warn');
-            let err   = sinon.stub(console, 'error');
-            pm.running = true;
-
-            // Every dial is refused: the socket errors, then closes, and close is
-            // where scheduleReconnect is called from.
-            sinon.stub(pm, 'connectToPeer').callsFake(function (addr) {
-                pm.peers.get(addr).lastError = 'connect ECONNREFUSED 10.0.0.1:10001';
-                pm.scheduleReconnect(addr);
-            });
-
-            // A hub that has been up for hours: this peer is already sitting at the
-            // one-minute ceiling, which is exactly the state that produced 45 error
-            // lines per ten minutes across five validators.
-            pm.peers.set('ws://v1:10001', {
-                inbound: false, reconnectDelay: 60000, failures: 30,
-                lastError: 'connect ECONNREFUSED 10.0.0.1:10001'
-            });
-            pm.scheduleReconnect('ws://v1:10001');
-            clock.tick(TEN_MINUTES);
-
-            // Ten one-minute retries would be ten lines; escalating backoff keeps it
-            // to a few. Five such peers must stay well under the 45 that were measured.
-            expect(warn.callCount).to.be.at.most(5);
-            expect(err.called).to.be.false;
-
-            let peer = pm.peers.get('ws://v1:10001');
-            if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
-            pm.running = false;
-            clock.restore();
-        });
-
-        it('a refused dial is stashed and reported once at warn, never at error', async function () {
-            let warn = sinon.stub(console, 'warn');
-            let err  = sinon.stub(console, 'error');
-            pm.running = true;
-
-            // Loopback discard port: nothing listens, so the connect is refused.
-            let addr = '127.0.0.1:9';
-            pm.connectToPeer(addr);
-            // The refusal arrives on the socket's error event, so poll for the stashed
-            // error rather than sleeping a fixed span long enough to cover a loaded box.
-            await waitUntil(() => (pm.peers.get(addr) || {}).lastError,
-                { timeoutMs: 5000, label: 'the refused dial to be stashed on the peer' });
-
-            let peer = pm.peers.get(addr);
-            if (peer && peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
-            pm.running = false;
-
-            expect(err.called).to.be.false;
-            expect(peer.lastError || '').to.contain('ECONNREFUSED');
-            expect(warn.callCount).to.equal(1);
-            expect(warn.firstCall.args[0]).to.contain('ECONNREFUSED');
-            expect(warn.firstCall.args[0]).to.contain(addr);
-        });
-
-        it('a peer that comes back resets the failure count', async function () {
-            const WS = require('ws');
-            let srv = new WS.Server({ host: '127.0.0.1', port: 0 });
-            await new Promise((res) => srv.on('listening', res));
-            let addr = '127.0.0.1:' + srv.address().port;
-
-            pm.running = true;
-            pm.peers.set(addr, {
-                ws: null, state: 'closed', lastSeen: null, reconnectDelay: 60000,
-                reconnectTimer: null, inbound: false, failures: 9,
-                lastError: 'connect ECONNREFUSED'
-            });
-
-            pm.connectToPeer(addr);
-            await new Promise((res) => pm.once('peer:connect', res));
-
-            let peer = pm.peers.get(addr);
-            expect(peer.failures).to.equal(0);
-            expect(peer.lastError).to.be.null;
-            expect(peer.reconnectDelay).to.equal(config.P2P_RECONNECT_BASE);
-
-            pm.running = false;
-            if (peer.ws) peer.ws.terminate();
-            await new Promise((res) => srv.close(res));
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Timers: heartbeat / dedup pruner / ping
-    // -----------------------------------------------------------------
-
-    describe('background timers', function () {
-        it('startHeartbeat broadcasts HEARTBEAT on its interval', function () {
-            let clock = sinon.useFakeTimers();
-            config.P2P_HEARTBEAT_INTERVAL = 1000;
-            let bcast = sinon.stub(pm, 'broadcast');
-            pm.startHeartbeat();
-            clock.tick(1001);
-            expect(bcast.calledWith('HEARTBEAT')).to.be.true;
-            clearInterval(pm.heartbeatTimer);
-            clock.restore();
-        });
-
-        it('startDedupPruner removes expired ids and keeps live ones', function () {
-            let clock = sinon.useFakeTimers();
-            config.P2P_DEDUP_PRUNE_INTERVAL = 1000;
-            pm.seenIds.set('old', Date.now() - 1);       // expired
-            pm.seenIds.set('fresh', Date.now() + 100000); // live
-            pm.startDedupPruner();
-            clock.tick(1001);
-            expect(pm.seenIds.has('old')).to.be.false;
-            expect(pm.seenIds.has('fresh')).to.be.true;
-            clearInterval(pm.dedupTimer);
-            clock.restore();
-        });
-
-        it('startPingInterval pings live peers/clients and terminates unresponsive ones', function () {
-            let clock = sinon.useFakeTimers();
-            config.P2P_WS_PING_INTERVAL = 1000;
-            let liveOut = { readyState: 1, _isAlive: true,  ping: sinon.stub(), terminate: sinon.stub() };
-            let liveIn  = { _isAlive: true,  ping: sinon.stub(), terminate: sinon.stub() };
-            let deadIn  = { _isAlive: false, ping: sinon.stub(), terminate: sinon.stub() };
-            pm.peers.set('ws://live:1', { ws: liveOut, inbound: false, state: 'open' });
-            pm.wss = { clients: new Set([liveIn, deadIn]) };
-            pm.startPingInterval();
-            clock.tick(1001);
-            expect(liveOut.ping.called).to.be.true;
-            expect(liveOut._isAlive).to.be.false;
-            expect(liveIn.ping.called).to.be.true;
-            expect(deadIn.terminate.called).to.be.true;
-            clearInterval(pm.pingTimer);
-            clock.restore();
-        });
-
-        it('startPingInterval terminates an unresponsive outbound peer', function () {
-            let clock = sinon.useFakeTimers();
-            config.P2P_WS_PING_INTERVAL = 1000;
-            let deadOut = { readyState: 1, _isAlive: false, ping: sinon.stub(), terminate: sinon.stub() };
-            pm.peers.set('ws://dead:1', { ws: deadOut, inbound: false, state: 'open' });
-            pm.startPingInterval();
-            clock.tick(1001);
-            expect(deadOut.terminate.called).to.be.true;
-            clearInterval(pm.pingTimer);
-            clock.restore();
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // dedup cache bound / rate window / DB recording
-    // -----------------------------------------------------------------
-
-    describe('addToDedup() / checkMsgRate() / recordPeer()', function () {
-        it('addToDedup evicts the oldest id at the cache cap', function () {
-            pm.dedupCacheMax = 2;
-            pm.addToDedup('a');
-            pm.addToDedup('b');
-            pm.addToDedup('c');
-            expect(pm.seenIds.has('a')).to.be.false;
-            expect(pm.seenIds.size).to.equal(2);
-        });
-
-        it('checkMsgRate allows up to the limit, blocks past it, and resets after the window', function () {
-            let clock = sinon.useFakeTimers();
-            pm.msgRateLimit = 2;
-            expect(pm.checkMsgRate('a')).to.be.true;  // 1
-            expect(pm.checkMsgRate('a')).to.be.true;  // 2
-            expect(pm.checkMsgRate('a')).to.be.false; // 3 > 2
-            clock.tick(60001);
-            expect(pm.checkMsgRate('a')).to.be.true;  // window reset
-            clock.restore();
-        });
-
-        it('checkMsgRate honors an explicit per-call limit (the known-peer ceiling)', function () {
-            let clock = sinon.useFakeTimers();
-            pm.msgRateLimit = 1;                              // default would block at 2
-            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 1
-            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 2
-            expect(pm.checkMsgRate('kp', 3)).to.be.true;    // 3
-            expect(pm.checkMsgRate('kp', 3)).to.be.false;   // 4 > 3
-            clock.restore();
-        });
-
-        it('recordPeer is a no-op without a db', function () {
-            let pm2 = new PeerManager(config, null);
-            expect(() => pm2.recordPeer('a', 'a', true)).to.not.throw();
-        });
-
-        it('recordPeer issues an upsert into p2p_peers', function () {
-            pm.recordPeer('ws://p:1', 'ws://p:1', true);
-            expect(dbStub.doQuery.calledOnce).to.be.true;
-            expect(dbStub.doQuery.getCall(0).args[0]).to.include('p2p_peers');
-            expect(dbStub.doQuery.getCall(0).args[1]).to.deep.equal(['ws://p:1', 'ws://p:1', 1, 'ws://p:1']);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Full lifecycle over real localhost sockets
-    // -----------------------------------------------------------------
-
-    describe('P2P lifecycle (real localhost sockets)', function () {
-        let nodes;
-        const net = require('net');
-
-        // Allocate an OS-assigned free port. PeerManager treats P2P_PORT:0 as
-        // falsy and falls back to 10001, so we must pass a concrete free port.
-        function freePort() {
-            return new Promise((resolve, reject) => {
-                let s = net.createServer();
-                s.on('error', reject);
-                s.listen(0, '127.0.0.1', () => {
-                    let p = s.address().port;
-                    s.close(() => resolve(p));
-                });
-            });
-        }
-
-        beforeEach(function () { nodes = []; });
-        afterEach(async function () {
-            for (let n of nodes) { try { await n.stop(); } catch (e) { /* already stopped */ } }
-        });
-
-        function mkNode(port, seeds, addr) {
-            let cfg = {
-                P2P_VALIDATOR_ADDR: addr, P2P_PORT: port, P2P_HOST: '127.0.0.1',
-                SEED_NODES: seeds || [], REQUIRE_SIGNATURES: false,
-                P2P_HEARTBEAT_INTERVAL: 100000, P2P_DEDUP_PRUNE_INTERVAL: 100000,
-                P2P_WS_PING_INTERVAL: 100000, P2P_RECONNECT_BASE: 200,
-                P2P_RECONNECT_MAX: 2000, P2P_MAX_PAYLOAD: 1048576
-            };
-            let n = new PeerManager(cfg, { ...DB_METHODS, doQuery: sinon.stub().resolves([]) });
-            nodes.push(n);
-            return n;
-        }
-
-        it('two nodes connect, exchange a message, register peers, and shut down cleanly', async function () {
-            this.timeout(10000);
-            let portA = await freePort();
-            let portB = await freePort();
-            let a = mkNode(portA, [], 'ws://nodeA:1');
-            await a.start();
-
-            let b = mkNode(portB, ['ws://127.0.0.1:' + portA], 'ws://nodeB:1');
-            let bConnected = new Promise(r => b.once('peer:connect', r));
-            await b.start();
-            await bConnected; // B's outbound to A is open
-
-            let aMsg  = new Promise(r => a.once('message', r));
-            let aPeer = new Promise(r => a.once('peer:connect', r));
-            b.broadcast('TEST', { hello: 'world' });
-            let env = await aMsg;
-            await aPeer;
-
-            expect(env.type).to.equal('TEST');
-            expect(env.data.hello).to.equal('world');
-            expect(a.getPeerStatus().some(p => p.inbound && p.state === 'open')).to.be.true;
-            expect(b.getPeerStatus().some(p => !p.inbound && p.state === 'open')).to.be.true;
-
-            await b.stop();
-            await a.stop();
-            expect(a.running).to.be.false;
-            expect(a.httpServer).to.be.null;
-        });
-
-        it('rejects inbound connections beyond the per-IP limit', async function () {
-            this.timeout(10000);
-            const WebSocket = require('ws');
-            let portA = await freePort();
-            let a = mkNode(portA, [], 'ws://limited:1');
-            a.maxConnectionsPerIp = 1;
-            await a.start();
-
-            // First client connects and stays open.
-            let c1 = new WebSocket('ws://127.0.0.1:' + portA);
-            await new Promise((res, rej) => { c1.once('open', res); c1.once('error', rej); });
-
-            // Second client from the same IP should be closed by the server.
-            let c2 = new WebSocket('ws://127.0.0.1:' + portA);
-            let c2Closed = await new Promise((res) => {
-                c2.once('close', (code) => res(code));
-                c2.once('open', () => {/* may briefly open before close frame */});
-            });
-            expect(c2Closed).to.equal(1008);
-
-            c1.close();
-            await a.stop();
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // messageSubscribers() and the 'message' listener ceiling
-    // -----------------------------------------------------------------
-    //
-    // The ceiling IS the roster length, so a roster that credits a subscriber which
-    // does not attach hides a leak of that size, and one that misses a subscriber
-    // which does attach prints MaxListenersExceededWarning at every boot, which is
-    // the always-on warning a sized ceiling removes. Two subscribers are a configuration
-    // question rather than a constant, so each case below is driven against the
-    // engine's OWN gate (its activation module, its enabled flag, its real handler)
-    // rather than against a copy of the rule written into this file.
-
-    describe('message subscriber roster', function () {
-
-        const rca                  = require('../../src/rollcall_activation.js');
-        const RollcallRound        = require('../../src/rollcall/round.js');
-        const AttestationRelay     = require('../../src/attestation/relay.js');
-        const CrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
-        const { spawnSync }        = require('child_process');
-
-        const ROLLCALL = 'RollcallRound';
-        const RELAY    = 'CrossChainDexConsensus:ATTEST_RELAY';
-
-        // A hub config as PeerManager sees it: XChainHub hands it p2pConfig, so the
-        // network and the engine opt-ins it carries are readable from here.
-        const hubConfig = (extra) => Object.assign({ P2P_VALIDATOR_ADDR: 'ws://self:10001' }, extra || {});
-
-        // A duck-typed hub, enough for the engines whose gates are compared with the
-        // roster below. Their constructors read config and nothing else.
-        const stubHub = (cfg, peerManager) => ({
-            db: dbStub, p2pConfig: cfg, network: cfg.HUB_NETWORK || '',
-            getPeerManager: () => peerManager || null, getIdentity: () => null
-        });
-
-        // Collect the warnings Node defers past the synchronous .on() that raises them.
-        async function warningsDuring(fn) {
-            const seen = [];
-            const onWarning = (w) => seen.push(w);
-            process.on('warning', onWarning);
-            try {
-                await fn();
-                await new Promise((resolve) => setImmediate(resolve));
-                await new Promise((resolve) => setImmediate(resolve));
-            } finally {
-                process.removeListener('warning', onWarning);
-            }
-            return seen;
-        }
-
-        // Attach `count` distinct listeners; return the ceiling warnings they raised.
-        async function attachListeners(target, count) {
-            const warnings = await warningsDuring(async () => {
-                for (let i = 0; i < count; i++) target.on('message', function () { return i; });
-            });
-            return warnings.filter(w => w.name === 'MaxListenersExceededWarning').map(w => w.message);
-        }
-
-        // The roster for a regtest hub, computed in a child process so the arming
-        // environment is the real one: rollcall_activation.js reads
-        // XC_ROLLCALL_REGTEST_ACTIVATION once, at require time, on purpose.
-        function regtestRosterWith(armingValue) {
-            const env = Object.assign({}, process.env);
-            if (armingValue === null) delete env[rca.ROLLCALL_REGTEST_ENV];
-            else env[rca.ROLLCALL_REGTEST_ENV] = armingValue;
-            const pmPath = require.resolve('../../src/peers/manager.js');
-            const out = spawnSync(process.execPath, ['-e',
-                'const PM = require(' + JSON.stringify(pmPath) + ');' +
-                'const r = PM.messageSubscribers({ HUB_NETWORK: "regtest" }, process.env);' +
-                'process.stdout.write(JSON.stringify({ n: r.length, rollcall: r.indexOf("RollcallRound") >= 0 }));'
-            ], { env, encoding: 'utf8' });
-            expect(out.status, out.stderr).to.equal(0);
-            return JSON.parse(out.stdout);
-        }
-
-        it('a regtest venue with no activation height credits no roll-call listener', function () {
-            this.timeout(10000);
-            // 18 is what lane L6e counted attaching at a real regtest boot: the 14
-            // singleton subscribers plus the four CrossChainDexConsensus channels.
-            expect(regtestRosterWith(null)).to.deep.equal({ n: 18, rollcall: false });
-        });
-
-        it('arming the regtest venue adds exactly one, and it is the roll-call listener', function () {
-            this.timeout(10000);
-            expect(regtestRosterWith('armed')).to.deep.equal({ n: 19, rollcall: true });
-        });
-
-        it('a network whose activation height is set credits RollcallRound', function () {
-            // mainnet and testnet carry literal heights, so this branch needs no env.
-            for (const network of ['mainnet', 'testnet']) {
-                const cfg    = hubConfig({ HUB_NETWORK: network });
-                const engine = new RollcallRound(stubHub(cfg));
-                // The three inputs the engine's start() gates on, read off the engine.
-                expect(engine.enabled, network).to.be.true;
-                expect(engine.interval, network).to.be.a('number').and.to.be.above(0);
-                expect(Number.isFinite(rca.ROLLCALL_ACTIVATION[network]), network).to.be.true;
-                expect(PeerManager.messageSubscribers(cfg, process.env), network).to.include(ROLLCALL);
-            }
-        });
-
-        it('an armed network with roll call switched off credits no roll-call listener', function () {
-            const cfg    = hubConfig({ HUB_NETWORK: 'testnet', ROLLCALL_ENABLED: 'false' });
-            const engine = new RollcallRound(stubHub(cfg));
-            expect(engine.enabled).to.be.false;
-            expect(PeerManager.messageSubscribers(cfg, process.env)).to.not.include(ROLLCALL);
-        });
-
-        it('the relay channel is credited exactly when AttestationRelay is opted in', function () {
-            for (const optIn of ['0', '1']) {
-                const cfg    = hubConfig({ HUB_NETWORK: 'regtest', ATTEST_RELAY_ENABLED: optIn });
-                const engine = new AttestationRelay(stubHub(cfg));
-                const roster = PeerManager.messageSubscribers(cfg, process.env);
-                expect(engine.enabled, optIn).to.equal(optIn === '1');
-                // An unstarted channel subscribes to nothing, and start() returns on
-                // this flag before starting it, so the credit must follow the flag.
-                expect(roster.indexOf(RELAY) >= 0, optIn).to.equal(engine.enabled);
-            }
-        });
-
-        it('the XCALL relay channel is credited because the call engine really attaches one', async function () {
-            sinon.stub(console, 'warn');
-            sinon.stub(console, 'log');
-            const cfg    = hubConfig({ HUB_NETWORK: 'regtest' });
-            const target = new PeerManager(cfg, dbStub);
-            const engine = new CrossChainCallEngine(stubHub(cfg, target));
-
-            const before = target.listenerCount('message');
-            await engine.start();
-            const after = target.listenerCount('message');
-            await engine.stop();
-
-            expect(after - before).to.equal(1);
-            expect(target.listenerCount('message')).to.equal(before);
-            // The channel name taken from the engine's own PBFT message types, so a
-            // renamed channel fails here instead of drifting away from the roster.
-            const channel = String(engine.consensus.types.PROPOSE).replace(/_PROPOSE$/, '');
-            expect(PeerManager.messageSubscribers(cfg, process.env))
-                .to.include('CrossChainDexConsensus:' + channel);
-        });
-
-        // Each configuration branch, driven the way a leak would be seen: a full set
-        // of legitimate subscribers is silent, and the next one warns.
-        const branches = [
-            ['regtest with nothing armed',  { HUB_NETWORK: 'regtest' }],
-            ['a network with roll call armed', { HUB_NETWORK: 'testnet' }],
-            ['regtest with the relay opted in', { HUB_NETWORK: 'regtest', ATTEST_RELAY_ENABLED: '1' }]
-        ];
-        for (const [label, extra] of branches) {
-            it('the ceiling equals the attachment count on ' + label, async function () {
-                const cfg    = hubConfig(extra);
-                const roster = PeerManager.messageSubscribers(cfg, process.env);
-                const target = new PeerManager(cfg, dbStub);
-
-                expect(new Set(roster).size, 'a repeated entry is a silent +1').to.equal(roster.length);
-                expect(target.getMaxListeners()).to.equal(roster.length);
-                expect(await attachListeners(target, roster.length),
-                    'a full boot must be silent').to.deep.equal([]);
-                expect((await attachListeners(target, 1)).length,
-                    'a listener leak would now be silent').to.be.at.least(1);
-            });
-        }
-    });
+    // Build a signed Option-A envelope (sig_pubkey carried) from `identity`.
+    registerFeature4verifySignatureOptionAPart1();
+  });
+}
+describe('PeerManager', function () {
+  beforeEach(function () {
+    rootSuiteKeypair = ValidatorIdentity.generate();
+    rootSuiteConfig = {
+      P2P_VALIDATOR_ADDR: 'ws://self:10001',
+      P2P_PORT: 0,
+      // Don't bind
+      P2P_HOST: '127.0.0.1',
+      SEED_NODES: [],
+      REQUIRE_SIGNATURES: false,
+      P2P_MSG_DEDUP_TTL: 60000,
+      P2P_MAX_PAYLOAD: 1048576,
+      P2P_HEARTBEAT_INTERVAL: 15000,
+      P2P_RECONNECT_BASE: 2000,
+      P2P_RECONNECT_MAX: 60000
+    };
+    // DB_METHODS gives the double the real named query methods (setP2pPeer
+    // among them), each routing through the doQuery stub the tests assert on.
+    rootSuiteDbStub = {
+      ...DB_METHODS,
+      doQuery: sinon.stub().resolves([])
+    };
+    rootSuitePm = new PeerManager(rootSuiteConfig, rootSuiteDbStub);
+  });
+  afterEach(function () {
+    sinon.restore();
+  });
+
+  // -----------------------------------------------------------------
+  // buildEnvelope()
+  // -----------------------------------------------------------------
+  registerFeature1buildEnvelope();
+  registerFeature2messageDeduplication();
+  registerFeature3verifySignature();
+  registerFeature4verifySignatureOptionA();
 });
