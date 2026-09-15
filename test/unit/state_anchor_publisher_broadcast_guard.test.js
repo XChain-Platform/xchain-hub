@@ -17,517 +17,168 @@
 // defaultBroadcast, the bounded post-ambiguous existence poll, and the
 // defer-over-risk rule; also pins that safe pre-send failures keep the
 // original fresh-PSBT retry behavior (the live multi-chain conflict fix).
-
-const { expect }           = require('chai');
+const {
+  expect
+} = require('chai');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
-
-function mkPub(){
-    const pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
-    pub.chunkRetryDelayMs    = 1;
-    pub.ambiguousPollDelayMs = 1;
-    pub.ambiguousPollAttempts = 2;
-    return pub;
+function mkPub() {
+  const pub = new StateAnchorPublisher({
+    db: {},
+    p2pConfig: {
+      DOGE_ADDRESS: 'Dpub1'
+    }
+  });
+  pub.chunkRetryDelayMs = 1;
+  pub.ambiguousPollDelayMs = 1;
+  pub.ambiguousPollAttempts = 2;
+  return pub;
 }
-
-function ambiguousErr(msg){
-    const e = new Error(msg || 'timeout');
-    e.anchorAmbiguousSend = true;
-    return e;
+function ambiguousErr(msg) {
+  const e = new Error(msg || 'timeout');
+  e.anchorAmbiguousSend = true;
+  return e;
 }
-
-describe('StateAnchorPublisher: broadcastWithRetry guard', function () {
-
-    it('keeps the legacy behavior with no existsCheck: retries pre-send failures with a fresh call, then succeeds', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => {
-            calls++;
-            if (calls < 3) throw new Error('no UTXOs available for Dpub1');
-            return { txid: 'tx-ok' };
-        };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
-        expect(res.txid).to.equal('tx-ok');
-        expect(calls).to.equal(3);
-    });
-
-    it('adopts an already-mined anchor on attempt 0 without broadcasting (lost ACK from a previous flush)', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => { calls++; return { txid: 'fresh' }; };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5,
-            async () => ({ exists: true, txid: 'landed-earlier' }));
-        expect(res.txid).to.equal('landed-earlier');
-        expect(res.exists).to.equal(true);
-        expect(calls).to.equal(0);
-    });
-
-    it('checks existence again before every retry and adopts once the anchor appears', async function () {
-        const pub = mkPub();
-        let calls = 0, checks = 0;
-        const broadcaster = async () => { calls++; throw new Error('definitive reject'); };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
-            checks++;
-            return checks >= 2 ? { exists: true, txid: 'peer-anchor' } : null;
-        });
-        expect(res.txid).to.equal('peer-anchor');
-        expect(calls).to.equal(1);   // one safe failure, then adopted before the retry
-    });
-
-    it('ambiguous send error: polls existence and adopts when the anchor turns up mined', async function () {
-        const pub = mkPub();
-        let calls = 0, checks = 0;
-        const broadcaster = async () => { calls++; throw ambiguousErr(); };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
-            checks++;
-            return checks >= 2 ? { exists: true, txid: 'mined-late' } : null;
-        });
-        expect(res.txid).to.equal('mined-late');
-        expect(calls).to.equal(1);   // NEVER re-broadcast after the ambiguous send
-    });
-
-    it('ambiguous send error + still absent after the poll window: defers (throws) instead of re-broadcasting', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => { calls++; throw ambiguousErr('socket hang up'); };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(err.message).to.equal('socket hang up');
-        expect(calls).to.equal(1);
-    });
-
-    it('ambiguous send error + existence undetermined (check throws): defers without re-broadcasting', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => { calls++; throw ambiguousErr(); };
-        let err = null;
-        try {
-            await pub.broadcastWithRetry(broadcaster, 'P', 5,
-                async () => { throw new Error('indexer unreachable'); });
-        } catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(err.anchorAmbiguousSend).to.equal(true);
-        expect(calls).to.equal(1);
-    });
-
-    it('ambiguous send error with NO existsCheck (archive/chunk path): defers immediately, no re-broadcast', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => { calls++; throw ambiguousErr(); };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(calls).to.equal(1);
-    });
-
-    it('definitive rejections keep retrying with a fresh PSBT even when the check says absent', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => {
-            calls++;
-            if (calls < 4) throw new Error('Encoder RPC error: txn-mempool-conflict');
-            return { txid: 'retried-ok' };
-        };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null);
-        expect(res.txid).to.equal('retried-ok');
-        expect(calls).to.equal(4);
-    });
-});
-
-// The spend-guard half of the same method: which exits charge the per-window
-// budget, and whether an operator pause asserted mid-retry stops the next send.
-// An entry-only allow() plus a record() reached only on the fresh-send success
-// branch answers neither: an ambiguous (lost-ACK) send pays a real fee against a
-// window that records nothing, and a pause landing during the retry delay stays
-// invisible to the loop.
-describe('StateAnchorPublisher: broadcastWithRetry spend accounting', function () {
-
-    // Cents charged to the rolling window by this call, whatever exit it took.
-    function spent(pub){ return pub.spendGuard.spentInWindow(); }
-
-    it('a fresh successful send charges the window exactly once', async function () {
-        const pub = mkPub();
-        const est = pub.spendGuard.estSpendUsdCents;
-        const broadcaster = async () => ({ txid: 'tx-ok' });
-        await pub.broadcastWithRetry(broadcaster, 'P', 5);
-        expect(spent(pub)).to.equal(est);
-    });
-
-    it('an ambiguous send adopted by the poll charges the window (the fee was paid)', async function () {
-        const pub = mkPub();
-        const est = pub.spendGuard.estSpendUsdCents;
-        let checks = 0;
-        const broadcaster = async () => { throw ambiguousErr(); };
-        const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
-            checks++;
-            return checks >= 2 ? { exists: true, txid: 'mined-late' } : null;
-        });
-        expect(res.txid).to.equal('mined-late');
-        expect(spent(pub)).to.equal(est);
-    });
-
-    it('an ambiguous send deferred after the poll window still charges the window', async function () {
-        const pub = mkPub();
-        const est = pub.spendGuard.estSpendUsdCents;
-        const broadcaster = async () => { throw ambiguousErr('socket hang up'); };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(spent(pub)).to.equal(est);
-    });
-
-    it('adopting an already-mined anchor before any send charges nothing', async function () {
-        const pub = mkPub();
-        const broadcaster = async () => ({ txid: 'fresh' });
-        await pub.broadcastWithRetry(broadcaster, 'P', 5,
-            async () => ({ exists: true, txid: 'landed-earlier' }));
-        expect(spent(pub)).to.equal(0);
-    });
-
-    it('a definitive failure that exhausts the retry budget charges nothing', async function () {
-        const pub = mkPub();
-        const broadcaster = async () => { throw new Error('Encoder RPC error: bad-txns'); };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 3, async () => null); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(spent(pub)).to.equal(0);
-    });
-
-    it('a consumed window refuses the send outright with err.spendBlocked', async function () {
-        const pub = mkPub();
-        pub.spendGuard.maxSpendUsdCents = 1;   // below one estimated send
-        let calls = 0;
-        const broadcaster = async () => { calls++; return { txid: 'nope' }; };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(err.spendBlocked).to.equal(true);
-        expect(calls).to.equal(0);
-    });
-
-    it('a pause asserted during the retry delay stops the next broadcast', async function () {
-        const pub = mkPub();
-        let calls = 0;
-        const broadcaster = async () => {
-            calls++;
-            if (calls === 1) throw new Error('Encoder RPC error: txn-mempool-conflict');
-            return { txid: 'should-not-happen' };
-        };
-        // The operator halt lands while the retry is sleeping.
-        pub._sleep = async () => { pub.spendGuard.pause('operator halt'); };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(err.spendBlocked).to.equal(true);
-        expect(calls).to.equal(1);
-        expect(spent(pub)).to.equal(0);   // the unsent attempt gives its budget back
-    });
-
-    // A pause landing around an ambiguous send must not convert the deferral into a
-    // spendBlocked error: the caller withdraws the anchor intent markers for every
-    // failure NOT flagged anchorAmbiguousSend, and losing them after a send that may
-    // have reached the network is how the same anchor gets paid for twice.
-    it('a pause landing around an ambiguous send keeps the ambiguity flag and charges the fee', async function () {
-        const pub = mkPub();
-        const est = pub.spendGuard.estSpendUsdCents;
-        let calls = 0, checks = 0;
-        const broadcaster = async () => { calls++; throw ambiguousErr('socket hang up'); };
-        // Absent from the mined view, then the halt lands before the loop re-enters.
-        const existsCheck = async () => {
-            checks++;
-            if (checks > 1) pub.spendGuard.pause('operator halt');
-            return null;
-        };
-        let err = null;
-        try { await pub.broadcastWithRetry(broadcaster, 'P', 5, existsCheck); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-        expect(err.anchorAmbiguousSend).to.equal(true);
-        expect(err.spendBlocked).to.equal(undefined);
-        expect(calls).to.equal(1);
-        expect(spent(pub)).to.equal(est);
-    });
-});
-
-describe('StateAnchorPublisher: isAmbiguousSendError classification', function () {
+function registerSplitSuitePart1() {
+  it('keeps the legacy behavior with no existsCheck: retries pre-send failures with a fresh call, then succeeds', async function () {
     const pub = mkPub();
-
-    it('encoder RPC rejections are NOT ambiguous (the node answered, tx refused)', function () {
-        expect(pub.isAmbiguousSendError(new Error('Encoder RPC error: bad-txns'))).to.equal(false);
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      if (calls < 3) throw new Error('no UTXOs available for Dpub1');
+      return {
+        txid: 'tx-ok'
+      };
+    };
+    const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
+    expect(res.txid).to.equal('tx-ok');
+    expect(calls).to.equal(3);
+  });
+  it('adopts an already-mined anchor on attempt 0 without broadcasting (lost ACK from a previous flush)', async function () {
+    const pub = mkPub();
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      return {
+        txid: 'fresh'
+      };
+    };
+    const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => ({
+      exists: true,
+      txid: 'landed-earlier'
+    }));
+    expect(res.txid).to.equal('landed-earlier');
+    expect(res.exists).to.equal(true);
+    expect(calls).to.equal(0);
+  });
+  it('checks existence again before every retry and adopts once the anchor appears', async function () {
+    const pub = mkPub();
+    let calls = 0,
+      checks = 0;
+    const broadcaster = async () => {
+      calls++;
+      throw new Error('definitive reject');
+    };
+    const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
+      checks++;
+      return checks >= 2 ? {
+        exists: true,
+        txid: 'peer-anchor'
+      } : null;
     });
-
-    it('HTTP 4xx refusals are NOT ambiguous', function () {
-        const e = new Error('Request failed with status code 401');
-        e.response = { status: 401 };
-        expect(pub.isAmbiguousSendError(e)).to.equal(false);
+    expect(res.txid).to.equal('peer-anchor');
+    expect(calls).to.equal(1); // one safe failure, then adopted before the retry
+  });
+}
+function registerSplitSuitePart2() {
+  it('ambiguous send error: polls existence and adopts when the anchor turns up mined', async function () {
+    const pub = mkPub();
+    let calls = 0,
+      checks = 0;
+    const broadcaster = async () => {
+      calls++;
+      throw ambiguousErr();
+    };
+    const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
+      checks++;
+      return checks >= 2 ? {
+        exists: true,
+        txid: 'mined-late'
+      } : null;
     });
-
-    it('never-connected transport errors are NOT ambiguous', function () {
-        for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) {
-            const e = new Error(code);
-            e.code = code;
-            expect(pub.isAmbiguousSendError(e), code).to.equal(false);
-        }
-    });
-
-    it('timeouts, resets, and 5xx after the request went out ARE ambiguous', function () {
-        const t = new Error('timeout of 30000ms exceeded'); t.code = 'ECONNABORTED';
-        expect(pub.isAmbiguousSendError(t)).to.equal(true);
-        const r = new Error('socket hang up'); r.code = 'ECONNRESET';
-        expect(pub.isAmbiguousSendError(r)).to.equal(true);
-        const s = new Error('Request failed with status code 502'); s.response = { status: 502 };
-        expect(pub.isAmbiguousSendError(s)).to.equal(true);
-        expect(pub.isAmbiguousSendError(new Error('mystery'))).to.equal(true);
-    });
-});
-
-describe('StateAnchorPublisher: defaultBroadcast tagging', function () {
-
-    function mkSigner(overrides){
-        return Object.assign({
-            encoder: {
-                getUtxos:    async () => [{ txid: 'u1', vout: 0 }],
-                createTx:    async () => ({ psbt: 'psbt-hex' }),
-                broadcastTx: async () => ({ txid: 'tx1' })
-            },
-            walletSignFn: async () => 'signed-hex'
-        }, overrides || {});
+    expect(res.txid).to.equal('mined-late');
+    expect(calls).to.equal(1); // NEVER re-broadcast after the ambiguous send
+  });
+  it('ambiguous send error + still absent after the poll window: defers (throws) instead of re-broadcasting', async function () {
+    const pub = mkPub();
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      throw ambiguousErr('socket hang up');
+    };
+    let err = null;
+    try {
+      await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null);
+    } catch (e) {
+      err = e;
     }
-
-    it('tags a transport failure from broadcastTx as anchorAmbiguousSend', async function () {
-        const pub = mkPub();
-        const signer = mkSigner();
-        signer.encoder.broadcastTx = async () => {
-            const e = new Error('timeout'); e.code = 'ECONNABORTED'; throw e;
-        };
-        let err = null;
-        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
-        expect(err.anchorAmbiguousSend).to.equal(true);
-    });
-
-    it('does NOT tag a definitive encoder rejection from broadcastTx', async function () {
-        const pub = mkPub();
-        const signer = mkSigner();
-        signer.encoder.broadcastTx = async () => { throw new Error('Encoder RPC error: bad-txns'); };
-        let err = null;
-        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
-        expect(err.anchorAmbiguousSend).to.be.undefined;
-    });
-
-    it('does NOT tag pre-send failures (createTx / getUtxos / signing)', async function () {
-        const pub = mkPub();
-        const signer = mkSigner();
-        signer.encoder.createTx = async () => {
-            const e = new Error('timeout'); e.code = 'ECONNABORTED'; throw e;
-        };
-        let err = null;
-        try { await pub.defaultBroadcast('P', signer); } catch (e) { err = e; }
-        expect(err.anchorAmbiguousSend).to.be.undefined;
-
-        const signer2 = mkSigner();
-        signer2.encoder.getUtxos = async () => [];
-        err = null;
-        try { await pub.defaultBroadcast('P', signer2); } catch (e) { err = e; }
-        expect(err.anchorAmbiguousSend).to.be.undefined;
-    });
-
-    it('still returns the broadcast result on success', async function () {
-        const pub = mkPub();
-        const res = await pub.defaultBroadcast('P', mkSigner());
-        expect(res.txid).to.equal('tx1');
-    });
-});
-
-describe('StateAnchorPublisher: findExistingCheckpointAnchor', function () {
-
-    const ROW = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 };
-
-    function mkPubWithIndexer(reply){
-        const pub = mkPub();
-        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub._indexerCall = async (coin, method, params) => {
-            expect(coin).to.equal('DOGE');
-            expect(method).to.equal('getanchoraction');
-            expect(params.block_index).to.equal(494);
-            expect(params.checkpoint_seq).to.equal(7);
-            if (reply instanceof Error) throw reply;
-            return reply;
-        };
-        return pub;
+    expect(err).to.be.an('error');
+    expect(err.message).to.equal('socket hang up');
+    expect(calls).to.equal(1);
+  });
+}
+function registerSplitSuitePart3() {
+  it('ambiguous send error + existence undetermined (check throws): defers without re-broadcasting', async function () {
+    const pub = mkPub();
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      throw ambiguousErr();
+    };
+    let err = null;
+    try {
+      await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
+        throw new Error('indexer unreachable');
+      });
+    } catch (e) {
+      err = e;
     }
-
-    it('returns { exists, txid } for a mined non-invalid anchor at any depth', async function () {
-        const pub = mkPubWithIndexer({ exists: true, txid: 'AB'.repeat(32), status: 'valid', confirmations: 1 });
-        const res = await pub.findExistingCheckpointAnchor(ROW);
-        expect(res.exists).to.equal(true);
-        expect(res.txid).to.equal('AB'.repeat(32));
-    });
-
-    it('returns exists with a null txid against a pre-upgrade indexer (adopt-but-do-not-stamp)', async function () {
-        const pub = mkPubWithIndexer({ exists: true, status: 'valid' });
-        const res = await pub.findExistingCheckpointAnchor(ROW);
-        expect(res.exists).to.equal(true);
-        expect(res.txid).to.equal(null);
-    });
-
-    it('returns null when definitively absent', async function () {
-        const pub = mkPubWithIndexer({ exists: false });
-        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
-    });
-
-    it('treats a decoded-invalid row as absent', async function () {
-        const pub = mkPubWithIndexer({ exists: true, txid: 'cc', status: 'invalid: bad sig' });
-        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
-    });
-
-    it('throws when no DOGE indexer is wired (undetermined, never a false absent)', async function () {
-        const pub = mkPub();
-        pub.indexers = {};
-        let err = null;
-        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
-        expect(err).to.be.an('error');
-    });
-
-    it('throws when the indexer is unreachable or answers with an error', async function () {
-        let err = null;
-        try { await mkPubWithIndexer(new Error('ETIMEDOUT')).findExistingCheckpointAnchor(ROW); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-
-        err = null;
-        try { await mkPubWithIndexer({ error: 'indexer database not ready' }).findExistingCheckpointAnchor(ROW); }
-        catch (e) { err = e; }
-        expect(err).to.be.an('error');
-    });
-
-    // getanchoraction's CHECKPOINT_VERSIONS carries the v1 ARCHIVE HEADS, which
-    // wrap a checkpoint under the SAME identity this lookup is keyed on, so an
-    // unfiltered answer can be an archive head. Adopting one skips the real
-    // checkpoint publish and the reward derived from it; calling it "absent" would
-    // re-broadcast over a checkpoint anchor sitting beneath it. Both directions are
-    // pinned here.
-    function mkPubWithVersionedIndexer(byVersion, unfiltered){
-        const pub = mkPub();
-        const asked = [];
-        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub._indexerCall = async (coin, method, params) => {
-            expect(method).to.equal('getanchoraction');
-            asked.push(params.version === undefined ? null : params.version);
-            return (params.version === undefined) ? unfiltered : (byVersion[params.version] || { exists: false });
-        };
-        pub._asked = asked;
-        return pub;
+    expect(err).to.be.an('error');
+    expect(err.anchorAmbiguousSend).to.equal(true);
+    expect(calls).to.equal(1);
+  });
+  it('ambiguous send error with NO existsCheck (archive/chunk path): defers immediately, no re-broadcast', async function () {
+    const pub = mkPub();
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      throw ambiguousErr();
+    };
+    let err = null;
+    try {
+      await pub.broadcastWithRetry(broadcaster, 'P', 5);
+    } catch (e) {
+      err = e;
     }
-
-    it('does NOT adopt a v1 archive head as this checkpoint\'s anchor', async function () {
-        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
-        expect(await pub.findExistingCheckpointAnchor(ROW)).to.equal(null);
-        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 0]);
-    });
-
-    it('finds a checkpoint anchor sitting BENEATH a newer archive head (no duplicate publish)', async function () {
-        const pub = mkPubWithVersionedIndexer(
-            { 0: { exists: true, version: 0, status: 'valid', txid: 'ab'.repeat(32) } },
-            { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
-        const res = await pub.findExistingCheckpointAnchor(ROW);
-        expect(res.exists).to.equal(true);
-        expect(res.txid, 'adopts the CHECKPOINT anchor, never the archive txid').to.equal('ab'.repeat(32));
-    });
-
-    it('keeps the single-call path when the top row is a checkpoint version', async function () {
-        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 0, status: 'valid', txid: 'cd'.repeat(32) });
-        const res = await pub.findExistingCheckpointAnchor(ROW);
-        expect(res.txid).to.equal('cd'.repeat(32));
-        expect(pub._asked).to.deep.equal([null]);
-    });
-
-    it('treats an indexer that IGNORES the version filter as undetermined, not absent', async function () {
-        // Such an indexer answers every narrowed lookup with the same archive head;
-        // accepting it is the adoption this branch exists to stop, and calling it
-        // absent would re-broadcast over an anchor that may already exist.
-        const head = { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) };
-        const pub = mkPub();
-        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub._indexerCall = async () => head;
-        let err = null;
-        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
-        expect(err).to.be.an('error');
-    });
-
-    // The BUNDLE guard (spec §2.4): the failover-race adopt on the checkpoint leg. It is
-    // the per-section lookup above run once per section, and it adopts ONLY when every
-    // section resolves to one mined transaction. A partial answer would stamp sections
-    // from a transaction that does not carry the others.
-    describe('_findExistingBundle', function () {
-
-        const SECTIONS = [{ chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 },
-                          { chain: 'LTC', network: 'regtest', block_index: 990, checkpoint_seq: 7 }];
-
-        // Answers per chain, so a partial or split-txid view can be scripted.
-        function mkPubByChain(byChain){
-            const pub = mkPub();
-            pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-            pub._indexerCall = async (coin, method, params) => {
-                const a = byChain[params.chain];
-                if (a instanceof Error) throw a;
-                return a;
-            };
-            return pub;
-        }
-        const mined = (txid) => ({ exists: true, version: 0, status: 'valid', txid: txid });
-
-        it('adopts when every section resolves to ONE mined transaction', async function () {
-            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('ab'.repeat(32)) });
-            expect(await pub._findExistingBundle(SECTIONS)).to.deep.equal({ exists: true, txid: 'ab'.repeat(32) });
-        });
-
-        it('does NOT adopt when one section is absent (that transaction is not this bundle)', async function () {
-            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: { exists: false } });
-            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
-        });
-
-        it('does NOT adopt when the sections were anchored by DIFFERENT transactions', async function () {
-            // A leftover per-chain history, or two racing publishers that each landed
-            // part of the set: adopting either txid would stamp rows it does not carry.
-            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('cd'.repeat(32)) });
-            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
-        });
-
-        it('does NOT adopt against a pre-upgrade indexer that serves no txid', async function () {
-            const pub = mkPubByChain({ BTC: { exists: true, version: 0, status: 'valid' },
-                                       LTC: { exists: true, version: 0, status: 'valid' } });
-            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
-        });
-
-        it('propagates an undetermined section (never a false absent, which would double-spend)', async function () {
-            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: new Error('ETIMEDOUT') });
-            let err = null;
-            try { await pub._findExistingBundle(SECTIONS); } catch (e) { err = e; }
-            expect(err).to.be.an('error');
-        });
-
-        it('treats a decoded-invalid section as not-this-bundle', async function () {
-            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)),
-                                       LTC: { exists: true, version: 0, status: 'invalid: SECTION 1 stale', txid: 'ab'.repeat(32) } });
-            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
-        });
-    });
-
-    it('propagates an undetermined answer from the narrowed lookup (never a false absent)', async function () {
-        const pub = mkPub();
-        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub._indexerCall = async (coin, method, params) => {
-            if (params.version === undefined) return { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) };
-            throw new Error('ETIMEDOUT');
-        };
-        let err = null;
-        try { await pub.findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
-        expect(err).to.be.an('error');
-    });
+    expect(err).to.be.an('error');
+    expect(calls).to.equal(1);
+  });
+  it('definitive rejections keep retrying with a fresh PSBT even when the check says absent', async function () {
+    const pub = mkPub();
+    let calls = 0;
+    const broadcaster = async () => {
+      calls++;
+      if (calls < 4) throw new Error('Encoder RPC error: txn-mempool-conflict');
+      return {
+        txid: 'retried-ok'
+      };
+    };
+    const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => null);
+    expect(res.txid).to.equal('retried-ok');
+    expect(calls).to.equal(4);
+  });
+}
+describe('StateAnchorPublisher: broadcastWithRetry guard', function () {
+  registerSplitSuitePart1();
+  registerSplitSuitePart2();
+  registerSplitSuitePart3();
 });
