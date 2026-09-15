@@ -22,7 +22,7 @@
 
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults.
-const { buildRateLimitOptions } = require('../lib/rate_limit_policy.js');
+const { buildRateLimitOptions } = require('./rate_limit_policy.js');
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
 const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const { authGate, feedPortAllowlist } = require('./auth_gate');
@@ -66,7 +66,7 @@ function installTransportMiddleware(app, ctx) {
     app.use(express.json());
     app.use(cors({ origin: CORS_ORIGIN }));
     // Per-IP cap. The options (JSON-RPC 429 body, loopback/private exemption) live in
-    // src/lib/rate_limit_policy.js so they are unit-testable; api.js self-starts on
+    // src/api/rate_limit_policy.js so they are unit-testable; api.js self-starts on
     // require, so nothing declared inline here could ever be asserted against.
     let rateLimitedLogged = 0;
     app.use(rateLimit(buildRateLimitOptions({

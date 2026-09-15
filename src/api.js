@@ -70,7 +70,7 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
 const { parseCorsOrigin } = require('./api/cors_origin.js');
-const { parseExemptLocal } = require('./lib/rate_limit_policy.js');
+const { parseExemptLocal } = require('./api/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
@@ -105,7 +105,7 @@ const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
 // pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
 // in seconds, and without this exemption needs HUB_RATE_LIMIT_RPM=60000 set by hand before
 // recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
-// private-IP reverse proxy is still throttled; see src/lib/rate_limit_policy.js.
+// private-IP reverse proxy is still throttled; see src/api/rate_limit_policy.js.
 // Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
 const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
