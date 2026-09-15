@@ -118,55 +118,36 @@ const resolve = (entry, cap) =>
     instance(entry, null, cap).resolveCapabilityValidators(
         entry[2], BLOCK, ...(entry[3].length > 1 ? [NETWORK] : []));
 
-describe('capability_snapshots truncation parity (count mode)', function () {
+function registerTruncationWriterSuite() {
+describe('writeCapabilitySnapshotRows (shared choke point)', function () {
 
-    beforeEach(function () { sinon.stub(console, 'warn'); });
-    afterEach(function () { sinon.restore(); });
-
-    it('PREMISE: the block under test is genuinely below stake-weighted activation', function () {
-        expect(swq.isStakeWeightedQuorumActive(BLOCK, NETWORK)).to.equal(false);
-        expect(swq.isStakeWeightedQuorumActive(BLOCK, 'regtest')).to.equal(true);
-    });
-
-    for (const entry of WRITERS) {
-        const name = entry[0];
-
-        it('SECURITY: ' + name + ' persists NOTHING for a truncated COUNT-mode set', async function () {
+        it('SECURITY: refuses a marked set outright and issues no statement', async function () {
             const db  = makeDb();
-            const cap = capStub(true);
+            const set = RETAINED.map(v => ({ pubkey: v.pubkey, source: '', amount: v.amount }));
+            set.truncated = true;
 
-            await persist(entry, db, cap);
+            const rows = await snapWrite.writeCapabilitySnapshotRows(db, 'cross_chain', BLOCK, set);
 
-            expect(cap.getSnapshot.callCount).to.equal(1);          // the count RPC really ran
+            expect(rows).to.deep.equal([]);
             expect(db.inserts).to.have.lengthOf(0);
-            expect(db.rows).to.have.lengthOf(0);
+            expect(console.warn.callCount).to.equal(1);      // a silent refusal is an ops trap
         });
 
-        // Negative control: the SAME retained rows, marker cleared, do reach the mirror. It
-        // pins the refusal to the marker rather than to a harness that writes nothing.
-        it(name + ' still mirrors a COMPLETE COUNT-mode set (control)', async function () {
-            const db = makeDb();
+        it('writes an unmarked set of the same rows (control)', async function () {
+            const db  = makeDb();
+            const set = RETAINED.map(v => ({ pubkey: v.pubkey, source: '', amount: v.amount }));
 
-            await persist(entry, db, capStub(false));
+            const rows = await snapWrite.writeCapabilitySnapshotRows(db, 'cross_chain', BLOCK, set);
 
+            expect(rows).to.have.lengthOf(2);
             expect(db.inserts).to.have.lengthOf(1);
             expect(db.rows).to.have.lengthOf(2);
-            expect(db.rows.map(r => r.signing_pubkey)).to.deep.equal(RETAINED.map(v => v.pubkey.toLowerCase()));
-            expect(db.rows.every(r => r.source === '')).to.equal(true);   // count mode has no source key
         });
+    });
+}
 
-        it(name + ' carries `truncated` onto the resolved COUNT-mode array', async function () {
-            const out = await resolve(entry, capStub(true));
-
-            expect(out).to.have.lengthOf(2);
-            expect(out.truncated).to.equal(true);
-        });
-    }
-
-    // The two resolvers that sit outside the six writers above and reach the same table by
-    // their own path. Both dropped the COUNT-mode marker until this row; each is driven
-    // through its real resolver so a revert is named here rather than in a review.
-    describe('resolvers outside the shared writer set', function () {
+function registerTruncationResolverSuite() {
+describe('resolvers outside the shared writer set', function () {
 
         it('SECURITY: PriceAggregator returns a MARKED set for a truncated COUNT-mode read', async function () {
             const cap = capStub(true);
@@ -206,32 +187,63 @@ describe('capability_snapshots truncation parity (count mode)', function () {
             expect(out).to.have.lengthOf(2);
         });
     });
+}
+
+function registerTruncationWriterCases() {
+for (const entry of WRITERS) {
+        const name = entry[0];
+
+        it('SECURITY: ' + name + ' persists NOTHING for a truncated COUNT-mode set', async function () {
+            const db  = makeDb();
+            const cap = capStub(true);
+
+            await persist(entry, db, cap);
+
+            expect(cap.getSnapshot.callCount).to.equal(1);          // the count RPC really ran
+            expect(db.inserts).to.have.lengthOf(0);
+            expect(db.rows).to.have.lengthOf(0);
+        });
+
+        // Negative control: the SAME retained rows, marker cleared, do reach the mirror. It
+        // pins the refusal to the marker rather than to a harness that writes nothing.
+        it(name + ' still mirrors a COMPLETE COUNT-mode set (control)', async function () {
+            const db = makeDb();
+
+            await persist(entry, db, capStub(false));
+
+            expect(db.inserts).to.have.lengthOf(1);
+            expect(db.rows).to.have.lengthOf(2);
+            expect(db.rows.map(r => r.signing_pubkey)).to.deep.equal(RETAINED.map(v => v.pubkey.toLowerCase()));
+            expect(db.rows.every(r => r.source === '')).to.equal(true);   // count mode has no source key
+        });
+
+        it(name + ' carries `truncated` onto the resolved COUNT-mode array', async function () {
+            const out = await resolve(entry, capStub(true));
+
+            expect(out).to.have.lengthOf(2);
+            expect(out.truncated).to.equal(true);
+        });
+    }
+}
+
+describe('capability_snapshots truncation parity (count mode)', function () {
+
+    beforeEach(function () { sinon.stub(console, 'warn'); });
+    afterEach(function () { sinon.restore(); });
+
+    it('PREMISE: the block under test is genuinely below stake-weighted activation', function () {
+        expect(swq.isStakeWeightedQuorumActive(BLOCK, NETWORK)).to.equal(false);
+        expect(swq.isStakeWeightedQuorumActive(BLOCK, 'regtest')).to.equal(true);
+    });
+
+    registerTruncationWriterCases();
+
+    // The two resolvers that sit outside the six writers above and reach the same table by
+    // their own path. Both dropped the COUNT-mode marker until this row; each is driven
+    // through its real resolver so a revert is named here rather than in a review.
+    registerTruncationResolverSuite();
 
     // The shared writer is the only INSERT into the table, so its own refusal is what makes
     // the rule un-forgettable for a writer that never learned it.
-    describe('writeCapabilitySnapshotRows (shared choke point)', function () {
-
-        it('SECURITY: refuses a marked set outright and issues no statement', async function () {
-            const db  = makeDb();
-            const set = RETAINED.map(v => ({ pubkey: v.pubkey, source: '', amount: v.amount }));
-            set.truncated = true;
-
-            const rows = await snapWrite.writeCapabilitySnapshotRows(db, 'cross_chain', BLOCK, set);
-
-            expect(rows).to.deep.equal([]);
-            expect(db.inserts).to.have.lengthOf(0);
-            expect(console.warn.callCount).to.equal(1);      // a silent refusal is an ops trap
-        });
-
-        it('writes an unmarked set of the same rows (control)', async function () {
-            const db  = makeDb();
-            const set = RETAINED.map(v => ({ pubkey: v.pubkey, source: '', amount: v.amount }));
-
-            const rows = await snapWrite.writeCapabilitySnapshotRows(db, 'cross_chain', BLOCK, set);
-
-            expect(rows).to.have.lengthOf(2);
-            expect(db.inserts).to.have.lengthOf(1);
-            expect(db.rows).to.have.lengthOf(2);
-        });
-    });
+    registerTruncationWriterSuite();
 });
