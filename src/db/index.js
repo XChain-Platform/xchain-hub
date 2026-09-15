@@ -362,7 +362,15 @@ class Database {
 // What schema/bootstrap.js reaches the outside world through. Set on the class, not
 // required in that file, so a proxyquire load of THIS module hands the bring-up
 // methods the same stubbed driver and filesystem it hands the constructor.
-Database.io = { mariadb, fs, sqlDir: SQL_DIR };
+//
+// Installed non-enumerably, the same way installMixins() below installs the moved
+// methods: the split must not add a key that Object.keys(Database) or a for...in over
+// the class reports, because before the split nothing was there to report. writable
+// and configurable stay true so a test can swap the driver and put it back.
+Object.defineProperty(Database, 'io', {
+    value: { mariadb, fs, sqlDir: SQL_DIR },
+    enumerable: false, writable: true, configurable: true
+});
 
 // Install one mixin's methods on the prototype, non-enumerably.
 //
