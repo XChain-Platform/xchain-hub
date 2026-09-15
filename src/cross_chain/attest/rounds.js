@@ -186,27 +186,7 @@ module.exports = {
 
     async handlePropose(envelope) {
         let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest, btcBlockHeight } = envelope.data;
-        if (!attestationId || !digest) return;
-        if (!/^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/.test(attestationId)) return;
-        if (this.finalized.has(attestationId)) return;
-
-        // Discard proposals from senders that are not registered validators
-        // before doing any snapshot/indexer work for them.
-        if (!this.isKnownSender(envelope)) {
-            noteDrop({ reason: 'unknown_sender', phase: 'xchain_propose', sender: envelope.sender, envelope });
-            return;
-        }
-
-        // Verify digest
-        let computedDigest = this.digest(attestationId, confirmations);
-        if (computedDigest !== digest) return;
-
-        // The discrete fields are what get stored when the round finalizes, so
-        // bind them to the attestationId the digest covers; a proposer must
-        // not be able to verify one action while attesting another.
-        let [idSource, idIndex, idDest] = attestationId.split(':');
-        if (idSource !== sourceChain || idDest !== destChain ||
-            parseInt(idIndex, 10) !== parseInt(sourceActionIndex, 10)) return;
+        if (!this.admissibleProposal(envelope)) return;
 
         // Never trust the proposer's claim: confirm the source action exists on
         // the source chain, at sufficient depth, against this hub's OWN
@@ -218,10 +198,29 @@ module.exports = {
             return;
         }
 
-        // Create pending if not exists
+        // Create pending if not exists. Both snapshot awaits stay in this function so the
+        // round opens and takes the leader's and our own PREPARE in one synchronous step.
         if (!this.pendingAttestations.has(attestationId)) {
-            if (!(await this.openFollowerRound({ attestationId, sourceChain, sourceActionIndex, destChain,
-                confirmations, digest, btcBlockHeight }))) return;
+            // Lock quorum from the same block-boundary cross_chain snapshot the
+            // leader used (btcBlockHeight carried in the envelope) so every hub
+            // freezes the same N for this round. Falls back to the live set when
+            // the indexer is unreachable or the envelope predates this field.
+            let quorum;
+            try {
+                quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);
+            } catch (err) {
+                // Fail closed: resolveQuorum throws when federated but no
+                // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
+                // rather than PREPARE over a locally-derived quorum peers aren't using.
+                logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
+                return;
+            }
+            if (this.refusesZeroQuorum(attestationId, quorum, btcBlockHeight)) return;
+            // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
+            // follower and leader gate their tallies on the identical member set.
+            let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
+            this.openFollowerRound({ attestationId, sourceChain, sourceActionIndex, destChain,
+                confirmations, digest, btcBlockHeight, quorum, memberPubkeys });
         }
 
         let pending = this.pendingAttestations.get(attestationId);
@@ -237,42 +236,59 @@ module.exports = {
         this.checkPrepareQuorum(attestationId);
     },
 
-    // A follower's round for a verified PROPOSE, over the quorum and member set of the block the
-    // leader named. False when this hub refuses to PREPARE.
-    async openFollowerRound(round) {
-        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest, btcBlockHeight } = round;
-        // Lock quorum from the same block-boundary cross_chain snapshot the
-        // leader used (btcBlockHeight carried in the envelope) so every hub
-        // freezes the same N for this round. Falls back to the live set when
-        // the indexer is unreachable or the envelope predates this field.
-        let quorum;
-        try {
-            quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);
-        } catch (err) {
-            // Fail closed: resolveQuorum throws when federated but no
-            // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
-            // rather than PREPARE over a locally-derived quorum peers aren't using.
-            logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
+    // The checks a PROPOSE passes before any snapshot or indexer work is spent on it: a
+    // well-formed id this hub has not finalized, a registered sender, a matching digest and
+    // discrete fields bound to the id. False drops the PROPOSE.
+    admissibleProposal(envelope) {
+        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest } = envelope.data;
+        if (!attestationId || !digest) return false;
+        if (!/^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/.test(attestationId)) return false;
+        if (this.finalized.has(attestationId)) return false;
+
+        // Discard proposals from senders that are not registered validators
+        // before doing any snapshot/indexer work for them.
+        if (!this.isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'xchain_propose', sender: envelope.sender, envelope });
             return false;
         }
-        // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
-        // single-operator fast path (requestAttestation, which self-signs only after
-        // confirming no federation snapshot resolved), reaching handlePropose means a
-        // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
-        // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
-        // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
-        // mint an 'attested' row no quorum ratified, which downstream indexers then settle
-        // from escrow. This is the same empty-snapshot hazard the leader path already guards
-        // and the DEX engine was hardened against. Refuse; the round retries once the
-        // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
-        if (quorum === 0) {
-            logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
-                ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
-            return false;
-        }
-        // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
-        // follower and leader gate their tallies on the identical member set.
-        let memberPubkeys = await this.resolveMemberPubkeys(btcBlockHeight);
+
+        // Verify digest
+        let computedDigest = this.digest(attestationId, confirmations);
+        if (computedDigest !== digest) return false;
+
+        // The discrete fields are what get stored when the round finalizes, so
+        // bind them to the attestationId the digest covers; a proposer must
+        // not be able to verify one action while attesting another.
+        let [idSource, idIndex, idDest] = attestationId.split(':');
+        if (idSource !== sourceChain || idDest !== destChain ||
+            parseInt(idIndex, 10) !== parseInt(sourceActionIndex, 10)) return false;
+        return true;
+    },
+
+    // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
+    // single-operator fast path (requestAttestation, which self-signs only after
+    // confirming no federation snapshot resolved), reaching handlePropose means a
+    // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
+    // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
+    // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
+    // mint an 'attested' row no quorum ratified, which downstream indexers then settle
+    // from escrow. This is the same empty-snapshot hazard the leader path already guards
+    // and the DEX engine was hardened against. Refuse; the round retries once the
+    // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
+    // True, after the warning, when this hub refuses to PREPARE.
+    refusesZeroQuorum(attestationId, quorum, btcBlockHeight) {
+        if (quorum !== 0) return false;
+        logger.warn('CrossChain: refusing to PREPARE ' + attestationId +
+            ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
+        return true;
+    },
+
+    // A follower's round for a verified PROPOSE, over the quorum and member set handlePropose
+    // resolved at the block the leader named. Synchronous on purpose: handlePropose counts the
+    // leader's and its own PREPARE right after, so no vote can reach the round without them.
+    openFollowerRound(round) {
+        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest,
+            btcBlockHeight, quorum, memberPubkeys } = round;
         this.pendingAttestations.set(attestationId, {
             attestationId, sourceChain, sourceActionIndex, destChain,
             confirmations, digest,
@@ -287,7 +303,6 @@ module.exports = {
             }, this.timeout * 2),
             resolve: null, reject: null
         });
-        return true;
     },
 
     handlePrepare(envelope) {
