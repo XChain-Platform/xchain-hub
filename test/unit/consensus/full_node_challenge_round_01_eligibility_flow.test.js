@@ -28,7 +28,7 @@ function loadModule() {
     axiosStub = { post: sinon.stub() };
     ValidatorIdentityStub = function () {};
     ValidatorIdentityStub.verify = sinon.stub().returns(true);
-    FullNodeChallengeRound = proxyquire('../../src/consensus/full_node_challenge_round', {
+    FullNodeChallengeRound = proxyquire('../../../src/consensus/full_node_challenge_round', {
         axios: axiosStub,
         '../validators/identity.js': ValidatorIdentityStub,
     });

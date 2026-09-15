@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const eq = require('../../src/equivocation_header.js');
+const eq = require('../../../src/equivocation_header.js');
 
 // CONSENSUS-CRITICAL: the EQUIV header (WI-2 bump 2) is prefixed onto every signed
 // consensus canonical at/above the flag-day. The indexer keeps a byte-equivalent
@@ -70,7 +70,7 @@ function registerCrossServiceParityTests() {
     describe('cross-service activation parity', function () {
         it('hub activation map == canonical constants.js', function () {
             let canonical;
-            try { canonical = require('../../../xchain-documentation/protocol/constants.js').EQUIV_HEADER_ACTIVATION; }
+            try { canonical = require('../../../../xchain-documentation/protocol/constants.js').EQUIV_HEADER_ACTIVATION; }
             catch (e) { return this.skip(); }
             expect(eq.EQUIV_HEADER_ACTIVATION).to.deep.equal(canonical);
         });
@@ -80,9 +80,9 @@ function registerCrossServiceParityTests() {
             let copies;
             try {
                 copies = {
-                    indexer:  require('../../../xchain-indexer/src/equivocation_header.js'),
-                    sdk:      require('../../../xchain-sdk/src/equivocation_header.js'),
-                    explorer: require('../../../xchain-explorer/src/equivocation_header.js'),
+                    indexer:  require('../../../../xchain-indexer/src/equivocation_header.js'),
+                    sdk:      require('../../../../xchain-sdk/src/equivocation_header.js'),
+                    explorer: require('../../../../xchain-explorer/src/equivocation_header.js'),
                 };
             } catch (e) { return this.skip(); }
             const ref = eq.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');

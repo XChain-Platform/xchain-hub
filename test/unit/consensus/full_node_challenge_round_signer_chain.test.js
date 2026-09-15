@@ -27,16 +27,16 @@ const path = require('path');
 const vm = require('vm');
 const sinon = require('sinon');
 const EventEmitter = require('events');
-const FullNodeChallengeRound = require('../../src/consensus/full_node_challenge_round.js');
+const FullNodeChallengeRound = require('../../../src/consensus/full_node_challenge_round.js');
 const {
   applySignerHooks,
   buildSignerHooks
-} = require('../../src/lib/signer_loader.js');
+} = require('../../../src/lib/signer_loader.js');
 const {
   turnsUntil,
   settleFlag
-} = require('../helpers/microtask_turns');
-const TEMPLATE = path.join(__dirname, '..', '..', 'examples', 'doge-signer.example.js');
+} = require('../../helpers/microtask_turns');
+const TEMPLATE = path.join(__dirname, '..', '..', '..', 'examples', 'doge-signer.example.js');
 const source = fs.readFileSync(TEMPLATE, 'utf8').replace(/^#!.*\n/, '');
 const ME = 'a'.repeat(64);
 

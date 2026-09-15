@@ -9,9 +9,9 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const swq            = require('../../src/stake_weighted_quorum.js');
-const Consensus      = require('../../src/consensus/pbft.js');
-const OracleConsensus = require('../../src/oracle/consensus.js');
+const swq            = require('../../../src/stake_weighted_quorum.js');
+const Consensus      = require('../../../src/consensus/pbft.js');
+const OracleConsensus = require('../../../src/oracle/consensus.js');
 
 // SWQ-TRUNC: the round-locking normalizations rebuild a snapshot's validators with
 // `.map(...)`, which drops the `truncated` marker CapabilitySnapshot sets on the

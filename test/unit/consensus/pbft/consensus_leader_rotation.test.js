@@ -21,10 +21,10 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/consensus/pbft');
-const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_3, makeFederationSnapshot } = require('../helpers/fixtures');
-const { turnsUntil, settleFlag } = require('../helpers/microtask_turns');
+const Consensus  = require('../../../../src/consensus/pbft');
+const { createMockHub } = require('../../../helpers/mockHub');
+const { VALIDATORS_3, makeFederationSnapshot } = require('../../../helpers/fixtures');
+const { turnsUntil, settleFlag } = require('../../../helpers/microtask_turns');
 
 // Sorted member pubkeys are v1 < v2 < v3, so the rotation leader for
 // (seq, view 0) is VALIDATORS_3[seq % 3].

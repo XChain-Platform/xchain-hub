@@ -17,8 +17,8 @@
 // equivocation is SLASHABLE: a BTC indexer recovers the whole-federation membership block
 // from the two header-identical / same-snapshot_block / different-digest messages alone.
 const { expect } = require('chai');
-const eq = require('../../src/equivocation_header.js');
-const Consensus = require('../../src/consensus/pbft.js');
+const eq = require('../../../../src/equivocation_header.js');
+const Consensus = require('../../../../src/consensus/pbft.js');
 
 // Stub identity whose sign() echoes its input → lets us assert the EXACT signed bytes.
 const identity = { sign: (s) => 'SIG(' + s + ')', getPubkeyHex: () => 'ABCDEF' };

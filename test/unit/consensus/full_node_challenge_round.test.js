@@ -28,7 +28,7 @@ function loadModule() {
     axiosStub = { post: sinon.stub() };
     ValidatorIdentityStub = function () {};
     ValidatorIdentityStub.verify = sinon.stub().returns(true);
-    FullNodeChallengeRound = proxyquire('../../src/consensus/full_node_challenge_round', {
+    FullNodeChallengeRound = proxyquire('../../../src/consensus/full_node_challenge_round', {
         axios: axiosStub,
         '../validators/identity.js': ValidatorIdentityStub,
     });
@@ -212,7 +212,7 @@ it('a p2pConfig FULLNODE block cannot move a consensus param on mainnet', functi
             expect(eng.closeDepth).to.equal(3);
         });
 it('the effective values equal the pinned registry byte for byte (§7 proof)', function () {
-            const coins = require('../../src/coins/index.js');
+            const coins = require('../../../src/coins/index.js');
             for (const net of ['mainnet', 'testnet', 'regtest']) {
                 const pinned = coins.getCoinConfig('BTC', net).FULLNODE;
                 const eng    = new FullNodeChallengeRound(makeHub({ hub: { network: net } }));
@@ -223,7 +223,7 @@ it('the effective values equal the pinned registry byte for byte (§7 proof)', f
             }
         });
 it('fails closed when the registry lacks a consensus param, rather than defaulting', function () {
-            const coins = require('../../src/coins/index.js');
+            const coins = require('../../../src/coins/index.js');
             const orig  = coins.getCoinConfig;
             sinon.stub(coins, 'getCoinConfig').callsFake((tick, net) => {
                 const cfg = orig.call(coins, tick, net);

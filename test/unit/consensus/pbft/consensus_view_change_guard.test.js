@@ -14,9 +14,9 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/consensus/pbft');
-const { createMockHub } = require('../helpers/mockHub');
-const { pubkeyForTestSender } = require('../helpers/fixtures');
+const Consensus  = require('../../../../src/consensus/pbft');
+const { createMockHub } = require('../../../helpers/mockHub');
+const { pubkeyForTestSender } = require('../../../helpers/fixtures');
 
 describe('Consensus view-change guard (stress-sweep 2026-07-08)', function () {
 

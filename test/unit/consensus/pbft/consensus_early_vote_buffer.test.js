@@ -33,9 +33,9 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/consensus/pbft');
-const { createMockHub } = require('../helpers/mockHub');
-const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
+const Consensus  = require('../../../../src/consensus/pbft');
+const { createMockHub } = require('../../../helpers/mockHub');
+const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot, pubkeyForTestSender } = require('../../../helpers/fixtures');
 
 // S = 1000 + 100 + 100 + 100 = 1300. The whale alone clears 3*1000 > 2*1300;
 // the three small sources together (300) never do. Sorted by pubkey, the whale

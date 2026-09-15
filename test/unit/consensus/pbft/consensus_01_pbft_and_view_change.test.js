@@ -12,12 +12,12 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const Consensus      = require('../../src/consensus/pbft');
-const { createMockHub }     = require('../helpers/mockHub');
+const Consensus      = require('../../../../src/consensus/pbft');
+const { createMockHub }     = require('../../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
         makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot,
-        makeFederationSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
-const { waitUntil }  = require('../helpers/waitUntil');
+        makeFederationSnapshot, pubkeyForTestSender } = require('../../../helpers/fixtures');
+const { waitUntil }  = require('../../../helpers/waitUntil');
 
 let hub, pm, consensus;
 

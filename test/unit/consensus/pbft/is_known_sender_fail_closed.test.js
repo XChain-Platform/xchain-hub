@@ -38,19 +38,19 @@ const KEY_STRANGER = 'cc'.repeat(32); // in neither
 // admission therefore had to follow it.
 const CHAIN_KEYED = [{
   name: 'Consensus',
-  cls: require('../../src/consensus/pbft'),
+  cls: require('../../../../src/consensus/pbft'),
   method: '_isKnownSender'
 }, {
   name: 'OracleConsensus',
-  cls: require('../../src/oracle/consensus'),
+  cls: require('../../../../src/oracle/consensus'),
   method: '_isKnownSender'
 }, {
   name: 'CrossChainEngine',
-  cls: require('../../src/cross_chain/engine'),
+  cls: require('../../../../src/cross_chain/engine'),
   method: '_isKnownSender'
 }, {
   name: 'OracleRound',
-  cls: require('../../src/oracle/round'),
+  cls: require('../../../../src/oracle/round'),
   method: 'isRegisteredSender'
 }];
 
@@ -61,11 +61,11 @@ const CHAIN_KEYED = [{
 // start admitting on chain state alone. They keep the registry-keyed predicate.
 const REGISTRY_KEYED = [{
   name: 'Governance',
-  cls: require('../../src/validators/governance'),
+  cls: require('../../../../src/validators/governance'),
   method: '_isKnownSender'
 }, {
   name: 'ReorgHandler',
-  cls: require('../../src/anchor/reorg_handler'),
+  cls: require('../../../../src/anchor/reorg_handler'),
   method: '_isKnownSender'
 }];
 function call(cls, method, peerManager, arg) {
@@ -228,8 +228,8 @@ describe('vote admission follows the chain-effective signer set', function () {
   registerVoteAdmissionFollowsTheChainEffectiveSigneSuite2Part1.call(this);
 });
 describe('one key is one vote (count-mode forgery bound)', function () {
-  const OracleConsensus = require('../../src/oracle/consensus');
-  const CrossChainEngine = require('../../src/cross_chain/engine');
+  const OracleConsensus = require('../../../../src/oracle/consensus');
+  const CrossChainEngine = require('../../../../src/cross_chain/engine');
 
   // A tally that keyed on envelope.sender could be inflated to a full quorum by
   // one authorized key naming N different senders. Keyed on the proven key, those
@@ -286,7 +286,7 @@ describe('one key is one vote (count-mode forgery bound)', function () {
   });
 });
 describe('Consensus.quorumMet counts signing keys', function () {
-  const Consensus = require('../../src/consensus/pbft');
+  const Consensus = require('../../../../src/consensus/pbft');
   it('counts the KEY set, not the addr set, when keys are present', function () {
     const self = Object.create(Consensus.prototype);
     const ctx = {

@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const { bftQuorum, bftQuorumOrSingle } = require('../../src/lib/bft_quorum.js');
+const { bftQuorum, bftQuorumOrSingle } = require('../../../src/lib/bft_quorum.js');
 
 // The pre-extraction inline expression, hand-copied at ~15 consensus sites.
 // The whole point of the extraction is that bftQuorum must reproduce

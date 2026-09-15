@@ -26,9 +26,9 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const Consensus  = require('../../src/consensus/pbft');
-const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_4, makeValidator, makeFederationSnapshot, fixturePubkeyForAddr } = require('../helpers/fixtures');
+const Consensus  = require('../../../../src/consensus/pbft');
+const { createMockHub } = require('../../../helpers/mockHub');
+const { VALIDATORS_4, makeValidator, makeFederationSnapshot, fixturePubkeyForAddr } = require('../../../helpers/fixtures');
 
 // The block-locked population: the four validators that were staked at the
 // round's BTC block. Sorted member pubkeys are v1 < v2 < v3 < v4.

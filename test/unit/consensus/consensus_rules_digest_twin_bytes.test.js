@@ -57,15 +57,15 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
-const crd    = require('../../src/consensus_rules_digest.js');
+const crd    = require('../../../src/consensus_rules_digest.js');
 
 // Sibling checkout, resolved the way every other twin test in this repo
 // resolves it: an explicit env path for CI, falling back to the dev sibling
 // layout.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const INDEXER_COPY = path.join(INDEXER_DIR, 'src', 'consensus_rules_digest.js');
-const MY_COPY      = path.join(__dirname, '..', '..', 'src', 'consensus_rules_digest.js');
+const MY_COPY      = path.join(__dirname, '..', '..', '..', 'src', 'consensus_rules_digest.js');
 const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // The ONLY line that may differ, enumerated as the full text of both sides

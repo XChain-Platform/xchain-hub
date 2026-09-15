@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const swq = require('../../src/stake_weighted_quorum.js');
+const swq = require('../../../src/stake_weighted_quorum.js');
 
 // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
 // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
@@ -153,7 +153,7 @@ function registerStakeUtilityTests() {
             // cross-repo byte-identity is enforced by the dedicated consensus-primitive
             // conformance gate, so the skip is not a false green on this fork-class invariant.
             let canonical;
-            try { canonical = require('../../../xchain-documentation/protocol/constants.js').STAKE_WEIGHTED_QUORUM_ACTIVATION; }
+            try { canonical = require('../../../../xchain-documentation/protocol/constants.js').STAKE_WEIGHTED_QUORUM_ACTIVATION; }
             catch (e) { return this.skip(); }
             expect(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION).to.deep.equal(canonical);
         });

@@ -13,11 +13,11 @@
 const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
-const crd  = require('../../src/consensus_rules_digest.js');
-const PeerManager = require('../../src/peers/manager.js');
-const ValidatorIdentity = require('../../src/validators/identity.js');
+const crd  = require('../../../src/consensus_rules_digest.js');
+const PeerManager = require('../../../src/peers/manager.js');
+const ValidatorIdentity = require('../../../src/validators/identity.js');
 
-const INDEXER_COPY = path.resolve(__dirname, '../../../xchain-indexer/src/consensus_rules_digest.js');
+const INDEXER_COPY = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus_rules_digest.js');
 function registerDigestBasics() {
     it('covers every shared gate and is stable across calls', function () {
         const a = crd.computeConsensusRulesDigest();
@@ -46,7 +46,7 @@ function registerBrokenCarrierTests() {
     describe('a broken carrier is not an absent one', function () {
 
         const os = require('os');
-        const MODULE_SRC = path.resolve(__dirname, '../../src/consensus_rules_digest.js');
+        const MODULE_SRC = path.resolve(__dirname, '../../../src/consensus_rules_digest.js');
 
         // A standalone tree: the module under test plus a stub for every carrier it
         // names. __dirname is what the loader resolves against, so the cases have to own

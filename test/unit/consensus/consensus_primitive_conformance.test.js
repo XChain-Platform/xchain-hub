@@ -28,16 +28,16 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const swq   = require('../../src/stake_weighted_quorum.js');
-const equiv = require('../../src/equivocation_header.js');
+const swq   = require('../../../src/stake_weighted_quorum.js');
+const equiv = require('../../../src/equivocation_header.js');
 
-const LOCAL_DIR = path.join(__dirname, '..', '..', 'src');
+const LOCAL_DIR = path.join(__dirname, '..', '..', '..', 'src');
 // Resolve the canonical xchain-documentation repo. Prefer an explicit path: GitHub CI
 // sets XCHAIN_DOCS_DIR to wherever it checked the sibling out, because actions/checkout
 // cannot write a path above the job workspace (the dev/bin/ci-all.sh sibling layout is
 // one level above each repo). Fall back to that sibling layout for local + dev runs.
 // When neither resolves (standalone deploy), the guards below skip rather than fail.
-const DOCS_DIR  = process.env.XCHAIN_DOCS_DIR || path.join(__dirname, '..', '..', '..', 'xchain-documentation');
+const DOCS_DIR  = process.env.XCHAIN_DOCS_DIR || path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation');
 const CANON_DIR = path.join(DOCS_DIR, 'protocol', 'reference-impl');
 const VEC_DIR   = path.join(DOCS_DIR, 'protocol', 'test-vectors');
 
