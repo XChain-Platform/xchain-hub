@@ -27,44 +27,40 @@ async function seedXchainUsd(cluster) {
     );
 }
 
-describe('E2E: Fee Quote Pipeline', function () {
+let cluster;
 
-    let cluster;
+function missingOracleDataSuite() {
 
-    before(async function () {
-        this.timeout(15000);
-        try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable: skipping E2E fee tests');
-            return;
-        }
-        priceMocks.setup();
-    });
+        it('returns gas info without native coin conversion when no price data', async function () {
+            this.timeout(15000);
 
-    after(async function () {
-        this.timeout(10000);
-        priceMocks.teardown();
-        await testDb.teardown();
-    });
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
 
-    beforeEach(async function () {
-        this.timeout(15000);
-        if (!testDb.isAvailable()) return this.skip();
-        await testDb.truncateAll();
-        priceMocks.reset();
-    });
+            // XCHAIN/USD alone (the fail-closed minimum); no BTC/USD data
+            await seedXchainUsd(cluster);
+            let fee = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
+            expect(fee.result.gasCost).to.equal(100000);
+            expect(fee.result.xchainAmount).to.equal('1.00000000');
+            // No native coin conversion without coin price data
+            expect(fee.result.nativeCoinAmount).to.not.exist;
+        });
 
-    afterEach(async function () {
-        this.timeout(10000);
-        if (cluster) {
-            await cluster.stop();
-            cluster = null;
-        }
-    });
+        it('returns error for unknown action', async function () {
+            this.timeout(15000);
 
-    // E2E-FEE-001: Fee quote uses live oracle prices
-    describe('E2E-FEE-001: Fee quote from oracle data', function () {
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
 
-        it('calculates fee quote using finalized BTC/USD price', async function () {
+            let fee = await callRpc(port, 'getfeequote', { action: 'NONEXISTENT', chain: 'BTC' });
+            expect(fee.result.error).to.include('unknown action');
+        });
+    }
+
+function oracleFeeQuoteSuiteTests1() {
+it('calculates fee quote using finalized BTC/USD price', async function () {
             this.timeout(15000);
 
             priceMocks.mockCoinGeckoSuccess({
@@ -104,8 +100,10 @@ describe('E2E: Fee Quote Pipeline', function () {
             let nativeAmount = parseFloat(fee.result.nativeCoinAmount);
             expect(nativeAmount).to.be.greaterThan(0);
         });
+}
 
-        it('calculates different gas costs for different actions', async function () {
+function oracleFeeQuoteSuiteTests2() {
+it('calculates different gas costs for different actions', async function () {
             this.timeout(15000);
 
             priceMocks.mockCoinGeckoSuccess();
@@ -125,36 +123,54 @@ describe('E2E: Fee Quote Pipeline', function () {
             let vmDeploy = await callRpc(port, 'getfeequote', { action: 'VM_DEPLOY_BASE', chain: 'BTC' });
             expect(vmDeploy.result.gasCost).to.equal(100000);
         });
+}
+
+function oracleFeeQuoteSuite() {
+
+        oracleFeeQuoteSuiteTests1();
+
+        oracleFeeQuoteSuiteTests2();
+    }
+
+function feeQuotePipelineSuite() {
+
+
+
+    before(async function () {
+        this.timeout(15000);
+        try { await testDb.setup(); } catch (e) {
+            console.warn('MariaDB unavailable: skipping E2E fee tests');
+            return;
+        }
+        priceMocks.setup();
     });
+
+    after(async function () {
+        this.timeout(10000);
+        priceMocks.teardown();
+        await testDb.teardown();
+    });
+
+    beforeEach(async function () {
+        this.timeout(15000);
+        if (!testDb.isAvailable()) return this.skip();
+        await testDb.truncateAll();
+        priceMocks.reset();
+    });
+
+    afterEach(async function () {
+        this.timeout(10000);
+        if (cluster) {
+            await cluster.stop();
+            cluster = null;
+        }
+    });
+
+    // E2E-FEE-001: Fee quote uses live oracle prices
+    describe('E2E-FEE-001: Fee quote from oracle data', oracleFeeQuoteSuite);
 
     // E2E-FEE-002: No oracle data (partial response)
-    describe('E2E-FEE-002: Fee quote without oracle data', function () {
+    describe('E2E-FEE-002: Fee quote without oracle data', missingOracleDataSuite);
+}
 
-        it('returns gas info without native coin conversion when no price data', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-
-            // XCHAIN/USD alone (the fail-closed minimum); no BTC/USD data
-            await seedXchainUsd(cluster);
-            let fee = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
-            expect(fee.result.gasCost).to.equal(100000);
-            expect(fee.result.xchainAmount).to.equal('1.00000000');
-            // No native coin conversion without coin price data
-            expect(fee.result.nativeCoinAmount).to.not.exist;
-        });
-
-        it('returns error for unknown action', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-
-            let fee = await callRpc(port, 'getfeequote', { action: 'NONEXISTENT', chain: 'BTC' });
-            expect(fee.result.error).to.include('unknown action');
-        });
-    });
-});
+describe('E2E: Fee Quote Pipeline', feeQuotePipelineSuite);
