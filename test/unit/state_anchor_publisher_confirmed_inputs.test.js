@@ -57,9 +57,10 @@ function buildPub(utxos, extra) {
     return { pub, created, signedCount: () => signed, encoder };
 }
 
+let saved;
+
 describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on the anchor rail)', function () {
 
-    let saved;
     before(function () {
         saved = {};
         for (const k of ENV_KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
@@ -72,6 +73,14 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
     });
     afterEach(function () { for (const k of ENV_KEYS) delete process.env[k]; });
 
+    registerConfirmationSummarySuite();
+    registerConfirmedEncoderSuite();
+    registerUnconfirmedWalletSuite();
+    registerConfirmationWatchdogSuite();
+});
+
+function registerConfirmationSummarySuite() {
+
     describe('the shared summary helper', function () {
         it('splits by depth, tracks the deepest confirmation per txid, and reports unknown when no field is served', function () {
             let s = summarizeUtxoConfirmations([CONFIRMED, UNCONFIRMED, { txid: 'aa'.repeat(32), vout: 2, confirmations: 3 }], 1);
@@ -82,6 +91,9 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             expect(summarizeUtxoConfirmations(null, 1)).to.include({ total: 0, known: false });
         });
     });
+}
+
+function registerConfirmedEncoderSuite() {
 
     describe('what reaches the encoder', function () {
         it('asks for confirmed inputs only by default', async function () {
@@ -106,9 +118,19 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             expect(pub.allowUnconfirmedInputs, 'the default is untouched').to.equal(false);
         });
     });
+}
+
+function registerUnconfirmedWalletSuite() {
 
     describe('a wallet holding only unconfirmed change', function () {
-        it('is refused BEFORE anything is built or signed, with a typed deferral error', async function () {
+        registerUnconfirmedWalletInputTests();
+        registerUnconfirmedWalletFlushTests();
+        registerMidFlushDeferralTest();
+    });
+}
+
+function registerUnconfirmedWalletInputTests() {
+    it('is refused BEFORE anything is built or signed, with a typed deferral error', async function () {
             const { pub, created, signedCount } = buildPub([UNCONFIRMED, { ...UNCONFIRMED, vout: 2 }]);
             let err = null;
             try { await pub.defaultBroadcast('ANCHOR|5|payload'); } catch (e) { err = e; }
@@ -124,6 +146,9 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             await pub.defaultBroadcast('ANCHOR|5|payload');
             expect(created).to.have.length(1);
         });
+}
+
+function registerUnconfirmedWalletFlushTests() {
         it('defers the whole flush at the gate, arms the wake retry, and counts it', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
             pub.checkBalance = async () => 152890;                       // above the floor: balance alone would pass
@@ -155,6 +180,9 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             expect(pub._leaderRetryDue).to.equal(false);
             expect(pub.wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
         });
+}
+
+function registerMidFlushDeferralTest() {
         it('a mid-flush deferral (the last confirmed output spent by an earlier anchor) is a deferral, not a failed publish', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
             let row = { id: 1, chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
@@ -183,9 +211,13 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             expect(pub.noConfirmedUtxoDeferrals).to.equal(1);
             expect(pub._leaderRetryDue).to.equal(true);
         });
-    });
+}
 
-    describe('the confirmation watchdog', function () {
+function registerConfirmationWatchdogSuite() {
+    describe('the confirmation watchdog', registerConfirmationWatchdogTests);
+}
+
+function registerConfirmationWatchdogTests() {
         it('is armed by start() on its own cadence and released by stop()', async function () {
             process.env.ANCHOR_STARTUP_FLUSH_MS = '0';
             const { pub } = buildPub([CONFIRMED]);
@@ -243,5 +275,4 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             expect(pub.confirmationCheckFailures).to.equal(1);
             expect(pub.getAnchorStats().unconfirmedPublishes).to.equal(1);
         });
-    });
-});
+}
