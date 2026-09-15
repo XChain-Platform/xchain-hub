@@ -187,27 +187,29 @@ function snapshotFor(V) {
 }
 
 
+        const os   = require('os');
 
-        const MAP = { BTC: 799004, DOGE: 5000004, LTC: 2400004 };
+        const path = require('path');
+
+        const fs   = require('fs');
+
+        const MAP5 = { DOGE: 5000004, BTC: ADMIT_AT + 3 };
+
+        const MAP6 = { LTC: 2400004, BTC: ADMIT_AT + 4 };
+
+        let dir, pub, signer;
 
 
+        function rounds(base, maps) {
+            return [0, 1].map(i => {
+                let r = { round: 5 + i, timestamp: 1700000000 + i * 600, btcBlockHeight: base + i,
+                          pairs: [{ coinPair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }] };
+                if (maps && maps[i] !== undefined) r.admitBlocks = maps[i];
+                return r;
+            });
+        }
 
-            const V     = validators(4);
-
-            const PAIRS = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }];
-
-            let agg, hub;
-
-
-            function signedRound(map) {
-                const payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
-                return {
-                    source_chain: 'BTC', round: 5, timestamp: 1700000000,
-                    btc_block_height: ADMIT_AT, block_index: 800000, action_index: 42,
-                    pairs: PAIRS, admit_blocks: map,
-                    sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(payload) }))
-                };
-            }
+        const SIGS = [{ pubkey: 'ab'.repeat(32), sig: 'cd'.repeat(64) }];
 
 function registerTheAdmissionMapOnThe1Hooks() {
 
@@ -216,127 +218,93 @@ function registerTheAdmissionMapOnThe1Hooks() {
     afterEach(function () { sinon.restore(); });
 }
 
-function registerEndToEndThroughThe3Hooks() {
+function registerTheBatchProducerCarriesEach2Hooks() {
 
-            beforeEach(function () {
-                hub = createMockHub({ network: NETWORK });
-                hub.capabilitySnapshot = snapshotFor(V);
-                hub.db.doQuery.callsFake(async () => []);
-                agg = new armed.PriceAggregator(hub);
-            });
-}
-
-function registerTheAdmissionMapOnThe1Tests1() {
-
-    it('is ARMED for this suite, so neither era case is vacuous', function () {
-        expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, ADMIT_AT)).to.equal(true);
-        expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, LEGACY_AT)).to.equal(false);
-        expect(armed.act.isMirrorAdmissionProducerActive('LTC', NETWORK, ADMIT_AT)).to.equal(true);
-        expect(armed.act.isMirrorAdmissionProducerActive('LTC', 'mainnet', ADMIT_AT)).to.equal(false);
-    });
-}
-
-function registerPushpriceroundCarriesAdmitBlocksTo2Tests2() {
-
-        it('forwards the map verbatim, alongside every key it already forwarded', async function () {
-            const receiveValidatedRound = sinon.stub().resolves({ accepted: true });
-            const controller = await bootApi({ priceAggregator: { receiveValidatedRound } });
-
-            const pairs = [{ pair: 'BTC/USD', price: '50000' }];
-            await controller.pushpriceround({
-                source_chain: 'BTC', round: 5, timestamp: 1700000000, btc_block_height: ADMIT_AT,
-                pairs, sigs: [{ pubkey: 'ab', sig: 'cd' }], action_index: 42, block_index: 800000,
-                push_generation: 3, admit_blocks: MAP
-            });
-
-            const [chainArg, payload] = receiveValidatedRound.firstCall.args;
-            expect(chainArg).to.equal('BTC');
-            // The whole key set, deep-equalled: the handler's parameter list IS the
-            // interface, an unnamed key is dropped in silence, and a typo here is a
-            // runtime refusal rather than a build error.
-            expect(payload).to.deep.equal({
-                round: 5, timestamp: 1700000000, btc_block_height: ADMIT_AT,
-                pairs, sigs: [{ pubkey: 'ab', sig: 'cd' }], action_index: 42, block_index: 800000,
-                push_generation: 3, admit_blocks: MAP
-            });
+        before(function () {
+            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'row26-pub-'));
+            const hub = {
+                p2pConfig: { PUBLISHER_QUEUE_PATH: path.join(dir, 'publisher-queue.jsonl') },
+                network: NETWORK, db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]) },
+                getIdentity: () => null, getPeerManager: () => ({}), capabilitySnapshot: null,
+                oracleConsensus: null, oracleBatchSigner: null
+            };
+            pub    = new armed.OraclePublisher(hub);
+            signer = new armed.OracleBatchSigner(hub);
         });
-
-        it('leaves the map ABSENT when the pusher sent none, which is what a legacy round is', async function () {
-            const receiveValidatedRound = sinon.stub().resolves({ accepted: true });
-            const controller = await bootApi({ priceAggregator: { receiveValidatedRound } });
-            await controller.pushpriceround({
-                source_chain: 'BTC', round: 5, timestamp: 1700000000, btc_block_height: LEGACY_AT,
-                pairs: [{ pair: 'BTC/USD', price: '50000' }], sigs: [], block_index: 1
-            });
-            const payload = receiveValidatedRound.firstCall.args[1];
-            expect(payload.admit_blocks).to.equal(undefined);
-            expect('admit_blocks' in payload).to.equal(true);   // named, and undefined, never omitted
+        after(function () {
+            try { if (pub && typeof pub.stop === 'function') pub.stop(); } catch (e) { /* teardown only */ }
+            try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* teardown only */ }
         });
 }
 
-function registerEndToEndThroughThe3Tests4() {
+function registerTheBatchProducerCarriesEach2Tests1() {
 
-            it('accepts the round when the RPC carries the map the producer signed', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const result = await controller.pushpriceround(signedRound(MAP));
-                expect(result.accepted).to.equal(true, 'reason: ' + result.reason);
-            });
+        it('emits ADMIT_BLOCKS after each era round\'s pairs, spelled by the one encoder, and nothing below the activation', function () {
+            const body = pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT, [MAP5, MAP6]), SIGS).split('|');
+            // FIRST|LAST|ANCHOR|COUNT, then per round ROUND|TS|ANCHOR|PAIR_COUNT|pair|price x2|ADMIT_BLOCKS
+            expect(body.slice(0, 4)).to.deep.equal(['5', '6', String(ADMIT_AT + 1), '2']);
+            expect(body[4 + 8]).to.equal(armed.act.encodeAdmitBlocks(MAP5));
+            expect(body[4 + 9 + 8]).to.equal(armed.act.encodeAdmitBlocks(MAP6));
+            expect(body[4 + 18]).to.equal('1');                       // SIG_COUNT sits right after the second slot
+            const legacy = pub.buildPriceBatchBody(5, 6, LEGACY_AT, rounds(LEGACY_AT - 1), SIGS).split('|');
+            expect(legacy[4 + 8]).to.equal('6');                      // the next ROUND, no slot in between
+            expect(legacy.join('|')).to.not.match(/BTC:/);
+        });
 
-            it('REFUSES the identical round when the RPC drops the map', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const params = signedRound(MAP);
-                delete params.admit_blocks;                  // the pre-row behaviour, exactly
-                const result = await controller.pushpriceround(params);
-                expect(result.accepted).to.equal(false);
-                expect(result.reason).to.match(/refusing to build a legacy canonical/);
-            });
+        it('refuses to emit a wire for an era round with no map, so nothing its verifiers would refuse is ever spent on', function () {
+            expect(() => pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT), SIGS))
+                .to.throw(/has no admit_blocks; refusing to build a legacy canonical/);
+        });
 
-            it('refuses a map edited in flight, so the carrier cannot be used to rewrite one', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const params = signedRound(MAP);
-                params.admit_blocks = Object.assign({}, MAP, { BTC: MAP.BTC + 1 });
-                const result = await controller.pushpriceround(params);
-                expect(result.accepted).to.equal(false, 'an edited admission map verified');
-            });
+        it('splits a window at the activation, so no batch straddles it', function () {
+            expect(pub.flagDayKey(LEGACY_AT)).to.not.equal(pub.flagDayKey(ADMIT_AT));
+            const segments = pub.splitByFlagDay(rounds(LEGACY_AT, [undefined, MAP6]));
+            expect(segments.map(seg => seg.map(r => r.round))).to.deep.equal([[5], [6]]);
+            expect(signer.straddlesArmedOracleFlagDay(LEGACY_AT, ADMIT_AT)).to.equal(true);
+            expect(signer.straddlesArmedOracleFlagDay(ADMIT_AT, ADMIT_AT + 5)).to.equal(false);
+        });
 
-            it('round-trips the map: signed bytes -> wire field -> decode -> re-encode, identical', async function () {
-                const canonical = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, MAP);
-                const field     = canonical.slice(canonical.lastIndexOf('|') + 1);
-                const decoded   = armed.act.decodeAdmitBlocks(field);
-                assert.deepStrictEqual(decoded, MAP, 'the wire field did not decode to the signed map');
-                assert.strictEqual(armed.act.encodeAdmitBlocks(decoded), field,
-                    're-encoding the decoded map did not reproduce the wire bytes');
-                // And the legacy round below the activation is the pre-change bytes exactly:
-                // the body is terminal, so there is no field and nothing to strip.
-                const legacy = agg._buildPriceV0Payload(5, 1700000000, PAIRS, LEGACY_AT, undefined);
-                expect(legacy.endsWith('}')).to.equal(true, legacy.slice(-40));
-                expect(legacy).to.not.match(/BTC:/);
-            });
+        it('the signer rebuilds each round\'s map from its stored columns, and refuses a round whose pairs disagree', async function () {
+            const row = (round, pair, admit) => Object.assign({ round_number: round, coin_pair: pair, price: '1',
+                reference_block: ADMIT_AT, block_timestamp: 1700000000, proof_head: '[' }, admit);
+            signer.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([
+                row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(6, 'BTC/USD', { admit_block_btc: null, admit_block_ltc: null, admit_block_doge: null })
+            ]) };
+            const derived = await signer.deriveWindow(5, 6);
+            expect(derived.map(r => r.admitBlocks)).to.deep.equal([{ BTC: MAP5.BTC, DOGE: MAP5.DOGE }, undefined]);
+            expect(signer.db.doQuery.firstCall.args[0]).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge/);
+
+            signer.db = { ...DB_METHODS, doQuery: sinon.stub().resolves([
+                row(5, 'BTC/USD', { admit_block_btc: MAP5.BTC, admit_block_ltc: null, admit_block_doge: MAP5.DOGE }),
+                row(5, 'LTC/USD', { admit_block_btc: MAP5.BTC + 1, admit_block_ltc: null, admit_block_doge: MAP5.DOGE })
+            ]) };
+            let err = null;
+            try { await signer.deriveWindow(5, 5); } catch (e) { err = e; }
+            expect(err && err.message).to.match(/inconsistent anchor\/timestamp\/admission map across round 5/);
+        });
+
+        it('the buffer entry carries the finalized round\'s map, and only when the event has one', function () {
+            const base = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: ADMIT_AT, prices: [{ coinPair: 'BTC/USD', price: '1' }] };
+            expect(pub.bufferEntryFromEvent(Object.assign({ admitBlocks: MAP5 }, base)).admitBlocks).to.deep.equal(MAP5);
+            expect(pub.bufferEntryFromEvent(Object.assign({ admitBlocks: null }, base))).to.not.have.property('admitBlocks');
+            expect(pub.bufferEntryFromEvent(base)).to.not.have.property('admitBlocks');
+        });
 
 }
 
 describe('the admission map on the price wire (rows 17 and 14)', function () {
     registerTheAdmissionMapOnThe1Hooks();
-    registerTheAdmissionMapOnThe1Tests1();
 
 
 
     // -----------------------------------------------------------------------
-    // 1. pushpriceround: the round rail's carrier
+    // 2b. the producer side of the batch wire (row 26): the on-chain slot, the split at
+    //     the activation, and the signer rebuilding each round's map from its columns
     // -----------------------------------------------------------------------
-    describe('pushpriceround carries admit_blocks to the verifier', function () {
-        registerPushpriceroundCarriesAdmitBlocksTo2Tests2();
-
-
-
-        // THE LOAD-BEARING CASE. The real armed aggregator behind the real RPC handler: the
-        // producer's map is encoded into the signed canonical, travels as a push field,
-        // and the verifier rebuilds the identical bytes from it. Strip the field from the
-        // identical call and the same signatures no longer describe any round the verifier
-        // will build, which is precisely what was happening to every round before this row.
-        describe('end to end through the RPC surface, with the real aggregator', function () {
-            registerEndToEndThroughThe3Hooks();
-            registerEndToEndThroughThe3Tests4();
-        });
+    describe('the batch producer carries each round\'s map onto the on-chain wire', function () {
+        registerTheBatchProducerCarriesEach2Hooks();
+        registerTheBatchProducerCarriesEach2Tests1();
     });
 });

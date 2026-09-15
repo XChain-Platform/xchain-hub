@@ -188,25 +188,45 @@ function snapshotFor(V) {
 
 
 
-        const MAP = { BTC: 799004, DOGE: 5000004, LTC: 2400004 };
+        // INSERT column order: source_address, source_chain, coin, tick, fiat, value, fee,
+        // memo, block_time, effective_at, action_index, push_generation, admit_block.
+        const ADMIT_BLOCK = 12;
+
+
+        const V1 = {
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
+            value: '1.23', block_time: 1700000000, action_index: 7
+        };
+
+
+        function aggWithTip(network, tip) {
+            const hub = createMockHub({ network });
+            if (tip !== 'no-resolver')
+                hub.resolveAdmissionTip = sinon.stub().resolves(tip);
+            const agg = new armed.PriceAggregator(hub);
+            let insertArgs = null;
+            hub.db.doQuery.callsFake(async (sql, params) => {
+                if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+                return [];
+            });
+            return { agg, hub, insert: () => insertArgs };
+        }
 
 
 
-            const V     = validators(4);
-
-            const PAIRS = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }];
-
-            let agg, hub;
+            let zeroArmed = null;
 
 
-            function signedRound(map) {
-                const payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, map);
-                return {
-                    source_chain: 'BTC', round: 5, timestamp: 1700000000,
-                    btc_block_height: ADMIT_AT, block_index: 800000, action_index: 42,
-                    pairs: PAIRS, admit_blocks: map,
-                    sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(payload) }))
-                };
+            function aggAt(tip) {
+                const hub = createMockHub({ network: NETWORK });
+                hub.resolveAdmissionTip = sinon.stub().resolves(tip);
+                const agg = new zeroArmed.PriceAggregator(hub);
+                let insertArgs = null;
+                hub.db.doQuery.callsFake(async (sql, params) => {
+                    if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+                    return [];
+                });
+                return { agg, insert: () => insertArgs };
             }
 
 function registerTheAdmissionMapOnThe1Hooks() {
@@ -216,127 +236,124 @@ function registerTheAdmissionMapOnThe1Hooks() {
     afterEach(function () { sinon.restore(); });
 }
 
-function registerEndToEndThroughThe3Hooks() {
-
-            beforeEach(function () {
-                hub = createMockHub({ network: NETWORK });
-                hub.capabilitySnapshot = snapshotFor(V);
-                hub.db.doQuery.callsFake(async () => []);
-                agg = new armed.PriceAggregator(hub);
-            });
+function registerArmedAtHeight0Where3Hooks() {
+            before(function () { zeroArmed = armTwins(0); });
+            after(function () { if (zeroArmed) zeroArmed.restore(); zeroArmed = null; });
 }
 
-function registerTheAdmissionMapOnThe1Tests1() {
+function registerOraclePricesAdmitBlockStamped2Tests1() {
 
-    it('is ARMED for this suite, so neither era case is vacuous', function () {
-        expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, ADMIT_AT)).to.equal(true);
-        expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, LEGACY_AT)).to.equal(false);
-        expect(armed.act.isMirrorAdmissionProducerActive('LTC', NETWORK, ADMIT_AT)).to.equal(true);
-        expect(armed.act.isMirrorAdmissionProducerActive('LTC', 'mainnet', ADMIT_AT)).to.equal(false);
-    });
-}
+        it('stamps tip + the oracle margin of 1 block, on the PUBLISHING chain', async function () {
+            const t = aggWithTip(NETWORK, 799010);
+            const events = [];
+            t.agg.on('row:inserted', e => events.push(e));
 
-function registerPushpriceroundCarriesAdmitBlocksTo2Tests2() {
-
-        it('forwards the map verbatim, alongside every key it already forwarded', async function () {
-            const receiveValidatedRound = sinon.stub().resolves({ accepted: true });
-            const controller = await bootApi({ priceAggregator: { receiveValidatedRound } });
-
-            const pairs = [{ pair: 'BTC/USD', price: '50000' }];
-            await controller.pushpriceround({
-                source_chain: 'BTC', round: 5, timestamp: 1700000000, btc_block_height: ADMIT_AT,
-                pairs, sigs: [{ pubkey: 'ab', sig: 'cd' }], action_index: 42, block_index: 800000,
-                push_generation: 3, admit_blocks: MAP
-            });
-
-            const [chainArg, payload] = receiveValidatedRound.firstCall.args;
-            expect(chainArg).to.equal('BTC');
-            // The whole key set, deep-equalled: the handler's parameter list IS the
-            // interface, an unnamed key is dropped in silence, and a typo here is a
-            // runtime refusal rather than a build error.
-            expect(payload).to.deep.equal({
-                round: 5, timestamp: 1700000000, btc_block_height: ADMIT_AT,
-                pairs, sigs: [{ pubkey: 'ab', sig: 'cd' }], action_index: 42, block_index: 800000,
-                push_generation: 3, admit_blocks: MAP
-            });
-        });
-
-        it('leaves the map ABSENT when the pusher sent none, which is what a legacy round is', async function () {
-            const receiveValidatedRound = sinon.stub().resolves({ accepted: true });
-            const controller = await bootApi({ priceAggregator: { receiveValidatedRound } });
-            await controller.pushpriceround({
-                source_chain: 'BTC', round: 5, timestamp: 1700000000, btc_block_height: LEGACY_AT,
-                pairs: [{ pair: 'BTC/USD', price: '50000' }], sigs: [], block_index: 1
-            });
-            const payload = receiveValidatedRound.firstCall.args[1];
-            expect(payload.admit_blocks).to.equal(undefined);
-            expect('admit_blocks' in payload).to.equal(true);   // named, and undefined, never omitted
+            const result = await t.agg.receiveOraclePrice('LTC', V1);
+            expect(result).to.deep.equal({ accepted: true });
+            // The tip was read for LTC, the row's own source_chain, not for BTC.
+            expect(t.hub.resolveAdmissionTip.calledOnceWithExactly('LTC')).to.equal(true);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(799011);
+            expect(events[0].row.admit_block).to.equal(799011,
+                'the broadcast row must carry the same height the INSERT stored');
         });
 }
 
-function registerEndToEndThroughThe3Tests4() {
+function registerOraclePricesAdmitBlockStamped2Tests2() {
 
-            it('accepts the round when the RPC carries the map the producer signed', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const result = await controller.pushpriceround(signedRound(MAP));
-                expect(result.accepted).to.equal(true, 'reason: ' + result.reason);
+        it('leaves NULL, never 0, when the hub has no fresh tip for the chain', async function () {
+            const t = aggWithTip(NETWORK, null);
+            const result = await t.agg.receiveOraclePrice('LTC', V1);
+            expect(result).to.deep.equal({ accepted: true });   // the row still lands
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
+        });
+
+        it('leaves NULL when the tip read throws', async function () {
+            const t = aggWithTip(NETWORK, null);
+            t.hub.resolveAdmissionTip = sinon.stub().rejects(new Error('indexer down'));
+            await t.agg.receiveOraclePrice('LTC', V1);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
+        });
+
+        it('leaves NULL when the hub carries no admission resolver at all', async function () {
+            const t = aggWithTip(NETWORK, 'no-resolver');
+            await t.agg.receiveOraclePrice('LTC', V1);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
+        });
+
+        it('leaves NULL BELOW the activation even with a perfectly fresh tip', async function () {
+            const t = aggWithTip(NETWORK, LEGACY_AT);
+            await t.agg.receiveOraclePrice('LTC', V1);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null,
+                'a row below the activation must be byte-identical to today\'s row');
+        });
+
+        it('leaves NULL on a network whose activation is inert, at any height', async function () {
+            const t = aggWithTip('mainnet', ADMIT_AT + 1000000);
+            await t.agg.receiveOraclePrice('LTC', V1);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
+        });
+
+        it('leaves NULL when the row names no source chain to verify a height against', async function () {
+            const t = aggWithTip(NETWORK, 799010);
+            await t.agg.receiveOraclePrice('', V1);
+            expect(t.insert()[ADMIT_BLOCK]).to.equal(null);
+            expect(t.hub.resolveAdmissionTip.called).to.equal(false);
+        });
+
+        it('guards the stamp with the same generation rule as every other column', async function () {
+            const t = aggWithTip(NETWORK, 799010);
+            await t.agg.receiveOraclePrice('LTC', V1);
+            const sql = t.hub.db.doQuery.getCalls()
+                .find(c => /^INSERT INTO oracle_prices/.test(c.args[0])).args[0];
+            expect(sql).to.match(
+                /admit_block\s+= IF\(VALUES\(push_generation\) > push_generation, VALUES\(admit_block\), admit_block\)/);
+            // Assigned BEFORE push_generation, or its own IF would read the NEW generation
+            // and every stale replay would win.
+            expect(sql.indexOf('admit_block    = IF'))
+                .to.be.below(sql.indexOf('push_generation = GREATEST'));
+        });
+
+}
+
+function registerArmedAtHeight0Where3Tests9() {
+
+            it('stamps a tip of 0 as height 1', async function () {
+                const t = aggAt(0);
+                await t.agg.receiveOraclePrice('LTC', V1);
+                expect(t.insert()[ADMIT_BLOCK]).to.equal(1);
             });
 
-            it('REFUSES the identical round when the RPC drops the map', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const params = signedRound(MAP);
-                delete params.admit_blocks;                  // the pre-row behaviour, exactly
-                const result = await controller.pushpriceround(params);
-                expect(result.accepted).to.equal(false);
-                expect(result.reason).to.match(/refusing to build a legacy canonical/);
-            });
-
-            it('refuses a map edited in flight, so the carrier cannot be used to rewrite one', async function () {
-                const controller = await bootApi({ priceAggregator: agg });
-                const params = signedRound(MAP);
-                params.admit_blocks = Object.assign({}, MAP, { BTC: MAP.BTC + 1 });
-                const result = await controller.pushpriceround(params);
-                expect(result.accepted).to.equal(false, 'an edited admission map verified');
-            });
-
-            it('round-trips the map: signed bytes -> wire field -> decode -> re-encode, identical', async function () {
-                const canonical = agg._buildPriceV0Payload(5, 1700000000, PAIRS, ADMIT_AT, MAP);
-                const field     = canonical.slice(canonical.lastIndexOf('|') + 1);
-                const decoded   = armed.act.decodeAdmitBlocks(field);
-                assert.deepStrictEqual(decoded, MAP, 'the wire field did not decode to the signed map');
-                assert.strictEqual(armed.act.encodeAdmitBlocks(decoded), field,
-                    're-encoding the decoded map did not reproduce the wire bytes');
-                // And the legacy round below the activation is the pre-change bytes exactly:
-                // the body is terminal, so there is no field and nothing to strip.
-                const legacy = agg._buildPriceV0Payload(5, 1700000000, PAIRS, LEGACY_AT, undefined);
-                expect(legacy.endsWith('}')).to.equal(true, legacy.slice(-40));
-                expect(legacy).to.not.match(/BTC:/);
+            it('stamps NOTHING for an absent tip at the same arming', async function () {
+                const t = aggAt(null);
+                await t.agg.receiveOraclePrice('LTC', V1);
+                expect(t.insert()[ADMIT_BLOCK]).to.equal(null,
+                    'an absent tip was coerced to height 0 and stamped');
             });
 
 }
 
 describe('the admission map on the price wire (rows 17 and 14)', function () {
     registerTheAdmissionMapOnThe1Hooks();
-    registerTheAdmissionMapOnThe1Tests1();
 
 
 
     // -----------------------------------------------------------------------
-    // 1. pushpriceround: the round rail's carrier
+    // 3. row 14: oracle_prices.admit_block from the hub's own ingest
     // -----------------------------------------------------------------------
-    describe('pushpriceround carries admit_blocks to the verifier', function () {
-        registerPushpriceroundCarriesAdmitBlocksTo2Tests2();
+    describe('oracle_prices.admit_block, stamped from the hub\'s own ingest (row 14)', function () {
+        registerOraclePricesAdmitBlockStamped2Tests1();
 
 
 
-        // THE LOAD-BEARING CASE. The real armed aggregator behind the real RPC handler: the
-        // producer's map is encoded into the signed canonical, travels as a push field,
-        // and the verifier rebuilds the identical bytes from it. Strip the field from the
-        // identical call and the same signatures no longer describe any round the verifier
-        // will build, which is precisely what was happening to every round before this row.
-        describe('end to end through the RPC surface, with the real aggregator', function () {
-            registerEndToEndThroughThe3Hooks();
-            registerEndToEndThroughThe3Tests4();
+        // A TIP OF ZERO IS NOT A MISSING TIP, and this is the one case that separates them,
+        // so it needs the gate armed at height 0 rather than at 799000. The trap the whole
+        // rail is written against: Number(null) and Number('') are both 0, so a coercing
+        // guard reads an ABSENT tip as height 0 and stamps 0 + margin, a row admissible at a
+        // block every live chain passed years ago. Driven both ways under one arming.
+        describe('armed at height 0, where a tip of 0 is inside the era', function () {
+            registerArmedAtHeight0Where3Hooks();
+            registerArmedAtHeight0Where3Tests9();
         });
+        registerOraclePricesAdmitBlockStamped2Tests2();
     });
 });
