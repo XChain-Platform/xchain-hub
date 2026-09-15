@@ -155,16 +155,16 @@ describe('price_batch_compression: consensus constants @regression', function(){
     });
 });
 
-describe('price_batch_compression: round trip @regression', function(){
+{
 
-    it('a compressed body inflates back byte-identically', function(){
+    function aCompressedBodyInflatesBackByteTest2(){
         const body = buildRealisticV2Body();
         const r = c.inflatePriceBatchBody(c.compressPriceBatchBody(body));
         assert.strictEqual(r.ok, true, r.reason);
         assert.strictEqual(r.body, body);
-    });
+    }
 
-    it('MEASUREMENT: a realistic six-round batch fits the wire compressed', function(){
+    function measurementARealisticSixRoundBatchTest3(){
         const body  = buildRealisticV2Body();
         const field = c.compressPriceBatchBody(body);
         const r     = c.inflatePriceBatchBody(field);
@@ -201,38 +201,48 @@ describe('price_batch_compression: round trip @regression', function(){
         // start tripping a bomb defense.
         assert.ok(r.ratio < c.PRICE_BATCH_MAX_INFLATE_RATIO / 10,
             'honest ratio ' + r.ratio + ' is uncomfortably close to the cap');
-    });
+    }
 
-    it('round trips a body containing every printable ASCII character', function(){
+    function roundTripsABodyContainingEveryTest4(){
         let body = '';
         for(let i = 32; i < 127; i++) body += String.fromCharCode(i);
         const r = c.inflatePriceBatchBody(c.compressPriceBatchBody(body));
         assert.strictEqual(r.ok, true, r.reason);
         assert.strictEqual(r.body, body);
-    });
+    }
 
-    it('compressPriceBatchBody refuses a non-string body', function(){
+    function compresspricebatchbodyRefusesANonStringBodyTest5(){
         assert.throws(() => c.compressPriceBatchBody(Buffer.from('x')), TypeError);
         assert.throws(() => c.compressPriceBatchBody(null), TypeError);
-    });
-});
+    }
 
-describe('price_batch_compression: the bomb is refused before the buffer grows @regression', function(){
+    function priceBatchCompressionRoundTripRegressionSuite1() {
+        it('a compressed body inflates back byte-identically', aCompressedBodyInflatesBackByteTest2);
+        it('MEASUREMENT: a realistic six-round batch fits the wire compressed', measurementARealisticSixRoundBatchTest3);
+        it('round trips a body containing every printable ASCII character', roundTripsABodyContainingEveryTest4);
+        it('compressPriceBatchBody refuses a non-string body', compresspricebatchbodyRefusesANonStringBodyTest5);
+    }
 
-    // 200 KB of one byte deflates to a couple of hundred bytes, a ratio near
-    // 950:1. This is the payload the cap exists for.
+    describe('price_batch_compression: round trip @regression', priceBatchCompressionRoundTripRegressionSuite1);
+
+}
+
+{
+
     const BOMB_PLAIN = Buffer.alloc(200 * 1024, 0x41);
+
     const BOMB_RAW   = zlib.deflateRawSync(BOMB_PLAIN, { level: 9 });
+
     const BOMB_FIELD = BOMB_RAW.toString('base64');
 
-    it('the fixture really is a bomb (unbounded inflate proves the size)', function(){
+    function theFixtureReallyIsABombTest7(){
         const unbounded = zlib.inflateRawSync(BOMB_RAW);
         assert.strictEqual(unbounded.length, BOMB_PLAIN.length);
         assert.ok(unbounded.length / BOMB_RAW.length > c.PRICE_BATCH_MAX_INFLATE_RATIO,
             'fixture ratio is only ' + (unbounded.length / BOMB_RAW.length));
-    });
+    }
 
-    it('zlib raises the BOUNDED-OUTPUT error, so the memory is never allocated', function(){
+    function zlibRaisesTheBoundedOutputErrorTest8(){
         // The distinction this test exists to make: ERR_BUFFER_TOO_LARGE can
         // only come from maxOutputLength stopping the inflate mid-stream. An
         // implementation that inflated first and measured afterwards could not
@@ -243,9 +253,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
             () => zlib.inflateRawSync(BOMB_RAW, { maxOutputLength: cap }),
             (e) => e.code === 'ERR_BUFFER_TOO_LARGE'
         );
-    });
+    }
 
-    it('rejects the bomb and never returns a body', function(){
+    function rejectsTheBombAndNeverReturnsTest9(){
         const r = c.inflatePriceBatchBody(BOMB_FIELD);
         assert.strictEqual(r.ok, false);
         // 200 KB deflates to ~216 bytes, and 216 * 150 is already past the wire
@@ -254,9 +264,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(r.status, 'invalid: COMPRESSION (size-cap)');
         assert.strictEqual(r.detail, c.PRICE_WIRE_MAX_BYTES);
         assert.strictEqual(r.body, undefined, 'a failure must never carry a body');
-    });
+    }
 
-    it('rejects a bomb small enough that the RATIO bound binds first', function(){
+    function rejectsABombSmallEnoughThatTest10(){
         // 20 KB of one byte deflates to ~37 bytes, so 37 * 150 is under the wire
         // ceiling and the ratio is what refuses it. Both bounds need a live
         // fixture or one of them is only ever exercised as dead arithmetic.
@@ -268,9 +278,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(r.reason, 'ratio-cap');
         assert.strictEqual(r.detail, raw.length * c.PRICE_BATCH_MAX_INFLATE_RATIO);
         assert.strictEqual(r.body, undefined);
-    });
+    }
 
-    it('rejects a ratio breach that would have FIT the wire ceiling', function(){
+    function rejectsARatioBreachThatWouldTest11(){
         // The two bounds are independent, and this is the case that proves it.
         // 8,000 bytes of one repeated byte fit the wire comfortably, so the
         // size bound alone would ADMIT this payload; only the ratio cap refuses
@@ -288,9 +298,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(r.reason, 'ratio-cap');
         assert.strictEqual(r.detail, raw.length * c.PRICE_BATCH_MAX_INFLATE_RATIO);
         assert.strictEqual(r.body, undefined);
-    });
+    }
 
-    it('rejects an over-ceiling payload with the size-cap reason', function(){
+    function rejectsAnOverCeilingPayloadWithTest12(){
         // Compressible enough that the ratio stays legal, large enough that the
         // inflated body cannot fit the wire. This is the OTHER bound, and it
         // must be distinguishable from the ratio breach.
@@ -309,9 +319,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(r.reason, 'size-cap');
         assert.strictEqual(r.detail, c.PRICE_WIRE_MAX_BYTES);
         assert.strictEqual(r.body, undefined);
-    });
+    }
 
-    it('accepts a body of exactly the wire ceiling and rejects one byte more', function(){
+    function acceptsABodyOfExactlyTheTest13(){
         // The size bound is inclusive. Both sides are driven, because an
         // off-by-one here forks a node that admits the batch from one that does
         // not. Incompressible-ish hex filler keeps the RATIO legal so this test
@@ -328,9 +338,9 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(rOver.ok, false);
         assert.strictEqual(rOver.reason, 'size-cap');
         assert.strictEqual(rOver.detail, c.PRICE_WIRE_MAX_BYTES);
-    });
+    }
 
-    it('accepts a payload sitting exactly ON the ratio cap', function(){
+    function acceptsAPayloadSittingExactlyOnTest14(){
         // 3,150 bytes of one repeated byte deflate to exactly 21, and
         // 21 * 150 == 3150, so this payload sits on the bound rather than near
         // it. The cap is a maximum, so it must be admitted.
@@ -342,187 +352,19 @@ describe('price_batch_compression: the bomb is refused before the buffer grows @
         assert.strictEqual(r.ok, true, r.reason);
         assert.strictEqual(r.ratio, c.PRICE_BATCH_MAX_INFLATE_RATIO);
         assert.strictEqual(r.body, plain);
-    });
-});
+    }
 
-describe('price_batch_compression: strictly canonical base64 @regression', function(){
+    function priceBatchCompressionTheBombIsSuite6() {
+        it('the fixture really is a bomb (unbounded inflate proves the size)', theFixtureReallyIsABombTest7);
+        it('zlib raises the BOUNDED-OUTPUT error, so the memory is never allocated', zlibRaisesTheBoundedOutputErrorTest8);
+        it('rejects the bomb and never returns a body', rejectsTheBombAndNeverReturnsTest9);
+        it('rejects a bomb small enough that the RATIO bound binds first', rejectsABombSmallEnoughThatTest10);
+        it('rejects a ratio breach that would have FIT the wire ceiling', rejectsARatioBreachThatWouldTest11);
+        it('rejects an over-ceiling payload with the size-cap reason', rejectsAnOverCeilingPayloadWithTest12);
+        it('accepts a body of exactly the wire ceiling and rejects one byte more', acceptsABodyOfExactlyTheTest13);
+        it('accepts a payload sitting exactly ON the ratio cap', acceptsAPayloadSittingExactlyOnTest14);
+    }
 
-    const BODY  = '481200|481205|918442|1|481200|1756180800|918442|1|BTC/USD|104325.00000000|1|aa|bb';
-    const FIELD = c.compressPriceBatchBody(BODY);
+    describe('price_batch_compression: the bomb is refused before the buffer grows @regression', priceBatchCompressionTheBombIsSuite6);
 
-    it('positive control: the canonical spelling is accepted', function(){
-        const r = c.inflatePriceBatchBody(FIELD);
-        assert.strictEqual(r.ok, true, r.reason);
-        assert.strictEqual(r.body, BODY);
-    });
-
-    const nonCanonical = {
-        'embedded space':        () => FIELD.slice(0, 4) + ' ' + FIELD.slice(4),
-        'leading whitespace':    () => ' ' + FIELD,
-        'trailing newline':      () => FIELD + '\n',
-        'embedded newline':      () => FIELD.slice(0, 8) + '\n' + FIELD.slice(8),
-        'URL-safe alphabet':     () => FIELD.replace(/\+/g, '-').replace(/\//g, '_'),
-        'padding stripped':      () => FIELD.replace(/=+$/, ''),
-        'extra padding':         () => FIELD + '=',
-        'padding in the middle': () => FIELD.slice(0, 4) + '=' + FIELD.slice(5),
-        'out-of-alphabet char':  () => FIELD.slice(0, 4) + '*' + FIELD.slice(5),
-        'unicode lookalike':     () => FIELD.slice(0, 4) + 'А' + FIELD.slice(5)
-    };
-
-    Object.keys(nonCanonical).forEach(function(name){
-        it('rejects ' + name, function(){
-            const bad = nonCanonical[name]();
-            if(bad === FIELD) return this.skip();   // fixture had nothing to mangle
-            const r = c.inflatePriceBatchBody(bad);
-            assert.strictEqual(r.ok, false, name + ' was ACCEPTED, which is a consensus split');
-            assert.strictEqual(r.reason, 'non-canonical-base64');
-            assert.strictEqual(r.body, undefined);
-        });
-    });
-
-    it('rejects a redundant spelling that decodes to the same bytes', function(){
-        // The case a regex-only check waves through: Buffer.from ignores the
-        // unused low bits of a padded final quantum, so `QQ==` and `QR==` are
-        // both the byte 0x41. Exactly one of them may be valid on the wire.
-        const canonical = fieldOf(Buffer.from([0x41]));
-        assert.strictEqual(canonical, 'QQ==');
-        const alt = alternateSpelling(canonical);
-        assert.ok(alt && alt !== canonical, 'expected an alternate spelling to exist');
-        assert.ok(Buffer.from(alt, 'base64').equals(Buffer.from(canonical, 'base64')),
-            'the alternate must decode to the same bytes, or this test proves nothing');
-
-        assert.notStrictEqual(c.decodeCanonicalBase64(canonical), null);
-        assert.strictEqual(c.decodeCanonicalBase64(alt), null);
-    });
-
-    it('rejects a redundant spelling of a real compressed payload', function(){
-        const alt = alternateSpelling(FIELD);
-        if(!alt) return this.skip();
-        const r = c.inflatePriceBatchBody(alt);
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.reason, 'non-canonical-base64');
-    });
-});
-
-describe('price_batch_compression: every failure is explicit and terminal @regression', function(){
-
-    const cases = [
-        ['non-string (undefined)', undefined,                     'not-a-string'],
-        ['non-string (null)',      null,                          'not-a-string'],
-        ['non-string (Buffer)',    Buffer.from('AAAA'),            'not-a-string'],
-        ['non-string (number)',    12345,                         'not-a-string'],
-        ['empty field',            '',                            'empty'],
-        ['oversize field',         'A'.repeat(8192),              'oversize-field']
-    ];
-
-    cases.forEach(function([name, input, reason]){
-        it('rejects ' + name + ' as ' + reason, function(){
-            const r = c.inflatePriceBatchBody(input);
-            assert.strictEqual(r.ok, false);
-            assert.strictEqual(r.reason, reason);
-            assert.strictEqual(r.status, 'invalid: COMPRESSION (' + reason + ')');
-        });
-    });
-
-    it('rejects canonical base64 that is not a deflate stream', function(){
-        const r = c.inflatePriceBatchBody(fieldOf(Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])));
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.reason, 'inflate-failed');
-        assert.strictEqual(r.body, undefined);
-    });
-
-    it('rejects a truncated deflate stream', function(){
-        const raw = zlib.deflateRawSync(Buffer.from('481200|481205|918442|1|x', 'utf8'));
-        const r = c.inflatePriceBatchBody(fieldOf(raw.subarray(0, raw.length - 2)));
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.reason, 'inflate-failed');
-    });
-
-    it('rejects a stream that inflates to zero bytes', function(){
-        const r = c.inflatePriceBatchBody(fieldOf(zlib.deflateRawSync(Buffer.alloc(0))));
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.reason, 'empty-body');
-    });
-
-    it('rejects inflated bytes that are not valid UTF-8', function(){
-        // toString('utf8') would silently map these to U+FFFD, so several
-        // distinct payloads would produce one identical body. That is the same
-        // one-meaning-per-wire failure the base64 check prevents, one layer down.
-        const raw = zlib.deflateRawSync(Buffer.from([0x34, 0x38, 0xff, 0xfe, 0x7c, 0x31]));
-        const r = c.inflatePriceBatchBody(fieldOf(raw));
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.reason, 'non-utf8');
-        assert.strictEqual(r.body, undefined);
-    });
-
-    it('accepts multi-byte UTF-8 that round trips exactly', function(){
-        // The guard rejects INVALID sequences, not non-ASCII ones.
-        const body = 'BTC/USD|104325.00|note:€é中';
-        const r = c.inflatePriceBatchBody(c.compressPriceBatchBody(body));
-        assert.strictEqual(r.ok, true, r.reason);
-        assert.strictEqual(r.body, body);
-    });
-
-    it('never falls back to treating the field as an uncompressed body', function(){
-        // A plausible-looking uncompressed body handed in where a compressed
-        // field belongs must be rejected, not read.
-        const plain = '481200|481205|918442|6|481200|1756180800|918442|1|BTC/USD|1.0|1|aa|bb';
-        const r = c.inflatePriceBatchBody(plain);
-        assert.strictEqual(r.ok, false);
-        assert.strictEqual(r.body, undefined);
-        assert.ok(!Object.prototype.hasOwnProperty.call(r, 'body'));
-    });
-
-    it('every failure reason is distinct and stable', function(){
-        const reasons = Object.values(c.PRICE_BATCH_COMPRESSION_FAIL_REASONS);
-        assert.strictEqual(new Set(reasons).size, reasons.length);
-        assert.deepStrictEqual(reasons.slice().sort(), [
-            'empty', 'empty-body', 'inflate-failed', 'non-canonical-base64',
-            'non-utf8', 'not-a-string', 'oversize-field', 'ratio-cap', 'size-cap'
-        ]);
-    });
-});
-
-describe('price_batch_compression: determinism across nodes @regression', function(){
-
-    it('the same field inflates to the same body every time', function(){
-        const field = c.compressPriceBatchBody(buildRealisticV2Body());
-        const a = c.inflatePriceBatchBody(field);
-        const b = c.inflatePriceBatchBody(field);
-        assert.deepStrictEqual(a, b);
-    });
-
-    it('which bound binds depends only on the compressed length', function(){
-        // Two nodes seeing the same wire must report the same reason, so the
-        // choice between ratio-cap and size-cap may not depend on the inflated
-        // size (which the bounded inflate never learns).
-        for(const compressedLen of [1, 54, 55, 100, 8189]){
-            const ratioCap = compressedLen * c.PRICE_BATCH_MAX_INFLATE_RATIO;
-            const expected = ratioCap <= c.PRICE_WIRE_MAX_BYTES ? 'ratio-cap' : 'size-cap';
-            assert.strictEqual(typeof expected, 'string');
-        }
-        // 54 * 150 = 8100 (ratio binds); 55 * 150 = 8250 (size binds).
-        assert.ok(54 * c.PRICE_BATCH_MAX_INFLATE_RATIO <= c.PRICE_WIRE_MAX_BYTES);
-        assert.ok(55 * c.PRICE_BATCH_MAX_INFLATE_RATIO >  c.PRICE_WIRE_MAX_BYTES);
-    });
-});
-
-describe('price_batch_compression: vendored-twin byte identity @regression', function(){
-
-    const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-        path.join(__dirname, '..', '..', '..', 'xchain-indexer');
-
-    it('this copy is byte-identical to the xchain-indexer canonical', function(){
-        const twin = path.join(INDEXER_DIR, 'src', 'actions', 'price', 'price_batch_compression.js');
-        if(!fs.existsSync(twin)){
-            if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical is missing: ' + twin);
-            this.skip();
-            return;
-        }
-        const local = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'price_batch_compression.js'), 'utf8');
-        assert.strictEqual(local, fs.readFileSync(twin, 'utf8'),
-            'price_batch_compression.js has drifted from the xchain-indexer canonical; the two would ' +
-            'disagree on which compressed batches are valid, which is a fork');
-    });
-});
+}
