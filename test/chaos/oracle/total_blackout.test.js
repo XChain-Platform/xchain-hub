@@ -20,16 +20,21 @@ const { VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
-describe('Chaos: Total Price Source Blackout (API-6)', function () {
-    this.timeout(10000);
+function registerBeforeHook() {
 
     before(function () {
         mockApi.setup();
     });
+}
+
+function registerAfterHook() {
 
     after(function () {
         mockApi.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         mockApi.reset();
@@ -37,10 +42,16 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerAllSourcesUnavailableFetchPricesReturnsEmptyTest() {
 
     it('all sources unavailable → fetchPrices returns empty array', async function () {
         let fetcher = new PriceFetcher({
@@ -54,6 +65,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         let prices = await fetcher.fetchPrices();
         expect(prices).to.be.an('array').that.is.empty;
     });
+}
+
+function registerAllSourcesTimeoutFetchPricesReturnsEmptyTest() {
 
     it('all sources timeout → fetchPrices returns empty array', async function () {
         let fetcher = new PriceFetcher({
@@ -67,6 +81,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         let prices = await fetcher.fetchPrices();
         expect(prices).to.be.an('array').that.is.empty;
     });
+}
+
+function registerOracleRoundSkipsWhenNoPricesTest() {
 
     it('oracle round skips when no prices available', async function () {
         let hub = createMockHub();
@@ -84,6 +101,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         // Warning logged
         expect(console.warn.calledWithMatch('No prices available')).to.be.true;
     });
+}
+
+function registerOracleRoundSkipsWhenFetchPricesThrowsTest() {
 
     it('oracle round skips when fetchPrices throws', async function () {
         let hub = createMockHub();
@@ -97,6 +117,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         expect(hub._peerManager.broadcast.called).to.be.false;
         expect(console.error.calledWithMatch('Price fetch failed')).to.be.true;
     });
+}
+
+function registerConsensusStoresSkippedRoundWhenNoTest() {
 
     it('consensus stores skipped round when no submissions', async function () {
         let hub = createMockHub();
@@ -119,6 +142,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         expect(oracleConsensus.locallySkipped.has(5)).to.be.true;
         expect(oracleConsensus.finalized.has(5)).to.be.false;
     });
+}
+
+function registerConsensusStoresSkippedRoundWhenBelowTest() {
 
     it('consensus stores skipped round when below min submissions', async function () {
         let hub = createMockHub();
@@ -139,6 +165,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         let firstCall = hub.db.doQuery.getCall(0).args;
         expect(firstCall[0]).to.include('skipped');
     });
+}
+
+function registerNonOracleSubsystemsUnaffectedDuringPriceTest() {
 
     it('non-oracle subsystems unaffected during price blackout', async function () {
         let hub = createMockHub();
@@ -153,6 +182,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         expect(hub.applyConfig.called).to.be.false;  // Not touched
         expect(hub.db.doQuery.called).to.be.false;    // No DB writes for empty round
     });
+}
+
+function registerRecoverySourcesComeBackNextRoundTest() {
 
     it('recovery: sources come back → next round produces valid prices', async function () {
         let hub = createMockHub();
@@ -173,6 +205,9 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         expect(data.prices).to.have.length(3);
         expect(parseFloat(data.prices[0].price)).to.be.gt(0);
     });
+}
+
+function registerMultipleConsecutiveBlackoutRoundsNoCrashTest() {
 
     it('multiple consecutive blackout rounds → no crash or state corruption', async function () {
         let hub = createMockHub();
@@ -191,4 +226,20 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         // Submissions map should only have current and previous round
         expect(oracle.submissions.size).to.be.lte(2);
     });
+}
+describe('Chaos: Total Price Source Blackout (API-6)', function () {
+    this.timeout(10000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerAllSourcesUnavailableFetchPricesReturnsEmptyTest();
+    registerAllSourcesTimeoutFetchPricesReturnsEmptyTest();
+    registerOracleRoundSkipsWhenNoPricesTest();
+    registerOracleRoundSkipsWhenFetchPricesThrowsTest();
+    registerConsensusStoresSkippedRoundWhenNoTest();
+    registerConsensusStoresSkippedRoundWhenBelowTest();
+    registerNonOracleSubsystemsUnaffectedDuringPriceTest();
+    registerRecoverySourcesComeBackNextRoundTest();
+    registerMultipleConsecutiveBlackoutRoundsNoCrashTest();
 });
