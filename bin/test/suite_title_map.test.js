@@ -75,7 +75,7 @@ describe('bin/suite-title-map.js', function () {
             const mocha = parsed.segments.filter((s) => s.args);
             const members = parsed.segments.filter((s) => s.npm).map((s) => s.npm);
             assert.strictEqual(mocha.length, 1, 'the inline mocha segment must be collected');
-            assert.deepStrictEqual(members, ['ci:security', 'ci:regression']);
+            assert.deepStrictEqual(members, ['ci:guards', 'ci:security', 'ci:regression']);
             assert.ok(mocha[0].args.some((a) => a.includes('test/unit/')),
                 'and it must carry the glob the chain actually runs');
         });
