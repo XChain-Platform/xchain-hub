@@ -182,7 +182,7 @@ oraclePublisherTests('oversized PRICE v0 wire drop (item 2402)', function () {
         let pub = new OraclePublisher(makeHub());
         sinon.stub(pub, 'getMyRank').resolves(0);
         sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
-        let enqueueSpy = sinon.spy(pub, '_enqueue');
+        let enqueueSpy = sinon.spy(pub, 'enqueue');
         sinon.stub(pub, 'bufferFinalizedRound').resolves();
         await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0,
             prices: bigPrices(), signatures: [{ pubkey: 'pk', sig: 'sig' }] });

@@ -135,7 +135,7 @@ module.exports = {
     },
 
     // Rebuild the durable queue from a FRESH read rather than truncating it to the
-    // snapshot this pass began with. _enqueue APPENDS to the same file, and
+    // snapshot this pass began with. enqueue APPENDS to the same file, and
     // onRoundFinalized enqueues before it calls the pass, so a round finalized while
     // this pass was awaiting a broadcast is on disk but absent from `entries`; a
     // blind rewrite to `remaining` erases it, and the overlap guard above makes that

@@ -152,7 +152,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart1() {
     });
     let eng = new CrossChainDexEngine(hub);
     sinon.stub(eng, 'persistCapabilitySnapshot').rejects(new Error('db down'));
-    let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
+    let insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
@@ -177,7 +177,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart1() {
     let eng = new CrossChainDexEngine(hub);
     // Degraded/null snapshot => zero validators resolved => zero rows persisted.
     sinon.stub(eng, 'persistCapabilitySnapshot').resolves(0);
-    let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
+    let insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
@@ -203,7 +203,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart2() {
     });
     let eng = new CrossChainDexEngine(hub);
     sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
-    let insert = sinon.stub(eng, '_insertMatchRow').resolves(true);
+    let insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
     eng._inflight.add(row.match_id);
@@ -219,13 +219,13 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart2() {
   });
 
   // The durable fill must be accounted BEFORE any fallible delivery step. A mirror
-  // living inside _insertMatchRow, between the INSERT and its return, lets a failed
+  // living inside insertMatchRow, between the INSERT and its return, lets a failed
   // re-read throw past `if(inserted) this.applyCommit(row, +1)` and leaves the DB
   // holding a finalized fill the in-memory reservation ledger does not know about.
 }
 function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart3() {
   // The durable fill must be accounted BEFORE any fallible delivery step. A mirror
-  // living inside _insertMatchRow, between the INSERT and its return, lets a failed
+  // living inside insertMatchRow, between the INSERT and its return, lets a failed
   // re-read throw past `if(inserted) this.applyCommit(row, +1)` and leaves the DB
   // holding a finalized fill the in-memory reservation ledger does not know about.
   it('credits the ledger and releases the round even when the mirror read fails', async function () {
@@ -300,7 +300,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart4() {
     });
     let eng = new CrossChainDexEngine(hub);
     sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
-    sinon.stub(eng, '_insertMatchRow').rejects(new Error('deadlock'));
+    sinon.stub(eng, 'insertMatchRow').rejects(new Error('deadlock'));
     let commit = sinon.stub(eng, 'applyCommit');
     let forget = sinon.stub(eng.consensus, 'forgetFinalized');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();

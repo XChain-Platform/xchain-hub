@@ -247,7 +247,7 @@ function registerFeature19insertMatchRowRetractedRowRevivePart1() {
     q.resolves([]); // broadcast re-read
     hub.db.doQuery = q;
     let eng = new CrossChainDexEngine(hub);
-    let inserted = await eng._insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
+    let inserted = await eng.insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
     expect(inserted).to.be.true;
     let updateSql = q.getCall(1).args[0];
     expect(updateSql).to.match(/UPDATE cross_chain_matches SET status = 'finalized'/);
@@ -265,7 +265,7 @@ function registerFeature19insertMatchRowRetractedRowRevivePart1() {
     q.resolves([]);
     hub.db.doQuery = q;
     let eng = new CrossChainDexEngine(hub);
-    let inserted = await eng._insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
+    let inserted = await eng.insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
     expect(inserted).to.be.false;
   });
 
@@ -289,7 +289,7 @@ function registerFeature19insertMatchRowRetractedRowRevivePart2() {
       chainId: 'a'.repeat(64)
     });
     let eng = new CrossChainDexEngine(hub);
-    await eng._insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
+    await eng.insertMatchRow(feature19insertMatchRowRetractedRowReviveReviveRow());
     let sql = String(q.getCall(0).args[0]);
     let cols = sql.match(/\(([^)]*)\) VALUES/)[1].split(',').map(s => s.trim());
     let ddl = require('fs').readFileSync(require('path').join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'cross_chain_matches.sql'), 'utf8');
@@ -304,7 +304,7 @@ function registerFeature19insertMatchRowRetractedRowRevivePart2() {
   });
 }
 function registerFeature19insertMatchRowRetractedRowRevive() {
-  describe('_insertMatchRow(): retracted-row revive', function () {
+  describe('insertMatchRow(): retracted-row revive', function () {
     registerFeature19insertMatchRowRetractedRowRevivePart1();
     registerFeature19insertMatchRowRetractedRowRevivePart2();
   });
@@ -328,7 +328,7 @@ function registerFeature21eventEmitterPart1() {
   it('emits match:finalized when a match is inserted', async function () {
     let hub = makeDexHub();
     hub.resolveBtcLatestBlock = sinon.stub().resolves(100);
-    // _insertMatchRow reads affectedRows then re-reads the row; consensus single-node finalizes inline.
+    // insertMatchRow reads affectedRows then re-reads the row; consensus single-node finalizes inline.
     hub.db.doQuery = sinon.stub().resolves({
       affectedRows: 1
     });

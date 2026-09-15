@@ -174,7 +174,7 @@ oraclePublisherTests('onRoundFinalized()', function () {
         let hub = makeHub();
         let pub = new OraclePublisher(hub);
         sinon.stub(pub, 'getMyRank').resolves(null);
-        let enqueueSpy = sinon.spy(pub, '_enqueue');
+        let enqueueSpy = sinon.spy(pub, 'enqueue');
         await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, prices: [], signatures: [] });
         expect(enqueueSpy.called).to.be.false;
     });
@@ -184,7 +184,7 @@ oraclePublisherTests('onRoundFinalized()', function () {
         let pub = new OraclePublisher(hub);
         sinon.stub(pub, 'getMyRank').resolves(0);
         sinon.stub(pub, 'getActiveOraclePublishCount').resolves(0);
-        let enqueueSpy = sinon.spy(pub, '_enqueue');
+        let enqueueSpy = sinon.spy(pub, 'enqueue');
         await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, prices: [] });
         expect(enqueueSpy.called).to.be.false;
     });
@@ -195,7 +195,7 @@ oraclePublisherTests('onRoundFinalized()', function () {
         // rank=1, count=3, round=0: leaderRank=0%3=0 ≠ rank=1
         sinon.stub(pub, 'getMyRank').resolves(1);
         sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
-        let enqueueSpy = sinon.spy(pub, '_enqueue');
+        let enqueueSpy = sinon.spy(pub, 'enqueue');
         await pub.onRoundFinalized({ round: 0, btcBlockHeight: 100, prices: [] });
         expect(enqueueSpy.called).to.be.false;
     });
@@ -210,7 +210,7 @@ oraclePublisherTests('onRoundFinalized()', function () {
         let pub = new OraclePublisher(hub);
         sinon.stub(pub, 'getMyRank').resolves(0);
         sinon.stub(pub, 'getActiveOraclePublishCount').resolves(3);
-        let enqueueStub  = sinon.stub(pub, '_enqueue').resolves();
+        let enqueueStub  = sinon.stub(pub, 'enqueue').resolves();
         let processStub  = sinon.stub(pub, 'processQueue').resolves();
         let bufferStub   = sinon.stub(pub, 'bufferFinalizedRound').resolves();
         await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0, prices: [], signatures: [{ pubkey: 'pk', sig: 'sig' }] });
@@ -293,11 +293,11 @@ oraclePublisherTests('start()', function () {
 });
 
 
-// ── _enqueue() ──────────────────────────────────────────────────────────
-oraclePublisherTests('_enqueue()', function () {
+// ── enqueue() ──────────────────────────────────────────────────────────
+oraclePublisherTests('enqueue()', function () {
     it('appends an fsync-durable JSON line with attempt metadata', async function () {
         let pub = new OraclePublisher(makeHub());
-        await pub._enqueue({ round: 5, prices: [], sigs: [] });
+        await pub.enqueue({ round: 5, prices: [], sigs: [] });
         expect(fsMock.openSync.called).to.be.true;
         expect(fsMock.writeSync.called).to.be.true;
         expect(fsMock.fsyncSync.called).to.be.true;
@@ -311,7 +311,7 @@ oraclePublisherTests('_enqueue()', function () {
     it('fails loud when the queue write throws', async function () {
         let pub = new OraclePublisher(makeHub());
         fsMock.openSync = sinon.stub().throws(new Error('disk full'));
-        try { await pub._enqueue({ round: 5 }); expect.fail('should throw'); }
+        try { await pub.enqueue({ round: 5 }); expect.fail('should throw'); }
         catch (e) { expect(e.message).to.include('disk full'); }
     });
 
@@ -329,7 +329,7 @@ oraclePublisherTests('ORACLE_PUBLISH_ENABLED kill switch (item 2677)', function 
     it('onRoundFinalized enqueues nothing when disabled', async function () {
         process.env.ORACLE_PUBLISH_ENABLED = 'false';
         let pub = new OraclePublisher(makeHub());
-        let enqueue = sinon.stub(pub, '_enqueue');
+        let enqueue = sinon.stub(pub, 'enqueue');
         let proc    = sinon.stub(pub, 'processQueue');
         await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, btcBlockTime: 0, prices: [] });
         expect(enqueue.called).to.be.false;

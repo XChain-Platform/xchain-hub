@@ -257,7 +257,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             let hub = makeHub({ dir: dir });
             let p   = new AttestationBatchPublisher(hub);
             let now = 200 * WINDOW_S;
-            p._nowSeconds = () => now;
+            p.nowSeconds = () => now;
 
             expect(await p.resolveFloorWindow()).to.equal(p.windowStartFor(now));
             p._floorWindow = await p.resolveFloorWindow();
@@ -278,7 +278,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             // Birth two windows back, the window after it left behind, the newest one done.
             hub.db.markers.push(markerAt(now - 3 * WINDOW_S), markerAt(now - WINDOW_S));
             let p = new AttestationBatchPublisher(hub);
-            p._nowSeconds = () => now;
+            p.nowSeconds = () => now;
 
             p._floorWindow = await p.resolveFloorWindow();
 
@@ -307,7 +307,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             // this hub, and publishing them would be three empty coverage heads at fee cost.
             hub.db.markers.push(markerAt(now - WINDOW_S));
             let p = new AttestationBatchPublisher(hub);
-            p._nowSeconds = () => now;
+            p.nowSeconds = () => now;
 
             p._floorWindow = await p.resolveFloorWindow();
 
@@ -328,7 +328,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             let now = 200 * WINDOW_S;
             for(let i = 4; i >= 1; i--) hub.db.markers.push(markerAt(now - i * WINDOW_S));
             let p = new AttestationBatchPublisher(hub);
-            p._nowSeconds = () => now;
+            p.nowSeconds = () => now;
 
             p._floorWindow = await p.resolveFloorWindow();
 
@@ -350,7 +350,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
                                 markerAt(now - 2 * WINDOW_S, 'intent'),
                                 markerAt(now - WINDOW_S));
             let p = new AttestationBatchPublisher(hub);
-            p._nowSeconds = () => now;
+            p.nowSeconds = () => now;
 
             p._floorWindow = await p.resolveFloorWindow();
 

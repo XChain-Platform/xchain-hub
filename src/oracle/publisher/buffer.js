@@ -60,7 +60,7 @@ module.exports = {
 
     // Append one finalized round to the durable buffer, same open('a') + fsync
     // discipline the publish queue and the dead-letter file use. A write failure is
-    // FATAL to the caller for the same reason _enqueue's is: an unwritable buffer
+    // FATAL to the caller for the same reason enqueue's is: an unwritable buffer
     // means this hub silently loses an hour of price data it is the only holder of.
     async bufferFinalizedRound(event) {
         let entry = this.bufferEntryFromEvent(event);

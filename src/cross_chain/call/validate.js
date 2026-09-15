@@ -62,7 +62,7 @@ module.exports = {
         // though its own producer-side floor was bypassed. RELAY_MIN_FUTURE_S is far
         // below any producer margin, so this costs an honest round nothing: it still
         // tolerates 3600 - RELAY_MIN_FUTURE_S seconds of adverse clock skew.
-        let now = this._nowSeconds();
+        let now = this.nowSeconds();
         if(!Number.isFinite(Number(row.effective_time)) ||
            Number(row.effective_time) - now > 3600 ||
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;

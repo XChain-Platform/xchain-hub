@@ -15,7 +15,7 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
  * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
@@ -77,7 +77,7 @@ function readQueue(file) {
 
 // ---------- buildAttestationResponseWire ------------------------------------
 
-// ---------- _enqueue / readQueue / rewriteQueue / removeFromQueue --------
+// ---------- enqueue / readQueue / rewriteQueue / removeFromQueue --------
 
 // ---------- getBroadcaster -------------------------------------------------
 
@@ -121,18 +121,18 @@ const hookAt19647 = function () {
         try { fs.unlinkSync(pub.queuePath); } catch (_) {}
     };
 
-describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('_enqueue appends a JSON line and readQueue parses it back', function () {
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('enqueue appends a JSON line and readQueue parses it back', function () {
         const entry = { ts: 12345, requestId: '11'.repeat(32), wire: 'ATTEST|1|...' };
-        pub._enqueue(entry);
+        pub.enqueue(entry);
         const entries = pub.readQueue();
         expect(entries).to.have.length(1);
         expect(entries[0].requestId).to.equal('11'.repeat(32));
         expect(entries[0].wire).to.equal('ATTEST|1|...');
     }); });
 
-describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('_enqueue appends multiple entries correctly', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('enqueue appends multiple entries correctly', function () {
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
         const entries = pub.readQueue();
         expect(entries).to.have.length(2);
         expect(entries[0].requestId).to.equal('aa'.repeat(32));
@@ -169,8 +169,8 @@ describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('rewriteQueue replaces file contents with the given entries', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
         pub.rewriteQueue([{ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' }]);
         const entries = pub.readQueue();
         expect(entries).to.have.length(1);
@@ -178,16 +178,16 @@ describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('rewriteQueue with empty array clears the file', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.rewriteQueue([]);
         const entries = pub.readQueue();
         expect(entries).to.have.length(0);
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('removeFromQueue removes matching IDs and keeps others', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
-        pub._enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
+        pub.enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
         pub.removeFromQueue(new Set(['aa'.repeat(32), 'bb'.repeat(32)]));  // lowercase drop set
         const entries = pub.readQueue();
         expect(entries).to.have.length(1);
@@ -195,29 +195,29 @@ describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('removeFromQueue is a no-op for empty drop set', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.removeFromQueue(new Set());
         expect(pub.readQueue()).to.have.length(1);
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('removeFromQueue is a no-op for null drop set', function () {
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         pub.removeFromQueue(null);
         expect(pub.readQueue()).to.have.length(1);
     }); });
 
-describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('_enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)', function () {
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)', function () {
         const errStub = sinon.stub(console, 'error');
         pub.queuePath = '/nonexistent-root/cannot-write.jsonl';
-        let ok = pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        let ok = pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
         expect(ok).to.equal(false);
         expect(errStub.called).to.equal(true);
         expect(pub._enqueueFailures).to.equal(1);
         errStub.restore();
     }); });
 
-describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('_enqueue returns true on a durable write (item 2681)', function () {
-        expect(pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' })).to.equal(true);
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('enqueue returns true on a durable write (item 2681)', function () {
+        expect(pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' })).to.equal(true);
     }); });
 
 describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('rewriteQueue logs error (does not throw) on unwritable path', function () {

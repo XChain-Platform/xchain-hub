@@ -66,7 +66,7 @@ module.exports = {
 
     // Materialize a mirror row from a 'request:finalized' payload, or null when this
     // round is not one the mirror carries. Pure and synchronous by contract: it
-    // touches no DB and no clock beyond _nowSeconds, so the caller can run it inside
+    // touches no DB and no clock beyond nowSeconds, so the caller can run it inside
     // the emit and let only the finished row cross an await.
     //
     // Returns null (with a logged reason) rather than throwing on every "not ours"
@@ -190,7 +190,7 @@ module.exports = {
             // Hub wall clock at quorum. AUDIT ONLY: never a consensus input, never
             // compared across hubs, and deliberately the one column two hubs' copies
             // of the same logical row are allowed to disagree on (alongside `id`).
-            finalized_at:         this._nowSeconds()
+            finalized_at:         this.nowSeconds()
         };
     },
 

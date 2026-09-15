@@ -15,7 +15,7 @@
  * XChain Hub - AttestationPublisher unit tests
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
- * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
+ * enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, myRank,
  * computeResponsible, fetchPendingRequestIds, resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
@@ -77,7 +77,7 @@ function readQueue(file) {
 
 // ---------- buildAttestationResponseWire ------------------------------------
 
-// ---------- _enqueue / readQueue / rewriteQueue / removeFromQueue --------
+// ---------- enqueue / readQueue / rewriteQueue / removeFromQueue --------
 
 // ---------- getBroadcaster -------------------------------------------------
 

@@ -187,7 +187,7 @@ module.exports = {
     // spent with only stdout as its trace and crash recovery is disarmed for the
     // entry. A failed enqueue is fatal for this entry: skip the broadcast.
     enqueueFinalized(event, rid, payload, responseStatus, requestBlock, responsible, widen, leaderPubkey){
-        let queued = this._enqueue({
+        let queued = this.enqueue({
             ts:           Date.now(),
             requestId:    event.requestId,
             wire:         payload,

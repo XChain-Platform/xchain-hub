@@ -85,7 +85,7 @@ function makeFederation(network, n) {
         engine.identity = identity;
         // Fixed clock everywhere: the leader's stamp and every follower's window
         // are then exact, so a bounds failure is a bug and never a timing flake.
-        sinon.stub(engine, '_nowSeconds').returns(NOW);
+        sinon.stub(engine, 'nowSeconds').returns(NOW);
         bus.engines.push(engine);
         hubs.push({ engine: engine, identity: identity, pubkey: identity.getPubkeyHex().toLowerCase() });
     }

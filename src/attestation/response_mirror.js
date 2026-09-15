@@ -121,7 +121,7 @@ class AttestationResponseMirror {
     hubPeerManager(){ return this.hub && this.hub.peerManager; }
 
     // Seam for tests; every wall-clock read on this path goes through it.
-    _nowSeconds(){
+    nowSeconds(){
         return Math.floor(Date.now() / 1000);
     }
 

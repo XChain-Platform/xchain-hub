@@ -172,7 +172,7 @@ module.exports = {
         }
 
         for (let i = 0; i < wires.length; i++) {
-            await this._enqueue({
+            await this.enqueue({
                 // Identity field stays the FIRST round, so processQueue's Sets and the
                 // retention sweep's queue-floor clamp keep working on a scalar (D10).
                 round: wires[i].firstRound,

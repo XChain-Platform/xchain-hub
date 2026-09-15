@@ -121,7 +121,7 @@ module.exports = {
         return this.normalizeAmount(x) === this.normalizeAmount(y);
     },
 
-    _nowSeconds(){ return Math.floor(Date.now() / 1000); },
+    nowSeconds(){ return Math.floor(Date.now() / 1000); },
 
     // The BTC-anchored snapshot block. On a no-BTC regtest, fall back to the fixed
     // deterministic override the sibling engines share, so a record and the capability

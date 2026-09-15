@@ -1,3 +1,24 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ **********************************************************************
+ *
+ * Chain tip and chain ID writers across the cross-chain engines.
+ *
+ * Tests that both DEX and call engines stamp btc_chain_id on their rows
+ * from the identity provider, even when the read throws or returns null.
+ *
+ **********************************************************************/
+
 'use strict';
 
 const sinon      = require('sinon');
@@ -168,7 +189,7 @@ describe('CrossChainDexEngine stamps the match row', function () {
         it('writes the identity the Bitcoin indexer reported for the row network', async function () {
             const getChainTip = sinon.stub().resolves({ blockHeight: 131, blockTime: 1, chainId: LOCAL_ID });
             const eng = engineWith(getChainTip);
-            await eng._insertMatchRow(matchRow());
+            await eng.insertMatchRow(matchRow());
             const { cols, vals, idx } = insertCall(eng);
             expect(idx, 'btc_chain_id missing from the INSERT column list').to.be.greaterThan(-1);
             expect(vals).to.have.lengthOf(cols.length);
@@ -178,14 +199,14 @@ describe('CrossChainDexEngine stamps the match row', function () {
 
         it('writes NULL when the hub has not been told its chain', async function () {
             const eng = engineWith(sinon.stub().resolves(null));
-            await eng._insertMatchRow(matchRow());
+            await eng.insertMatchRow(matchRow());
             const { vals, idx } = insertCall(eng);
             expect(vals[idx]).to.equal(null);
         });
 
         it('writes NULL, and still commits the match, when the identity read throws', async function () {
             const eng = engineWith(sinon.stub().rejects(new Error('configs read failed')));
-            const inserted = await eng._insertMatchRow(matchRow());
+            const inserted = await eng.insertMatchRow(matchRow());
             expect(inserted, 'a finalized match must never be lost to an identity lookup').to.be.true;
             const { vals, idx } = insertCall(eng);
             expect(vals[idx]).to.equal(null);
@@ -194,7 +215,7 @@ describe('CrossChainDexEngine stamps the match row', function () {
         it('does not put the identity on the row object the canonical is built from', async function () {
             const eng = engineWith(sinon.stub().resolves({ chainId: LOCAL_ID }));
             const row = matchRow();
-            await eng._insertMatchRow(row);
+            await eng.insertMatchRow(row);
             expect(row).to.not.have.property('btc_chain_id');
         });
     });

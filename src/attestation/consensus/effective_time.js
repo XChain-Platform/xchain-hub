@@ -57,7 +57,7 @@ const ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_AHEAD_S  = 3600;
 module.exports = {
 
     // Seam for tests; every clock read on this path goes through it.
-    _nowSeconds(){
+    nowSeconds(){
         return Math.floor(Date.now() / 1000);
     },
 
@@ -79,7 +79,7 @@ module.exports = {
     // CrossChainCallEngine.relayEffectiveTime, differing only in which margin it
     // adds (see lib/attest_response_timing.js for why 120 and not 2400).
     chooseEffectiveTime(){
-        return this._nowSeconds() + this.forwardSeconds();
+        return this.nowSeconds() + this.forwardSeconds();
     },
 
     // Read a peer-supplied effective_time off a PROPOSE/PREPARE envelope.
@@ -121,7 +121,7 @@ module.exports = {
     // one soft edge: a NUMBER like 1e21 spells as an integer to that guard but
     // stringifies to '1e+21', and it cannot survive the upper bound here.
     effectiveTimeWithinFollowerWindow(effectiveTime){
-        let expected = this._nowSeconds() + this.forwardSeconds();
+        let expected = this.nowSeconds() + this.forwardSeconds();
         return Number.isSafeInteger(effectiveTime)
             && effectiveTime >= expected - ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S
             && effectiveTime <= expected + ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_AHEAD_S;

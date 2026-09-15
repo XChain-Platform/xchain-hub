@@ -155,7 +155,7 @@ describe('LEADER: propose() refuses an over-cap body before broadcasting (legacy
 
     it('refuses the same way in the MIRROR era', async function () {
         let e = makeEngine('regtest');  // regtest is armed at genesis
-        sinon.stub(e.engine, '_nowSeconds').returns(NOW);
+        sinon.stub(e.engine, 'nowSeconds').returns(NOW);
         await e.engine.propose(RID, {
             request:      { request_id: RID, block_index: MIRROR_BLK, deadline_block: MIRROR_BLK + 100 },
             providerId:   PROVIDER,

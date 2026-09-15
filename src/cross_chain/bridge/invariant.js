@@ -58,7 +58,7 @@ module.exports = {
     // escrows its own units.
     async getBridgeInvariant(tick){
         let network = this.network;
-        let now     = this._nowSeconds();
+        let now     = this.nowSeconds();
         let out     = await this.collectInvariantEntries(tick, network, now);
 
         // Read each chain once, then assemble. A reader that throws takes only its own chain

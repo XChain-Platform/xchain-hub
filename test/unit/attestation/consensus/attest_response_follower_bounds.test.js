@@ -60,7 +60,7 @@ function makeFollower() {
         getModule: () => ({ agree: (p) => p[0] || null })
     });
     engine.identity = identity;
-    sinon.stub(engine, '_nowSeconds').returns(NOW);
+    sinon.stub(engine, 'nowSeconds').returns(NOW);
     return { engine, identity, leader, third,
              me:        identity.getPubkeyHex().toLowerCase(),
              leaderKey: leader.getPubkeyHex().toLowerCase(),

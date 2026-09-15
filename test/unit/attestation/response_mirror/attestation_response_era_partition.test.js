@@ -118,21 +118,21 @@ function buildEngines() {
 }
 
 // Emits one finalized event and classifies which of the two eras acted.
-// _enqueue is the publisher's durable WAL append (unconditional for a
+// enqueue is the publisher's durable WAL append (unconditional for a
 // terminal 'ok' response, ahead of the leader/follower branch), and
 // insertAndBroadcast is the mirror's one write path (shared by the
 // request:finalized listener and the gossip receiver); spying on both, rather
 // than re-deriving either predicate here, is what makes this a guard on the
 // real engines instead of a restatement of the code under test.
 async function fireAndClassify(consensus, pub, mirror, rid, blockIndex) {
-    let enqueueSpy   = sinon.spy(pub, '_enqueue');
+    let enqueueSpy   = sinon.spy(pub, 'enqueue');
     let mirrorSpy    = sinon.spy(mirror, 'insertAndBroadcast');
     let finalizedSpy = sinon.spy(pub, 'onRequestFinalized');
 
     consensus.emit('request:finalized', finalizedEvent(rid, blockIndex));
     // The mirror's listener is synchronous through the insertAndBroadcast call
     // itself, so mirrorSpy.called is already settled here. The publisher's
-    // listener awaits computeResponsible before it reaches _enqueue, so wait
+    // listener awaits computeResponsible before it reaches enqueue, so wait
     // on the exact promise the internal handler is chaining on.
     await finalizedSpy.returnValues[0];
 

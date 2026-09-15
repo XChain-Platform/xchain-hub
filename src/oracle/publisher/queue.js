@@ -29,7 +29,7 @@ const logger = getLogger();
 module.exports = {
 
     // Enqueue a round for publishing (durable, fsync'd)
-    async _enqueue(round) {
+    async enqueue(round) {
         let entry = Object.assign({}, round, { attempts: 0, enqueuedAt: Date.now() });
         let line  = JSON.stringify(entry) + '\n';
         try {

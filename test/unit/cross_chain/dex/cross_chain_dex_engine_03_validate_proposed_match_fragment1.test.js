@@ -145,13 +145,13 @@ function feature10validateProposedMatchFragment1OrderRow(eng, a, b, block) {
     b_ownership: d.hi.give_ownership,
     b_payout_addr: d.hi.get_address,
     b_payout_legs: d.hi.payout_legs || null,
-    // Honest leaders stamp _nowSeconds() plus a forward propagation margin sized to
+    // Honest leaders stamp nowSeconds() plus a forward propagation margin sized to
     // the slower leg; validateProposedMatch bounds it ASYMMETRICALLY against the
     // follower's clock. A far-future stamp would lock both escrows, and a stamp at
     // or behind now would make the match settleable before it had reached both
     // chains' indexers (#4202). So: the engine's own clock plus a margin, never a
     // fixed timestamp.
-    effective_time: eng._nowSeconds() + 600
+    effective_time: eng.nowSeconds() + 600
   };
 }
 // Cross-chain royalty legs: the canonical is built from the PROPOSED row, so the
@@ -271,7 +271,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
     // Everything else re-derives identically; only the leader's effective_time is
     // pushed far into the future. Without the bound the follower would sign it and
     // the finalized match would never settle, locking both escrows.
-    row.effective_time = eng._nowSeconds() + 30 * 24 * 3600; // +30 days
+    row.effective_time = eng.nowSeconds() + 30 * 24 * 3600; // +30 days
     sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
@@ -292,14 +292,14 @@ function registerFeature10validateProposedMatchFragment1Part3() {
   // is settleable on both legs the moment it is mirrored, so the indexer that
   // already holds the row settles a block ahead of one still receiving it and the
   // two legs' settlement action indexes diverge. _finalizeMatch stamped exactly
-  // that (bare _nowSeconds()) before this fix, so the guard and the producer
+  // that (bare nowSeconds()) before this fix, so the guard and the producer
   // margin land together.
   // #4202, the other half of the effective_time bound. The window was once
   // symmetric, so a match stamped AT the leader's clock second passed. Such a match
   // is settleable on both legs the moment it is mirrored, so the indexer that
   // already holds the row settles a block ahead of one still receiving it and the
   // two legs' settlement action indexes diverge. _finalizeMatch stamped exactly
-  // that (bare _nowSeconds()) before this fix, so the guard and the producer
+  // that (bare nowSeconds()) before this fix, so the guard and the producer
   // margin land together.
   it('returns false when the match is effective on arrival (no propagation window)', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
@@ -310,7 +310,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
     sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     for (const delta of [0, -30, 5]) {
       let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
-      row.effective_time = eng._nowSeconds() + delta;
+      row.effective_time = eng.nowSeconds() + delta;
       expect(await eng.validateProposedMatch(row), 'co-signed a match effective at now' + (delta >= 0 ? '+' : '') + delta).to.be.false;
     }
   });
@@ -334,7 +334,7 @@ function registerFeature10validateProposedMatchFragment1Part4() {
       a,
       b
     } = makeOrderPair();
-    const now = eng._nowSeconds();
+    const now = eng.nowSeconds();
     let desc = eng.tryMatch(a, b);
     await eng.finalizeMatch(desc);
     expect(proposed, 'no row was proposed').to.not.equal(null);

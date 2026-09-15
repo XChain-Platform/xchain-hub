@@ -160,7 +160,7 @@ module.exports = {
             // OUR clock, not the sender's. This column means "when this hub came to
             // hold the row", it is never a consensus input, and the two hubs are
             // explicitly allowed to disagree on it.
-            finalized_at:         this._nowSeconds()
+            finalized_at:         this.nowSeconds()
         };
     },
 

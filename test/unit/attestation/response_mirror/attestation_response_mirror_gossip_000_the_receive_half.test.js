@@ -269,7 +269,7 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () { afterE
             let mirror = new AttestationResponseMirror(hub);
             stubRequestLookup([localRequest()]);
             await mirror.start();
-            sinon.stub(mirror, '_nowSeconds').returns(1780000000);
+            sinon.stub(mirror, 'nowSeconds').returns(1780000000);
 
             // The wire claims a different position; the local request row wins.
             await mirror.handleResult({ type: ATTEST_RESULT, data: gossipPayload({ requestAction: REQUEST_ACTION }) });

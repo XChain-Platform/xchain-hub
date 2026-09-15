@@ -48,7 +48,7 @@ module.exports = {
     // comment above describes and makes no claim about completion.
     async resolveFloorWindow(){
         let db = this.hubDb();
-        if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this._nowSeconds());
+        if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this.nowSeconds());
         let rows = await db.getAttestPublishedBatch(this.network);
         let oldest = (rows && rows.length) ? Number(rows[0].oldest) : NaN;
         let newest = (rows && rows.length) ? Number(rows[0].newest) : NaN;
@@ -57,7 +57,7 @@ module.exports = {
         // behind, and without this marker that condition is silent.
         this._newestMarkerWindow = (Number.isFinite(newest) && newest > 0) ? newest : null;
         if(Number.isFinite(oldest) && oldest > 0) return oldest;
-        return this.windowStartFor(this._nowSeconds());
+        return this.windowStartFor(this.nowSeconds());
     },
 
     // The closed windows with no durable marker, oldest first, bounded. `age` is how

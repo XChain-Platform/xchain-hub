@@ -41,7 +41,7 @@ module.exports = {
         // receiving it, and the two then carried different settlement action indexes
         // for the same match. Size the margin to the SLOWER of the two legs, since
         // both chains must hold the row before either reaches its eligible block.
-        let effectiveTime = this._nowSeconds() +
+        let effectiveTime = this.nowSeconds() +
             Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
 
         let row = this.buildMatchRow(desc, matchId, snapshotBlock, effectiveTime);
@@ -154,7 +154,7 @@ module.exports = {
         // re-proposes rather than the round staying in-flight and retired forever.
         let inserted;
         try {
-            inserted = await this._insertMatchRow(row);
+            inserted = await this.insertMatchRow(row);
         } catch(e){
             logger.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
@@ -185,7 +185,7 @@ module.exports = {
 
     // Returns true iff the row was actually inserted (false on INSERT IGNORE dedupe), so the
     // caller only updates the committed ledger once per fill.
-    async _insertMatchRow(row){
+    async insertMatchRow(row){
         // Resolved into the value list rather than onto `row`: the row object is what the
         // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
         // never consensus. canonicalMatch enumerates its fields explicitly, so this value has

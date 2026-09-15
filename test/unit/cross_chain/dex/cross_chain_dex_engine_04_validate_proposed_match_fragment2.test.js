@@ -145,13 +145,13 @@ function feature10validateProposedMatchFragment2OrderRow(eng, a, b, block) {
     b_ownership: d.hi.give_ownership,
     b_payout_addr: d.hi.get_address,
     b_payout_legs: d.hi.payout_legs || null,
-    // Honest leaders stamp _nowSeconds() plus a forward propagation margin sized to
+    // Honest leaders stamp nowSeconds() plus a forward propagation margin sized to
     // the slower leg; validateProposedMatch bounds it ASYMMETRICALLY against the
     // follower's clock. A far-future stamp would lock both escrows, and a stamp at
     // or behind now would make the match settleable before it had reached both
     // chains' indexers (#4202). So: the engine's own clock plus a margin, never a
     // fixed timestamp.
-    effective_time: eng._nowSeconds() + 600
+    effective_time: eng.nowSeconds() + 600
   };
 }
 // Cross-chain royalty legs: the canonical is built from the PROPOSED row, so the

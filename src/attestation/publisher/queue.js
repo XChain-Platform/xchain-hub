@@ -37,7 +37,7 @@ module.exports = {
     // unwritable queue must not let a real BTC fee be spent with no durable record
     // and with crash recovery disarmed for the entry. A failure is critical (not a
     // best-effort warn) and is counted in _enqueueFailures for /health visibility.
-    _enqueue(entry){
+    enqueue(entry){
         try {
             let fd = fs.openSync(this.queuePath, 'a');
             fs.writeSync(fd, JSON.stringify(entry) + '\n');

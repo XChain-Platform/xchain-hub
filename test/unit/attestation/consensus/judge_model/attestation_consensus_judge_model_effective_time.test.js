@@ -128,7 +128,7 @@ function makeNode(identity, agreeImpl, proposedAt) {
     // Mirror era for the whole round; the activation height itself is covered
     // by attest_response_activation's own suite.
     node.consensus.isMirrorEra = () => true;
-    node.consensus._nowSeconds  = () => node.clock;
+    node.consensus.nowSeconds  = () => node.clock;
     return node;
 }
 function registerJudgeEffectiveTimeEdgeTests() {

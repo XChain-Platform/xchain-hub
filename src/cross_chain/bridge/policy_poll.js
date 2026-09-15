@@ -122,7 +122,7 @@ module.exports = {
             // never over the issuer's BRIDGE_CHAINS (which an issuer can empty while copies
             // are still outstanding). NOT monotonic across policy_seq, which is why apply
             // order is by seq and never by time.
-            effective_time:  this._nowSeconds() + this.policyMarginS(pair.copies, originChain),
+            effective_time:  this.nowSeconds() + this.policyMarginS(pair.copies, originChain),
             network:         network,
             push_generation: 0
         };

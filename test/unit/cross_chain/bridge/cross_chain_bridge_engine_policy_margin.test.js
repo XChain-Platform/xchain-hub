@@ -104,7 +104,7 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
             };
             return null;
         };
-        const before = engine._nowSeconds();
+        const before = engine.nowSeconds();
         await engine.maybeSnapshotPolicy(
             { origin_chain: 'BTC', tick: 'FUFU', copies: new Set(['DOGE']) }, 'regtest', 150);
 

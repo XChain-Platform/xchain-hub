@@ -326,7 +326,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
 
         const a = pub.processQueue();
         await flush();
-        await pub._enqueue(entry(8));
+        await pub.enqueue(entry(8));
         await pub.processQueue();      // skipped by the guard
         release();
         await a;

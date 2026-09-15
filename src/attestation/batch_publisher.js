@@ -208,7 +208,7 @@ class AttestationBatchPublisher {
 
     hubDb(){ return (this.hub && this.hub.db) || this.db; }
     hubPeerManager(){ return this.hub && this.hub.peerManager; }
-    _nowSeconds(){ return Math.floor(Date.now() / 1000); }
+    nowSeconds(){ return Math.floor(Date.now() / 1000); }
 
     // ------------------------------------------------------------ window math
 
@@ -267,7 +267,7 @@ class AttestationBatchPublisher {
         this._sweeping = true;
         let attempted = 0, published = 0;
         try {
-            let now     = Number.isFinite(nowSec) ? Number(nowSec) : this._nowSeconds();
+            let now     = Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds();
             let pending = await this.pendingWindows(now);
             for(let w of pending){
                 attempted++;

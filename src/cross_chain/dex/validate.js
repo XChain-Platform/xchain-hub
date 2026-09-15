@@ -102,7 +102,7 @@ module.exports = {
         // settlement action indexes diverge. Honest leaders now stamp a forward margin
         // sized to the slower leg, comfortably above RELAY_MIN_FUTURE_S, so neither half
         // rejects an honest proposal (same clock-skew tolerance as the call relay).
-        let now = this._nowSeconds();
+        let now = this.nowSeconds();
         if(!Number.isFinite(Number(row.effective_time)) ||
            Number(row.effective_time) - now > 3600 ||
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;

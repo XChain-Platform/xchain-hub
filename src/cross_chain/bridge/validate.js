@@ -77,7 +77,7 @@ module.exports = {
         // stamp whose row never applies (a griefing hold on the escrow), the lower guard is
         // the propagation floor, because a row effective at or behind our clock is eligible
         // the instant it finalizes and two indexers then inject it at different blocks.
-        let now = this._nowSeconds();
+        let now = this.nowSeconds();
         if(!Number.isFinite(Number(row.effective_time)) ||
            Number(row.effective_time) - now > 3600 ||
            Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;

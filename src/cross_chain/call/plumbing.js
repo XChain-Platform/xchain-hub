@@ -63,7 +63,7 @@ module.exports = {
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },
 
-    _nowSeconds(){ return Math.floor(Date.now() / 1000); },
+    nowSeconds(){ return Math.floor(Date.now() / 1000); },
 
     // effective_time to stamp on a relayed row: now + a forward margin sized to
     // the chain that GATES the row (dispatch -> the TARGET chain injects the
@@ -79,6 +79,6 @@ module.exports = {
     // enforce a fixed floor of their own and a hub stamping under it would never
     // collect a quorum.
     relayEffectiveTime(gatingChain){
-        return this._nowSeconds() + relayMarginS(gatingChain, this.relayMarginBlocks);
+        return this.nowSeconds() + relayMarginS(gatingChain, this.relayMarginBlocks);
     },
 };

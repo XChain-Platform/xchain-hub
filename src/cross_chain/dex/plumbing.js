@@ -60,7 +60,7 @@ module.exports = {
         return validators;
     },
 
-    _nowSeconds(){ return Math.floor(Date.now() / 1000); },
+    nowSeconds(){ return Math.floor(Date.now() / 1000); },
 
     // Resolve the BTC-anchored snapshot block. In a no-BTC regtest, fall back to a fixed
     // deterministic override (XDEX_SNAPSHOT_BLOCK) so the match + capability snapshot share

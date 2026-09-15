@@ -237,7 +237,7 @@ module.exports = {
             // indexer applies it at the first block whose protocol block_time reaches the
             // stamp, so a bare clock second would make it eligible the instant it finalized
             // and two indexers would inject it at different action indexes.
-            effective_time:       this._nowSeconds() + relayMarginFloorS(destChain),
+            effective_time:       this.nowSeconds() + relayMarginFloorS(destChain),
             // Source-chain reorg fence, stamped from the source indexer's own generation.
             // Metadata, NOT part of the signed canonical: an unfenced quorum-class
             // retraction is refused outright, so a follower pins this to its own view below.
