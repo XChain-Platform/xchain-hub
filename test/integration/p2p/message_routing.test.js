@@ -17,6 +17,7 @@ const testDb           = require('../../helpers/testDb');
 const { createPeerPair, buildEnvelope, sendEnvelope, waitForEvent } = require('../../helpers/testPeerNetwork');
 const ValidatorIdentity = require('../../../src/validators/identity');
 const { waitUntil }     = require('../../helpers/waitUntil');
+const PeerManager       = require('../../../src/peers/manager');
 
 // Order-preserving flush. The transport delivers frames in order, so a probe sent
 // after the frames under test can only be dispatched once those have been handled
@@ -30,9 +31,9 @@ async function flushWith(peerWs, received) {
     return received.filter(e => e.id !== probe.id);
 }
 
-describe('Integration: P2P Message Routing (SC-9.x)', function () {
+let peerPair = null;
 
-    let peerPair = null;
+describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
@@ -58,8 +59,18 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
         sinon.restore();
     });
 
-    // SC-9.1: Message type routing to correct subsystem
-    describe('SC-9.1: Message type routing', function () {
+    describe('SC-9.1: Message type routing', registerMessageRoutingTests);
+    describe('SC-9.2: Deduplication', registerDeduplicationTests);
+    describe('SC-9.3: Signature verification', registerSignatureTests);
+});
+
+// SC-9.1: Message type routing to correct subsystem
+function registerMessageRoutingTests() {
+    registerMessageEventTests();
+    registerDroppedMessageTests();
+}
+
+function registerMessageEventTests() {
         it('emits message event for valid envelopes', async function () {
             let db = testDb.getDb();
             peerPair = await createPeerPair(db);
@@ -97,7 +108,9 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             expect(heartbeats).to.have.lengthOf(1);
             expect(heartbeats[0].sender).to.equal('ws://peer-hb:10001');
         });
+}
 
+function registerDroppedMessageTests() {
         it('silently drops messages with invalid JSON', async function () {
             let db = testDb.getDb();
             peerPair = await createPeerPair(db);
@@ -128,10 +141,10 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             let delivered = await flushWith(peerPair.peerWs, received);
             expect(delivered).to.have.lengthOf(0);
         });
-    });
+}
 
-    // SC-9.2: Message deduplication
-    describe('SC-9.2: Deduplication', function () {
+// SC-9.2: Message deduplication
+function registerDeduplicationTests() {
         it('processes message with same ID only once', async function () {
             let db = testDb.getDb();
             peerPair = await createPeerPair(db);
@@ -164,10 +177,15 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
             expect(received).to.have.lengthOf(2);
         });
-    });
+}
 
-    // SC-9.3: Signature verification
-    describe('SC-9.3: Signature verification', function () {
+// SC-9.3: Signature verification
+function registerSignatureTests() {
+    registerSignedMessageTest();
+    registerUnsignedMessageTest();
+}
+
+function registerSignedMessageTest() {
         it('accepts valid signed messages when REQUIRE_SIGNATURES is true', async function () {
             let db = testDb.getDb();
 
@@ -177,30 +195,14 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             let peerAddr = 'ws://signed-peer:10001';
 
             // Create PeerManager with signature requirement
-            let PeerManager = require('../../../src/peers/manager');
-            let pm = new PeerManager({
-                P2P_VALIDATOR_ADDR:     'ws://hub-sig:10001',
-                P2P_PORT:               0,
-                P2P_HOST:               '127.0.0.1',
-                REQUIRE_SIGNATURES:     true,
-                P2P_HEARTBEAT_INTERVAL: 600000,
-                P2P_RECONNECT_BASE:     60000,
-                P2P_MSG_DEDUP_TTL:      60000
-            }, db);
+            let pm = createSignaturePeerManager(db, 'ws://hub-sig:10001');
 
             // Register the peer's pubkey
             let pubkeyMap = new Map();
             pubkeyMap.set(peerAddr, keypair.pubkeyHex);
             pm.setValidatorPubkeys(pubkeyMap);
 
-            await pm.start();
-            let port = pm.httpServer.address().port;
-
-            let ws = new WebSocket('ws://127.0.0.1:' + port);
-            await new Promise((resolve, reject) => {
-                ws.on('open', resolve);
-                ws.on('error', reject);
-            });
+            let ws = await openPeerSocket(pm);
 
             let received = [];
             pm.on('message', (env) => { received.push(env); });
@@ -219,58 +221,27 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             await waitUntil(() => received.length === 1, { label: 'the signed envelope to be routed' });
 
             // Send a message with invalid signature
-            let badEnv = {
-                type:      'BAD_SIG_TEST',
-                id:        'bad-sig:' + Date.now(),
-                sender:    peerAddr,
-                timestamp: Date.now(),
-                data:      { hello: 'tampered' },
-                sig:       'ff'.repeat(64)
-            };
-            // The forged envelope has no valid probe available on a signature-required
-            // socket, so wait on the drop the transport announces instead of a clock.
-            let warnStub = sinon.stub(console, 'warn');
-            try {
-                ws.send(JSON.stringify(badEnv));
-                await waitUntil(() => warnStub.args.some(a => String(a[0]).includes('Invalid signature')),
-                    { label: 'the forged envelope to be dropped' });
-            } finally {
-                warnStub.restore();
-            }
+            await sendForgedEnvelope(ws, peerAddr);
             // Should still only have the one valid message
             expect(received).to.have.lengthOf(1);
 
             ws.close();
             await pm.stop();
         });
+}
 
+function registerUnsignedMessageTest() {
         it('rejects unsigned messages when REQUIRE_SIGNATURES is true', async function () {
             let db = testDb.getDb();
 
-            let PeerManager = require('../../../src/peers/manager');
-            let pm = new PeerManager({
-                P2P_VALIDATOR_ADDR:     'ws://hub-sig2:10001',
-                P2P_PORT:               0,
-                P2P_HOST:               '127.0.0.1',
-                REQUIRE_SIGNATURES:     true,
-                P2P_HEARTBEAT_INTERVAL: 600000,
-                P2P_RECONNECT_BASE:     60000,
-                P2P_MSG_DEDUP_TTL:      60000
-            }, db);
+            let pm = createSignaturePeerManager(db, 'ws://hub-sig2:10001');
 
             // Register pubkeys
             let pubkeyMap = new Map();
             pubkeyMap.set('ws://unsigned-peer:10001', 'cc'.repeat(32));
             pm.setValidatorPubkeys(pubkeyMap);
 
-            await pm.start();
-            let port = pm.httpServer.address().port;
-
-            let ws = new WebSocket('ws://127.0.0.1:' + port);
-            await new Promise((resolve, reject) => {
-                ws.on('open', resolve);
-                ws.on('error', reject);
-            });
+            let ws = await openPeerSocket(pm);
 
             let received = [];
             pm.on('message', (env) => { received.push(env); });
@@ -292,5 +263,48 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             ws.close();
             await pm.stop();
         });
+}
+
+function createSignaturePeerManager(db, validatorAddr) {
+    return new PeerManager({
+        P2P_VALIDATOR_ADDR:     validatorAddr,
+        P2P_PORT:               0,
+        P2P_HOST:               '127.0.0.1',
+        REQUIRE_SIGNATURES:     true,
+        P2P_HEARTBEAT_INTERVAL: 600000,
+        P2P_RECONNECT_BASE:     60000,
+        P2P_MSG_DEDUP_TTL:      60000
+    }, db);
+}
+
+async function openPeerSocket(pm) {
+    await pm.start();
+    let port = pm.httpServer.address().port;
+    let ws = new WebSocket('ws://127.0.0.1:' + port);
+    await new Promise((resolve, reject) => {
+        ws.on('open', resolve);
+        ws.on('error', reject);
     });
-});
+    return ws;
+}
+
+async function sendForgedEnvelope(ws, peerAddr) {
+    let badEnv = {
+        type:      'BAD_SIG_TEST',
+        id:        'bad-sig:' + Date.now(),
+        sender:    peerAddr,
+        timestamp: Date.now(),
+        data:      { hello: 'tampered' },
+        sig:       'ff'.repeat(64)
+    };
+    // The forged envelope has no valid probe available on a signature-required
+    // socket, so wait on the drop the transport announces instead of a clock.
+    let warnStub = sinon.stub(console, 'warn');
+    try {
+        ws.send(JSON.stringify(badEnv));
+        await waitUntil(() => warnStub.args.some(a => String(a[0]).includes('Invalid signature')),
+            { label: 'the forged envelope to be dropped' });
+    } finally {
+        warnStub.restore();
+    }
+}
