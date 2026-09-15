@@ -16,44 +16,10 @@ const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
 
-describe('E2E: Config Pipeline', function () {
+let cluster;
 
-    let cluster;
-
-    before(async function () {
-        this.timeout(15000);
-        try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable, skipping E2E config tests');
-            return;
-        }
-        priceMocks.setup();
-    });
-
-    after(async function () {
-        this.timeout(10000);
-        priceMocks.teardown();
-        await testDb.teardown();
-    });
-
-    beforeEach(async function () {
-        this.timeout(15000);
-        if (!testDb.isAvailable()) return this.skip();
-        await testDb.truncateAll();
-        priceMocks.reset();
-    });
-
-    afterEach(async function () {
-        this.timeout(10000);
-        if (cluster) {
-            await cluster.stop();
-            cluster = null;
-        }
-    });
-
-    // E2E-CONFIG-003: Single-node config update
-    describe('E2E-CONFIG-003: Single-node config update', function () {
-
-        it('writes and retrieves config via JSON-RPC', async function () {
+function configUpdateSuiteTests1() {
+it('writes and retrieves config via JSON-RPC', async function () {
             this.timeout(15000);
 
             cluster = createCluster(1);
@@ -90,8 +56,10 @@ describe('E2E: Config Pipeline', function () {
             let readRes2 = await callRpc(port, 'getallconfigs');
             expect(readRes2.result.configs.BTC.mainnet.decoder.host).to.equal('updated.local');
         });
+}
 
-        it('handles multi-coin config in a single update', async function () {
+function configUpdateSuiteTests2() {
+it('handles multi-coin config in a single update', async function () {
             this.timeout(15000);
 
             cluster = createCluster(1);
@@ -132,5 +100,51 @@ describe('E2E: Config Pipeline', function () {
             let readRes = await callRpc(port, 'getallconfigs');
             expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('new-host');
         });
+}
+
+function configUpdateSuite() {
+
+        configUpdateSuiteTests1();
+
+        configUpdateSuiteTests2();
+    }
+
+function configPipelineSuite() {
+
+
+
+    before(async function () {
+        this.timeout(15000);
+        try { await testDb.setup(); } catch (e) {
+            console.warn('MariaDB unavailable, skipping E2E config tests');
+            return;
+        }
+        priceMocks.setup();
     });
-});
+
+    after(async function () {
+        this.timeout(10000);
+        priceMocks.teardown();
+        await testDb.teardown();
+    });
+
+    beforeEach(async function () {
+        this.timeout(15000);
+        if (!testDb.isAvailable()) return this.skip();
+        await testDb.truncateAll();
+        priceMocks.reset();
+    });
+
+    afterEach(async function () {
+        this.timeout(10000);
+        if (cluster) {
+            await cluster.stop();
+            cluster = null;
+        }
+    });
+
+    // E2E-CONFIG-003: Single-node config update
+    describe('E2E-CONFIG-003: Single-node config update', configUpdateSuite);
+}
+
+describe('E2E: Config Pipeline', configPipelineSuite);
