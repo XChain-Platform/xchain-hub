@@ -54,19 +54,21 @@ function makeDb(fsOverrides) {
 
 function fatalErr(code) { const e = new Error(code); e.code = code; return e; }
 
-describe('Database: extended coverage', function () {
 
-    beforeEach(function () {
-        // Keep negative-path logs out of the test output; some are asserted on.
-        sinon.stub(console, 'log');
-        sinon.stub(console, 'error');
-        sinon.stub(console, 'warn');
-    });
+function registerDatabaseHooks() {
+        beforeEach(function () {
+            // Keep negative-path logs out of the test output; some are asserted on.
+            sinon.stub(console, 'log');
+            sinon.stub(console, 'error');
+            sinon.stub(console, 'warn');
+        });
 
-    afterEach(function () {
-        sinon.restore();
-    });
+        afterEach(function () {
+            sinon.restore();
+        });
+}
 
+function registerFailFastIfFatalTests() {
     // -----------------------------------------------------------------
     // failFastIfFatal()
     // -----------------------------------------------------------------
@@ -92,7 +94,9 @@ describe('Database: extended coverage', function () {
             expect(() => db.failFastIfFatal(undefined, 'x')).to.not.throw();
         });
     });
+}
 
+function registerVerifyDatabaseTests() {
     // -----------------------------------------------------------------
     // verifyDatabase()
     // -----------------------------------------------------------------
@@ -133,7 +137,9 @@ describe('Database: extended coverage', function () {
             expect(db._sleep.calledWith(5000)).to.be.true;
         });
     });
+}
 
+function registerCreateDatabaseTests() {
     // -----------------------------------------------------------------
     // createDatabase()
     // -----------------------------------------------------------------
@@ -169,7 +175,9 @@ describe('Database: extended coverage', function () {
             expect(db._sleep.calledWith(5000)).to.be.true;
         });
     });
+}
 
+function registerVerifyTablesTests() {
     // -----------------------------------------------------------------
     // verifyTables()
     // -----------------------------------------------------------------
@@ -216,12 +224,9 @@ describe('Database: extended coverage', function () {
             expect(console.error.called).to.be.true;
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // runMigrations() / migrateUniqueKey()
-    // -----------------------------------------------------------------
-
-    describe('runMigrations() / migrateUniqueKey()', function () {
+function registerUniqueKeyMigrationTests() {
         it('skips the migration when the unique key already exists', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ c: 1 }]); // index already present
@@ -264,7 +269,9 @@ describe('Database: extended coverage', function () {
             expect(console.error.calledWithMatch(/Migration error on t/)).to.be.true;
             expect(mockConn.release.called).to.be.true;
         });
+}
 
+function registerRunMigrationSequenceTests() {
         it('runMigrations migrates unique keys, the batch index, and the capability ENUM', async function () {
             const { db } = makeDb();
             const mig = sinon.stub(db, 'migrateUniqueKey').resolves();
@@ -303,7 +310,9 @@ describe('Database: extended coverage', function () {
             expect(widen.args[3]).to.equal('(validator_pubkey, round_number, reward_type, round_qualifier)');
             expect(back.calledBefore(wide), 'backfill must precede the widen').to.be.true;
         });
+}
 
+function registerMigrationBackfillTests() {
         it('the archive qualifier backfill touches only anchor_archive rows still at 0', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves({ affectedRows: 2 });
@@ -336,437 +345,24 @@ describe('Database: extended coverage', function () {
                 expect(call.args[3]).to.include('NOT NULL');
             }
         });
+}
+
+function registerRunMigrationsMigrateUniqueKeyTests() {
+    // -----------------------------------------------------------------
+    // runMigrations() / migrateUniqueKey()
+    // -----------------------------------------------------------------
+    describe('runMigrations() / migrateUniqueKey()', function () {
+        registerUniqueKeyMigrationTests();
+        registerRunMigrationSequenceTests();
+        registerMigrationBackfillTests();
     });
+}
 
-    // -----------------------------------------------------------------
-    // _migrateColumnType()   (#4315)
-    // -----------------------------------------------------------------
-
-    describe('_migrateColumnType()', function () {
-
-        it('skips when the live DATA_TYPE already matches the target', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ DATA_TYPE: 'datetime' }]);
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
-            // only the information_schema SELECT runs; no ALTER
-            expect(mockConn.query.callCount).to.equal(1);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('converts the column in place when the live type differs', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
-                .onCall(1).resolves([]); // ALTER MODIFY
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
-            const alter = mockConn.query.getCall(1).args[0];
-            expect(alter).to.include('ALTER TABLE `governance_proposals` MODIFY `voting_end`');
-            expect(alter).to.include('DATETIME NOT NULL');
-            expect(console.log.calledWithMatch(/converted governance_proposals\.voting_end timestamp -> datetime/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('is a no-op when the table/column is absent (fresh install)', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]); // information_schema returns no row
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
-            expect(mockConn.query.callCount).to.equal(1); // no ALTER
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        // The conversion failure is swallowed so one bad ALTER cannot take the hub's boot
-        // down with it, but it must be LOUD: the line names what it costs and the exact
-        // statement an operator runs to finish the job by hand.
-        it('catches a failed ALTER, says what it costs, and still releases the connection', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
-                .onCall(1).rejects(new Error('alter failed'));
-            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
-            expect(console.error.calledWithMatch(/MIGRATION FAILED: governance_proposals\.voting_end/)).to.be.true;
-            expect(console.error.calledWithMatch(/2038-01-19/)).to.be.true;
-            expect(console.error.calledWithMatch(/ALTER TABLE `governance_proposals` MODIFY `voting_end` DATETIME NOT NULL/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // migrateEnumColumn()
-    // -----------------------------------------------------------------
-
-    describe('migrateEnumColumn()', function () {
-        const TARGET = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
-
-        it('skips when the live column already covers every target value', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation','full_node')" }]);
-            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
-            // only the COLUMN_TYPE SELECT runs; no ALTER
-            expect(mockConn.query.callCount).to.equal(1);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('widens the column in place when a target value is missing', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation')" }])
-                .onCall(1).resolves([]); // ALTER MODIFY
-            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
-            const alter = mockConn.query.getCall(1).args[0];
-            expect(alter).to.include('ALTER TABLE `validator_capabilities` MODIFY `capability`');
-            expect(alter).to.include("'full_node'");
-            expect(alter).to.include('NOT NULL');
-            expect(console.log.calledWithMatch(/widened validator_capabilities\.capability/)).to.be.true;
-        });
-
-        it('is a no-op when the table/column is absent (fresh install)', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]); // information_schema returns no row
-            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
-            expect(mockConn.query.callCount).to.equal(1); // no ALTER
-        });
-
-        it('catches and logs an error, still releasing the connection', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ COLUMN_TYPE: "enum('price')" }])
-                .onCall(1).rejects(new Error('alter failed'));
-            await db.migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
-            expect(console.error.calledWithMatch(/Migration error widening validator_capabilities\.capability/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // migrateIndex()
-    // -----------------------------------------------------------------
-
-    describe('migrateIndex()', function () {
-        it('skips the ALTER when the index already exists', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ c: 1 }]); // index already present
-            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
-            // only the existence SELECT runs; no ALTER
-            expect(mockConn.query.callCount).to.equal(1);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('adds the index with ADD INDEX (no dedup step) when absent', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ c: 0 }]) // not present
-                .onCall(1).resolves([]);        // ALTER ADD INDEX
-            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
-            // exactly two queries: the existence check + the ALTER (no DELETE dedup)
-            expect(mockConn.query.callCount).to.equal(2);
-            const add = mockConn.query.getCall(1).args[0];
-            expect(add).to.include('ALTER TABLE validator_rewards ADD INDEX idx_batch_seq (batch_seq)');
-            expect(add).to.not.include('UNIQUE');
-            expect(console.log.calledWithMatch(/added INDEX idx_batch_seq on validator_rewards/)).to.be.true;
-        });
-
-        it('catches and logs a migration error, still releasing the connection', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ c: 0 }]).onCall(1).rejects(new Error('alter failed'));
-            await db.migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)'); // must not throw
-            expect(console.error.calledWithMatch(/Migration error on validator_rewards/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // _createTableFromFile()
-    // -----------------------------------------------------------------
-
-    describe('_createTableFromFile()', function () {
-        it('splits the SQL file on ; and runs each non-empty statement', async function () {
-            const sql = 'CREATE TABLE configs (id INT);\n\n  ;\nINSERT INTO configs VALUES (1);';
-            const { db, mockConn } = makeDb({ readFileSync: sinon.stub().returns(sql) });
-            await db._createTableFromFile('configs.sql');
-            const ran = mockConn.query.getCalls().map(c => c.args[0]);
-            expect(ran).to.include('CREATE TABLE configs (id INT)');
-            expect(ran).to.include('INSERT INTO configs VALUES (1)');
-            // the blank `;` segment is skipped
-            expect(ran.every(q => q.trim() !== '')).to.be.true;
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // stripSqlLineComments()
-    // -----------------------------------------------------------------
-
-    describe('stripSqlLineComments()', function () {
-        let db;
-        beforeEach(function () { db = makeDb().db; });
-
-        it('strips a -- line comment but keeps the newline', function () {
-            expect(db.stripSqlLineComments('a INT, -- a comment\nb INT')).to.equal('a INT, \nb INT');
-        });
-
-        it('preserves a -- sequence inside a quoted string', function () {
-            const out = db.stripSqlLineComments("name VARCHAR DEFAULT 'a -- b'");
-            expect(out).to.include("'a -- b'");
-        });
-
-        it('treats a doubled quote inside a string as an escape', function () {
-            const out = db.stripSqlLineComments("v VARCHAR DEFAULT 'it''s -- ok'");
-            expect(out).to.include("'it''s -- ok'");
-        });
-
-        it('handles backtick-quoted identifiers', function () {
-            const out = db.stripSqlLineComments('`weird--col` INT -- trailing\n');
-            expect(out).to.include('`weird--col`');
-            expect(out).to.not.include('trailing');
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // parseExpectedColumns()
-    // -----------------------------------------------------------------
-
-    describe('parseExpectedColumns()', function () {
-        let db;
-        beforeEach(function () { db = makeDb().db; });
-
-        it('returns null when there is no CREATE TABLE block', function () {
-            expect(db.parseExpectedColumns('SELECT 1;')).to.be.null;
-        });
-
-        it('parses columns with nullability / default flags', function () {
-            const sql = 'CREATE TABLE IF NOT EXISTS t (\n' +
-                        '  id INT NOT NULL PRIMARY KEY,\n' +
-                        '  name VARCHAR(20),\n' +
-                        '  created INT NOT NULL DEFAULT 0,\n' +
-                        '  PRIMARY KEY (id)\n' +
-                        ');';
-            const cols = db.parseExpectedColumns(sql);
-            const byName = Object.fromEntries(cols.map(c => [c.name, c]));
-            expect(byName).to.have.all.keys('id', 'name', 'created'); // constraint line skipped
-            expect(byName.id.notNull).to.be.true;            // inline PRIMARY KEY -> notNull
-            expect(byName.name.nullable).to.be.true;
-            expect(byName.created.notNull).to.be.true;
-            expect(byName.created.hasDefault).to.be.true;
-        });
-
-        it('returns null when the block has only constraint lines', function () {
-            const sql = 'CREATE TABLE t (\n  PRIMARY KEY (a),\n  UNIQUE KEY uq (b)\n);';
-            expect(db.parseExpectedColumns(sql)).to.be.null;
-        });
-
-        it('skips empty segments and single-token (typeless) column lines', function () {
-            // `id INT,,` -> an empty segment; ` onlyname` -> a single token (no type)
-            const cols = db.parseExpectedColumns('CREATE TABLE t (id INT,, onlyname, b VARCHAR(2));');
-            expect(cols.map(c => c.name)).to.deep.equal(['id', 'b']);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // alterTableForDrift()
-    // -----------------------------------------------------------------
-
-    describe('alterTableForDrift()', function () {
-        // A fake caller-supplied connection whose first query returns the live
-        // columns and whose subsequent (ALTER) queries resolve empty.
-        function conn(liveCols) {
-            const c = { query: sinon.stub().resolves([]) };
-            c.query.onFirstCall().resolves(liveCols);
-            return c;
-        }
-
-        it('returns early when the SQL has no parseable columns', async function () {
-            const { db } = makeDb({ readFileSync: sinon.stub().returns('-- just a comment\n') });
-            const c = { query: sinon.stub().resolves([]) };
-            await db.alterTableForDrift('t.sql', c);
-            expect(c.query.called).to.be.false;
-        });
-
-        it('adds a missing column from the SQL source', async function () {
-            const { db } = makeDb({
-                readFileSync: sinon.stub().returns("CREATE TABLE t (id INT NOT NULL, extra VARCHAR(8) DEFAULT 'x');")
-            });
-            const c = conn([{ COLUMN_NAME: 'id', IS_NULLABLE: 'NO', COLUMN_TYPE: 'int' }]);
-            await db.alterTableForDrift('t.sql', c);
-            const alters = c.query.getCalls().slice(1).map(x => x.args[0]);
-            expect(alters.some(s => /ADD COLUMN extra VARCHAR\(8\)/.test(s))).to.be.true;
-        });
-
-        it('skips a missing NOT NULL column that has no DEFAULT', async function () {
-            const { db } = makeDb({
-                readFileSync: sinon.stub().returns('CREATE TABLE t (id INT, req VARCHAR(10) NOT NULL);')
-            });
-            const c = conn([{ COLUMN_NAME: 'id', IS_NULLABLE: 'YES', COLUMN_TYPE: 'int' }]);
-            await db.alterTableForDrift('t.sql', c);
-            const alters = c.query.getCalls().slice(1).map(x => x.args[0]);
-            expect(alters.some(s => /ADD COLUMN req/.test(s))).to.be.false;
-            expect(console.log.calledWithMatch(/cannot backfill/)).to.be.true;
-        });
-
-        it('relaxes a live NOT NULL column when the source is nullable', async function () {
-            const { db } = makeDb({
-                readFileSync: sinon.stub().returns('CREATE TABLE t (col VARCHAR(10));')
-            });
-            const c = conn([{ COLUMN_NAME: 'col', IS_NULLABLE: 'NO', COLUMN_TYPE: 'varchar(10)' }]);
-            await db.alterTableForDrift('t.sql', c);
-            const alters = c.query.getCalls().slice(1).map(x => x.args[0]);
-            expect(alters.some(s => /MODIFY `col` varchar\(10\) NULL/.test(s))).to.be.true;
-        });
-
-        it('makes no changes when the live schema already matches', async function () {
-            const { db } = makeDb({
-                readFileSync: sinon.stub().returns('CREATE TABLE t (col VARCHAR(10));')
-            });
-            const c = conn([{ COLUMN_NAME: 'col', IS_NULLABLE: 'YES', COLUMN_TYPE: 'varchar(10)' }]);
-            await db.alterTableForDrift('t.sql', c);
-            expect(c.query.callCount).to.equal(1); // only the live-columns SELECT
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // getConnection(): transaction + retry/backoff tail
-    // -----------------------------------------------------------------
-
-    describe('getConnection()', function () {
-        it('returns the active transaction connection without touching the pool', async function () {
-            const { db, mockPool } = makeDb();
-            const txConn = { marker: true };
-            db.transactionConnection = txConn;
-            expect(await db.getConnection()).to.equal(txConn);
-            expect(mockPool.getConnection.called).to.be.false;
-        });
-
-        it('retries with backoff then succeeds', async function () {
-            const { db, mockPool, mockConn } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
-            mockPool.getConnection
-                .onFirstCall().rejects(new Error('refused'))
-                .onSecondCall().resolves(mockConn);
-            const c = await db.getConnection();
-            expect(c).to.equal(mockConn);
-            expect(db._sleep.called).to.be.true;
-            expect(db.circuitFailures).to.equal(0); // reset on success
-        });
-
-        it('rethrows a query error when inside a transaction', async function () {
-            const { db, mockConn } = makeDb();
-            db.transactionConnection = mockConn; // marks tx active
-            mockConn.query.rejects(new Error('constraint violation'));
-            try {
-                await db.doQuery('INSERT INTO t VALUES (1)');
-                expect.fail('should have rethrown inside a transaction');
-            } catch (e) {
-                expect(e.message).to.equal('constraint violation');
-            }
-            expect(mockConn.release.called).to.be.false; // tx conn is not released by doQuery
-        });
-
-        it('throws after exhausting maxAttempts when the circuit stays closed', async function () {
-            const { db, mockPool } = makeDb();
-            sinon.stub(db, '_sleep').resolves();
-            db.circuitThreshold = 1000; // keep the breaker from tripping first
-            mockPool.getConnection.rejects(new Error('refused'));
-            try {
-                await db.getConnection();
-                expect.fail('should have thrown');
-            } catch (e) {
-                expect(e.message).to.include('Could not connect to MariaDB after 30 attempts');
-            }
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // setChainTip() / getChainTip()
-    // -----------------------------------------------------------------
-
-    describe('chain tip helpers', function () {
-        it('setChainTip normalizes the coin abbreviation to its full name, defaulting network to mainnet', async function () {
-            const { db } = makeDb();
-            const setParam = sinon.stub(db, 'setParam').resolves();
-            await db.setChainTip('BTC', null, 840000, 1718000000);
-            // 'BTC' normalizes to 'bitcoin' so chain_tips co-locate under the
-            // canonical coin key (not a phantom abbreviation-keyed coin).
-            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_height', '840000')).to.be.true;
-            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_time', '1718000000')).to.be.true;
-        });
-
-        it('getChainTip returns null when no tip has been set', async function () {
-            const { db } = makeDb();
-            sinon.stub(db, 'getConfig').resolves({});
-            expect(await db.getChainTip('BTC')).to.be.null;
-        });
-
-        it('getChainTip reads the canonical full-name key for a coin abbreviation', async function () {
-            const { db } = makeDb();
-            const getConfig = sinon.stub(db, 'getConfig')
-                .resolves({ block_height: '840000', block_time: '1718000000' });
-            const tip = await db.getChainTip('LTC', 'testnet');
-            expect(tip).to.deep.equal({ blockHeight: 840000, blockTime: 1718000000, chainId: null });
-            expect(getConfig.calledWith('litecoin', 'testnet', 'chain_tips')).to.be.true;
-        });
-
-        it('getChainTip falls back to the abbreviation key for pre-normalization tips', async function () {
-            const { db } = makeDb();
-            const getConfig = sinon.stub(db, 'getConfig');
-            // Canonical key empty (no tip written since the normalization landed)...
-            getConfig.withArgs('bitcoin', 'mainnet', 'chain_tips').resolves({});
-            // ...but an older tip still lives under the raw abbreviation.
-            getConfig.withArgs('BTC', 'mainnet', 'chain_tips')
-                .resolves({ block_height: '820000', block_time: '1717000000' });
-            const tip = await db.getChainTip('BTC');
-            expect(tip).to.deep.equal({ blockHeight: 820000, blockTime: 1717000000, chainId: null });
-        });
-
-        it('getChainTip defaults block_time to 0 when unparseable', async function () {
-            const { db } = makeDb();
-            sinon.stub(db, 'getConfig').resolves({ block_height: '5', block_time: 'NaNish' });
-            expect(await db.getChainTip('BTC')).to.deep.equal({ blockHeight: 5, blockTime: 0, chainId: null });
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // getAllConfigs() cursor branch + getConfigWatermark()
-    // -----------------------------------------------------------------
-
-    describe('getAllConfigs() incremental cursor', function () {
-        it('adds the UNIX_TIMESTAMP cursor predicate when sinceUpdatedAt > 0', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]);
-            await db.getAllConfigs(1718000000);
-            const [sql, args] = mockConn.query.getCall(0).args;
-            // Inclusive >= boundary (#2265): a strict > dropped a write committed
-            // in the same second as the watermark; consumers merge idempotently,
-            // so re-delivering the cursor second is a no-op.
-            expect(sql).to.include('WHERE UNIX_TIMESTAMP(updated_at) >= ?');
-            expect(args).to.deep.equal([1718000000]);
-        });
-
-        it('omits the cursor predicate for 0 / NaN cursors', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]);
-            await db.getAllConfigs(0);
-            expect(mockConn.query.getCall(0).args[0]).to.not.include('WHERE');
-            mockConn.query.resetHistory();
-            await db.getAllConfigs('not-a-number');
-            expect(mockConn.query.getCall(0).args[0]).to.not.include('WHERE');
-        });
-    });
-
-    describe('getConfigWatermark()', function () {
-        it('returns the MAX(updated_at) watermark as a number', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ watermark: '1718000123' }]);
-            expect(await db.getConfigWatermark()).to.equal(1718000123);
-        });
-
-        it('returns 0 when the table is empty (null watermark)', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ watermark: null }]);
-            expect(await db.getConfigWatermark()).to.equal(0);
-        });
-
-        it('returns 0 when no row comes back at all', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]);
-            expect(await db.getConfigWatermark()).to.equal(0);
-        });
-    });
+describe('Database: extended coverage', function () {
+    registerDatabaseHooks();
+    registerFailFastIfFatalTests();
+    registerVerifyDatabaseTests();
+    registerCreateDatabaseTests();
+    registerVerifyTablesTests();
+    registerRunMigrationsMigrateUniqueKeyTests();
 });
