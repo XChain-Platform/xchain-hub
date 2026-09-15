@@ -46,74 +46,97 @@ function makeProviderRegistry(agreeSpy) {
     };
 }
 
-describe('AttestationConsensus: judge_model leader stalls when its responsible set omits its proposers', function () {
+function makeRound(responsibleIdentities) {
+    return {
+        request:      { request_id: 'req', block_index: 0 },
+        providerId:   'llm',
+        pinnedConsensusStrategy: 'judge_model',
+        redundancy:   3,
+        quorum:       3,
+        mirrorEra:    false,
+        responsible:  responsibleIdentities.map(id => ({ pubkey: pub(id) })),
+        commits:      new Set(),
+        prepares:     new Set(),
+        signatures:   new Map(),
+        proposals:    new Map(),
+        winner:       null,
+        status:       'ok',
+        myPubkey:     pub(leader),
+        leaderPubkey: pub(leader),
+        role:         'leader',
+        finalized:    false,
+        timer:        null
+    };
+}
 
-    const RID  = 'cd'.repeat(16);       // 32 hex chars
-    const BODY = Buffer.from('4');      // the live rounds all carried body=1B
+function proposeFrom(identity) {
+    let canonical = consensus._buildCanonical(RID, 'llm', BODY, 'ok', '', 0, null).toString('utf8');
+    return {
+        type: 'ATTEST_PROPOSE',
+        data: {
+            requestId:  RID,
+            providerId: 'llm',
+            body_b64:   BODY.toString('base64'),
+            meta:       '',
+            status:     'ok',
+            sig_pubkey: pub(identity),
+            sig:        identity.sign(canonical)
+        }
+    };
+}
 
-    let hub, consensus, agreeSpy;
-    let leader, fB, fC, fD, community1, community2;
+let leader, fB, fC, fD, community1, community2;
 
-    // A PROPOSE signed the way _handlePropose verifies it: over the canonical
-    // built from the wire values. mirrorEra is false on the round, so
-    // readWireEffectiveTime returns null and the canonical takes no stamp.
-    function proposeFrom(identity) {
-        let canonical = consensus._buildCanonical(RID, 'llm', BODY, 'ok', '', 0, null).toString('utf8');
-        return {
-            type: 'ATTEST_PROPOSE',
-            data: {
-                requestId:  RID,
-                providerId: 'llm',
-                body_b64:   BODY.toString('base64'),
-                meta:       '',
-                status:     'ok',
-                sig_pubkey: pub(identity),
-                sig:        identity.sign(canonical)
-            }
-        };
-    }
+let hub, consensus, agreeSpy;
+const RID  = 'cd'.repeat(16);       // 32 hex chars
+const BODY = Buffer.from('4');      // the live rounds all carried body=1B
 
-    function makeRound(responsibleIdentities) {
-        return {
-            request:      { request_id: 'req', block_index: 0 },
-            providerId:   'llm',
-            pinnedConsensusStrategy: 'judge_model',
-            redundancy:   3,
-            quorum:       3,
-            mirrorEra:    false,
-            responsible:  responsibleIdentities.map(id => ({ pubkey: pub(id) })),
-            commits:      new Set(),
-            prepares:     new Set(),
-            signatures:   new Map(),
-            proposals:    new Map(),
-            winner:       null,
-            status:       'ok',
-            myPubkey:     pub(leader),
-            leaderPubkey: pub(leader),
-            role:         'leader',
-            finalized:    false,
-            timer:        null
-        };
-    }
+function registerJudgeLeaderRecoveryTests() {
+it('reads healthy from every single hub while the sets disagree, which is why per-hub logs cannot see it', function () {
+        // Each hub's own set is the right size and contains itself, so each hub
+        // reports a well-formed round. Constraint 2: the fault is only visible
+        // when the sets are compared ACROSS hubs.
+        let leaderSet   = makeRound([leader, community1, community2, fB, fC]);
+        let followerSet = makeRound([fB, fC, fD, leader, community1]);
 
-    beforeEach(function () {
-        hub        = createMockHub();
-        agreeSpy   = sinon.stub().returns({ body: BODY, meta: '' });
-        consensus  = new AttestationConsensus(hub, makeProviderRegistry(agreeSpy));
-        leader     = mkIdentity();
-        fB         = mkIdentity();
-        fC         = mkIdentity();
-        fD         = mkIdentity();
-        community1 = mkIdentity();
-        community2 = mkIdentity();
+        let asKeys = r => r.responsible.map(v => v.pubkey).sort().join(',');
+
+        expect(leaderSet.responsible).to.have.lengthOf(5);
+        expect(followerSet.responsible).to.have.lengthOf(5);
+        expect(asKeys(leaderSet)).to.not.equal(asKeys(followerSet),
+            'this rig is only meaningful while the two sets differ');
+
+        // fD is responsible in the follower's view and an outsider in the leader's,
+        // so fD's proposal is admitted by one hub and silently discarded by the other.
+        expect(followerSet.responsible.some(v => v.pubkey === pub(fD))).to.equal(true);
+        expect(leaderSet.responsible.some(v => v.pubkey === pub(fD))).to.equal(false);
     });
 
-    afterEach(function () {
-        for (let [, p] of consensus.pending) { if (p.timer) clearTimeout(p.timer); }
-        sinon.restore();
-    });
+    it('FALSIFICATION: with the leader\'s set matching its peers, the same proposals are admitted and it advances', async function () {
+        // Same messages and bodies; the only change is that the leader's set now
+        // contains its proposers. If this cannot go green, the tests above pin
+        // something other than the membership gate.
+        let pending = makeRound([leader, fB, fC, fD, community1]);
+        consensus.pending.set(RID, pending);
+        pending.proposals.set(pub(leader), { body: BODY, meta: '', status: 'ok' });
 
-    it('admits only the proposers inside its own responsible set, and the three it drops leave no trace', function () {
+        consensus._handlePropose(proposeFrom(fB));
+        consensus._handlePropose(proposeFrom(fC));
+        consensus._handlePropose(proposeFrom(fD));
+
+        let admitted = [...pending.proposals.keys()].sort();
+        expect(admitted).to.deep.equal([pub(leader), pub(fB), pub(fC), pub(fD)].sort());
+
+        await consensus.maybeAdvanceFromProposals(RID);
+
+        // Past the threshold, the leader runs the judge and establishes a winner.
+        expect(agreeSpy.called, 'agree() must run once the leader is over its threshold').to.equal(true);
+        expect(pending.winner).to.not.equal(null);
+    });
+}
+
+function registerJudgeLeaderStallTests() {
+it('admits only the proposers inside its own responsible set, and the three it drops leave no trace', function () {
         // The leader's set is the right SIZE (5, i.e. redundancy 3 + widen 2) and
         // holds itself plus four community members that carry no llm transport and
         // therefore never propose. Its three transport-carrying peers are absent.
@@ -155,46 +178,33 @@ describe('AttestationConsensus: judge_model leader stalls when its responsible s
         expect(agreeSpy.called, 'agree() must not have run: the leader never reached its threshold').to.equal(false);
         expect(pending.finalized).to.equal(false);
     });
+}
 
-    it('reads healthy from every single hub while the sets disagree, which is why per-hub logs cannot see it', function () {
-        // Each hub's own set is the right size and contains itself, so each hub
-        // reports a well-formed round. Constraint 2: the fault is only visible
-        // when the sets are compared ACROSS hubs.
-        let leaderSet   = makeRound([leader, community1, community2, fB, fC]);
-        let followerSet = makeRound([fB, fC, fD, leader, community1]);
+describe('AttestationConsensus: judge_model leader stalls when its responsible set omits its proposers', function () {
 
-        let asKeys = r => r.responsible.map(v => v.pubkey).sort().join(',');
+    // A PROPOSE signed the way _handlePropose verifies it: over the canonical
+    // built from the wire values. mirrorEra is false on the round, so
+    // readWireEffectiveTime returns null and the canonical takes no stamp.
 
-        expect(leaderSet.responsible).to.have.lengthOf(5);
-        expect(followerSet.responsible).to.have.lengthOf(5);
-        expect(asKeys(leaderSet)).to.not.equal(asKeys(followerSet),
-            'this rig is only meaningful while the two sets differ');
 
-        // fD is responsible in the follower's view and an outsider in the leader's,
-        // so fD's proposal is admitted by one hub and silently discarded by the other.
-        expect(followerSet.responsible.some(v => v.pubkey === pub(fD))).to.equal(true);
-        expect(leaderSet.responsible.some(v => v.pubkey === pub(fD))).to.equal(false);
+    beforeEach(function () {
+        hub        = createMockHub();
+        agreeSpy   = sinon.stub().returns({ body: BODY, meta: '' });
+        consensus  = new AttestationConsensus(hub, makeProviderRegistry(agreeSpy));
+        leader     = mkIdentity();
+        fB         = mkIdentity();
+        fC         = mkIdentity();
+        fD         = mkIdentity();
+        community1 = mkIdentity();
+        community2 = mkIdentity();
     });
 
-    it('FALSIFICATION: with the leader\'s set matching its peers, the same proposals are admitted and it advances', async function () {
-        // Same messages and bodies; the only change is that the leader's set now
-        // contains its proposers. If this cannot go green, the tests above pin
-        // something other than the membership gate.
-        let pending = makeRound([leader, fB, fC, fD, community1]);
-        consensus.pending.set(RID, pending);
-        pending.proposals.set(pub(leader), { body: BODY, meta: '', status: 'ok' });
-
-        consensus._handlePropose(proposeFrom(fB));
-        consensus._handlePropose(proposeFrom(fC));
-        consensus._handlePropose(proposeFrom(fD));
-
-        let admitted = [...pending.proposals.keys()].sort();
-        expect(admitted).to.deep.equal([pub(leader), pub(fB), pub(fC), pub(fD)].sort());
-
-        await consensus.maybeAdvanceFromProposals(RID);
-
-        // Past the threshold, the leader runs the judge and establishes a winner.
-        expect(agreeSpy.called, 'agree() must run once the leader is over its threshold').to.equal(true);
-        expect(pending.winner).to.not.equal(null);
+    afterEach(function () {
+        for (let [, p] of consensus.pending) { if (p.timer) clearTimeout(p.timer); }
+        sinon.restore();
     });
+
+    registerJudgeLeaderStallTests();
+
+    registerJudgeLeaderRecoveryTests();
 });
