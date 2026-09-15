@@ -28,9 +28,172 @@ const { DB_METHODS } = require('../helpers/mockHub');
 // observed where they are now written.
 const { getLogger } = require('../../src/observability');
 
-describe('boot auth posture', function () {
+function makeAuthBootServer() {
+    const mockApp = {
+        use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
+        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
+    };
+    const mockExpress = sinon.stub().returns(mockApp);
+    mockExpress.json = sinon.stub().returns(function expressJson() {});
+    const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
+    return { mockExpress, mockServer };
+}
 
-    describe('evaluateAuthPosture()', function () {
+function makeAuthBootHub() {
+    return {
+        // DB_METHODS supplies getDatabaseLivenessProbe, the ping/health probe,
+        // routed through the doQuery stub beside it.
+        db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
+        capabilitySnapshot: { monitor: new ConsensusInputMonitor({ throttleMs: 60000, log: () => {} }) },
+        stateAnchorPublisher: null,
+        attestationPublisher:  null,
+        start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
+        startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
+        startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
+        on: () => {}
+    };
+}
+
+async function bootApi(env) {
+    const captured = { methods: null, exits: [] };
+    const { mockExpress, mockServer } = makeAuthBootServer();
+
+    const mockHub = makeAuthBootHub();
+
+    const saved = {};
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
+                     'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
+        saved[k] = process.env[k];
+        delete process.env[k];
+    }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9998'
+    }, env);
+
+    const exitStub = sinon.stub(process, 'exit').callsFake((code) => { captured.exits.push(code); });
+    try {
+        proxyquire('../../src/api', {
+            'dotenv': { config: sinon.stub() },
+            'express': mockExpress,
+            'helmet': sinon.stub().returns(function helmetMw() {}),
+            'cors': sinon.stub().returns(function corsMw() {}),
+            'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
+            'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
+            'http': { createServer: sinon.stub().returns(mockServer) },
+            'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+            'geoip-lite': { lookup: sinon.stub().returns(null) },
+            './XChainHub': function () { return mockHub; }
+        });
+    } finally {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+    // The boot is an async IIFE with two terminal outcomes: it either
+    // registers the JSON-RPC methods or refuses via process.exit. Poll for
+    // whichever arrives; a fixed settle has to be sized for the slower one
+    // on the slowest box, which is dead time on every other run.
+    try {
+        await waitUntil(() => captured.methods || captured.exits.length > 0,
+            { label: 'api.js boot to serve or refuse' });
+    } finally {
+        exitStub.restore();
+    }
+    return { exits: captured.exits, methods: captured.methods, hub: mockHub };
+}
+
+function registerAuthLoggingSuite() {
+describe('/health consensus-input wiring', function () {
+
+        afterEach(function () { sinon.restore(); });
+
+        function makeRes() {
+            return { statusCode: 200, status(code) { this.statusCode = code; return this; } };
+        }
+
+        it('reports the consensus-input telemetry on a healthy hub', async function () {
+            const boot = await bootApi({ HUB_API_KEY: 'k' });
+            const res  = makeRes();
+            const body = await boot.methods.health({}, { res });
+
+            expect(body.consensus_input).to.be.an('object');
+            expect(body.consensus_input.alerting).to.equal(false);
+            expect(body.status).to.equal('healthy');
+            expect(res.statusCode).to.equal(200);
+        });
+
+        it('degrades to 503 once consensus-input fetches are alerting', async function () {
+            const boot = await bootApi({ HUB_API_KEY: 'k' });
+            const monitor = boot.hub.capabilitySnapshot.monitor;
+            for (let i = 0; i < 3; i++) monitor.recordFailure('getactivevalidators', REASONS.UNREACHABLE, 'down');
+
+            const res  = makeRes();
+            const body = await boot.methods.health({}, { res });
+
+            expect(body.consensus_input.alerting).to.equal(true);
+            expect(body.consensus_input.by_reason.unreachable).to.equal(3);
+            expect(body.consensus_input.last_failure.reason).to.equal('unreachable');
+            expect(body.status).to.equal('degraded');
+            expect(res.statusCode).to.equal(503);
+        });
+
+        it('recovers to healthy once a fetch succeeds again', async function () {
+            const boot = await bootApi({ HUB_API_KEY: 'k' });
+            const monitor = boot.hub.capabilitySnapshot.monitor;
+            for (let i = 0; i < 3; i++) monitor.recordFailure('getactivevalidators', REASONS.UNREACHABLE, 'down');
+            monitor.recordSuccess('getactivevalidators');
+
+            const res  = makeRes();
+            const body = await boot.methods.health({}, { res });
+            expect(body.status).to.equal('healthy');
+            expect(res.statusCode).to.equal(200);
+        });
+    });
+}
+
+function registerAuthBootSuite() {
+describe('src/api.js boot', function () {
+
+        afterEach(function () { sinon.restore(); });
+
+        it('refuses to boot with no key and no declaration', async function () {
+            const err = sinon.stub(getLogger(), 'error');
+            const boot = await bootApi({});
+            expect(boot.exits).to.deep.equal([1]);
+            expect(err.getCalls().some(c => String(c.args[0]).indexOf('REFUSING TO BOOT') === 0))
+                .to.equal(true, 'expected the refusal on stderr');
+        });
+
+        it('refuses a keyless VALIDATOR hub too (unchanged from before)', async function () {
+            const err = sinon.stub(getLogger(), 'error');
+            const boot = await bootApi({ P2P_VALIDATOR_ADDR: 'bc1qexample' });
+            // process.exit is stubbed, so the module keeps running and trips the
+            // later validator-mode env requirements too. What matters is that the
+            // auth posture exited FIRST, before anything served.
+            expect(boot.exits[0]).to.equal(1);
+            expect(String(err.firstCall.args[0])).to.contain('REFUSING TO BOOT');
+            expect(String(err.firstCall.args[0])).to.contain('VALIDATOR');
+        });
+
+        it('boots when keyless is declared', async function () {
+            sinon.stub(getLogger(), 'warn');
+            const boot = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
+            expect(boot.exits).to.deep.equal([]);
+            expect(boot.methods).to.not.equal(null);
+        });
+
+        it('boots with a key', async function () {
+            const boot = await bootApi({ HUB_API_KEY: 'a-strong-key' });
+            expect(boot.exits).to.deep.equal([]);
+        });
+    });
+}
+
+function registerAuthPostureSuite() {
+describe('evaluateAuthPosture()', function () {
 
         it('REFUSES a keyless config-oracle hub (the fail-open default that shipped)', function () {
             const p = evaluateAuthPosture({ apiKey: '', allowUnauthenticated: false, validatorMode: false });
@@ -85,157 +248,16 @@ describe('boot auth posture', function () {
             expect(p.warnings).to.deep.equal([]);
         });
     });
+}
+
+describe('boot auth posture', function () {
+
+    registerAuthPostureSuite();
 
     // Boot src/api.js with everything heavy stubbed. process.exit is stubbed so
     // a refusal is observable instead of taking the test runner down with it.
-    async function bootApi(env) {
-        const captured = { methods: null, exits: [] };
-        const mockApp = {
-            use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
-            listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
-        };
-        const mockExpress = sinon.stub().returns(mockApp);
-        mockExpress.json = sinon.stub().returns(function expressJson() {});
-        const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
 
-        const mockHub = {
-            // DB_METHODS supplies getDatabaseLivenessProbe, the ping/health probe,
-            // routed through the doQuery stub beside it.
-            db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
-            capabilitySnapshot: { monitor: new ConsensusInputMonitor({ throttleMs: 60000, log: () => {} }) },
-            stateAnchorPublisher: null,
-            attestationPublisher:  null,
-            start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
-            startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
-            startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
-            on: () => {}
-        };
+    registerAuthBootSuite();
 
-        const saved = {};
-        for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
-                         'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
-                         'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
-            saved[k] = process.env[k];
-            delete process.env[k];
-        }
-        Object.assign(process.env, {
-            HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-            HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9998'
-        }, env);
-
-        const exitStub = sinon.stub(process, 'exit').callsFake((code) => { captured.exits.push(code); });
-        try {
-            proxyquire('../../src/api', {
-                'dotenv': { config: sinon.stub() },
-                'express': mockExpress,
-                'helmet': sinon.stub().returns(function helmetMw() {}),
-                'cors': sinon.stub().returns(function corsMw() {}),
-                'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
-                'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
-                'http': { createServer: sinon.stub().returns(mockServer) },
-                'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-                'geoip-lite': { lookup: sinon.stub().returns(null) },
-                './XChainHub': function () { return mockHub; }
-            });
-        } finally {
-            for (const [k, v] of Object.entries(saved)) {
-                if (v === undefined) delete process.env[k];
-                else process.env[k] = v;
-            }
-        }
-        // The boot is an async IIFE with two terminal outcomes: it either
-        // registers the JSON-RPC methods or refuses via process.exit. Poll for
-        // whichever arrives; a fixed settle has to be sized for the slower one
-        // on the slowest box, which is dead time on every other run.
-        try {
-            await waitUntil(() => captured.methods || captured.exits.length > 0,
-                { label: 'api.js boot to serve or refuse' });
-        } finally {
-            exitStub.restore();
-        }
-        return { exits: captured.exits, methods: captured.methods, hub: mockHub };
-    }
-
-    describe('src/api.js boot', function () {
-
-        afterEach(function () { sinon.restore(); });
-
-        it('refuses to boot with no key and no declaration', async function () {
-            const err = sinon.stub(getLogger(), 'error');
-            const boot = await bootApi({});
-            expect(boot.exits).to.deep.equal([1]);
-            expect(err.getCalls().some(c => String(c.args[0]).indexOf('REFUSING TO BOOT') === 0))
-                .to.equal(true, 'expected the refusal on stderr');
-        });
-
-        it('refuses a keyless VALIDATOR hub too (unchanged from before)', async function () {
-            const err = sinon.stub(getLogger(), 'error');
-            const boot = await bootApi({ P2P_VALIDATOR_ADDR: 'bc1qexample' });
-            // process.exit is stubbed, so the module keeps running and trips the
-            // later validator-mode env requirements too. What matters is that the
-            // auth posture exited FIRST, before anything served.
-            expect(boot.exits[0]).to.equal(1);
-            expect(String(err.firstCall.args[0])).to.contain('REFUSING TO BOOT');
-            expect(String(err.firstCall.args[0])).to.contain('VALIDATOR');
-        });
-
-        it('boots when keyless is declared', async function () {
-            sinon.stub(getLogger(), 'warn');
-            const boot = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
-            expect(boot.exits).to.deep.equal([]);
-            expect(boot.methods).to.not.equal(null);
-        });
-
-        it('boots with a key', async function () {
-            const boot = await bootApi({ HUB_API_KEY: 'a-strong-key' });
-            expect(boot.exits).to.deep.equal([]);
-        });
-    });
-
-    describe('/health consensus-input wiring', function () {
-
-        afterEach(function () { sinon.restore(); });
-
-        function makeRes() {
-            return { statusCode: 200, status(code) { this.statusCode = code; return this; } };
-        }
-
-        it('reports the consensus-input telemetry on a healthy hub', async function () {
-            const boot = await bootApi({ HUB_API_KEY: 'k' });
-            const res  = makeRes();
-            const body = await boot.methods.health({}, { res });
-
-            expect(body.consensus_input).to.be.an('object');
-            expect(body.consensus_input.alerting).to.equal(false);
-            expect(body.status).to.equal('healthy');
-            expect(res.statusCode).to.equal(200);
-        });
-
-        it('degrades to 503 once consensus-input fetches are alerting', async function () {
-            const boot = await bootApi({ HUB_API_KEY: 'k' });
-            const monitor = boot.hub.capabilitySnapshot.monitor;
-            for (let i = 0; i < 3; i++) monitor.recordFailure('getactivevalidators', REASONS.UNREACHABLE, 'down');
-
-            const res  = makeRes();
-            const body = await boot.methods.health({}, { res });
-
-            expect(body.consensus_input.alerting).to.equal(true);
-            expect(body.consensus_input.by_reason.unreachable).to.equal(3);
-            expect(body.consensus_input.last_failure.reason).to.equal('unreachable');
-            expect(body.status).to.equal('degraded');
-            expect(res.statusCode).to.equal(503);
-        });
-
-        it('recovers to healthy once a fetch succeeds again', async function () {
-            const boot = await bootApi({ HUB_API_KEY: 'k' });
-            const monitor = boot.hub.capabilitySnapshot.monitor;
-            for (let i = 0; i < 3; i++) monitor.recordFailure('getactivevalidators', REASONS.UNREACHABLE, 'down');
-            monitor.recordSuccess('getactivevalidators');
-
-            const res  = makeRes();
-            const body = await boot.methods.health({}, { res });
-            expect(body.status).to.equal('healthy');
-            expect(res.statusCode).to.equal(200);
-        });
-    });
+    registerAuthLoggingSuite();
 });
