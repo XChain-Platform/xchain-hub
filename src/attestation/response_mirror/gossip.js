@@ -254,7 +254,7 @@ module.exports = {
 
     // Does this hub already hold the row? One keyed read on the UNIQUE index.
     async alreadyHeld(row){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return false;
         let rows = await db.getAttestationResponse(row.network, row.request_id, row.effective_time);
         return !!(rows && rows.length);

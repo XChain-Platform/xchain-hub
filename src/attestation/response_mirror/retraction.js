@@ -62,7 +62,7 @@ module.exports = {
         let windowEnd   = parsed.windowEnd;
         let actionIndex = parsed.actionIndex;
 
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function')
             return this.refuseRetraction(sourceChain, 'mirror database not ready');
 

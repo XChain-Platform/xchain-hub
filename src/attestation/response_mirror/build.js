@@ -204,7 +204,7 @@ module.exports = {
     //
     // Returns true iff THIS hub newly inserted the row.
     async insertAndBroadcast(row){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function'){
             this.stats.errors++;
             logger.warn('AttestationResponseMirror: no hub DB; dropping mirror row for ' +

@@ -206,7 +206,7 @@ class AttestationBatchPublisher {
         }
     }
 
-    _db(){ return (this.hub && this.hub.db) || this.db; }
+    hubDb(){ return (this.hub && this.hub.db) || this.db; }
     hubPeerManager(){ return this.hub && this.hub.peerManager; }
     _nowSeconds(){ return Math.floor(Date.now() / 1000); }
 

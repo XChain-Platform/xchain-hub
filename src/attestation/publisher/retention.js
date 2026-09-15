@@ -84,7 +84,7 @@ module.exports = {
     // Returns the number of rows deleted. Throws on a DB error; the caller decides
     // (the sweep path treats a retention failure as non-fatal).
     async prunePublishedRequests(){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return 0;
         if (!this.publishedRequestsRetentionMs || this.publishedRequestsRetentionMs <= 0) return 0;
 
@@ -129,7 +129,7 @@ module.exports = {
     // sweep, since the table only grows when this hub spends.
     sweepPublishedRequestRetention(){
         if (!this.enabled || !this._markersAddedSinceSweep) return;
-        if (!this._db() || !this.publishedRequestsRetentionMs) return;
+        if (!this.hubDb() || !this.publishedRequestsRetentionMs) return;
         this._markersAddedSinceSweep = false;
         this._retentionSweep = this.prunePublishedRequests()
             .catch((e) => {

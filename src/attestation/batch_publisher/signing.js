@@ -147,7 +147,7 @@ module.exports = {
     // would be an unauthenticated claim about someone else's state.
     async handleSignReq(envelope){
         let d = envelope.data;
-        if(!this.identity || !this._db()) return;
+        if(!this.identity || !this.hubDb()) return;
         let pm = this.hubPeerManager();
         if(!pm || typeof pm.broadcast !== 'function') return;
 

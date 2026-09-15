@@ -47,7 +47,7 @@ module.exports = {
     // catch-up horizon. Flooring on the oldest marker keeps the anti-backfill job the
     // comment above describes and makes no claim about completion.
     async resolveFloorWindow(){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return this.windowStartFor(this._nowSeconds());
         let rows = await db.getAttestPublishedBatch(this.network);
         let oldest = (rows && rows.length) ? Number(rows[0].oldest) : NaN;
@@ -230,7 +230,7 @@ module.exports = {
     // bytes. So every numeric column is coerced here, once, and every text column is
     // stringified; a verifier rebuilding from the wire sees the same spellings.
     async selectWindowRows(windowStart, windowEnd){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') throw new Error('no hub DB');
         let rows = await db.findAttestationResponsesInBatchWindow(
             this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1);

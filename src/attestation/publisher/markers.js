@@ -38,7 +38,7 @@ module.exports = {
     // yet. This table is the restart-surviving half of the guard, ported from
     // OraclePublisher's oracle_published_rounds. Resolved lazily off the hub so a
     // publisher constructed before the hub's DB is wired still sees it.
-    _db(){ return (this.hub && this.hub.db) ? this.hub.db : null; },
+    hubDb(){ return (this.hub && this.hub.db) ? this.hub.db : null; },
 
     // Identity of one PUBLICATION, which is what the at-most-once guards actually
     // protect. A request id alone is the wrong identity: a non-ok response
@@ -74,7 +74,7 @@ module.exports = {
     // not yet added the per-outcome columns lands here too, and defers rather than
     // spending against an identity it cannot read.
     async getPublishedMarker(rid){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return null;
         let rows = await db.findAttestPublishedRequestsByRequestId(rid);
         return (rows && rows.length > 0) ? rows[0] : null;
@@ -86,7 +86,7 @@ module.exports = {
     // quarantined rather than replayed for a second fee. Throws on a DB error so the
     // caller fails closed. No-op when no DB is wired.
     async recordPublishIntent(rid, status){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return;
         await db.setAttestPublishedRequest(rid, String(status || 'ok'));
     },
@@ -99,7 +99,7 @@ module.exports = {
     // the surviving armed intent makes a restart QUARANTINE this publication instead of
     // re-broadcasting it, which is the fail-safe direction. No-op when no DB is wired.
     async markPublished(rid, txid, status){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return;
         let st = String(status || 'ok');
         try {
@@ -124,7 +124,7 @@ module.exports = {
     // cover for this process lifetime (the behavior before this marker existed, never
     // worse).
     async hydratePublishedMarkers(){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return;
         let rows = await db.findAllAttestPublishedRequests();
         let quarantined = [];
@@ -165,7 +165,7 @@ module.exports = {
     // never thrown: leaving the intent is the fail-closed direction, so a failure here
     // only costs an operator replay.
     async clearPublishIntent(rid, status){
-        let db = this._db();
+        let db = this.hubDb();
         if (!db) return;
         try {
             await db.updateAttestPublishedRequestByRequestIdAndIntentStatus(rid, String(status || 'ok'));
@@ -201,7 +201,7 @@ module.exports = {
                 'recorded before a crash, on-chain state unknown); not re-broadcasting, awaiting operator replay');
             return 'sent';
         }
-        if (!this._db()) return 'send';
+        if (!this.hubDb()) return 'send';
         let marker;
         try {
             marker = await this.getPublishedMarker(rid);

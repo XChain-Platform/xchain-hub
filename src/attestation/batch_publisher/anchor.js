@@ -52,7 +52,7 @@ module.exports = {
     // widening step already trust. The pushed row keeps precedence where it exists so
     // the one hub that has it behaves exactly as before.
     async resolveAnchor(){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db){
             this._anchorFailure = 'this hub has no database handle';
             return null;
@@ -176,7 +176,7 @@ module.exports = {
         if(this._persistedAnchors.has(a)) return 0;
         if(!set) set = await this.resolveAttestationSet(a);
         if(!set || set.length === 0) return 0;          // unresolved / truncated: nothing to mirror
-        let db = this._db();
+        let db = this.hubDb();
         if(!db) return 0;
         let rows;
         try {

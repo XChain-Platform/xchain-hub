@@ -64,7 +64,7 @@ function makeHub(overrides) {
     return {
         db,
         p2pConfig: overrides && overrides.p2pConfig ? overrides.p2pConfig : {},
-        _db: db
+        hubDb: db
     };
 }
 

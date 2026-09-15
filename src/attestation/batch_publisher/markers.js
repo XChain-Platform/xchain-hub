@@ -31,7 +31,7 @@ module.exports = {
     // ------------------------------------------------------------ durable markers
 
     async getMarker(windowStart){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return null;
         let rows = await db.findAttestPublishedBatchesByNetwork(this.network, windowStart);
         return (rows && rows.length) ? rows[0] : null;
@@ -41,7 +41,7 @@ module.exports = {
     // remembering in memory: they are the ones the sweep must refuse, once each rather
     // than once per pass.
     async hydrateMarkers(){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
         for(let r of (rows || [])) this._quarantined.add(Number(r.window_start));
@@ -54,7 +54,7 @@ module.exports = {
     // Idempotent: an existing row for the window is left exactly as it is, so a replay
     // can never downgrade a `sent` or `landed` marker back to an intent.
     async recordIntent(window, batchKey){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         await db.setAttestPublishedBatchByNetwork(this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent');
     },
@@ -63,7 +63,7 @@ module.exports = {
     // statement: it can only ever remove a row that says "no outcome recorded", so it
     // cannot erase evidence of a window this hub or the federation has paid for.
     async clearIntent(windowStart){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         await db.deleteAttestPublishedBatch(this.network, windowStart, 'intent');
     },
@@ -72,7 +72,7 @@ module.exports = {
     // rather than thrown: the intent row means a restart quarantines the window instead
     // of paying for it twice.
     async markSent(windowStart, txid, rowCount){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         try {
             await db.updateAttestPublishedBatch('sent', txid, rowCount, this.network, windowStart, 'intent');
@@ -84,7 +84,7 @@ module.exports = {
     },
 
     async recordDeadLetter(windowStart, windowEnd, rowCount){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         this.stats.windowsDeadLettered++;
         try {
@@ -99,7 +99,7 @@ module.exports = {
     // pushed back (D72). Authoritative for the WHOLE federation: any hub's batch landing
     // covers the window, so a hub that never published one stops considering it.
     async recordLandedWindow(windowStart, windowEnd, txidOrNull, rowCount){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         this.stats.landedRecorded++;
         this._quarantined.delete(Number(windowStart));

@@ -116,7 +116,7 @@ class AttestationResponseMirror {
     // Resolved per call rather than cached at construction: startAttestation runs
     // after hub.start() has built both, but a hub that reconnects its DB or wires a
     // broadcaster later must not leave this engine holding a dead handle.
-    _db(){ return this.hub && this.hub.db; }
+    hubDb(){ return this.hub && this.hub.db; }
     broadcaster(){ return this.hub && this.hub.hubDbBroadcaster; }
     hubPeerManager(){ return this.hub && this.hub.peerManager; }
 

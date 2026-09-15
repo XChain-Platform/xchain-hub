@@ -279,7 +279,7 @@ module.exports = {
 
     // Set the batch link on one row, once. Returns true iff this call set it.
     async linkBatchAction(row, actionIndex){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return false;
         let res = await db.updateAttestationResponseByNetworkAndRequestId(actionIndex, row.network, row.request_id, row.effective_time);
         return !!(res && Number(res.affectedRows) > 0);
@@ -289,7 +289,7 @@ module.exports = {
     // object in hand for the reason insertAndBroadcast records: the consumer's cursor is
     // the AUTO_INCREMENT id, and only the table carries it.
     async rebroadcastRow(row){
-        let db = this._db();
+        let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
         let stored = (rows && rows.length) ? rows[0] : null;
