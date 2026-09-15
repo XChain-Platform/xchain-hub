@@ -44,17 +44,17 @@ function landingMargin(windowBlocks){ return Math.ceil(windowBlocks / MARGIN_DIV
 // How many ranks past the leader must come up inside one accept window.
 const REQUIRED_SWEEPERS = 3;
 
-describe('RollcallRound publish-tunable invariants (D88)', function () {
+{
 
-    it('the live networks carry the spec\'s literal 24-block landing margin', function () {
+    function theLiveNetworksCarryTheSpecTest2() {
         // Guards the generalisation above: if a future retune moves the live
         // window off 144, the ratio silently stops meaning "24 blocks" and this
         // says so instead of letting the derived margin drift unnoticed.
         assert.strictEqual(landingMargin(rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS.mainnet), 24);
         assert.strictEqual(landingMargin(rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS.testnet), 24);
-    });
+    }
 
-    it('PUBLISH_DELAY < SELF_PUBLISH < ACCEPT_WINDOW - landing margin on every network', function () {
+    function publishDelaySelfPublishAcceptWindowTest3() {
         for (const net of NETWORKS) {
             const publishDelay = RollcallRound.PUBLISH_DELAY_DEFAULTS[net];
             const selfPublish  = RollcallRound.SELF_PUBLISH_DEFAULTS[net];
@@ -74,9 +74,9 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
                 'covering the DOGE landing plus the 2-hour miner timestamp slack; past it the ' +
                 'self-publish lands after the close has cut the window');
         }
-    });
+    }
 
-    it('at least three ranks past the leader unlock inside the accept window on every network', function () {
+    function atLeastThreeRanksPastTheTest4() {
         for (const net of NETWORKS) {
             const tolerance = RollcallRound.ELECTION_TOLERANCE_DEFAULTS[net];
             const window    = rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS[net];
@@ -93,11 +93,11 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
                 REQUIRED_SWEEPERS + ' sweepers must get a slot, or a dead or censoring leader costs ' +
                 'the epoch outright');
         }
-    });
+    }
 
     // The ladder arithmetic above is a claim about the defaults. This drives the
     // real predicate over a real order to prove the code agrees with it.
-    it('the engine really does unlock rank 3 inside the window at the regtest defaults', function () {
+    function theEngineReallyDoesUnlockRankTest5() {
         const eng = Object.create(RollcallRound.prototype);
         eng.electionToleranceBlocks = RollcallRound.ELECTION_TOLERANCE_DEFAULTS.regtest;
         const order  = ['0', '1', '2', '3', '4'].map(n => n.repeat(64));
@@ -109,7 +109,7 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
             'rank 3 must have a slot by the end of the accept window');
         assert.strictEqual(eng._rankUnlocked(order, 'f'.repeat(64), window), false,
             'a key outside the elected order never publishes, however long it waits');
-    });
+    }
 
     // No network may put its self-publish deadline at or before the earliest tip
     // a round can exist at. A round needs tip - E >= CANONICAL_REORG_BUFFER,
@@ -124,7 +124,7 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
     // Correctness does not depend on it either way, since the chain's present set
     // is the union of whatever lands, but regtest is the venue the acceptance
     // tests drive: a ladder that is inert there is a failover witnessed nowhere.
-    it('keeps every self-publish deadline past the earliest signable tip', function () {
+    function keepsEverySelfPublishDeadlinePastTest6() {
         const buffer = CANONICAL_REORG_BUFFER;
         for (const net of ['mainnet', 'testnet', 'regtest']) {
             assert.ok(RollcallRound.SELF_PUBLISH_DEFAULTS[net] > buffer,
@@ -140,9 +140,9 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
             assert.strictEqual(Math.floor(buffer / RollcallRound.ELECTION_TOLERANCE_DEFAULTS[net]), 0,
                 net + ': no sweeper rank may be unlocked at the first tick, or the leader has no slot');
         }
-    });
+    }
 
-    it('the three tunables have a documented row in CONFIGURATION.md', function () {
+    function theThreeTunablesHaveADocumentedTest7() {
         const fs   = require('fs');
         const path = require('path');
         const doc  = fs.readFileSync(path.join(__dirname, '..', '..', 'CONFIGURATION.md'), 'utf8');
@@ -169,8 +169,20 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
         assert.deepStrictEqual(missing, [],
             'ROLLCALL_ env vars read in src/rollcall/round.js but undocumented in CONFIGURATION.md: ' +
             missing.join(', '));
-    });
-});
+    }
+
+    function rollcallroundPublishTunableInvariantsD88Suite1() {
+        it('the live networks carry the spec\'s literal 24-block landing margin', theLiveNetworksCarryTheSpecTest2);
+        it('PUBLISH_DELAY < SELF_PUBLISH < ACCEPT_WINDOW - landing margin on every network', publishDelaySelfPublishAcceptWindowTest3);
+        it('at least three ranks past the leader unlock inside the accept window on every network', atLeastThreeRanksPastTheTest4);
+        it('the engine really does unlock rank 3 inside the window at the regtest defaults', theEngineReallyDoesUnlockRankTest5);
+        it('keeps every self-publish deadline past the earliest signable tip', keepsEverySelfPublishDeadlinePastTest6);
+        it('the three tunables have a documented row in CONFIGURATION.md', theThreeTunablesHaveADocumentedTest7);
+    }
+
+    describe('RollcallRound publish-tunable invariants (D88)', rollcallroundPublishTunableInvariantsD88Suite1);
+
+}
 
 // A network whose activation height is the INERT placeholder must cost nothing
 // at runtime, not merely decide nothing. Without this the engine starts, polls
