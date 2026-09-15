@@ -21,7 +21,7 @@
  *
  * So the load-bearing assertion in this file is byte EQUALITY across the three builders,
  * driven on the same inputs, in BOTH eras: below the activation there is no field at all
- * (the legacy bytes are untouched) and at or above it the field is present and identical.
+ * (the pre-activation bytes are untouched) and at or above it the field is present and identical.
  *
  * THE SUITE ARMS ITSELF. The admission activation is read from the environment at module
  * load, so the suite purges the activation twin, the hub's admission seam and the two hub
@@ -30,23 +30,19 @@
  * the process happened to launch with would report the admission-era cases as PENDING, and
  * a pending case on a consensus byte layout is the failure mode this file exists to close.
  ********************************************************************/
-
 'use strict';
-
 const assert            = require('assert');
 const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const { createMockHub } = require('../helpers/mockHub');
 const eq                = require('../../src/equivocation_header.js');
-
 // The regtest producer activation this suite arms, keyed on the ROUND's own BTC anchor. One
-// armed process therefore drives both eras: a round below this height is a legacy round and
+// armed process therefore drives both eras: a round below this height is a pre-activation round and
 // a round at or above it is an admission-era round. 799000 is the anchor the price ingest
 // path is already exercised at, so no other flag day on this rail moves underneath.
 const ADMIT_AT  = 799000;
 const LEGACY_AT = ADMIT_AT - 1;
-
 const HUB_MODULES = [
     '../../src/mirror_admission_activation.js',
     '../../src/lib/admission_height.js',
@@ -57,11 +53,9 @@ const INDEXER_MODULES = [
     '../../../xchain-indexer/src/mirror_admission_activation.js',
     '../../../xchain-indexer/src/consensus/ed25519.js'
 ];
-
 const ROUND   = 5;
 const TIME    = 1756199400;
 const NETWORK = 'regtest';
-
 // Pairs handed over unsorted and keyed both ways, so a builder that trusted its caller
 // would emit different bytes than its twins for the identical round.
 function pairsCoinKeyed() {
@@ -74,14 +68,11 @@ function pairsCoinKeyed() {
 function pairsPairKeyed() {
     return pairsCoinKeyed().map(p => ({ pair: p.coinPair || p.pair, price: p.price }));
 }
-
 // Insertion order deliberately NOT ASCII order: the encoding sorts, so these bytes are
 // fixed whatever order the map was assembled in.
 function admitMap() { return { DOGE: 5000004, BTC: 799004, LTC: 2400004 }; }
 const ADMIT_FIELD = 'BTC:799004,DOGE:5000004,LTC:2400004';
-
 let armed = null;
-
 function armTwins() {
     const hubPaths = HUB_MODULES.map(m => require.resolve(m));
     let indexerPaths = null;
@@ -90,7 +81,6 @@ function armTwins() {
         if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
             throw new Error('PRICE v0 admission parity cannot run: xchain-indexer sibling missing (' + e.message + ')');
     }
-
     const paths    = hubPaths.concat(indexerPaths || []);
     const saved    = paths.map(p => [p, require.cache[p]]);
     const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
@@ -120,7 +110,7 @@ function armTwins() {
         indexer:  indexer,
         producer: new OracleConsensus(hubOn(NETWORK), {}),
         ingest:   new PriceAggregator(hubOn(NETWORK)),
-        // Second pair on an INERT network, to drive the era key: a mainnet round is a legacy
+        // Second pair on an INERT network, to drive the era key: a mainnet round is a pre-activation
         // round at every height, including heights far above the armed regtest threshold.
         inertProducer: new OracleConsensus(hubOn('mainnet'), {}),
         inertIngest:   new PriceAggregator(hubOn('mainnet')),
@@ -151,62 +141,74 @@ function builtBy(height, map, network) {
     return { producer: b.producer(), ingest: b.ingest(), indexer: b.indexer() };
 }
 
-describe('PRICE v0 canonical: the admission field across all three byte-twins', function () {
+{
 
-    before(function () { armed = armTwins(); });
-    after(function () { if (armed) armed.restore(); armed = null; });
-
-    it('is ARMED for this suite, so neither era case is vacuous', function () {
+    function isArmedForThisSuiteSoTest2() {
         expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, ADMIT_AT)).to.equal(true);
         expect(armed.act.isMirrorAdmissionProducerActive('BTC', NETWORK, LEGACY_AT)).to.equal(false);
         // And the inert side of the era key, which the mainnet cases below rely on.
         expect(armed.act.isMirrorAdmissionProducerActive('BTC', 'mainnet', ADMIT_AT)).to.equal(false);
         expect(armed.indexer, 'the indexer verifier twin must be resolvable in a monorepo run').to.not.equal(null);
-    });
+    }
 
-    describe('below the activation: the legacy bytes are untouched', function () {
+    let registerbelowTheActivationTheLegacyBytes3;
 
-        it('all three emit the identical canonical, with no admission field', function () {
+    {
+
+        function allThreeEmitTheIdenticalCanonicalTest5() {
             const b = builtBy(LEGACY_AT, undefined);
             assert.strictEqual(b.ingest, b.producer,
                 'PriceAggregator diverged from the OracleConsensus producer on a legacy round');
             assert.strictEqual(b.indexer, b.producer,
                 'the indexer verifier diverged from the producer on a legacy round');
-            // The body is the last thing in the canonical, so a legacy round ends at the JSON.
+            // The body is the last thing in the canonical, so a pre-activation round ends at the JSON.
             expect(b.producer.endsWith('}')).to.equal(true, b.producer.slice(-40));
             expect(b.producer).to.not.match(/BTC:799004/);
-        });
+        }
 
-        it('a mainnet round is legacy at a height far above the armed regtest one', function () {
+        function aMainnetRoundIsLegacyAtTest6() {
             const b = builtBy(ADMIT_AT + 1000000, undefined, 'mainnet');
             assert.strictEqual(b.ingest, b.producer);
             assert.strictEqual(b.indexer, b.producer);
             expect(b.producer.endsWith('}')).to.equal(true);
-        });
+        }
 
-        it('all three REFUSE a map on a legacy round rather than signing bytes no era reads', function () {
+        function allThreeRefuseAMapOnTest7() {
             const b = three(LEGACY_AT, admitMap());
             for (const [name, build] of [['producer', b.producer], ['ingest', b.ingest], ['indexer', b.indexer]])
                 expect(build, name).to.throw(/refusing to build an admission-era canonical/);
-        });
-    });
+        }
 
-    describe('at and above the activation: the field is present and identical', function () {
+        function belowTheActivationTheLegacyBytesSuite4() {
+            it('all three emit the identical canonical, with no admission field', allThreeEmitTheIdenticalCanonicalTest5);
+            it('a mainnet round is legacy at a height far above the armed regtest one', aMainnetRoundIsLegacyAtTest6);
+            it('all three REFUSE a map on a legacy round rather than signing bytes no era reads', allThreeRefuseAMapOnTest7);
+        }
 
-        it('all three emit the identical canonical for one round and map', function () {
+        registerbelowTheActivationTheLegacyBytes3 = function registerSuite() {
+            describe('below the activation: the legacy bytes are untouched', belowTheActivationTheLegacyBytesSuite4);
+        };
+
+    }
+
+    let registeratAndAboveTheActivationThe8;
+
+    {
+
+        function allThreeEmitTheIdenticalCanonicalTest10() {
             const b = builtBy(ADMIT_AT, admitMap());
             assert.strictEqual(b.ingest, b.producer,
                 'PriceAggregator diverged from the OracleConsensus producer: this hub would reject every round it signs');
             assert.strictEqual(b.indexer, b.producer,
                 'the indexer verifier diverged from the producer: the hub would sign bytes no indexer checks');
             expect(b.producer.endsWith('|' + ADMIT_FIELD)).to.equal(true, b.producer.slice(-60));
-        });
+        }
 
         // The exact byte layout, stated as an assertion rather than as a comment: the EQUIV
         // header, then the round body, then a single '|' and the ASCII-ordered map. The field
         // is INSIDE the wrapped body, which is where every other rail puts it, so the wrapper
         // stays a pure function of the bytes it wraps.
-        it('appends the field after the JSON body and inside the EQUIV wrapper', function () {
+        function appendsTheFieldAfterTheJsonTest11() {
             const canonical = builtBy(ADMIT_AT, admitMap()).producer;
             const prefix    = 'EQUIV|' + eq.ENGINE_TAGS.ORACLE + '|' + ADMIT_AT + '|0||';
             expect(canonical.startsWith(prefix)).to.equal(true, canonical.slice(0, 60));
@@ -223,17 +225,17 @@ describe('PRICE v0 canonical: the admission field across all three byte-twins', 
             // own decoder: the field is not merely present, it is the canonical encoding.
             assert.deepStrictEqual(armed.act.decodeAdmitBlocks(field),
                 { BTC: 799004, DOGE: 5000004, LTC: 2400004 });
-        });
+        }
 
-        it('the map insertion order never reaches the bytes, on any of the three', function () {
+        function theMapInsertionOrderNeverReachesTest12() {
             const other = { LTC: 2400004, BTC: 799004, DOGE: 5000004 };
             const a = builtBy(ADMIT_AT, admitMap());
             const b = builtBy(ADMIT_AT, other);
             for (const k of ['producer', 'ingest', 'indexer'])
                 assert.strictEqual(b[k], a[k], k + ' is sensitive to the map\'s insertion order');
-        });
+        }
 
-        it('one changed height changes the signed bytes on all three, and they still agree', function () {
+        function oneChangedHeightChangesTheSignedTest13() {
             const moved = { DOGE: 5000004, BTC: 799005, LTC: 2400004 };
             const a = builtBy(ADMIT_AT, admitMap());
             const b = builtBy(ADMIT_AT, moved);
@@ -241,32 +243,48 @@ describe('PRICE v0 canonical: the admission field across all three byte-twins', 
                 assert.notStrictEqual(b[k], a[k], k + ' signs the same bytes for two different admission maps');
             assert.strictEqual(b.ingest, b.producer);
             assert.strictEqual(b.indexer, b.producer);
-        });
+        }
 
-        it('all three REFUSE a round with no map, rather than signing legacy bytes above the era', function () {
+        function allThreeRefuseARoundWithTest14() {
             for (const missing of [null, undefined]) {
                 const b = three(ADMIT_AT, missing);
                 for (const [name, build] of [['producer', b.producer], ['ingest', b.ingest], ['indexer', b.indexer]])
                     expect(build, name + ' with ' + String(missing)).to.throw(/refusing to build a legacy canonical/);
             }
-        });
+        }
 
-        it('all three refuse a map the encoding cannot spell injectively', function () {
+        function allThreeRefuseAMapTheTest15() {
             for (const bad of [{ BTC: '0799004' }, { btc: 799004 }, { BTC: -1 }, {}]) {
                 const b = three(ADMIT_AT + 1, bad);
                 for (const [name, build] of [['producer', b.producer], ['ingest', b.ingest], ['indexer', b.indexer]])
                     expect(build, name + ' with ' + JSON.stringify(bad))
                         .to.throw(/canonically spelled|closed vocabulary|EMPTY admission map/);
             }
-        });
-    });
+        }
+
+        function atAndAboveTheActivationTheSuite9() {
+            it('all three emit the identical canonical for one round and map', allThreeEmitTheIdenticalCanonicalTest10);
+            it('appends the field after the JSON body and inside the EQUIV wrapper', appendsTheFieldAfterTheJsonTest11);
+            it('the map insertion order never reaches the bytes, on any of the three', theMapInsertionOrderNeverReachesTest12);
+            it('one changed height changes the signed bytes on all three, and they still agree', oneChangedHeightChangesTheSignedTest13);
+            it('all three REFUSE a round with no map, rather than signing legacy bytes above the era', allThreeRefuseARoundWithTest14);
+            it('all three refuse a map the encoding cannot spell injectively', allThreeRefuseAMapTheTest15);
+        }
+
+        registeratAndAboveTheActivationThe8 = function registerSuite() {
+            describe('at and above the activation: the field is present and identical', atAndAboveTheActivationTheSuite9);
+        };
+
+    }
 
     // The hub's own ingest path, driven rather than reasoned about: a round signed over the
     // admission-era canonical must verify through receiveValidatedRound, and a round whose
     // map the encoder refuses must come back REJECTED rather than throwing out of the push
     // handler. The map rides the pushed round because the producer signed THAT map; one
     // re-resolved from this hub's tips would rebuild bytes no signature covers.
-    describe('through the hub ingest verifier, end to end', function () {
+    let registerthroughTheHubIngestVerifierEnd16;
+
+    {
 
         const V = [0, 1, 2, 3].map(() => {
             const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -275,39 +293,10 @@ describe('PRICE v0 canonical: the admission field across all three byte-twins', 
                 sign:   (payload) => crypto.sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('hex')
             };
         });
+
         const PAIRS = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }];
 
         let hub, agg;
-
-        beforeEach(function () {
-            hub = createMockHub({ network: NETWORK });
-            agg = new armed.PriceAggregator(hub);
-            // BOTH snapshot shapes: regtest runs with stake-weighted quorum armed, so the
-            // verifier resolves the WEIGHT snapshot, and a suite stubbing only the count
-            // snapshot would report every round as 'validator snapshot unavailable' and
-            // never reach the canonical at all.
-            hub.capabilitySnapshot = {
-                getSnapshot: sinon.stub().resolves({
-                    capability: 'price',
-                    blockIndex: 800000,
-                    count:      V.length,
-                    validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
-                }),
-                getWeightSnapshot: sinon.stub().resolves({
-                    capability:  'price',
-                    blockIndex:  800000,
-                    count:       V.length,
-                    sourceCount: V.length,
-                    validators:  V.map((v, i) => ({ pubkey: v.pubkey, source: 'src-' + i, weight: '50' }))
-                })
-            };
-            hub.db.doQuery.callsFake(async (sql) => {
-                if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
-                return [];
-            });
-        });
-
-        afterEach(function () { sinon.restore(); });
 
         function round(overrides) {
             const map     = (overrides && 'admit_blocks' in overrides) ? overrides.admit_blocks : admitMap();
@@ -324,34 +313,86 @@ describe('PRICE v0 canonical: the admission field across all three byte-twins', 
             }, overrides || {});
         }
 
-        it('accepts a round whose signatures cover the admission-era canonical', async function () {
+        async function acceptsARoundWhoseSignaturesCoverTest18() {
             const result = await agg.receiveValidatedRound('BTC', round());
             expect(result.accepted).to.equal(true, 'reason: ' + result.reason);
-        });
+        }
 
-        it('rejects, and does not throw, when the pushed map is unspellable', async function () {
+        async function rejectsAndDoesNotThrowWhenTest19() {
             const r      = round();
             r.admit_blocks = { BTC: '0799004' };         // a leading zero no verifier could re-derive
             const result = await agg.receiveValidatedRound('BTC', r);
             expect(result.accepted).to.equal(false);
             expect(result.reason).to.match(/admission map unusable/);
-        });
+        }
 
-        it('rejects an admission-era round that carries no map at all', async function () {
+        async function rejectsAnAdmissionEraRoundThatTest20() {
             const r = round();
             delete r.admit_blocks;
             const result = await agg.receiveValidatedRound('BTC', r);
             expect(result.accepted).to.equal(false);
             expect(result.reason).to.match(/refusing to build a legacy canonical/);
-        });
+        }
 
-        it('refuses the signatures when the pushed map is not the one that was signed', async function () {
+        async function refusesTheSignaturesWhenThePushedTest21() {
             // The bite: a relay that edits one height in flight must not be able to get the
             // round stored, even though every signature in it is a real signature.
             const r = round();
             r.admit_blocks = { DOGE: 5000004, BTC: 799005, LTC: 2400004 };
             const result = await agg.receiveValidatedRound('BTC', r);
             expect(result.accepted).to.equal(false, 'an edited admission map verified');
-        });
-    });
-});
+        }
+
+        function throughTheHubIngestVerifierEndSuite17() {
+            beforeEach(function () {
+                hub = createMockHub({ network: NETWORK });
+                agg = new armed.PriceAggregator(hub);
+                // BOTH snapshot shapes: regtest runs with stake-weighted quorum armed, so the
+                // verifier resolves the WEIGHT snapshot, and a suite stubbing only the count
+                // snapshot would report every round as 'validator snapshot unavailable' and
+                // never reach the canonical at all.
+                hub.capabilitySnapshot = {
+                    getSnapshot: sinon.stub().resolves({
+                        capability: 'price',
+                        blockIndex: 800000,
+                        count:      V.length,
+                        validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
+                    }),
+                    getWeightSnapshot: sinon.stub().resolves({
+                        capability:  'price',
+                        blockIndex:  800000,
+                        count:       V.length,
+                        sourceCount: V.length,
+                        validators:  V.map((v, i) => ({ pubkey: v.pubkey, source: 'src-' + i, weight: '50' }))
+                    })
+                };
+                hub.db.doQuery.callsFake(async (sql) => {
+                    if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+                    return [];
+                });
+            });
+            afterEach(function () { sinon.restore(); });
+            it('accepts a round whose signatures cover the admission-era canonical', acceptsARoundWhoseSignaturesCoverTest18);
+            it('rejects, and does not throw, when the pushed map is unspellable', rejectsAndDoesNotThrowWhenTest19);
+            it('rejects an admission-era round that carries no map at all', rejectsAnAdmissionEraRoundThatTest20);
+            it('refuses the signatures when the pushed map is not the one that was signed', refusesTheSignaturesWhenThePushedTest21);
+        }
+
+        registerthroughTheHubIngestVerifierEnd16 = function registerSuite() {
+            describe('through the hub ingest verifier, end to end', throughTheHubIngestVerifierEndSuite17);
+        };
+
+    }
+
+    function priceV0CanonicalTheAdmissionFieldSuite1() {
+        before(function () { armed = armTwins(); });
+        after(function () { if (armed) armed.restore(); armed = null; });
+        it('is ARMED for this suite, so neither era case is vacuous', isArmedForThisSuiteSoTest2);
+        registerbelowTheActivationTheLegacyBytes3();
+        registeratAndAboveTheActivationThe8();
+        registerthroughTheHubIngestVerifierEnd16();
+    }
+
+    describe('PRICE v0 canonical: the admission field across all three byte-twins', priceV0CanonicalTheAdmissionFieldSuite1);
+
+}
