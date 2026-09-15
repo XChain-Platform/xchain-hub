@@ -27,15 +27,17 @@ const { createMockHub }    = require('../helpers/mockHub');
 // ATTEST_META_MAX_LENGTH the meta field gets (REG-ATT-002).
 // -----------------------------------------------------------------
 
-describe('Regression: Attestation status size cap', function () {
+const PROVIDER_ID  = 'http_get';
 
-    const PROVIDER_ID  = 'http_get';
-    const MAX_RESP     = 32768;
-    const STATUS_MAX   = 256;                         // ATTEST_META_MAX_LENGTH
-    const SENDER_PK    = 'cd'.repeat(32);
+const MAX_RESP     = 32768;
 
-    let hub, consensus, warns;
+const STATUS_MAX   = 256;
+                     // ATTEST_META_MAX_LENGTH
+const SENDER_PK    = 'cd'.repeat(32);
 
+let hub, consensus, warns;
+
+function registerSuitePart1() {
     beforeEach(function () {
         hub = createMockHub();
         let providerRegistry = {
@@ -60,28 +62,32 @@ describe('Regression: Attestation status size cap', function () {
         warns = [];
         sinon.stub(console, 'warn').callsFake((m) => warns.push(String(m)));
     });
+}
 
+function registerSuitePart2() {
     afterEach(function () {
         for (let [, p] of consensus.pending) { if (p.timer) clearTimeout(p.timer); }
         sinon.restore();
     });
+}
 
-    // A legitimately-sized body and meta so the status guard is the only new gate.
-    function envelope(type, statusLen) {
-        return {
-            type,
-            data: {
-                requestId:  'rid',
-                providerId: PROVIDER_ID,
-                body_b64:   'A'.repeat(16),
-                meta:       'm',
-                status:     'x'.repeat(statusLen),
-                sig_pubkey: SENDER_PK,
-                sig:        'ee'.repeat(64)
-            }
-        };
-    }
+// A legitimately-sized body and meta so the status guard is the only new gate.
+function envelope(type, statusLen) {
+    return {
+        type,
+        data: {
+            requestId:  'rid',
+            providerId: PROVIDER_ID,
+            body_b64:   'A'.repeat(16),
+            meta:       'm',
+            status:     'x'.repeat(statusLen),
+            sig_pubkey: SENDER_PK,
+            sig:        'ee'.repeat(64)
+        }
+    };
+}
 
+function registerSuitePart3() {
     describe('_handlePropose()', function () {
         it('rejects an oversized status before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -100,7 +106,9 @@ describe('Regression: Attestation status size cap', function () {
             expect(warns.some(m => m.indexOf('oversized') !== -1)).to.equal(false);
         });
     });
+}
 
+function registerSuitePart4() {
     describe('handlePrepare()', function () {
         it('rejects an oversized status before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -120,4 +128,12 @@ describe('Regression: Attestation status size cap', function () {
             expect(verify.called).to.equal(false);
         });
     });
+}
+
+describe('Regression: Attestation status size cap', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+
 });
