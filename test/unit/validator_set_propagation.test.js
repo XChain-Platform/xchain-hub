@@ -24,14 +24,14 @@ const { expect } = require('chai');
 const XChainHub  = require('../../src/XChainHub');
 const { DB_METHODS } = require('../helpers/mockHub.js');
 
+const PUBKEY = 'ab'.repeat(32);
+const SET    = [{ addr: 'ws://v1:10001', signing_pubkey: 'aa'.repeat(32) }];
+
+let hub, engines;
+
+function stubEngine() { return { setValidatorSet: sinon.stub(), setChainPairValidators: sinon.stub() }; }
+
 describe('XChainHub: validator-set propagation (F1)', function () {
-
-    const PUBKEY = 'ab'.repeat(32);
-    const SET    = [{ addr: 'ws://v1:10001', signing_pubkey: 'aa'.repeat(32) }];
-
-    let hub, engines;
-
-    function stubEngine() { return { setValidatorSet: sinon.stub(), setChainPairValidators: sinon.stub() }; }
 
     beforeEach(function () {
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
@@ -51,6 +51,12 @@ describe('XChainHub: validator-set propagation (F1)', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+
+    registerValidatorSetUpdateTests();
+    registerValidatorSetRemovalTests();
+});
+
+function registerValidatorSetUpdateTests() {
 
     it('registerValidator propagates the reloaded set to EVERY running engine', async function () {
         await hub.registerValidator(PUBKEY, 'ws://new-validator:10009');
@@ -78,6 +84,9 @@ describe('XChainHub: validator-set propagation (F1)', function () {
             expect(eng.setValidatorSet.calledOnceWith(SET), name + '.setValidatorSet').to.be.true;
         }
     });
+}
+
+function registerValidatorSetRemovalTests() {
 
     it('rotateValidator on an unknown addr throws (no active row) and does NOT propagate', async function () {
         // Default stub resolves [] → addr-check finds no active validator.
@@ -106,4 +115,4 @@ describe('XChainHub: validator-set propagation (F1)', function () {
         expect(engines.consensus.setValidatorSet.calledOnce).to.be.true;
         // No throw = pass for the null engines.
     });
-});
+}
