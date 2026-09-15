@@ -86,18 +86,14 @@ const ANSWER = {
              { round: 27, status: 'missing' }]
 };
 
-describe('getoracleroundpresence JSON-RPC method', function () {
+{
 
-    this.timeout(20000);
-
-    afterEach(function () { sinon.restore(); });
-
-    it('is registered on the JSON-RPC controller', async function () {
+    async function isRegisteredOnTheJsonRpcTest2() {
         const c = await bootController(sinon.stub().resolves(ANSWER));
         expect(c.getoracleroundpresence).to.be.a('function');
-    });
+    }
 
-    it('is a PUBLIC read: it is not in the keyed write or sensitive-read tiers', async function () {
+    async function isAPublicReadItIsTest3() {
         // A divergence probe an operator can only run with the hub's write key is a
         // probe nobody runs. Asserted against the shipped sets, not a copy.
         const fs  = require('fs');
@@ -107,33 +103,33 @@ describe('getoracleroundpresence JSON-RPC method', function () {
         const sensBlock  = src.slice(sensIdx, src.indexOf(')', sensIdx));
         expect(writeBlock).to.not.contain('getoracleroundpresence');
         expect(sensBlock).to.not.contain('getoracleroundpresence');
-    });
+    }
 
-    it('forwards the caller range to the hub unchanged', async function () {
+    async function forwardsTheCallerRangeToTheTest4() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         const out = await c.getoracleroundpresence({ from_round: 25, to_round: 27 });
         expect(impl.firstCall.args.slice(0, 2)).to.deep.equal([25, 27]);
         expect(out).to.deep.equal(ANSWER);
-    });
+    }
 
-    it('lets the hub resolve an omitted range', async function () {
+    async function letsTheHubResolveAnOmittedTest5() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         await c.getoracleroundpresence({});
         expect(impl.firstCall.args).to.deep.equal([undefined, undefined, undefined]);
-    });
+    }
 
-    it('refuses a non-numeric bound before touching the hub', async function () {
+    async function refusesANonNumericBoundBeforeTest6() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         expect((await c.getoracleroundpresence({ from_round: '25; DROP TABLE price_snapshots' })).error)
             .to.contain('from_round');
         expect((await c.getoracleroundpresence({ to_round: 'soon' })).error).to.contain('to_round');
         expect(impl.called).to.equal(false);
-    });
+    }
 
-    it('refuses a bound at or past 2^53, which pins the event loop in the fold', async function () {
+    async function refusesABoundAtOrPastTest7() {
         // Number.isFinite and strictInt's Number.isInteger are BOTH true for 2^53,
         // so only the explicit safe-integer check closes this. The fold cannot
         // increment past such a bound, and this is a public read: one unauthenticated
@@ -145,9 +141,9 @@ describe('getoracleroundpresence JSON-RPC method', function () {
                 .to.contain('from_round');
         }
         expect(impl.called).to.equal(false);
-    });
+    }
 
-    it('refuses a negative, fractional or boolean bound before touching the hub', async function () {
+    async function refusesANegativeFractionalOrBooleanTest8() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         expect((await c.getoracleroundpresence({ from_round: -1 })).error).to.contain('from_round');
@@ -155,27 +151,45 @@ describe('getoracleroundpresence JSON-RPC method', function () {
         expect((await c.getoracleroundpresence({ to_round: true })).error).to.contain('to_round');
         expect((await c.getoracleroundpresence({ to_round: '12abc' })).error).to.contain('to_round');
         expect(impl.called).to.equal(false);
-    });
+    }
 
-    it('still forwards an ordinary numeric-string range unchanged', async function () {
+    async function stillForwardsAnOrdinaryNumericStringTest9() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         await c.getoracleroundpresence({ from_round: '25', to_round: '27', limit: '3' });
         expect(impl.firstCall.args).to.deep.equal(['25', '27', '3']);
-    });
+    }
 
-    it('refuses a limit outside the supported span before touching the hub', async function () {
+    async function refusesALimitOutsideTheSupportedTest10() {
         const impl = sinon.stub().resolves(ANSWER);
         const c = await bootController(impl);
         expect((await c.getoracleroundpresence({ limit: 0 })).error).to.contain('limit');
         expect((await c.getoracleroundpresence({ limit: MAX_RANGE + 1 })).error).to.contain(String(MAX_RANGE));
         expect(impl.called).to.equal(false);
-    });
+    }
 
-    it('reports an error rather than leaking a DB failure to the caller', async function () {
+    async function reportsAnErrorRatherThanLeakingTest11() {
         const c = await bootController(sinon.stub().rejects(new Error('ER_ACCESS_DENIED root@db')));
         const out = await c.getoracleroundpresence({});
         expect(out.error).to.equal('error fetching oracle round presence');
         expect(JSON.stringify(out)).to.not.contain('ACCESS_DENIED');
-    });
-});
+    }
+
+    function getoracleroundpresenceJsonRpcMethodSuite1() {
+        this.timeout(20000);
+        afterEach(function () { sinon.restore(); });
+        it('is registered on the JSON-RPC controller', isRegisteredOnTheJsonRpcTest2);
+        it('is a PUBLIC read: it is not in the keyed write or sensitive-read tiers', isAPublicReadItIsTest3);
+        it('forwards the caller range to the hub unchanged', forwardsTheCallerRangeToTheTest4);
+        it('lets the hub resolve an omitted range', letsTheHubResolveAnOmittedTest5);
+        it('refuses a non-numeric bound before touching the hub', refusesANonNumericBoundBeforeTest6);
+        it('refuses a bound at or past 2^53, which pins the event loop in the fold', refusesABoundAtOrPastTest7);
+        it('refuses a negative, fractional or boolean bound before touching the hub', refusesANegativeFractionalOrBooleanTest8);
+        it('still forwards an ordinary numeric-string range unchanged', stillForwardsAnOrdinaryNumericStringTest9);
+        it('refuses a limit outside the supported span before touching the hub', refusesALimitOutsideTheSupportedTest10);
+        it('reports an error rather than leaking a DB failure to the caller', reportsAnErrorRatherThanLeakingTest11);
+    }
+
+    describe('getoracleroundpresence JSON-RPC method', getoracleroundpresenceJsonRpcMethodSuite1);
+
+}
