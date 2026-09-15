@@ -14,8 +14,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
-const AttestationConsensus = require('../../src/attestation/consensus.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const AttestationConsensus = require('../../../src/attestation/consensus.js');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 let rootSuiteMockDb, rootSuiteMockPool, rootSuiteMockConn, rootSuiteMockMariadb, rootSuiteXChainHub;
 
@@ -154,7 +154,7 @@ function registerFeature9oraclePriceStalenessL5Part2() {
 function registerFeature9oraclePriceStalenessL5Part3() {
   ['mainnet', 'testnet'].forEach(function (network) {
     it('ignores the p2pConfig override on ' + network + ' and warns once', async function () {
-      const coins = require('../../src/coins');
+      const coins = require('../../../src/coins');
       const pinned = Number(coins.getCoinConfig('BTC', network).ORACLE_MAX_PRICE_AGE_SECONDS);
       let h = new rootSuiteXChainHub('host', 3306, 'db', 'user', 'pass', {
         HUB_NETWORK: network,
@@ -183,7 +183,7 @@ function registerFeature9oraclePriceStalenessL5Part3() {
     });
   });
   it('ignores the override in standalone mode, where the network is unset', function () {
-    const coins = require('../../src/coins');
+    const coins = require('../../../src/coins');
     const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
     let h = new rootSuiteXChainHub('host', 3306, 'db', 'user', 'pass', {
       ORACLE_MAX_PRICE_AGE_SECONDS: 0
@@ -198,7 +198,7 @@ function registerFeature9oraclePriceStalenessL5Part3() {
 }
 function registerFeature9oraclePriceStalenessL5Part4() {
   it('sources the default bound from the consensus-pinned coin registry (no literal 1800)', function () {
-    const coins = require('../../src/coins');
+    const coins = require('../../../src/coins');
     // No env/p2pConfig override -> the bound is the registry value, not a literal.
     const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
     expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned);
@@ -212,7 +212,7 @@ function registerFeature9oraclePriceStalenessL5Part4() {
   // NO pair, so that arity must resolve to the registry default rather
   // than null, or the consumer's clamp silently no-ops.
   it('resolves the representative scalar when called with no coin pair (#4479)', function () {
-    const coins = require('../../src/coins');
+    const coins = require('../../../src/coins');
     const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
     expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds()).to.equal(pinned);
     expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds()).to.be.greaterThan(0);
@@ -230,7 +230,7 @@ function registerFeature9oraclePriceStalenessL5() {
     registerFeature9oraclePriceStalenessL5Part4();
   });
 }
-const feature10capabilityGovernanceHotReloadCapabilityRegistry = require('../../src/validators/capability_registry');
+const feature10capabilityGovernanceHotReloadCapabilityRegistry = require('../../../src/validators/capability_registry');
 let feature10capabilityGovernanceHotReloadHub;
 function registerFeature10capabilityGovernanceHotReloadPart1() {
   it('parseCapabilityParameter recognizes CAPABILITY_<CAP>_MIN_STAKE', function () {
@@ -326,7 +326,7 @@ describe('XChainHub', function () {
   // each test still gets the fresh mock created in beforeEach.
   before(function () {
     this.timeout(30000);
-    rootSuiteXChainHub = proxyquire('../../src/XChainHub', {
+    rootSuiteXChainHub = proxyquire('../../../src/XChainHub', {
       './db': function () {
         return rootSuiteMockDb;
       }

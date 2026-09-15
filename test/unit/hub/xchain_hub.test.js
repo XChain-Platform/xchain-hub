@@ -14,8 +14,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
-const AttestationConsensus = require('../../src/attestation/consensus.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const AttestationConsensus = require('../../../src/attestation/consensus.js');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 let rootSuiteMockDb, rootSuiteMockPool, rootSuiteMockConn, rootSuiteMockMariadb, rootSuiteXChainHub;
 
@@ -45,7 +45,7 @@ function registerFeature1constructor() {
     registerFeature1constructorPart1();
   });
 }
-const feature2startConsensusPinVerificationCoins = require('../../src/coins');
+const feature2startConsensusPinVerificationCoins = require('../../../src/coins');
 function registerFeature2startConsensusPinVerificationPart1() {
   it('fails closed on an armed-pin mismatch before any DB work', async function () {
     let verify = sinon.stub(feature2startConsensusPinVerificationCoins, 'verifyConsensusPin').throws(new Error('CONSENSUS CONFIG PIN MISMATCH for BTC/testnet'));
@@ -350,7 +350,7 @@ describe('XChainHub', function () {
   // each test still gets the fresh mock created in beforeEach.
   before(function () {
     this.timeout(30000);
-    rootSuiteXChainHub = proxyquire('../../src/XChainHub', {
+    rootSuiteXChainHub = proxyquire('../../../src/XChainHub', {
       './db': function () {
         return rootSuiteMockDb;
       }

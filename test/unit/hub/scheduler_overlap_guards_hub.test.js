@@ -30,12 +30,12 @@ const os                = require('os');
 const path              = require('path');
 const EventEmitter      = require('events');
 const proxyquire        = require('proxyquire');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub } = require('../../helpers/mockHub');
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large
 // and the first load on the Parallels share can exceed a 5s hook timeout).
 require('mathjs');
-require('../../src/bcmath.js');
+require('../../../src/bcmath.js');
 
 // Park a caller until release() is called.
 function makeGate() {
@@ -56,7 +56,7 @@ describe('XChainHub.runOwnCapabilityCheck overlap guard', function () {
     let hub, runAllSelfTests, broadcast;
 
     beforeEach(function () {
-        const XChainHub = require('../../src/XChainHub');
+        const XChainHub = require('../../../src/XChainHub');
         hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
         broadcast       = sinon.stub();
         runAllSelfTests = sinon.stub().resolves();
@@ -111,7 +111,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub().resolves({ data: { result: { amount: '1', block_index: 5 } } }) };
-        const XChainHub = proxyquire('../../src/XChainHub', { axios: axiosStub });
+        const XChainHub = proxyquire('../../../src/XChainHub', { axios: axiosStub });
         hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
         refreshOwnQualification     = sinon.stub().resolves();
         hub.refreshOwnQualification = refreshOwnQualification;
@@ -214,7 +214,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
 
     function xchainhubRefreshtransportsignersetOverlapGuardSuite10() {
         beforeEach(function () {
-            const XChainHub = require('../../src/XChainHub');
+            const XChainHub = require('../../../src/XChainHub');
             hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
             setEffectiveSignerSet = sinon.stub();
             hub.peerManager = { setEffectiveSignerSet };
@@ -248,7 +248,7 @@ describe('XChainHub.pollOwnStake overlap guard', function () {
 
 {
 
-    const OraclePublisher = require('../../src/oracle/publisher');
+    const OraclePublisher = require('../../../src/oracle/publisher');
 
     const MY_PUB = 'aa'.repeat(32);
 

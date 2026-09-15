@@ -18,8 +18,8 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
-const { MAX_RANGE } = require('../../src/lib/oracle_round_presence.js');
-const { DB_METHODS } = require('../helpers/mockHub');
+const { MAX_RANGE } = require('../../../src/lib/oracle_round_presence.js');
+const { DB_METHODS } = require('../../helpers/mockHub');
 
 let mockDb, XChainHub, hub;
 
@@ -43,7 +43,7 @@ describe('XChainHub.getOracleRoundPresence', function () {
 
     before(function () {
         this.timeout(30000);
-        XChainHub = proxyquire('../../src/XChainHub', { './db': function () { return mockDb; } });
+        XChainHub = proxyquire('../../../src/XChainHub', { './db': function () { return mockDb; } });
     });
 
     beforeEach(function () {

@@ -69,7 +69,7 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
     before(function () {
         this.timeout(30000);
         axiosStub = { post: sinon.stub() };
-        XChainHub = proxyquire('../../src/XChainHub', {
+        XChainHub = proxyquire('../../../src/XChainHub', {
             'axios': axiosStub,
             './db': function () { return mockDb; }
         });

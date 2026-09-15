@@ -35,7 +35,7 @@ describe('XChainHub BTC indexer coin guard', function () {
     before(function () {
         this.timeout(30000);
         axiosStub = { post: sinon.stub() };
-        XChainHub = proxyquire('../../src/XChainHub', {
+        XChainHub = proxyquire('../../../src/XChainHub', {
             'axios': axiosStub,
             './db': function () { return mockDb; }
         });

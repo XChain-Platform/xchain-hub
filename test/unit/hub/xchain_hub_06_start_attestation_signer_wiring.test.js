@@ -14,8 +14,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
-const AttestationConsensus = require('../../src/attestation/consensus.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const AttestationConsensus = require('../../../src/attestation/consensus.js');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 let rootSuiteMockDb, rootSuiteMockPool, rootSuiteMockConn, rootSuiteMockMariadb, rootSuiteXChainHub;
 
@@ -66,7 +66,7 @@ function feature20startAttestationSignerWiringMakeAttestationStubs() {
 function registerFeature20startAttestationSignerWiringPart1() {
   it('applies HUB_SIGNER_MODULE hooks to the attestation publisher', async function () {
     this.timeout(30000);
-    const realLoader = require('../../src/lib/signer_loader.js');
+    const realLoader = require('../../../src/lib/signer_loader.js');
     const fakeHooks = {
       source: 'fake-signer',
       walletSignFn: sinon.stub(),
@@ -74,7 +74,7 @@ function registerFeature20startAttestationSignerWiringPart1() {
       getBalanceFn: null
     };
     const stubs = feature20startAttestationSignerWiringMakeAttestationStubs();
-    const HubWithSigner = proxyquire('../../src/XChainHub', Object.assign({
+    const HubWithSigner = proxyquire('../../../src/XChainHub', Object.assign({
       './db': function () {
         return rootSuiteMockDb;
       },
@@ -98,7 +98,7 @@ function registerFeature20startAttestationSignerWiringPart1() {
   it('starts cleanly with no signer configured (hooks null)', async function () {
     this.timeout(30000);
     const stubs = feature20startAttestationSignerWiringMakeAttestationStubs();
-    const HubNoSigner = proxyquire('../../src/XChainHub', Object.assign({
+    const HubNoSigner = proxyquire('../../../src/XChainHub', Object.assign({
       './db': function () {
         return rootSuiteMockDb;
       },
@@ -133,7 +133,7 @@ describe('XChainHub', function () {
   // each test still gets the fresh mock created in beforeEach.
   before(function () {
     this.timeout(30000);
-    rootSuiteXChainHub = proxyquire('../../src/XChainHub', {
+    rootSuiteXChainHub = proxyquire('../../../src/XChainHub', {
       './db': function () {
         return rootSuiteMockDb;
       }

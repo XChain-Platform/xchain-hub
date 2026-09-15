@@ -14,8 +14,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
-const AttestationConsensus = require('../../src/attestation/consensus.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const AttestationConsensus = require('../../../src/attestation/consensus.js');
+const { DB_METHODS } = require('../../helpers/mockHub.js');
 
 let rootSuiteMockDb, rootSuiteMockPool, rootSuiteMockConn, rootSuiteMockMariadb, rootSuiteXChainHub;
 
@@ -97,7 +97,7 @@ function registerFeature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1Par
   it('re-loads the validator set per finalized round so rotated-in validators are slashable', async function () {
     this.timeout(30000);
     const stubs = feature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1MakeOracleStubs();
-    const Hub = proxyquire('../../src/XChainHub', stubs.modules);
+    const Hub = proxyquire('../../../src/XChainHub', stubs.modules);
     let hub = new Hub('h', 1, 'd', 'u', 'p', {
       P2P_PORT: 10001
     });
@@ -132,7 +132,7 @@ function registerFeature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1Par
   it('falls back to the last-known-good set when the per-round reload fails', async function () {
     this.timeout(30000);
     const stubs = feature18roundFinalizedValidatorSetFreshnessSLASHSTATICVSET1MakeOracleStubs();
-    const Hub = proxyquire('../../src/XChainHub', stubs.modules);
+    const Hub = proxyquire('../../../src/XChainHub', stubs.modules);
     let hub = new Hub('h', 1, 'd', 'u', 'p', {
       P2P_PORT: 10001
     });
@@ -216,7 +216,7 @@ function feature19startOracleWiresOracleBatchSignerBatchSignerDeps() {
 function registerFeature19startOracleWiresOracleBatchSignerPart1() {
   it('constructs, starts, subscribes and cleanly stops OracleBatchSigner on a hub running oracle consensus', async function () {
     this.timeout(30000);
-    const Hub = proxyquire('../../src/XChainHub', feature19startOracleWiresOracleBatchSignerBatchSignerDeps());
+    const Hub = proxyquire('../../../src/XChainHub', feature19startOracleWiresOracleBatchSignerBatchSignerDeps());
     let hub = new Hub('h', 1, 'd', 'u', 'p', {
       P2P_PORT: 10001
     });
@@ -249,7 +249,7 @@ function registerFeature19startOracleWiresOracleBatchSignerPart1() {
     expect(hub.peerManager.removeListener.calledOnceWith('message', messageHandler)).to.be.true;
   });
   it('starts and stops with no OracleBatchSigner on a hub not running oracle consensus', async function () {
-    const Hub = proxyquire('../../src/XChainHub', feature19startOracleWiresOracleBatchSignerBatchSignerDeps());
+    const Hub = proxyquire('../../../src/XChainHub', feature19startOracleWiresOracleBatchSignerBatchSignerDeps());
     let hub = new Hub('h', 1, 'd', 'u', 'p', null); // no p2pConfig -> no peerManager
 
     await hub.startOracle();
@@ -273,7 +273,7 @@ describe('XChainHub', function () {
   // each test still gets the fresh mock created in beforeEach.
   before(function () {
     this.timeout(30000);
-    rootSuiteXChainHub = proxyquire('../../src/XChainHub', {
+    rootSuiteXChainHub = proxyquire('../../../src/XChainHub', {
       './db': function () {
         return rootSuiteMockDb;
       }

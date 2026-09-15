@@ -27,14 +27,14 @@ const path             = require('path');
 const { spawn }        = require('child_process');
 const { expect }       = require('chai');
 
-const XChainHub        = require('../../src/XChainHub');
-const PriceAggregator  = require('../../src/oracle/price_aggregator');
+const XChainHub        = require('../../../src/XChainHub');
+const PriceAggregator  = require('../../../src/oracle/price_aggregator');
 
 // The real gate modules, used here to state the expected values rather than to
 // produce them: the assertions below read the aggregator's OWN behaviour.
-const eq               = require('../../src/equivocation_header.js');
+const eq               = require('../../../src/equivocation_header.js');
 
-const API_ENTRY = path.resolve(__dirname, '../../src/api.js');
+const API_ENTRY = path.resolve(__dirname, '../../../src/api.js');
 
 // A TBTC height above every testnet oracle activation (all of which are 0 on
 // testnet) and below nothing that matters here; the row measured the gates at

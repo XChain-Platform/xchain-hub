@@ -30,12 +30,12 @@ const os                = require('os');
 const path              = require('path');
 const EventEmitter      = require('events');
 const proxyquire        = require('proxyquire');
-const { createMockHub } = require('../helpers/mockHub');
+const { createMockHub } = require('../../helpers/mockHub');
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large
 // and the first load on the Parallels share can exceed a 5s hook timeout).
 require('mathjs');
-require('../../src/bcmath.js');
+require('../../../src/bcmath.js');
 
 // Park a caller until release() is called.
 function makeGate() {
@@ -57,7 +57,7 @@ function flush() {
 
     function makeEngine() {
         axiosStub = { post: sinon.stub() };
-        CrossChainDexEngine = proxyquire('../../src/cross_chain/dex_engine', { axios: axiosStub });
+        CrossChainDexEngine = proxyquire('../../../src/cross_chain/dex_engine', { axios: axiosStub });
         const hub = createMockHub();
         hub.db = { doQuery: sinon.stub().resolves([]) };
         hub.capabilitySnapshot = null;
@@ -142,7 +142,7 @@ function flush() {
 
 describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
 
-    const AttestationSpotChecker = require('../../src/attestation/spot_checker');
+    const AttestationSpotChecker = require('../../../src/attestation/spot_checker');
 
     function makeChecker(injector) {
         const hub = {
@@ -199,7 +199,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
 
 {
 
-    const AttestationPublisher = require('../../src/attestation/publisher');
+    const AttestationPublisher = require('../../../src/attestation/publisher');
 
     const MY_PUB = 'aa'.repeat(32);
 
@@ -342,7 +342,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
     function oracleroundExecuteroundOverlapGuardSuite7() {
         beforeEach(function () {
             fetchPrices = sinon.stub().resolves([{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }]);
-            OracleRound = proxyquire('../../src/oracle/round', {
+            OracleRound = proxyquire('../../../src/oracle/round', {
                 './price_fetcher': function () { return { fetchPrices: (...a) => fetchPrices(...a) }; }
             });
             hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
