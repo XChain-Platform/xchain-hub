@@ -49,10 +49,9 @@ function readMixins(){
         .map(file => ({ file, methods: Object.keys(require(path.join(DB_DIR, file))) }));
 }
 
-describe('db mixin install', function(){
+const mixins = readMixins();
 
-    const mixins = readMixins();
-
+function registerMixinPresenceTests() {
     it('finds the table-family mixins beside index.js', function(){
         expect(mixins.length).to.be.greaterThan(0);
         // A family file that exports something other than a plain method object
@@ -92,7 +91,9 @@ describe('db mixin install', function(){
                 expect(d.configurable, m.file + ' -> ' + name + ' configurable').to.equal(true);
             }
     });
+}
 
+function registerMixinBehaviorTests() {
     it('keeps every mixin method out of a for...in over an instance', function(){
         const instance = Object.create(Database.prototype);
         const seen = [];
@@ -145,4 +146,9 @@ describe('db mixin install', function(){
         for(const name of ['constructor', 'doQuery', 'getConnection', 'runMigrations', 'close'])
             expect(classMembers, name + ' must still be the class\'s own').to.include(name);
     });
+}
+
+describe('db mixin install', function(){
+    registerMixinPresenceTests();
+    registerMixinBehaviorTests();
 });
