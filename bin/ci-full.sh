@@ -112,6 +112,15 @@ need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-w
 # published number on its own. Cheap and self-contained, so it runs first.
 run_tier "frozen carrier set (check:frozen-set)" npm run check:frozen-set
 
+# --- local guard: the measurement tools' own suites (bin/test) -------------
+# No npm script collects bin/test, and adding one would change what `ci` runs
+# and the suite-title pin that records it, so the tier lives here. These suites
+# are what make the identity, frozen-set, reachability, title-map and sibling
+# reference readings mean anything: a tool that stops seeing what it measures
+# still exits 0, and only its own fixtures say so.
+run_tier "measurement tools (bin/test)" \
+  npx mocha 'bin/test/**/*.test.js' --no-config --timeout 120000 --recursive --exit
+
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" npm run ci
 
