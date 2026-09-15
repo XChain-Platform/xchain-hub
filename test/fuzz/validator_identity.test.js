@@ -15,7 +15,7 @@ const fc                = require('fast-check');
 const ValidatorIdentity = require('../../src/validators/identity');
 const gen               = require('./helpers/generators');
 
-describe('Fuzz: ValidatorIdentity', function () {
+function registerConstructorTests() {
 
     // -----------------------------------------------------------------
     // Constructor: input validation
@@ -63,12 +63,9 @@ describe('Fuzz: ValidatorIdentity', function () {
             ), { numRuns: 50 });
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // sign() and verify()
-    // -----------------------------------------------------------------
-
-    describe('sign() and verify()', function () {
+function registerSignAndVerifyTestCases1() {
 
         it('sign + verify round-trip always succeeds for any payload', function () {
             fc.assert(fc.property(
@@ -110,6 +107,9 @@ describe('Fuzz: ValidatorIdentity', function () {
                 }
             ), { numRuns: 100 });
         });
+}
+
+function registerSignAndVerifyTestCases2() {
 
         it('cross-key rejection: signature from one key never verifies with a different pubkey', function () {
             fc.assert(fc.property(
@@ -144,7 +144,22 @@ describe('Fuzz: ValidatorIdentity', function () {
                 }
             ), { numRuns: 100 });
         });
+
+}
+
+function registerSignAndVerifyTests() {
+
+    // -----------------------------------------------------------------
+    // sign() and verify()
+    // -----------------------------------------------------------------
+
+    describe('sign() and verify()', function () {
+        registerSignAndVerifyTestCases1();
+        registerSignAndVerifyTestCases2();
     });
+}
+
+function registerPubkeyFromHexTests() {
 
     // -----------------------------------------------------------------
     // pubkeyFromHex()
@@ -174,6 +189,9 @@ describe('Fuzz: ValidatorIdentity', function () {
             ), { numRuns: 50 });
         });
     });
+}
+
+function registerEnvelopeSignVerifyRoundTripTests() {
 
     // -----------------------------------------------------------------
     // Envelope sign/verify round-trip
@@ -227,4 +245,10 @@ describe('Fuzz: ValidatorIdentity', function () {
             ), { numRuns: 50 });
         });
     });
+}
+describe('Fuzz: ValidatorIdentity', function () {
+    registerConstructorTests();
+    registerSignAndVerifyTests();
+    registerPubkeyFromHexTests();
+    registerEnvelopeSignVerifyRoundTripTests();
 });
