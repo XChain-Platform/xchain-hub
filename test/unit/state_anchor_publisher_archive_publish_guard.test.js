@@ -55,6 +55,12 @@ function mkPub(){
 
 describe('StateAnchorPublisher archive publication guard', () => {
 
+    registerArchivePublicationGuardTests();
+    registerArchiveAttestationDisplacementTest();
+});
+
+function registerArchivePublicationGuardTests() {
+
     it('refuses a new archive round while a publication is still in flight', async () => {
         const { pub } = mkPub();
         let releasePublish;
@@ -105,6 +111,9 @@ describe('StateAnchorPublisher archive publication guard', () => {
         expect(threw, 'the publish failure must still propagate').to.equal(true);
         expect(pub._archivePublishing, 'a failed publish latched the guard forever').to.equal(null);
     });
+}
+
+function registerArchiveAttestationDisplacementTest() {
 
     it('settles the publisher-attestation round it displaces', async () => {
         const { pub, identity } = mkPub();
@@ -141,4 +150,4 @@ describe('StateAnchorPublisher archive publication guard', () => {
         pub.stop();                                  // settles the survivor
         await second;
     });
-});
+}
