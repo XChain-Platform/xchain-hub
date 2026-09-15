@@ -35,28 +35,85 @@ function makeProviderRegistry() {
     };
 }
 
+let hub, consensus, me, live, mute, pending;
+const RID  = 'ab'.repeat(16);
+const BODY = Buffer.from('a-body');
+
+function proposeEnvelope(signer) {
+    let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0, null).toString('utf8');
+    return {
+        type: 'ATTEST_PROPOSE',
+        data: {
+            requestId:  RID,
+            providerId: 'http_get',
+            body_b64:   BODY.toString('base64'),
+            meta:       '',
+            status:     'ok',
+            sig_pubkey: pub(signer),
+            sig:        signer.sign(canonical)
+        }
+    };
+}
+
+function registerProposerRecordEdgeTests() {
+it('reads a case-folded pubkey and rid the same way', function () {
+        consensus._handlePropose(proposeEnvelope(live));
+        expect(consensus.hasProposedFor(RID.toUpperCase(), pub(live).toUpperCase())).to.be.true;
+    });
+
+    it('is ring-bounded FIFO so requestId flooding cannot grow it', function () {
+        let c = new AttestationConsensus(
+            createMockHub({ p2pConfig: { ATTESTATION_PROPOSER_SEEN_MAX: '2' } }), makeProviderRegistry());
+        c.recordProposer('r1', pub(live));
+        c.recordProposer('r2', pub(live));
+        c.recordProposer('r3', pub(live));
+        expect(c.proposerSeen.size).to.equal(2);
+        expect(c.hasProposedFor('r1', pub(live))).to.be.false;
+        expect(c.hasProposedFor('r3', pub(live))).to.be.true;
+    });
+
+    it('clears the record on stop()', async function () {
+        consensus._handlePropose(proposeEnvelope(live));
+        await consensus.stop();
+        expect(consensus.proposerSeen.size).to.equal(0);
+        expect(consensus.hasProposedFor(RID, pub(live))).to.be.false;
+    });
+}
+
+function registerProposerRecordCoreTests() {
+it('records an accepted PROPOSE and reads it back per request and pubkey', function () {
+        consensus._handlePropose(proposeEnvelope(live));
+        expect(consensus.hasProposedFor(RID, pub(live))).to.be.true;
+        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
+        expect(consensus.hasProposedFor('cd'.repeat(16), pub(live))).to.be.false;
+    });
+
+    it('survives the round teardown a timeout performs', function () {
+        consensus._handlePropose(proposeEnvelope(live));
+        // What the round-timeout handler does to a stalled round.
+        consensus.pending.delete(RID);
+        consensus.earlyMessages.delete(RID);
+        consensus.markTornDown(RID);
+
+        expect(consensus.pending.has(RID)).to.be.false;
+        expect(consensus.hasProposedFor(RID, pub(live)), 'the retry round lost the evidence').to.be.true;
+        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
+    });
+
+    it('does not record a PROPOSE it rejects', function () {
+        let env = proposeEnvelope(mute);
+        env.data.sig = 'ff'.repeat(64);            // bad signature
+        consensus._handlePropose(env);
+        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
+
+        // Nor one from outside the responsible set.
+        let outsider = mkIdentity();
+        consensus._handlePropose(proposeEnvelope(outsider));
+        expect(consensus.hasProposedFor(RID, pub(outsider))).to.be.false;
+    });
+}
+
 describe('AttestationConsensus: cross-round proposer record (P60)', function () {
-
-    let hub, consensus, me, live, mute, pending;
-    const RID  = 'ab'.repeat(16);
-    const BODY = Buffer.from('a-body');
-
-    function proposeEnvelope(signer) {
-        let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0, null).toString('utf8');
-        return {
-            type: 'ATTEST_PROPOSE',
-            data: {
-                requestId:  RID,
-                providerId: 'http_get',
-                body_b64:   BODY.toString('base64'),
-                meta:       '',
-                status:     'ok',
-                sig_pubkey: pub(signer),
-                sig:        signer.sign(canonical)
-            }
-        };
-    }
-
     beforeEach(function () {
         hub       = createMockHub();
         consensus = new AttestationConsensus(hub, makeProviderRegistry());
@@ -92,57 +149,7 @@ describe('AttestationConsensus: cross-round proposer record (P60)', function () 
         sinon.restore();
     });
 
-    it('records an accepted PROPOSE and reads it back per request and pubkey', function () {
-        consensus._handlePropose(proposeEnvelope(live));
-        expect(consensus.hasProposedFor(RID, pub(live))).to.be.true;
-        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
-        expect(consensus.hasProposedFor('cd'.repeat(16), pub(live))).to.be.false;
-    });
+    registerProposerRecordCoreTests();
 
-    it('survives the round teardown a timeout performs', function () {
-        consensus._handlePropose(proposeEnvelope(live));
-        // What the round-timeout handler does to a stalled round.
-        consensus.pending.delete(RID);
-        consensus.earlyMessages.delete(RID);
-        consensus.markTornDown(RID);
-
-        expect(consensus.pending.has(RID)).to.be.false;
-        expect(consensus.hasProposedFor(RID, pub(live)), 'the retry round lost the evidence').to.be.true;
-        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
-    });
-
-    it('does not record a PROPOSE it rejects', function () {
-        let env = proposeEnvelope(mute);
-        env.data.sig = 'ff'.repeat(64);            // bad signature
-        consensus._handlePropose(env);
-        expect(consensus.hasProposedFor(RID, pub(mute))).to.be.false;
-
-        // Nor one from outside the responsible set.
-        let outsider = mkIdentity();
-        consensus._handlePropose(proposeEnvelope(outsider));
-        expect(consensus.hasProposedFor(RID, pub(outsider))).to.be.false;
-    });
-
-    it('reads a case-folded pubkey and rid the same way', function () {
-        consensus._handlePropose(proposeEnvelope(live));
-        expect(consensus.hasProposedFor(RID.toUpperCase(), pub(live).toUpperCase())).to.be.true;
-    });
-
-    it('is ring-bounded FIFO so requestId flooding cannot grow it', function () {
-        let c = new AttestationConsensus(
-            createMockHub({ p2pConfig: { ATTESTATION_PROPOSER_SEEN_MAX: '2' } }), makeProviderRegistry());
-        c.recordProposer('r1', pub(live));
-        c.recordProposer('r2', pub(live));
-        c.recordProposer('r3', pub(live));
-        expect(c.proposerSeen.size).to.equal(2);
-        expect(c.hasProposedFor('r1', pub(live))).to.be.false;
-        expect(c.hasProposedFor('r3', pub(live))).to.be.true;
-    });
-
-    it('clears the record on stop()', async function () {
-        consensus._handlePropose(proposeEnvelope(live));
-        await consensus.stop();
-        expect(consensus.proposerSeen.size).to.equal(0);
-        expect(consensus.hasProposedFor(RID, pub(live))).to.be.false;
-    });
+    registerProposerRecordEdgeTests();
 });
