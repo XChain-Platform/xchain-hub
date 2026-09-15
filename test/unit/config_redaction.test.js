@@ -52,8 +52,7 @@ function realisticTree() {
     };
 }
 
-describe('config_redaction', function () {
-
+function registerSecretParamNameTests() {
     describe('isSecretParamName', function () {
 
         it('matches the credential params xchain-node actually pushes', function () {
@@ -76,7 +75,9 @@ describe('config_redaction', function () {
                 expect(redaction.isSecretParamName(name)).to.equal(false);
         });
     });
+}
 
+function registerWantsSecretsTests() {
     describe('wantsSecrets', function () {
 
         it('is true only for an explicit opt-in', function () {
@@ -89,88 +90,102 @@ describe('config_redaction', function () {
                 expect(redaction.wantsSecrets(v)).to.equal(false, JSON.stringify(v));
         });
     });
+}
 
-    describe('redactConfigTree', function () {
-
-        it('replaces every password in a realistic node-pushed tree', function () {
-            const { configs, redacted } = redaction.redactConfigTree(realisticTree());
-            const btc = configs.Bitcoin.regtest;
-            expect(btc.bitcoind.pass).to.equal(redaction.REDACTED);
-            expect(btc['xchain-indexer'].pass).to.equal(redaction.REDACTED);
-            expect(btc['xchain-decoder'].pass).to.equal(redaction.REDACTED);
-            expect(btc.checkpoint.pass).to.equal(redaction.REDACTED);
-            expect(redacted).to.equal(4);
-        });
-
-        it('serves every non-secret param unchanged, so discovery still works', function () {
-            const { configs } = redaction.redactConfigTree(realisticTree());
-            const btc = configs.Bitcoin.regtest;
-            expect(btc['xchain-indexer'].db_host).to.equal('mariadb');
-            expect(btc['xchain-indexer'].db_port).to.equal('3306');
-            expect(btc['xchain-indexer'].name).to.equal('XCHAIN_BTC_REGTEST');
-            expect(btc['xchain-indexer'].user).to.equal('indexer_user');
-            expect(btc.checkpoint.hub_url).to.equal('http://hub:10000');
-            expect(btc.checkpoint.self_sync).to.equal('true');
-            expect(btc.chain_tips.block_height).to.equal('4211');
-        });
-
-        it('never mutates the caller\'s tree (the hub reads the same object internally)', function () {
-            const original = realisticTree();
-            redaction.redactConfigTree(original);
-            expect(original.Bitcoin.regtest['xchain-indexer'].pass).to.equal('indexer-db-secret');
-            expect(original.Bitcoin.regtest.bitcoind.pass).to.equal('node-rpc-secret');
-        });
-
-        it('redacts a credential nested inside a JSON-blob param value', function () {
-            const tree = { Bitcoin: { regtest: { ATTESTATION_PROVIDER: {
-                llm: JSON.stringify({ judge_models: ['a', 'b'], vendors: { anthropic: { api_key: 'sk-live-xyz' } } })
-            } } } };
-            const { configs, redacted } = redaction.redactConfigTree(tree);
-            const blob = JSON.parse(configs.Bitcoin.regtest.ATTESTATION_PROVIDER.llm);
-            expect(blob.vendors.anthropic.api_key).to.equal(redaction.REDACTED);
-            expect(blob.judge_models).to.deep.equal(['a', 'b']);
-            expect(redacted).to.equal(1);
-        });
-
-        it('leaves a clean JSON blob byte-identical rather than re-serializing it', function () {
-            const raw  = '{ "judge_models" : ["a","b"],  "threshold": 0.85 }';
-            const tree = { Bitcoin: { regtest: { ATTESTATION_PROVIDER: { llm: raw } } } };
-            const { configs, redacted } = redaction.redactConfigTree(tree);
-            expect(configs.Bitcoin.regtest.ATTESTATION_PROVIDER.llm).to.equal(raw);
-            expect(redacted).to.equal(0);
-        });
-
-        it('leaves a value that only looks like JSON alone', function () {
-            const tree = { Bitcoin: { regtest: { m: { note: '{not json at all', url: 'http://x/y' } } } };
-            const { configs, redacted } = redaction.redactConfigTree(tree);
-            expect(configs.Bitcoin.regtest.m.note).to.equal('{not json at all');
-            expect(configs.Bitcoin.regtest.m.url).to.equal('http://x/y');
-            expect(redacted).to.equal(0);
-        });
-
-        it('reports zero for a tree carrying no credential', function () {
-            const tree = { Bitcoin: { regtest: { chain_tips: { block_height: '9', block_time: '1' } } } };
-            expect(redaction.redactConfigTree(tree).redacted).to.equal(0);
-        });
-
-        it('handles empty, null and non-object inputs without throwing', function () {
-            expect(redaction.redactConfigTree({})).to.deep.equal({ configs: {}, redacted: 0 });
-            expect(redaction.redactConfigTree(null)).to.deep.equal({ configs: null, redacted: 0 });
-            expect(redaction.redactConfigTree(undefined).configs).to.equal(undefined);
-        });
-
-        it('survives a self-referential tree, and fails closed at the depth cap', function () {
-            const tree = { Bitcoin: { regtest: { m: { pass: 'cycle-secret-value' } } } };
-            tree.Bitcoin.regtest.m.self = tree;
-            const { configs, redacted } = redaction.redactConfigTree(tree);
-            expect(configs.Bitcoin.regtest.m.pass).to.equal(redaction.REDACTED);
-            expect(redacted).to.be.greaterThan(0);
-            // The output must terminate (no cycle handed back) and must not carry
-            // the real password ANYWHERE: returning the original node at the depth
-            // cap would splice the whole unredacted graph back into the response.
-            const serialized = JSON.stringify(configs);
-            expect(serialized).to.not.include('cycle-secret-value');
-            expect(serialized).to.include(redaction.TRUNCATED);
-        });
+function registerRedactionCoreTests() {
+    it('replaces every password in a realistic node-pushed tree', function () {
+        const { configs, redacted } = redaction.redactConfigTree(realisticTree());
+        const btc = configs.Bitcoin.regtest;
+        expect(btc.bitcoind.pass).to.equal(redaction.REDACTED);
+        expect(btc['xchain-indexer'].pass).to.equal(redaction.REDACTED);
+        expect(btc['xchain-decoder'].pass).to.equal(redaction.REDACTED);
+        expect(btc.checkpoint.pass).to.equal(redaction.REDACTED);
+        expect(redacted).to.equal(4);
     });
+
+    it('serves every non-secret param unchanged, so discovery still works', function () {
+        const { configs } = redaction.redactConfigTree(realisticTree());
+        const btc = configs.Bitcoin.regtest;
+        expect(btc['xchain-indexer'].db_host).to.equal('mariadb');
+        expect(btc['xchain-indexer'].db_port).to.equal('3306');
+        expect(btc['xchain-indexer'].name).to.equal('XCHAIN_BTC_REGTEST');
+        expect(btc['xchain-indexer'].user).to.equal('indexer_user');
+        expect(btc.checkpoint.hub_url).to.equal('http://hub:10000');
+        expect(btc.checkpoint.self_sync).to.equal('true');
+        expect(btc.chain_tips.block_height).to.equal('4211');
+    });
+
+    it('never mutates the caller\'s tree (the hub reads the same object internally)', function () {
+        const original = realisticTree();
+        redaction.redactConfigTree(original);
+        expect(original.Bitcoin.regtest['xchain-indexer'].pass).to.equal('indexer-db-secret');
+        expect(original.Bitcoin.regtest.bitcoind.pass).to.equal('node-rpc-secret');
+    });
+
+    it('redacts a credential nested inside a JSON-blob param value', function () {
+        const tree = { Bitcoin: { regtest: { ATTESTATION_PROVIDER: {
+            llm: JSON.stringify({ judge_models: ['a', 'b'], vendors: { acme: { api_key: 'sk-live-xyz' } } })
+        } } } };
+        const { configs, redacted } = redaction.redactConfigTree(tree);
+        const blob = JSON.parse(configs.Bitcoin.regtest.ATTESTATION_PROVIDER.llm);
+        expect(blob.vendors.acme.api_key).to.equal(redaction.REDACTED);
+        expect(blob.judge_models).to.deep.equal(['a', 'b']);
+        expect(redacted).to.equal(1);
+    });
+}
+
+function registerRedactionEdgeTests() {
+    it('leaves a clean JSON blob byte-identical rather than re-serializing it', function () {
+        const raw  = '{ "judge_models" : ["a","b"],  "threshold": 0.85 }';
+        const tree = { Bitcoin: { regtest: { ATTESTATION_PROVIDER: { llm: raw } } } };
+        const { configs, redacted } = redaction.redactConfigTree(tree);
+        expect(configs.Bitcoin.regtest.ATTESTATION_PROVIDER.llm).to.equal(raw);
+        expect(redacted).to.equal(0);
+    });
+
+    it('leaves a value that only looks like JSON alone', function () {
+        const tree = { Bitcoin: { regtest: { m: { note: '{not json at all', url: 'http://x/y' } } } };
+        const { configs, redacted } = redaction.redactConfigTree(tree);
+        expect(configs.Bitcoin.regtest.m.note).to.equal('{not json at all');
+        expect(configs.Bitcoin.regtest.m.url).to.equal('http://x/y');
+        expect(redacted).to.equal(0);
+    });
+
+    it('reports zero for a tree carrying no credential', function () {
+        const tree = { Bitcoin: { regtest: { chain_tips: { block_height: '9', block_time: '1' } } } };
+        expect(redaction.redactConfigTree(tree).redacted).to.equal(0);
+    });
+
+    it('handles empty, null and non-object inputs without throwing', function () {
+        expect(redaction.redactConfigTree({})).to.deep.equal({ configs: {}, redacted: 0 });
+        expect(redaction.redactConfigTree(null)).to.deep.equal({ configs: null, redacted: 0 });
+        expect(redaction.redactConfigTree(undefined).configs).to.equal(undefined);
+    });
+
+    it('survives a self-referential tree, and fails closed at the depth cap', function () {
+        const tree = { Bitcoin: { regtest: { m: { pass: 'cycle-secret-value' } } } };
+        tree.Bitcoin.regtest.m.self = tree;
+        const { configs, redacted } = redaction.redactConfigTree(tree);
+        expect(configs.Bitcoin.regtest.m.pass).to.equal(redaction.REDACTED);
+        expect(redacted).to.be.greaterThan(0);
+        // The output must terminate (no cycle handed back) and must not carry
+        // the real password ANYWHERE: returning the original node at the depth
+        // cap would splice the whole unredacted graph back into the response.
+        const serialized = JSON.stringify(configs);
+        expect(serialized).to.not.include('cycle-secret-value');
+        expect(serialized).to.include(redaction.TRUNCATED);
+    });
+}
+
+function registerRedactConfigTreeTests() {
+    describe('redactConfigTree', function () {
+        registerRedactionCoreTests();
+        registerRedactionEdgeTests();
+    });
+}
+
+describe('config_redaction', function () {
+    registerSecretParamNameTests();
+    registerWantsSecretsTests();
+    registerRedactConfigTreeTests();
 });
