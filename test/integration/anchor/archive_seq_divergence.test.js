@@ -16,7 +16,7 @@
 // exactly how the two hubs' cross_chain_matches tables come to disagree in production
 // (a dropped announcement, a hub restarting through the round, a partitioned peer).
 //
-// THE HAZARD. An election key that binds _getNextBatchSeq(), i.e. MAX(batch_seq)+1
+// THE HAZARD. An election key that binds getNextBatchSeq(), i.e. MAX(batch_seq)+1
 // over THIS hub's own cross_chain_matches / cross_chain_calls / validator_rewards, with
 // no consensus step, is uniform only while every back-fill has landed; once one hub misses
 // one, the two compute DIFFERENT keys for
@@ -74,7 +74,7 @@ function matchRow(id){
     };
 }
 
-// Mirror of the publisher's _matchCanonical, so fixture rows carry REAL signatures and
+// Mirror of the publisher's matchCanonical, so fixture rows carry REAL signatures and
 // the follower's cryptographic verification is the shipped one.
 function matchCanonical(m){
     let raw = ['XMATCH', m.match_id, String(m.snapshot_block),
@@ -206,7 +206,7 @@ async function keyAt(nd){
     let rows = await nd.db.doQuery(
         "SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1",
         [NETWORK]);
-    return nd.pub._archiveElectionKey(nd.pub.cpFromRow(rows[0]), await nd.pub._getNextBatchSeq());
+    return nd.pub.archiveElectionKey(nd.pub.cpFromRow(rows[0]), await nd.pub.getNextBatchSeq());
 }
 async function orderAt(nd, bus){
     return StateAnchorPublisher.hashOrder(await keyAt(nd), bus.nodes.map(n => n.pubkey));
@@ -264,8 +264,8 @@ async function divergeOnRoundOne(btcBlock){
     bus.deaf.clear();
 
     expect(laggy.db.matches[0].batch_seq, 'the lagging hub missed the back-fill').to.equal(null);
-    expect(await leader.pub._getNextBatchSeq(), 'leader has consumed batch 0').to.equal(1);
-    expect(await laggy.pub._getNextBatchSeq(), 'lagging hub still thinks 0 is free').to.equal(0);
+    expect(await leader.pub.getNextBatchSeq(), 'leader has consumed batch 0').to.equal(1);
+    expect(await laggy.pub.getNextBatchSeq(), 'lagging hub still thinks 0 is free').to.equal(0);
 
     // Fresh cargo for round two, pending on BOTH hubs.
     for(let nd of bus.nodes){
@@ -282,7 +282,7 @@ function registerArchiveOrderingTests() {
         const { bus, leader, laggy } = await divergeOnRoundOne(BLOCK);
 
         // The precondition that made the old key diverge is real and still present.
-        expect(await leader.pub._getNextBatchSeq()).to.equal(1);
+        expect(await leader.pub.getNextBatchSeq()).to.equal(1);
         expect(laggy.pub._observedConsumedBatchSeq, 'nothing has taught the lagging hub yet').to.equal(-1);
 
         // The key first, because it is the property and it discriminates on a set of any
@@ -334,7 +334,7 @@ function registerDuplicateArchiveTest() {
         expect(refusal.data.sig, 'no co-signature rides a refusal').to.equal('');
 
         // Convergence: the lagging hub's next seq is now the leader's.
-        expect(await laggy.pub._getNextBatchSeq()).to.equal(await leader.pub._getNextBatchSeq());
+        expect(await laggy.pub.getNextBatchSeq()).to.equal(await leader.pub.getNextBatchSeq());
     });
 }
 
@@ -382,6 +382,6 @@ function registerArchiveConvergenceTests() {
 
         expect(laggy.pub._observedConsumedBatchSeq, 'batch 0 learned as consumed').to.equal(0);
         expect(laggy.db.matches[0].batch_seq, 'and the missed back-fill actually landed').to.equal(0);
-        expect(await laggy.pub._getNextBatchSeq()).to.equal(await leader.pub._getNextBatchSeq());
+        expect(await laggy.pub.getNextBatchSeq()).to.equal(await leader.pub.getNextBatchSeq());
     });
 }

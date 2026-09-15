@@ -37,7 +37,7 @@ module.exports = {
     // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /
     // the indexer's cross_settle._canonical (kept local so archive verification
     // never depends on the DEX engine being constructed).
-    _matchCanonical(m){
+    matchCanonical(m){
         let raw = [
             'XMATCH', m.match_id, String(m.snapshot_block),
             m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr,
@@ -58,7 +58,7 @@ module.exports = {
     },
 
     // XCALL phase canonicals: byte-identical to CrossChainCallEngine._canonicalMatch
-    // / the indexer's verifiers (kept local for the same reason as _matchCanonical).
+    // / the indexer's verifiers (kept local for the same reason as matchCanonical).
     callCanonical(c){
         let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
         let phase = (c.phase === 'result') ? 'result' : 'dispatch';
@@ -115,7 +115,7 @@ module.exports = {
         }
         if(weighted){
             // source carries the staking source; weight (or amount, from
-            // _resolveCapabilitySet) carries its stake; normalize for swq.
+            // resolveCapabilitySet) carries its stake; normalize for swq.
             let weightedSet = (validatorSet || []).map(v => ({
                 pubkey: String(v.pubkey).toLowerCase(),
                 source: String(v.source != null ? v.source : ''),
@@ -174,7 +174,7 @@ module.exports = {
         }
     },
 
-    async _getNextBatchSeq(){
+    async getNextBatchSeq(){
         // Spans every batch_seq-bearing table so a fresh seq is unique across
         // matches, calls AND rewards (consensus-uniform: all hubs compute the
         // same next seq from quorum-agreed rows).
@@ -213,7 +213,7 @@ module.exports = {
         };
     },
 
-    _parseSigs(raw){
+    parseSigs(raw){
         try {
             let sigs = JSON.parse(String(raw || '[]'));
             return Array.isArray(sigs) ? sigs.filter(s => s && s.pubkey && s.sig) : [];

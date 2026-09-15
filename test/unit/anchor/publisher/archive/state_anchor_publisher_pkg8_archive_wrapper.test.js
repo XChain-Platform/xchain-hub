@@ -153,15 +153,15 @@ function registerSplitSuitePart1() {
       }
     });
     pub._getActiveOraclePublishPubkeys = async () => [me];
-    pub._getNextBatchSeq = async () => 3;
+    pub.getNextBatchSeq = async () => 3;
     let captured = null;
-    pub._archiveElectionKey = (cp, batchSeq) => {
+    pub.archiveElectionKey = (cp, batchSeq) => {
       captured = cp;
       return 'k|' + batchSeq;
     };
     pub._rankUnlocked = () => false; // bail right after the wrapper pick
 
-    let r = await pub._startArchiveRound({}, 100);
+    let r = await pub.startArchiveRound({}, 100);
     expect(r).to.equal('none');
     expect(captured, 'wrapper checkpoint was selected').to.not.equal(null);
     expect(captured.checkpoint_seq, 'consensus-newest row, though it has the LOWER id').to.equal(106);
@@ -188,9 +188,9 @@ function registerSplitSuitePart2() {
       }
     });
     pub._getActiveOraclePublishPubkeys = async () => [me];
-    pub._getNextBatchSeq = async () => 3;
+    pub.getNextBatchSeq = async () => 3;
     pub._rankUnlocked = () => false;
-    await pub._startArchiveRound({}, 100);
+    await pub.startArchiveRound({}, 100);
     expect(seen.length).to.be.at.least(1);
     for (let sql of seen) {
       expect(sql, 'wrapper pick must not key on the per-hub insertion cursor').to.not.match(/ORDER BY[^;]*\bid\s+DESC/i);

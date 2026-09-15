@@ -41,7 +41,7 @@ module.exports = {
     // (ar.ARCHIVE_REWARD_AMOUNT, from the twin module, NOT the operator-tunable env). The
     // 'XANCPUB|archive|...' roundId is disjoint from every per-chain XANCPUB roundId, so
     // the two attestation families can never equivocation-collide.
-    _archiveAttestationCanonical(cp, batchSeq, publisher){
+    archiveAttestationCanonical(cp, batchSeq, publisher){
         let base = ['XANCPUB', 'anchor_archive', String(batchSeq),
                     String(cp.snapshot_block), String(publisher || '').toLowerCase(),
                     ar.ARCHIVE_REWARD_AMOUNT].join('|');
@@ -54,13 +54,13 @@ module.exports = {
 
     async archiveAttestationSigningSet(cp){
         // Same fail-closed resolver, same reason to degrade rather than propagate (see
-        // runPublisherAttestationRound): this round is awaited in _publishArchive AFTER
+        // runPublisherAttestationRound): this round is awaited in publishArchive AFTER
         // the wrapper co-sign quorum has already been collected, so a throw here discards
         // a completed round instead of publishing the count-0 head the archive's own
         // liveness note promises. Abstaining matches the snapCount === 0 branch below.
         let signingSet;
         try {
-            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+            signingSet = await this.resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         } catch(e){
             logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
@@ -88,7 +88,7 @@ module.exports = {
             // Settle whatever this round displaces. The timer below is guarded on
             // `this._archiveAttestRound === round`, so a displaced round's timer no-ops
             // and checkArchiveAttestQuorum only ever looks at the live field: without
-            // this, the _publishArchive awaiting the displaced round waits forever. Same
+            // this, the publishArchive awaiting the displaced round waits forever. Same
             // shape as the stop() teardown. The archive leg is the reachable one: the v0
             // twin's caller runs only inside flush(), which _flushing serializes.
             let displaced = this._archiveAttestRound;
@@ -139,7 +139,7 @@ module.exports = {
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
-        let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
+        let canonical = this.archiveAttestationCanonical(cp, batchSeq, publisher);
         let mySig     = this.identity.sign(canonical);
 
         // Unresolved (empty) set: abstain, exactly as the v0 bundle round does. Self-attesting
@@ -209,7 +209,7 @@ module.exports = {
         let eligible = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(eligible.length === 0 || !eligible.includes(myPubkey)) return;
 
-        let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
+        let canonical = this.archiveAttestationCanonical(cp, batchSeq, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
         this.peerManager.broadcast(XANCARCHPUB_SIGN, {
@@ -230,7 +230,7 @@ module.exports = {
         this.checkArchiveAttestQuorum();
     },
 
-    // The flag-day twin of _isChainDerivedReward, for the pending-reward selector, which has
+    // The flag-day twin of isChainDerivedReward, for the pending-reward selector, which has
     // to apply eligibility BEFORE its LIMIT; db/validators.js
     // findArchivableAnchorRewardsBelowFlagDays turns these thresholds into the selector's
     // exclusion clause. Emitted from the same two constants the predicate reads, on the
@@ -240,7 +240,7 @@ module.exports = {
     // Thresholds are read HERE rather than cached on the instance: both maps are mutable
     // module state that configuration and tests re-pin. When either is not a finite
     // number the hub is unscoped or on an unknown network, which is exactly when
-    // _isChainDerivedReward answers false for everything, so this returns null and the
+    // isChainDerivedReward answers false for everything, so this returns null and the
     // selector keeps its original unnarrowed form.
     derivedRewardFlagDays(){
         let anchorFlagDay  = Number(ar.ANCHOR_REWARD_ACTIVATION[this.network]);
@@ -254,7 +254,7 @@ module.exports = {
     // cargo: anchor_<CHAIN>/anchor_bundle at/above ANCHOR_REWARD_ACTIVATION, anchor_archive
     // at/above ARCHIVE_REWARD_ACTIVATION, judged on the row's block_index and this hub's
     // network (an unscoped hub answers false and keeps archiving: costs DOGE, never a row).
-    _isChainDerivedReward(row){
+    isChainDerivedReward(row){
         let type  = String(row && row.reward_type || '');
         // A row with no block_index is pre-upgrade local state; the selector's SQL
         // already excludes it, and Number(null) would read as height 0 here.

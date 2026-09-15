@@ -100,41 +100,41 @@ describe('StateAnchorPublisher: chain-derived rewards are not archive cargo', ()
 
 function registerDerivedRewardClassificationTests() {
 
-    describe('_isChainDerivedReward', () => {
+    describe('isChainDerivedReward', () => {
         it('marks every anchor reward type derived at/above its flag-day (regtest activates at 0)', () => {
             const pub = mkPub('regtest', [], []);
             for(const t of ['anchor_BTC', 'anchor_LTC', 'anchor_DOGE', 'anchor_bundle', 'anchor_archive'])
-                expect(pub._isChainDerivedReward(row(t, 5)), t).to.equal(true);
+                expect(pub.isChainDerivedReward(row(t, 5)), t).to.equal(true);
         });
 
         it('keeps a row below its flag-day as hub-pushed cargo', () => {
             const pub = mkPub('mainnet', [], []);
             const belowChain   = ar.ANCHOR_REWARD_ACTIVATION.mainnet - 1;
             const belowArchive = ar.ARCHIVE_REWARD_ACTIVATION.mainnet - 1;
-            expect(pub._isChainDerivedReward(row('anchor_BTC', belowChain))).to.equal(false);
-            expect(pub._isChainDerivedReward(row('anchor_bundle', belowChain))).to.equal(false);
-            expect(pub._isChainDerivedReward(row('anchor_archive', belowArchive))).to.equal(false);
-            expect(pub._isChainDerivedReward(row('anchor_BTC', ar.ANCHOR_REWARD_ACTIVATION.mainnet))).to.equal(true);
-            expect(pub._isChainDerivedReward(row('anchor_archive', ar.ARCHIVE_REWARD_ACTIVATION.mainnet))).to.equal(true);
+            expect(pub.isChainDerivedReward(row('anchor_BTC', belowChain))).to.equal(false);
+            expect(pub.isChainDerivedReward(row('anchor_bundle', belowChain))).to.equal(false);
+            expect(pub.isChainDerivedReward(row('anchor_archive', belowArchive))).to.equal(false);
+            expect(pub.isChainDerivedReward(row('anchor_BTC', ar.ANCHOR_REWARD_ACTIVATION.mainnet))).to.equal(true);
+            expect(pub.isChainDerivedReward(row('anchor_archive', ar.ARCHIVE_REWARD_ACTIVATION.mainnet))).to.equal(true);
         });
 
         it('never marks a non-anchor type, a row without a block, or an unscoped hub', () => {
             const pub = mkPub('regtest', [], []);
-            expect(pub._isChainDerivedReward(row('oracle_round', 5))).to.equal(false);
-            expect(pub._isChainDerivedReward(row('anchor_archive', null))).to.equal(false);
+            expect(pub.isChainDerivedReward(row('oracle_round', 5))).to.equal(false);
+            expect(pub.isChainDerivedReward(row('anchor_archive', null))).to.equal(false);
             const unscoped = mkPub('', [], []);
-            expect(unscoped._isChainDerivedReward(row('anchor_archive', 5))).to.equal(false);
+            expect(unscoped.isChainDerivedReward(row('anchor_archive', 5))).to.equal(false);
         });
     });
 }
 
 function registerDerivedRewardRoundTests() {
 
-    describe('_startArchiveRound', () => {
+    describe('startArchiveRound', () => {
         it('answers none, and never reaches the checkpoint wrapper, when only derived rows are pending', async () => {
             const hits = [];
             const pub = mkPub('regtest', [row('anchor_archive', 5), row('anchor_bundle', 6)], hits);
-            const verdict = await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            const verdict = await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
             expect(verdict).to.equal('none');
             expect(hits.some(s => s.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1),
                 'the pending-reward query ran').to.equal(true);
@@ -147,7 +147,7 @@ function registerDerivedRewardRoundTests() {
             const hits = [];
             const below = ar.ARCHIVE_REWARD_ACTIVATION.mainnet - 1;
             const pub = mkPub('mainnet', [row('anchor_archive', below)], hits);
-            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
             expect(hits.some(s => s.indexOf('FROM state_checkpoints') !== -1),
                 'a below-flag-day row must reach the checkpoint wrapper selection').to.equal(true);
         });
@@ -174,7 +174,7 @@ function registerDerivedRewardPageTests() {
             rows[1].round_number = 2;
             const pub = mkSelector('mainnet', rows, 2, hits);
 
-            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
 
             expect(hits.some(h => h.sql.indexOf('FROM state_checkpoints') !== -1),
                 'the starved legacy reward must reach the checkpoint wrapper selection').to.equal(true);
@@ -183,7 +183,7 @@ function registerDerivedRewardPageTests() {
         it('binds this hub\'s own two flag-days, and keeps the unnarrowed form off-network', async () => {
             let hits = [];
             let pub = mkSelector('mainnet', [], 5, hits);
-            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
             let q = hits.find(h => h.sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1);
             expect(q.sql).to.contain('AND NOT (reward_type IN (?, ?, ?, ?) AND block_index >= ?)');
             expect(q.sql).to.contain('AND NOT (reward_type = ? AND block_index >= ?)');
@@ -191,11 +191,11 @@ function registerDerivedRewardPageTests() {
                                             ar.ANCHOR_REWARD_ACTIVATION.mainnet,
                                             'anchor_archive', ar.ARCHIVE_REWARD_ACTIVATION.mainnet, 5]);
 
-            // An unscoped hub has no thresholds to bind, and _isChainDerivedReward answers
+            // An unscoped hub has no thresholds to bind, and isChainDerivedReward answers
             // false for every row there, so the selector must stay exactly as it was.
             hits = [];
             pub = mkSelector('', [], 5, hits);
-            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
             q = hits.find(h => h.sql.indexOf('FROM validator_rewards WHERE reward_type LIKE') !== -1);
             expect(q.sql).to.not.contain('AND NOT (');
             expect(q.params).to.deep.equal([5]);
@@ -206,7 +206,7 @@ function registerDerivedRewardPageTests() {
             // produced there, only now the LIMIT never sees those rows.
             const hits = [];
             const pub = mkSelector('regtest', [row('anchor_archive', 5), row('anchor_BTC', 5)], 5, hits);
-            await pub._startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
+            await pub.startArchiveRound({ broadcastFn: () => {} }, BLOCK, false);
             expect(hits.some(h => h.sql.indexOf('FROM state_checkpoints') !== -1),
                 'nothing on regtest is archive cargo, so no wrapper is selected').to.equal(false);
         });

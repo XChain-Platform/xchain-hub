@@ -13,7 +13,7 @@
 // Three archive-path fail-opens on the DOGE anchor rail (review board #4183, #4185,
 // and the null-txid half of #4180).
 //
-//   #4183 _startArchiveRound treated an EMPTY oracle_publish signing set as a
+//   #4183 startArchiveRound treated an EMPTY oracle_publish signing set as a
 //         single-validator quorum: `snapCount <= 1` self-signed and published a v1
 //         the leader is not a member of, then dequeued the settled cross_chain rows,
 //         while the indexer + full-parse recovery refuse an empty-set anchor. The
@@ -91,7 +91,7 @@ function buildPub(rows) {
 describe('StateAnchorPublisher #4183 empty signing set is not a quorum of one', () => {
 
     // The archive round with one pending match, a resolvable election set, and a
-    // signing set the caller controls. _publishArchive is spied, never run.
+    // signing set the caller controls. publishArchive is spied, never run.
     // `signingSetFor` receives this hub's own pubkey so a caller can build a set
     // that does (or does not) contain it.
     function archiveRound(signingSetFor) {
@@ -102,21 +102,21 @@ describe('StateAnchorPublisher #4183 empty signing set is not a quorum of one', 
         let me = identity.getPubkeyHex().toLowerCase();
         let published = [];
         pub._getActiveOraclePublishPubkeys = async () => [me];    // election set resolves: this hub leads
-        pub._resolveCapabilitySet          = async () => signingSetFor(me);
-        pub._getNextBatchSeq               = async () => 7;
-        pub._publishArchive                = async (round) => { published.push(round); };
+        pub.resolveCapabilitySet          = async () => signingSetFor(me);
+        pub.getNextBatchSeq               = async () => 7;
+        pub.publishArchive                = async (round) => { published.push(round); };
         return { pub, me, published };
     }
 
     it('an EMPTY signing set DEFERS the round instead of self-publishing a v1', async () => {
         let { pub, published } = archiveRound(() => []);
-        expect(await pub._startArchiveRound(null, BLOCK), 'round must defer').to.equal('none');
+        expect(await pub.startArchiveRound(null, BLOCK), 'round must defer').to.equal('none');
         expect(published.length, 'nothing may be broadcast to DOGE').to.equal(0);
     });
 
     it('a GENUINE single-member set still self-signs and publishes (liveness preserved)', async () => {
         let { pub, published } = archiveRound((me) => [{ pubkey: me, amount: '1', source: '' }]);
-        expect(await pub._startArchiveRound(null, BLOCK)).to.equal('published');
+        expect(await pub.startArchiveRound(null, BLOCK)).to.equal('published');
         expect(published.length, 'the sole validator publishes as before').to.equal(1);
         expect(published[0].signatures.size).to.equal(1);
     });
@@ -138,7 +138,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
 
     function verifier(resolved) {
         let { pub } = buildPub({});                         // no local reward rows: late-joiner path
-        pub._resolveCapabilitySet = async () => (resolved === undefined ? SET : resolved);
+        pub.resolveCapabilitySet = async () => (resolved === undefined ? SET : resolved);
         return pub;
     }
 

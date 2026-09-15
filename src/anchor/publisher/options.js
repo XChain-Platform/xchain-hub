@@ -145,8 +145,8 @@ module.exports = {
         // wake is a fraction of a ladder step, so it costs at most that much latency
         // on top of the unlock it is watching for. It does NOT change how often a
         // healthy leader anchors: a wake flush runs in failover-only mode, which
-        // skips every election this hub leads (see flush / _publishPendingCheckpoints
-        // / _startArchiveRound), so rank-0 publishing keeps its interval and size
+        // skips every election this hub leads (see flush / publishPendingCheckpoints
+        // / startArchiveRound), so rank-0 publishing keeps its interval and size
         // triggers and the federation still pays for one anchor per checkpoint.
         this.rankWakeMs = parseInt(hubConfig.ANCHOR_RANK_WAKE_MS || cfg.ANCHOR_RANK_WAKE_MS || '900000');  // 15 min
     },
@@ -182,7 +182,7 @@ module.exports = {
         // The escape hatch is for venues that mine on demand (regtest), where
         // chaining costs nothing and waiting for a confirmation would stall a harness.
         // Archive CHUNKS are the one designed exception: they descend from the head
-        // on purpose and are always allowed to spend it (see _publishArchive).
+        // on purpose and are always allowed to spend it (see publishArchive).
         this.allowUnconfirmedInputs =
             String(hubConfig.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
                    cfg.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';

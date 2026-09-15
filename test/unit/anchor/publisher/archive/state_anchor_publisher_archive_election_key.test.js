@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // The ARCHIVE election key must not carry the hub-local batch seq drawn by
-// _getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own tables with no
+// getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own tables with no
 // consensus step: that seq is fleet-uniform only while backfillBatch plus the XANC_FINALIZED
 // gossip have landed everywhere, so one missed back-fill makes two hubs key the SAME
 // wrapper checkpoint differently: each ranks itself 0 under its own key and both
@@ -19,7 +19,7 @@
 // each reads itself rank 1 and NEITHER publishes (hub0 batch 38 / hub1 batch 39).
 //
 // These are the pure-function halves of the fix: the key is a function of the wrapper
-// identity alone, and _getNextBatchSeq honours a floor learned from federation evidence
+// identity alone, and getNextBatchSeq honours a floor learned from federation evidence
 // so the lagging hub converges on the leader's numbering. The two-hub rig that drives
 // them through a real round lives in
 // test/integration/anchor/archiveSeqDivergence.integration.test.js.
@@ -55,19 +55,19 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
 
 function registerArchiveElectionKeyTests() {
 
-    describe('_archiveElectionKey', function () {
+    describe('archiveElectionKey', function () {
 
         it('is a function of the wrapper identity alone, never of the hub-local batch seq', function () {
             const pub = mkPub(0);
             // The exact divergence observed live: one wrapper, two hubs whose tables
             // differ by one missed back-fill, so they draw 38 and 39 for the same round.
-            expect(pub._archiveElectionKey(CP, 38)).to.equal(pub._archiveElectionKey(CP, 39));
-            expect(pub._archiveElectionKey(CP)).to.equal(pub._archiveElectionKey(CP, 26));
+            expect(pub.archiveElectionKey(CP, 38)).to.equal(pub.archiveElectionKey(CP, 39));
+            expect(pub.archiveElectionKey(CP)).to.equal(pub.archiveElectionKey(CP, 26));
         });
 
         it('carries only quorum-agreed fields', function () {
             const pub = mkPub(0);
-            const key = pub._archiveElectionKey(CP);
+            const key = pub.archiveElectionKey(CP);
             // chain/network/checkpoint_seq: the wrapper's own identity, and checkpoint_seq
             // is derived from snapshot_block by the checkpoint engine, so two hubs holding
             // the same wrapper cannot disagree about any of them.
@@ -79,18 +79,18 @@ function registerArchiveElectionKeyTests() {
 
         it('is STABLE while a batch stalls, so the failover ladder keeps a fixed anchor', function () {
             const pub = mkPub(0);
-            const first = pub._archiveElectionKey(CP);
+            const first = pub.archiveElectionKey(CP);
             // Nothing about a stalled round moves: same wrapper, later retry, later seq.
-            expect(pub._archiveElectionKey(Object.assign({}, CP), 99)).to.equal(first);
+            expect(pub.archiveElectionKey(Object.assign({}, CP), 99)).to.equal(first);
             // And it DOES move when the wrapper advances, so leadership still rotates.
-            expect(pub._archiveElectionKey(Object.assign({}, CP, { checkpoint_seq: 8 }))).to.not.equal(first);
+            expect(pub.archiveElectionKey(Object.assign({}, CP, { checkpoint_seq: 8 }))).to.not.equal(first);
         });
 
         it('gives two hubs at different batch seqs the identical rank order', function () {
             const pub = mkPub(0);
             const set = ['aa', 'bb', 'cc', 'dd'].map(s => s.repeat(32));
-            const atOneSeq   = StateAnchorPublisher.hashOrder(pub._archiveElectionKey(CP, 38), set);
-            const atOtherSeq = StateAnchorPublisher.hashOrder(pub._archiveElectionKey(CP, 39), set);
+            const atOneSeq   = StateAnchorPublisher.hashOrder(pub.archiveElectionKey(CP, 38), set);
+            const atOtherSeq = StateAnchorPublisher.hashOrder(pub.archiveElectionKey(CP, 39), set);
             expect(atOneSeq).to.deep.equal(atOtherSeq);
         });
     });
@@ -98,22 +98,22 @@ function registerArchiveElectionKeyTests() {
 
 function registerArchiveSequenceFloorTests() {
 
-    describe('_getNextBatchSeq floor', function () {
+    describe('getNextBatchSeq floor', function () {
 
         it('returns the row-derived seq when no consumed seq has been observed', async function () {
-            expect(await mkPub(7)._getNextBatchSeq()).to.equal(7);
+            expect(await mkPub(7).getNextBatchSeq()).to.equal(7);
         });
 
         it('draws above a consumed seq the federation has demonstrably spent', async function () {
             const pub = mkPub(38);                 // our rows say 38; we missed the back-fills
             pub.noteConsumedBatchSeq(40, 'test');
-            expect(await pub._getNextBatchSeq()).to.equal(41);
+            expect(await pub.getNextBatchSeq()).to.equal(41);
         });
 
         it('never walks the seq BACKWARDS on a stale observation', async function () {
             const pub = mkPub(41);
             pub.noteConsumedBatchSeq(38, 'test');
-            expect(await pub._getNextBatchSeq()).to.equal(41);
+            expect(await pub.getNextBatchSeq()).to.equal(41);
         });
 
         it('keeps the highest floor it has seen and ignores a lower one', function () {
@@ -126,7 +126,7 @@ function registerArchiveSequenceFloorTests() {
         it('ignores an implausible jump, so a Byzantine member cannot burn the numbering', async function () {
             const pub = mkPub(7);
             pub.noteConsumedBatchSeq(7 + pub._archiveSeqFloorMaxJump + 1, 'test');
-            expect(await pub._getNextBatchSeq()).to.equal(7);
+            expect(await pub.getNextBatchSeq()).to.equal(7);
         });
 
         it('ignores a non-numeric observation', function () {

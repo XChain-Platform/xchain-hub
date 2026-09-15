@@ -41,7 +41,7 @@ module.exports = {
     // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could
     // publish; on a static regtest tip the same leader won forever). Returns
     // the flush summary's archive status.
-    async _startArchiveRound(signer, electionBlock, failoverOnly){
+    async startArchiveRound(signer, electionBlock, failoverOnly){
         // One at a time across BOTH phases: a round collecting signatures, and a round
         // whose publish is already in flight (see _archivePublishing).
         if(this._archiveRound || this._archivePublishing) return 'round_pending';
@@ -74,7 +74,7 @@ module.exports = {
         let liveIntent = await this.getLiveArchiveIntent(network);
         if(this.archiveRoundIntentHeld(liveIntent, network)) return 'intent_held';
 
-        let batchSeq = await this._getNextBatchSeq();
+        let batchSeq = await this.getNextBatchSeq();
         if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly)) return 'none';
         let rewardRows = await this.resolveArchiveRewardSources(rewards);
         if(this.archiveEmptyAfterResolution(matches, calls, rewardRows)) return 'none';
@@ -98,7 +98,7 @@ module.exports = {
 
         this.armArchiveRound(round, batchSeq);
         this.broadcastArchiveSignReq(cp, batchSeq, archive, wire, electionBlock, myPubkey, mySig);
-        await this._checkArchiveQuorum();
+        await this.checkArchiveQuorum();
         return 'round_started';
     },
 
@@ -149,14 +149,14 @@ module.exports = {
             // Unconditional (all set sizes): the membership check above already
             // pins the size-1 identity, and a single-member ladder resolves to
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
-            let order = canonicalForms.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
+            let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
             // Same backup-only rule as the v0 path. A leader driving its
             // own batch on the wake cadence would archive whatever few rows are
             // pending every 15 minutes instead of accumulating them to the interval
             // or the size trigger, which is the over-anchoring this mode exists to
             // avoid. Backups are exactly who the wake is for.
-            if(failoverOnly && this._isRankZero(order)) return true;
+            if(failoverOnly && this.isRankZero(order)) return true;
             if(!this._rankUnlocked(order, me, since)){
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
@@ -179,18 +179,18 @@ module.exports = {
     // block instead would let signers present only in the current set
     // contribute signatures the indexer later drops, pushing validSigs below
     // quorum, marking the v1 invalid on-chain while the rows get dequeued
-    // anyway (see the on-chain-validity gate in _publishArchive), permanently
+    // anyway (see the on-chain-validity gate in publishArchive), permanently
     // losing settled cross-chain state. The election set above may differ
     // (liveness); the set that gates co-signature acceptance must not.
     // Resolve the SIGNING set as the full {pubkey, source, weight} snapshot via
-    // _resolveCapabilitySet (the SAME set the indexer anchor.js + full-parse
+    // resolveCapabilitySet (the SAME set the indexer anchor.js + full-parse
     // recovery verify the wrapper signatures against, oracle_publish @
     // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
     // the stake-weighted gate needs, so the publisher's local quorum decision
     // must use this set, not _getActiveOraclePublishPubkeys.
     // Hands back the resolver's own promise, so the round awaits the read it awaited inline.
     archiveSigningSet(cp){
-        return this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        return this.resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
     },
 
     // An UNRESOLVED (empty) signing set is not a quorum of one: defer the round,
@@ -198,7 +198,7 @@ module.exports = {
     // / runArchiveAttestationRound both abstain on snapCount === 0). The election gate
     // above fails closed on an empty set, but it reads a DIFFERENT resolver at a
     // DIFFERENT height (_getActiveOraclePublishPubkeys @ electionBlock vs
-    // _resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
+    // resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
     // snapCount > 0. Without this the `snapCount <= 1` self-sign path below treats 0
     // as single-node: the leader signs an archive whose declared signing set it is
     // not a member of, publishes a v1 that the indexer (anchor.js) and full-parse
@@ -247,9 +247,9 @@ module.exports = {
         let signatures = new Map();
         if(signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
-        // Full {pubkey, source, weight} set so _checkArchiveQuorum can tally
+        // Full {pubkey, source, weight} set so checkArchiveQuorum can tally
         // distinct-source stake (weight carries the source's stake when weighted).
-        // Preserve the truncation flag so the weighted archive quorum (_checkArchiveQuorum
+        // Preserve the truncation flag so the weighted archive quorum (checkArchiveQuorum
         // via meetsStakeThreshold) fails closed on an over-cap oracle_publish snapshot.
         let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
         if(signingSet.truncated === true) roundValidators.truncated = true;
@@ -293,7 +293,7 @@ module.exports = {
         let result;
         this._archivePublishing = round;
         try {
-            result = await this._publishArchive(round);
+            result = await this.publishArchive(round);
         } finally {
             this._archivePublishing = null;
         }

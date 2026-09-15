@@ -36,7 +36,7 @@ module.exports = {
     // for a transaction the chain never carried; nothing downstream can undo it.
     //
     // Queuing grants no authority: the entry writes nothing until
-    // _drainDeferredRewardAttest sees _verifyAnchorOnChain bind this exact txid at this
+    // drainDeferredRewardAttest sees _verifyAnchorOnChain bind this exact txid at this
     // exact ANCHOR version, buried dogeConfirmations deep. `e` carries the checkpoint
     // identity (chain/network/blockIndex/checkpointSeq) that verification re-SELECTs, the
     // txid and anchorVersion it must bind, and the attestation tuple to write.
@@ -80,7 +80,7 @@ module.exports = {
     //
     // An entry past announceRetryTtlMs is ABANDONED and no longer counted here, which is
     // what bounds the trail at the TTL (6 h, 36 BTC blocks) instead of leaving it open
-    // ended; _drainDeferredRewardAttest deletes those entries on its own timer, and this
+    // ended; drainDeferredRewardAttest deletes those entries on its own timer, and this
     // read must not wait for that timer to agree with it.
     //
     // ONE queue covers both halves of the rail: a receiver's re-proof of a peer's reward
@@ -129,7 +129,7 @@ module.exports = {
     // until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
     // Every non-verified outcome writes nothing either way, so the safety property does not
     // depend on this choice.
-    async _drainDeferredRewardAttest(){
+    async drainDeferredRewardAttest(){
         if(this._deferredRewardAttest.size === 0) return;
         for(let [key, e] of [...this._deferredRewardAttest]){
             if(Date.now() - e.at > this.announceRetryTtlMs){

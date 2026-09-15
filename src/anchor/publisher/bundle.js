@@ -41,7 +41,7 @@ module.exports = {
     // (D3). It never reaches the chain, and it feeds hashOrder: renaming it permutes
     // every hub's rank the moment one hub deploys ahead of another, so two elections
     // would run at once mid-rollout. It is an opaque domain separator, not a version.
-    _bundleElectionKey(b){
+    bundleElectionKey(b){
         return 'XANCV7|' + b.network + '|' + String(b.snapshot_block);
     },
 
@@ -63,7 +63,7 @@ module.exports = {
 
     // Does this hub LEAD `order` (rank 0)? The failover wake's whole job is to act
     // only where this is false, so the leader's publishing cadence is untouched.
-    _isRankZero(order){
+    isRankZero(order){
         if(!this.identity || !order || order.length === 0) return false;
         return order[0] === String(this.identity.getPubkeyHex()).toLowerCase();
     },
@@ -177,7 +177,7 @@ module.exports = {
     //
     // The method keeps its name: flush() and the deferral suites drive it, and what
     // changed is the unit of work inside it, not the seam.
-    async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
+    async publishPendingCheckpoints(signer, btcBlock, failoverOnly){
         let rows     = await this.findAnchorEligibleSections();
         let anchored = [];
         let skipped  = { rows: 0 };
@@ -211,7 +211,7 @@ module.exports = {
     // TWO ORDERING RULES, and both are load-bearing (D5):
     //   - sections by CHAIN ascending;
     //   - within a section, the (PUBKEY, SIG) pairs by PUBKEY ascending.
-    // _parseSigs returns the stored JSON order UNSORTED, so without the inner sort two
+    // parseSigs returns the stored JSON order UNSORTED, so without the inner sort two
     // publishers racing the same bundle emit different bytes for identical state, and
     // the attestation round's DB byte-match (§2.5) becomes non-deterministic. The frozen
     // vector deliberately feeds this builder out-of-order input to prove both sorts run.
@@ -223,7 +223,7 @@ module.exports = {
     // bundle before the version set restarted at 0): it is the seam the attestation
     // round, the split arithmetic, the follower byte-match and the golden-vector suite
     // all drive, and renaming it would touch every one of them to say nothing new.
-    _buildV7Payload(sections, publisher, attestSigs){
+    buildV7Payload(sections, publisher, attestSigs){
         let ordered = (sections || []).slice().sort((a, b) => {
             let x = String(a.chain), y = String(b.chain);
             return x < y ? -1 : (x > y ? 1 : 0);
@@ -232,7 +232,7 @@ module.exports = {
         let snapshotBlock = ordered.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
         let parts = ['ANCHOR', '0', network, String(snapshotBlock), String(ordered.length)];
         for(let s of ordered){
-            let sigs = this._parseSigs(s.validator_signatures).slice().sort((a, b) => {
+            let sigs = this.parseSigs(s.validator_signatures).slice().sort((a, b) => {
                 let x = String(a.pubkey), y = String(b.pubkey);
                 return x < y ? -1 : (x > y ? 1 : 0);
             });
@@ -256,7 +256,7 @@ module.exports = {
     // ATTEST_SIG_COUNT from its '0' to the real decimal and add one pair per signer.
     v7Bytes(sections, publisher, attestSigCount){
         let n    = Math.max(0, Number(attestSigCount) || 0);
-        let base = Buffer.byteLength(this._buildV7Payload(sections, publisher, []), 'utf8');
+        let base = Buffer.byteLength(this.buildV7Payload(sections, publisher, []), 'utf8');
         return base - 1 + String(n).length + (n * ANCHOR_SIG_PAIR_BYTES);
     },
 

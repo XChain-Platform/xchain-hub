@@ -153,8 +153,8 @@ function registerUnconfirmedWalletFlushTests() {
             const { pub } = buildPub([UNCONFIRMED]);
             pub.checkBalance = async () => 152890;                       // above the floor: balance alone would pass
             let walked = false;
-            pub._publishPendingCheckpoints = async () => { walked = true; return []; };
-            pub._startArchiveRound         = async () => { walked = true; return 'none'; };
+            pub.publishPendingCheckpoints = async () => { walked = true; return []; };
+            pub.startArchiveRound         = async () => { walked = true; return 'none'; };
             expect(pub.wakeFlushOpts()).to.deep.equal({ failoverOnly: true });
             let res = await pub.flush();
             expect(res.skipped).to.equal('no_confirmed_utxo');
@@ -169,8 +169,8 @@ function registerUnconfirmedWalletFlushTests() {
         it('a normal flush that finds a confirmed output clears the retry and the wake returns to failover-only', async function () {
             const { pub } = buildPub([UNCONFIRMED]);
             pub.checkBalance = async () => 152890;
-            pub._publishPendingCheckpoints = async () => [];
-            pub._startArchiveRound         = async () => 'none';
+            pub.publishPendingCheckpoints = async () => [];
+            pub.startArchiveRound         = async () => 'none';
             await pub.flush();
             expect(pub._leaderRetryDue).to.equal(true);
             pub.allowUnconfirmedInputs = false;
@@ -204,7 +204,7 @@ function registerMidFlushDeferralTest() {
             let origErr = console.error;
             console.error = (...a) => errors.push(a.join(' '));
             try {
-                let anchored = await pub._publishPendingCheckpoints(pub.resolveSigner(), 100, false);
+                let anchored = await pub.publishPendingCheckpoints(pub.resolveSigner(), 100, false);
                 expect(anchored).to.deep.equal([]);
             } finally { console.error = origErr; }
             expect(errors.filter(l => l.indexOf('v0 publish failed') !== -1), 'not reported as a failure').to.have.length(0);

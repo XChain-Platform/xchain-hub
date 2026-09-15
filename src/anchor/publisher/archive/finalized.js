@@ -125,7 +125,7 @@ module.exports = {
     // statuses passes verifyFinalizedAgainstLocal (the statuses genuinely match) and
     // can suppress them with an archive it never published.
     //
-    // An honest leader NEVER emits that shape: _publishArchive rewrites every match
+    // An honest leader NEVER emits that shape: publishArchive rewrites every match
     // and call status to the '__partial__' sentinel and clears the reward list
     // whenever the broadcast returned no txid, so `txid == null` implies
     // `every status === '__partial__'`, which leaves `archived_status <> status` and
@@ -166,7 +166,7 @@ module.exports = {
     // back-fill exactly the way an honest lost-chunk publish already splits it:
     //   now   - stamp batch_seq under the '__partial__' sentinel, no txid,
     //   later - stamp the announced statuses + txid once the head is buried.
-    // Staging the seq is load-bearing: _getNextBatchSeq is MAX(batch_seq)+1
+    // Staging the seq is load-bearing: getNextBatchSeq is MAX(batch_seq)+1
     // fleet-wide, so a follower that stamped nothing would hand its own next round
     // the seq the leader just used, and two v1 anchors sharing one seq corrupt chunk
     // reassembly. The sentinel keeps `archived_status <> status` true, so nothing is
@@ -206,7 +206,7 @@ module.exports = {
             await this.backfillBatch(Number(d.batch_seq), d.matches, null, calls, rewards);
             return;
         }
-        // Archive-head version SET {1}: _publishArchive emits a v1 head at every height,
+        // Archive-head version SET {1}: publishArchive emits a v1 head at every height,
         // attested or not (D4). This gate runs at ALL heights (row suppression has nothing
         // to do with reward retirement), so it keeps the reject-set form rather than the
         // reward gate's exact-v1 expectation. Rejecting {0,2} still stops a v0 checkpoint

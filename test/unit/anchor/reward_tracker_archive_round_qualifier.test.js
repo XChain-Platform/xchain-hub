@@ -173,7 +173,7 @@ function makePublisher(localRewardRows, oraclePublishSet) {
 }
 
 const verify = async (pub, reward, snapshotBlock) => {
-    let set   = await pub._resolveCapabilitySet('oracle_publish', snapshotBlock, '');
+    let set   = await pub.resolveCapabilitySet('oracle_publish', snapshotBlock, '');
     let snaps = set.map(v => ({ snapshot_block: snapshotBlock, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
     return pub.verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [reward],

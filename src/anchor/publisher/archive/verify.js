@@ -107,9 +107,9 @@ module.exports = {
                         '... predates our local history; accepting on signature quorum alone');
         }
 
-        let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block), resolveQuorumNetwork(am, this.network));
-        let sigs = this._parseSigs(am.validator_signatures);
-        if(!this.quorumVerified(this._matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), resolveQuorumNetwork(am, this.network)))){   // RECORD network
+        let set  = await this.resolveCapabilitySet('cross_chain', Number(am.snapshot_block), resolveQuorumNetwork(am, this.network));
+        let sigs = this.parseSigs(am.validator_signatures);
+        if(!this.quorumVerified(this.matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), resolveQuorumNetwork(am, this.network)))){   // RECORD network
             logger.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                          '... fails signature quorum against the cross_chain set at block ' + am.snapshot_block);
             return false;
@@ -138,8 +138,8 @@ module.exports = {
                         '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
         }
 
-        let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network));
-        let sigs = this._parseSigs(ac.validator_signatures);
+        let set  = await this.resolveCapabilitySet('cross_chain', Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network));
+        let sigs = this.parseSigs(ac.validator_signatures);
         if(!this.quorumVerified(this.callCanonical(ac), sigs, set, swq.isStakeWeightedQuorumActive(Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network)))){   // RECORD network
             logger.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                          '... (' + ac.phase + ') fails signature quorum against the cross_chain set at block ' + ac.snapshot_block);
@@ -169,7 +169,7 @@ module.exports = {
         // wrong amount signed). The activation constants themselves do not move; only
         // which network they are read for.
         let recordNetwork = resolveQuorumNetwork(archive, this.network);
-        let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index), recordNetwork);
+        let set = await this.resolveCapabilitySet('oracle_publish', Number(rr.block_index), recordNetwork);
         if(!set.some(v => v.pubkey === pubkey)){
             logger.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
                          '... is not in the oracle_publish set at block ' + rr.block_index + '; NOT signing');
@@ -328,7 +328,7 @@ module.exports = {
     async verifyArchivedSnapshotGroups(groups, archive){
     for(let [key, archived] of groups){
         let [block, capability] = key.split('|');
-        let resolved = await this._resolveCapabilitySet(capability, Number(block), resolveQuorumNetwork(archive, this.network));
+        let resolved = await this.resolveCapabilitySet(capability, Number(block), resolveQuorumNetwork(archive, this.network));
         if(resolved.length !== archived.size){
             logger.warn("StateAnchorPublisher: archive snapshot group " + key + " size " + archived.size +
                          " differs from our resolution (" + resolved.length + ")");

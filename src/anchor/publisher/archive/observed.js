@@ -66,7 +66,7 @@ module.exports = {
     // is already paid for). Keyed by PROPOSER, because the failover ladder legitimately
     // unlocks several ranks for one batch_seq and each proposes its own body. UNIONED
     // across proposals from the same proposer: a round that times out stamps nothing, so
-    // _getNextBatchSeq hands the retry the same seq with the rows that accumulated
+    // getNextBatchSeq hands the retry the same seq with the rows that accumulated
     // since, and the FINALIZED that follows names the later set.
     recordObservedArchiveContent(batchSeq, pubkey, archive){
         if(!Number.isFinite(batchSeq) || !pubkey || !archive) return;
@@ -127,7 +127,7 @@ module.exports = {
     // not hold the referenced checkpoint) as ABSTAIN reasons, else the
     // verifyAnchorOnChain verdict. `announcedTxid` is the FINALIZED's txid, which is
     // bound into the signed finalizedCanonical and is the txid of the v1 ARCHIVE HEAD
-    // (_publishArchive broadcasts the v1 payload first, then the v2 continuation
+    // (publishArchive broadcasts the v1 payload first, then the v2 continuation
     // chunks). Binding it, plus the archive-head version set {1}, closes the archive
     // half of XANC-ELECTED-FORGE-1: proving the CHECKPOINT is anchored is not enough,
     // because an elected leader could reference a real-but-different anchored checkpoint

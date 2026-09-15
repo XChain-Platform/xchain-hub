@@ -103,13 +103,13 @@ describe('StateAnchorPublisher #7579 a confirmed reward survives a transient wri
         pub.deferRewardAttestation(entry());
         expect(pub._deferredRewardAttest.size, 'entry queued').to.equal(1);
 
-        await pub._drainDeferredRewardAttest();                        // DB is sick
+        await pub.drainDeferredRewardAttest();                        // DB is sick
         expect(inserts.length, 'nothing was persisted').to.equal(0);
         expect(pub._deferredRewardAttest.size, 'the confirmed reward must not be discarded').to.equal(1);
         expect(federated.length, 'peers must not hear about a row we failed to hold').to.equal(0);
         expect(broadcast.length).to.equal(0);
 
-        await pub._drainDeferredRewardAttest();                        // DB is healthy
+        await pub.drainDeferredRewardAttest();                        // DB is healthy
         expect(inserts.length, 'the retry writes the row exactly once').to.equal(1);
         expect(broadcast.length, 'and streams it').to.equal(1);
         expect(federated.length, 'and federates it').to.equal(1);
@@ -119,7 +119,7 @@ describe('StateAnchorPublisher #7579 a confirmed reward survives a transient wri
     it('clears the entry and federates on a clean write (control)', async () => {
         const { pub, inserts, broadcast, federated } = makePub();
         pub.deferRewardAttestation(entry());
-        await pub._drainDeferredRewardAttest();
+        await pub.drainDeferredRewardAttest();
         expect(inserts.length).to.equal(1);
         expect(broadcast.length).to.equal(1);
         expect(federated.length).to.equal(1);
@@ -135,7 +135,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
     it('repairs a read-back that THROWS after the row committed', async () => {
         const { pub, inserts, broadcast, resyncs, federated } = makePub({ readBackThrows: true });
         pub.deferRewardAttestation(entry());
-        await pub._drainDeferredRewardAttest();
+        await pub.drainDeferredRewardAttest();
         expect(inserts.length, 'the row is durable').to.equal(1);
         expect(broadcast.length, 'nothing could be streamed').to.equal(0);
         expect(resyncs.length, 'the mirror gap must be repaired, not left to a reconnect').to.equal(1);
@@ -147,7 +147,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
     it('repairs a read-back that comes back EMPTY after the row committed', async () => {
         const { pub, broadcast, resyncs } = makePub({ readBackEmpty: true });
         pub.deferRewardAttestation(entry());
-        await pub._drainDeferredRewardAttest();
+        await pub.drainDeferredRewardAttest();
         expect(broadcast.length).to.equal(0);
         expect(resyncs.length, 'an empty read-back is the same undeliverable-row event').to.equal(1);
     });
@@ -155,7 +155,7 @@ describe('StateAnchorPublisher #7579 an undeliverable COMMITTED attestation row 
     it('does NOT churn mirrors when there are no subscribers to gap', async () => {
         const { pub, inserts, resyncs, selects } = makePub({ readBackThrows: true, subscribers: new Set() });
         pub.deferRewardAttestation(entry());
-        await pub._drainDeferredRewardAttest();
+        await pub.drainDeferredRewardAttest();
         expect(inserts.length, 'the write still happens').to.equal(1);
         expect(selects(), 'and no read-back is even attempted').to.equal(0);
         expect(resyncs.length, 'dropAllForResync would disconnect nobody').to.equal(0);

@@ -65,7 +65,7 @@ function mkRow() {
   };
 }
 
-// A publisher wired so _publishPendingCheckpoints reaches the broadcast decision with
+// A publisher wired so publishPendingCheckpoints reaches the broadcast decision with
 // the election, flag-day and identity machinery out of the way.
 function mkPub(db) {
   const pub = new StateAnchorPublisher({
@@ -94,7 +94,7 @@ function sqlHits(db, needle) {
 // relative to it. With an identity set and no gate, a held row solicits a full 2f+1
 // XANCPUB quorum from the federation, occupy the single _attestRound slot for up
 // to roundTimeoutMs, and make every peer re-derive the election, for a publish
-// this loop then declines. The archive twin (_publishArchive) already checks its
+// this loop then declines. The archive twin (publishArchive) already checks its
 // intent first and documents that ordering as deliberate.
 function mkAttestingPub(db) {
   const pub = mkPub(db);
@@ -131,7 +131,7 @@ function registerSplitSuitePart1() {
     const pub = mkPub(db);
     pub.findExistingCheckpointAnchor = async () => null; // mined view: definitively absent
     let broadcasts = 0;
-    const out = await pub._publishPendingCheckpoints({
+    const out = await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         broadcasts++;
         return {
@@ -160,7 +160,7 @@ function registerSplitSuitePart2() {
       txid: 'mined-tx'
     });
     let broadcasts = 0;
-    const out = await pub._publishPendingCheckpoints({
+    const out = await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         broadcasts++;
         return {
@@ -187,7 +187,7 @@ function registerSplitSuitePart3() {
     pub.anchorIntentTtlMs = 1000;
     pub.findExistingCheckpointAnchor = async () => null;
     let broadcasts = 0;
-    const out = await pub._publishPendingCheckpoints({
+    const out = await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         broadcasts++;
         return {
@@ -205,7 +205,7 @@ function registerSplitSuitePart3() {
     const pub = mkPub(db);
     pub.findExistingCheckpointAnchor = async () => null;
     let armedBeforeSend = false;
-    await pub._publishPendingCheckpoints({
+    await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         armedBeforeSend = sqlHits(db, 'INSERT INTO anchor_published_checkpoints').length === 1;
         return {
@@ -224,7 +224,7 @@ function registerSplitSuitePart4() {
     });
     const pub = mkPub(db);
     pub.findExistingCheckpointAnchor = async () => null;
-    await pub._publishPendingCheckpoints({
+    await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         throw new Error('no UTXOs available for Dpub1');
       }
@@ -237,7 +237,7 @@ function registerSplitSuitePart4() {
     });
     const pub = mkPub(db);
     pub.findExistingCheckpointAnchor = async () => null;
-    await pub._publishPendingCheckpoints({
+    await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         const e = new Error('socket hang up');
         e.anchorAmbiguousSend = true;
@@ -260,7 +260,7 @@ function registerSplitSuitePart5() {
     const pub = mkAttestingPub(db);
     pub.findExistingCheckpointAnchor = async () => null;
     let broadcasts = 0;
-    const out = await pub._publishPendingCheckpoints({
+    const out = await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
         broadcasts++;
         return {
@@ -289,7 +289,7 @@ function registerSplitSuitePart5() {
       exists: true,
       txid: 'mined-tx'
     });
-    const out = await pub._publishPendingCheckpoints({
+    const out = await pub.publishPendingCheckpoints({
       broadcastFn: async () => ({
         txid: 'fresh'
       })
@@ -308,7 +308,7 @@ function registerSplitSuitePart6() {
     });
     const pub = mkAttestingPub(db);
     pub.findExistingCheckpointAnchor = async () => null;
-    await pub._publishPendingCheckpoints({
+    await pub.publishPendingCheckpoints({
       broadcastFn: async () => ({
         txid: 'fresh'
       })
@@ -317,7 +317,7 @@ function registerSplitSuitePart6() {
   });
 }
 function registerSplitSuitePart7() {
-  describe('_publishPendingCheckpoints', function () {
+  describe('publishPendingCheckpoints', function () {
     registerSplitSuitePart1();
     registerSplitSuitePart2();
     registerSplitSuitePart3();

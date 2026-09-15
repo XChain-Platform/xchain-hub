@@ -115,7 +115,7 @@ class XchainPriceSource {
         return Boolean(this.host && this.dbName && this.user);
     }
 
-    _db() {
+    openIndexerDb() {
         if (!this.indexerDb)
             this.indexerDb = new Database(this.host, this.port, this.dbName, this.user, this.pass);
         return this.indexerDb;

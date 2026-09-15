@@ -54,7 +54,7 @@ module.exports = {
     //
     // The roundId 'XANCPUB|bundle|NETWORK|SNAPSHOT_BLOCK' is disjoint from the archive
     // family ('XANCPUB|archive|...'), so the two can never equivocation-collide.
-    _attestationCanonical(b, publisher){
+    attestationCanonical(b, publisher){
         let base = ['XANCPUB', 'anchor_bundle', String(b.snapshot_block),
                     String(b.snapshot_block), String(publisher || '').toLowerCase(),
                     ar.ANCHOR_REWARD_AMOUNT].join('|');
@@ -66,7 +66,7 @@ module.exports = {
     },
 
     async attestationSigningSet(b){
-        // _resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
+        // resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
         // deterministic snapshot is unavailable), which is right for the callers that
         // must not build on a divergent set. Here it would abort the whole anchor: this
         // round is awaited inside publishBundle, whose catch only logs the failure and
@@ -77,7 +77,7 @@ module.exports = {
         // throw inside the round still surfaces.
         let signingSet;
         try {
-            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));
+            signingSet = await this.resolveCapabilitySet('oracle_publish', Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));
         } catch(e){
             logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(b.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
@@ -127,7 +127,7 @@ module.exports = {
                 network: String(b.network), snapshot_block: Number(b.snapshot_block),
                 sections: b.sections.map(s => ({ chain: String(s.chain), block_index: Number(s.block_index),
                                                  checkpoint_seq: Number(s.checkpoint_seq) })),
-                body: this._buildV7Payload(b.sections, publisher, []),
+                body: this.buildV7Payload(b.sections, publisher, []),
                 publisher: publisher, sig_pubkey: me, sig: mySig
             });
             this.checkAttestQuorum();
@@ -153,14 +153,14 @@ module.exports = {
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
-        let canonical = this._attestationCanonical(b, publisher);
+        let canonical = this.attestationCanonical(b, publisher);
         let mySig     = this.identity.sign(canonical);
 
         // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
         // this file fails closed on an unresolved set, and the two resolvers used across
         // one round can legitimately disagree (_getActiveOraclePublishPubkeys reads the
-        // capability snapshot, _resolveCapabilitySet may take the weighted one), so a
-        // hub can pass the eligible.length fail-closed gate in _publishPendingCheckpoints
+        // capability snapshot, resolveCapabilitySet may take the weighted one), so a
+        // hub can pass the eligible.length fail-closed gate in publishPendingCheckpoints
         // and still resolve snapCount 0 here. Self-attesting on that would emit a v0
         // carrying one signature that every indexer rejects (it resolves a non-empty set),
         // while THIS hub banks and archives an anchor reward no live indexer credits: the
@@ -231,7 +231,7 @@ module.exports = {
             // still bind sender === eligible[0] (rank 0), or any current member
             // could impersonate the sole elected publisher.
             let order = canonicalForms.hashOrder(
-                this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
+                this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
             if(!this._rankUnlocked(order, sender, since)) return;          // proposer not unlocked
@@ -252,12 +252,12 @@ module.exports = {
             if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
             mine.push(local[0]);
         }
-        if(this._buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
+        if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
         // The proposer's own SNAPSHOT_BLOCK claim has to be the one our rows produce, or
         // the canonical we co-sign would name a block the bundle does not commit to.
         if(mine.reduce((m, r) => Math.max(m, Number(r.snapshot_block)), 0) !== snapshotBlock) return;
 
-        let canonical = this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
+        let canonical = this.attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
         this.peerManager.broadcast(XANCPUB_SIGN, {

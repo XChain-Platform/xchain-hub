@@ -40,7 +40,7 @@ function mkPub(){
 
 function hex(n){ return 'a'.repeat(n); }
 
-// The v1/v6 archive head exactly as _publishArchive assembles it (same field
+// The v1/v6 archive head exactly as publishArchive assembles it (same field
 // order as the indexer parser, anchor.js formats[1]/formats[6]). Mirrored rather
 // than called because the real builder is inline in a DB-bound publish path;
 // the field list is the contract this test measures against.
@@ -232,7 +232,7 @@ function registerAnchorBundleSizeTests() {
             // arithmetic must agree with the builder byte for byte.
             const pub  = mkPub();
             const att  = Array.from({ length: 5 }, (_, i) => ({ pubkey: String(i).repeat(64), sig: String(i).repeat(128) }));
-            const real = Buffer.byteLength(pub._buildV7Payload(sections(3, 5), hex(64), att), 'utf8');
+            const real = Buffer.byteLength(pub.buildV7Payload(sections(3, 5), hex(64), att), 'utf8');
             expect(pub.v7Bytes(sections(3, 5), hex(64), att.length)).to.equal(real);
         });
 

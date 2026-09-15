@@ -232,7 +232,7 @@ module.exports = {
         // The signing/quorum set at the reward's snapshot_block, resolved LOCALLY. This is the
         // same set + weighting the indexer re-verifies against, so a quorum this hub accepts is
         // one the derive path will accept too.
-        let signingSet = await this._resolveCapabilitySet('oracle_publish', snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
+        let signingSet = await this.resolveCapabilitySet('oracle_publish', snapshotBlock, resolveQuorumNetwork({ network: network }, this.network));
         let pubkeys    = new Set((signingSet || []).map(v => String(v.pubkey).toLowerCase()));
         if(pubkeys.size === 0) return null;                                       // unresolved set: fail closed, exactly like every other path here
         if(!pubkeys.has(sender))    return null;                                  // relayer is not one of ours
@@ -248,8 +248,8 @@ module.exports = {
         // fields of §2.5); `chain` on this wire is the checkpoint IDENTITY the mined-anchor
         // proof re-runs against, never part of what was signed.
         let canonical = (rewardType === 'anchor_archive')
-            ? this._archiveAttestationCanonical({ network: network, snapshot_block: snapshotBlock }, roundRef, publisher)
-            : this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
+            ? this.archiveAttestationCanonical({ network: network, snapshot_block: snapshotBlock }, roundRef, publisher)
+            : this.attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
 
         let seen = new Set(), signers = [], sigs = [];
     for(let s of d.attest_sigs){

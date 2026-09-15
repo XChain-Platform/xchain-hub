@@ -53,7 +53,7 @@ module.exports = {
         if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null) return;
-        let myNextSeq = await this._getNextBatchSeq();
+        let myNextSeq = await this.getNextBatchSeq();
         if(this.refusedStaleArchiveSeq(d, sender, myNextSeq)) return;
         this.bindObservedArchiveLeader(d, sender, cp, electionPubkeys);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
@@ -84,7 +84,7 @@ module.exports = {
     },
 
     // Fail CLOSED on an unresolved election set, the same way the LEADER does
-    // at the identical condition (_startArchiveRound: "empty oracle_publish set,
+    // at the identical condition (startArchiveRound: "empty oracle_publish set,
     // deferring round (fail closed)") and the same way handleFinalized and
     // handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
     // every membership tie to the federation, so during an unresolved window a
@@ -109,7 +109,7 @@ module.exports = {
             // signer-less rank-0 hub stalls archiving federation-wide.
             // Runs for a single-member set too, so the
             // sole elected leader cannot be impersonated by a non-member.
-            let order = canonicalForms.hashOrder(this._archiveElectionKey(cp), electionPubkeys);
+            let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
         }
@@ -271,10 +271,10 @@ module.exports = {
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
-        await this._checkArchiveQuorum();
+        await this.checkArchiveQuorum();
     },
 
-    async _checkArchiveQuorum(){
+    async checkArchiveQuorum(){
         let round = this._archiveRound;
         if(!round || round.done) return;
         // STAKE_WEIGHTED_QUORUM: fire on distinct-source signer stake > 2/3 of the
@@ -297,7 +297,7 @@ module.exports = {
         // intent published nothing, so the pending counter stays as it was.
         let result;
         try {
-            result = await this._publishArchive(round);
+            result = await this.publishArchive(round);
         } finally {
             this._archivePublishing = null;
         }

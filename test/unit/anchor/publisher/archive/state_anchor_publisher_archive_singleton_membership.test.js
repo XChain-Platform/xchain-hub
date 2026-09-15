@@ -17,9 +17,9 @@
 // snapshot_block, is the single validator A. Three sites then colluded to publish and
 // dequeue anyway:
 //
-//   _startArchiveRound seeded the leader's own signature whenever `snapCount <= 1`,
+//   startArchiveRound seeded the leader's own signature whenever `snapCount <= 1`,
 //   membership untested; the same `snapCount <= 1` took the immediate-publish fast
-//   path with no quorum check at all; and _publishArchive's on-chain-validity gate
+//   path with no quorum check at all; and publishArchive's on-chain-validity gate
 //   short-circuited on `round.validators.length === 1` before quorumVerified ran.
 //
 // The indexer reaches the opposite verdict on the same bytes: anchor.js filters signers
@@ -81,7 +81,7 @@ function buildPub(rows) {
 }
 
 // One pending match, an election set that always elects THIS hub, and a signing set the
-// caller controls. _publishArchive is spied, never run, so a publish attempt is visible
+// caller controls. publishArchive is spied, never run, so a publish attempt is visible
 // as an entry in `published` rather than as a DOGE send.
 function archiveRound(signingSetFor) {
     let { pub, identity } = buildPub({
@@ -91,9 +91,9 @@ function archiveRound(signingSetFor) {
     let me = identity.getPubkeyHex().toLowerCase();
     let published = [];
     pub._getActiveOraclePublishPubkeys = async () => [me];
-    pub._resolveCapabilitySet          = async () => signingSetFor(me);
-    pub._getNextBatchSeq               = async () => 7;
-    pub._publishArchive                = async (round) => { published.push(round); };
+    pub.resolveCapabilitySet          = async () => signingSetFor(me);
+    pub.getNextBatchSeq               = async () => 7;
+    pub.publishArchive                = async (round) => { published.push(round); };
     return { pub, me, published };
 }
 
@@ -101,7 +101,7 @@ describe('StateAnchorPublisher #7578 a singleton signing set still requires memb
 
     it('a NON-MEMBER leader of a one-member set defers instead of self-publishing', async () => {
         let { pub, published } = archiveRound(() => [{ pubkey: OTHER_PK, amount: '1', source: '' }]);
-        expect(await pub._startArchiveRound(null, BLOCK), 'the round must defer').to.equal('none');
+        expect(await pub.startArchiveRound(null, BLOCK), 'the round must defer').to.equal('none');
         expect(published.length, 'nothing may be broadcast to DOGE').to.equal(0);
     });
 
@@ -113,7 +113,7 @@ describe('StateAnchorPublisher #7578 a singleton signing set still requires memb
             { pubkey: OTHER_PK,          amount: '1', source: 'srcA' },
             { pubkey: 'bb'.repeat(32),   amount: '1', source: 'srcB' }
         ]);
-        expect(await pub._startArchiveRound(null, BLOCK)).to.equal('round_started');
+        expect(await pub.startArchiveRound(null, BLOCK)).to.equal('round_started');
         expect(published.length, 'a multi-member round co-signs before it publishes').to.equal(0);
         expect(pub._archiveRound.signatures.has(me),
                'a leader outside the signing set must not inflate its own quorum').to.equal(false);
@@ -123,7 +123,7 @@ describe('StateAnchorPublisher #7578 a singleton signing set still requires memb
 
     it('a GENUINE single-member set still self-signs and publishes (liveness control)', async () => {
         let { pub, me, published } = archiveRound((meIs) => [{ pubkey: meIs, amount: '1', source: '' }]);
-        expect(await pub._startArchiveRound(null, BLOCK)).to.equal('published');
+        expect(await pub.startArchiveRound(null, BLOCK)).to.equal('published');
         expect(published.length, 'the sole validator publishes as before').to.equal(1);
         expect(published[0].signatures.get(me), 'its own signature is the quorum').to.be.a('string');
     });
@@ -131,7 +131,7 @@ describe('StateAnchorPublisher #7578 a singleton signing set still requires memb
 
 describe('StateAnchorPublisher #7578 the on-chain-validity gate has no singleton bypass', () => {
 
-    // _publishArchive far enough along to reach the validity gate and the back-fill,
+    // publishArchive far enough along to reach the validity gate and the back-fill,
     // with every send captured. `backfills` is the observable: '__partial__' statuses
     // mean the rows stayed pending, real statuses mean they were dequeued.
     function publishPub() {
@@ -169,7 +169,7 @@ describe('StateAnchorPublisher #7578 the on-chain-validity gate has no singleton
     it('REFUSES to dequeue on a one-member set signed by a NON-member', async () => {
         const { pub, sent, backfills } = publishPub();
         // The old bypass read validators.length === 1 and never looked at who signed.
-        await pub._publishArchive(round(sent,
+        await pub.publishArchive(round(sent,
             [{ pubkey: OTHER_PK, amount: '1', source: '' }],
             new Map([['cc'.repeat(32), 'not-a-member-signature']])));
         expect(backfills.length, 'the back-fill still runs, under the sentinel').to.equal(1);
@@ -179,7 +179,7 @@ describe('StateAnchorPublisher #7578 the on-chain-validity gate has no singleton
 
     it('DEQUEUES a one-member set signed by that member (control)', async () => {
         const { pub, sent, backfills } = publishPub();
-        await pub._publishArchive(round(sent,
+        await pub.publishArchive(round(sent,
             [{ pubkey: OTHER_PK, amount: '1', source: '' }],
             new Map([[OTHER_PK, OTHER.sign('canonical')]])));
         expect(backfills.length).to.equal(1);

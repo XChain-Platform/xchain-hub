@@ -223,7 +223,7 @@ function registerMultiSourceArchiveTests() {
         };
         let pub = new StateAnchorPublisher(hub);
         // Both the archived rows and our own resolution carry the two source rows.
-        pub._resolveCapabilitySet = async () => [
+        pub.resolveCapabilitySet = async () => [
             { pubkey: PK, amount: '100', source: 'srcA' },
             { pubkey: PK, amount: '100', source: 'srcB' }
         ];

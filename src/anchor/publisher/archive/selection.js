@@ -75,7 +75,7 @@ module.exports = {
     // archive publish records an anchor_archive reward, which the next flush archived
     // alone, one reward-only ANCHOR per restart.
     dropChainDerivedRewards(rewards){
-        return (rewards || []).filter(r => !this._isChainDerivedReward(r));
+        return (rewards || []).filter(r => !this.isChainDerivedReward(r));
     },
 
     // The three row sets normalized to arrays, or null (with the pending counter cleared)
@@ -101,7 +101,7 @@ module.exports = {
     // both the leader and follower paths), so id ordering is local insertion order,
     // which MATCH_KEYS already calls "the hub-assigned mirror cursor" and
     // verifyArchiveAgainstLocal deletes before byte-comparing. The selected row
-    // feeds _archiveElectionKey, which advertises itself as "deterministic +
+    // feeds archiveElectionKey, which advertises itself as "deterministic +
     // identical on every hub"; keying that on a locally-ordered pick let two hubs
     // elect over different keys for the same batch_seq (divergent rank orders, a
     // stalled or double-published archive round). checkpoint_seq is quorum-agreed
@@ -113,10 +113,10 @@ module.exports = {
     },
 
     // Durable at-most-once for the ARCHIVE spend, the twin of the
-    // anchor_published_checkpoints gate in _publishPendingCheckpoints. A crash
+    // anchor_published_checkpoints gate in publishPendingCheckpoints. A crash
     // between an accepted v1/v2 send and backfillBatch leaves every source row
     // pending. The archive path does read mined state, through getarchiveanchor
-    // rather than getanchoraction, but only at the send: _publishArchive passes
+    // rather than getanchoraction, but only at the send: publishArchive passes
     // findExistingArchiveAnchor to broadcastWithRetry, and that lookup answers from
     // parsed on-chain actions, so a send still sitting in the DOGE mempool reads as
     // absent. Without this marker the next flush therefore rebuilds the whole batch

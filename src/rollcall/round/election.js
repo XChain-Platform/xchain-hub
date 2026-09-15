@@ -58,12 +58,12 @@ module.exports = {
         let keys = null;
         try {
             let sap = this.hub && this.hub.stateAnchorPublisher;
-            if(sap && typeof sap._resolveCapabilitySet === 'function'){
+            if(sap && typeof sap.resolveCapabilitySet === 'function'){
                 // Borrowed rather than re-derived: the anchor rail already owns
                 // the resolver that fails closed off regtest and picks the
                 // source-keyed weighted form, and two copies of that logic would
                 // be two ways to disagree with the chain.
-                let set = await sap._resolveCapabilitySet('oracle_publish', epoch, this.network);
+                let set = await sap.resolveCapabilitySet('oracle_publish', epoch, this.network);
                 if(Array.isArray(set)) keys = set.map(v => String(v.pubkey).toLowerCase());
             } else if(this.capabilitySnapshot && typeof this.capabilitySnapshot.getWeightSnapshot === 'function'){
                 // The weighted form specifically: the chain's R(E) is

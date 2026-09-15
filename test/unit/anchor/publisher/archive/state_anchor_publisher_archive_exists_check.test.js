@@ -12,13 +12,13 @@
 
 // Crash-safety for the ARCHIVE publish path.
 //
-// _publishArchive broadcasts the v1 head and every v2 continuation chunk BEFORE
+// publishArchive broadcasts the v1 head and every v2 continuation chunk BEFORE
 // backfillBatch records the batch, so a crash in that window leaves the rows pending
 // and the next flush re-elects the identical matches and pays for the whole archive a
 // second time. The checkpoint path has guarded this since its own existence check
 // landed; the archive path had no on-chain guard at all, and could not reuse the
 // checkpoint one: every archive read is keyed on match_batch_seq, which is exactly what
-// the restart does not preserve (_getNextBatchSeq is MAX(batch_seq)+1 fleet-wide, so a
+// the restart does not preserve (getNextBatchSeq is MAX(batch_seq)+1 fleet-wide, so a
 // peer archiving in the meantime moves it).
 //
 // These pin the content-addressed guard: the head is adopted when the same batch
@@ -43,7 +43,7 @@ const ROUND_SEQ  = 12;          // the seq THIS process allocated
 const LANDED_SEQ = 9;           // the seq the earlier (crashed) attempt published under
 const CHUNKS     = ['chunk0', 'chunk1', 'chunk2'];
 
-// A publisher wired so _publishArchive reaches its broadcast decisions with the
+// A publisher wired so publishArchive reaches its broadcast decisions with the
 // intent marker, quorum, back-fill and reward bookkeeping out of the way. Every DOGE
 // send is captured rather than made.
 function mkPub(indexerReply) {
@@ -78,7 +78,7 @@ function mkPub(indexerReply) {
     return { pub, sent, backfills };
 }
 
-// The sole member of this fixture's signing set, with a REAL key. _publishArchive's
+// The sole member of this fixture's signing set, with a REAL key. publishArchive's
 // on-chain-validity gate runs quorumVerified over the round's own signatures with no
 // `validators.length === 1` short-circuit in front of it, so a placeholder signature
 // string fails the gate and stamps every row '__partial__' - which is a verdict about
@@ -137,7 +137,7 @@ function registerArchiveExistencePublishTests() {
 
     it('publishes the whole batch when the archive is definitively not on-chain', async () => {
         const { pub, sent } = mkPub(() => ABSENT);
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length, 'head + every continuation chunk').to.equal(CHUNKS.length);
         expect(parse(sent[0]).version).to.equal('1');
         // Nothing was adopted, so the chunks stay on this round's own seq.
@@ -147,7 +147,7 @@ function registerArchiveExistencePublishTests() {
 
     it('asks the CONTENT question: checkpoint identity + crc + count + our address, never a batch seq', async () => {
         const { pub, sent } = mkPub(() => ABSENT);
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         const call = pub.indexerCalls.find(c => c.method === 'getarchiveanchor');
         expect(call, 'the archive path must consult getarchiveanchor').to.be.an('object');
         expect(call.params).to.include({
@@ -162,7 +162,7 @@ function registerArchiveExistencePublishTests() {
 
     it('re-spends NOTHING when the identical batch is already on-chain under a different seq', async () => {
         const { pub, sent, backfills } = mkPub(() => onChain([0, 1, 2]));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length, 'a completed archive must not be paid for twice').to.equal(0);
         // The adopted head's txid is what the rows are stamped with: it is the archive.
         expect(backfills[0].txid).to.equal('aa'.repeat(32));
@@ -176,7 +176,7 @@ function registerArchiveExistenceRecoveryTests() {
 
     it('resumes a PARTIAL archive: only the missing chunk is sent, under the ADOPTED seq', async () => {
         const { pub, sent } = mkPub(() => onChain([0, 1]));      // head + chunk 1 landed, chunk 2 did not
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length, 'only the missing chunk costs a fee').to.equal(1);
         const p = parse(sent[0]);
         expect(p.version).to.equal('2');
@@ -189,46 +189,46 @@ function registerArchiveExistenceRecoveryTests() {
         // The resumed chunk goes out and succeeds, so the batch IS complete afterwards;
         // this pins that the resume path still runs the normal completeness bookkeeping.
         const { pub, sent, backfills } = mkPub(() => onChain([0, 1]));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(backfills.length).to.equal(1);
         expect(backfills[0].matches[0].status, 'a successful resume archives normally').to.equal('settled');
     });
 
     it('republishes when the on-chain head is decoded-invalid (it anchored nothing)', async () => {
         const { pub, sent } = mkPub(() => Object.assign(onChain([0, 1, 2]), { status: 'invalid: BATCH_CRC32' }));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
     });
 
     it('republishes when the on-chain head declares a different chunk geometry', async () => {
         const { pub, sent } = mkPub(() => Object.assign(onChain([0, 1, 2]), { total_chunks: 5 }));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length, 'our chunk bytes would land in slots that head never declared')
             .to.equal(CHUNKS.length);
     });
 
     it('republishes when the on-chain head has no resolvable txid (adopting one livelocks the rows)', async () => {
         const { pub, sent } = mkPub(() => Object.assign(onChain([0, 1, 2]), { txid: null }));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
     });
 
     it('an UNREACHABLE indexer degrades to publishing, never to blocking the archive', async () => {
         const { pub, sent } = mkPub(() => { throw new Error('connect ECONNREFUSED'); });
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length, 'an un-upgraded or down indexer keeps todays behavior').to.equal(CHUNKS.length);
     });
 
     it('an indexer too old to serve the method degrades to publishing', async () => {
         const { pub, sent } = mkPub(() => ({ error: 'method not found' }));
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
     });
 
     it('with no DOGE indexer wired the check is undetermined, so the archive still publishes', async () => {
         const { pub, sent } = mkPub(() => ABSENT);
         pub.indexers = {};
-        await pub._publishArchive(mkRound(sent));
+        await pub.publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
     });
 }

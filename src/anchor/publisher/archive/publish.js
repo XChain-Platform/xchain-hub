@@ -28,7 +28,7 @@ const logger = getLogger();
 
 module.exports = {
 
-    async _publishArchive(round){
+    async publishArchive(round){
         let sigs = [];
         for(let [pk, sg] of round.signatures) sigs.push({ pubkey: pk, sig: sg });
 
@@ -73,8 +73,8 @@ module.exports = {
     },
 
     // Last gate before anything is spent, mirroring the pre-broadcast marker read in
-    // _publishPendingCheckpoints. _startArchiveRound checks this before the round
-    // opens, but a co-signed round reaches here minutes later and _publishArchive is
+    // publishPendingCheckpoints. startArchiveRound checks this before the round
+    // opens, but a co-signed round reaches here minutes later and publishArchive is
     // reachable from other paths, so re-read: any UNSETTLED intent for this network
     // belongs to an earlier round that may already have paid, and this round's own
     // intent is not armed until just before its send. Checked ahead of the
@@ -133,7 +133,7 @@ module.exports = {
         // The publisher tail is UNCONDITIONAL. Field order MUST match the indexer parser
         // (anchor.js formats[1]):
         // ...|SIG_COUNT|PUBKEY|SIG|...|PUBLISHER|ATTEST_SIG_COUNT|APUBKEY|ASIG|...
-        // Mirrors _buildV7Payload's tail, empty-publisher fallback included, so the two
+        // Mirrors buildV7Payload's tail, empty-publisher fallback included, so the two
         // legs degrade identically.
         parts.push(String(me || '').toLowerCase(), String(attestSigs.length));
         for(let s of attestSigs) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
@@ -258,7 +258,7 @@ module.exports = {
     // with their final status would strand them in an unrecoverable hole and the
     // archive reward would be credited for an anchor that was never published. Treat
     // it exactly like a lost chunk: keep the rows pending under a fresh batch seq.
-    // (Mirrors the v0 null-txid guard in _publishPendingCheckpoints.)
+    // (Mirrors the v0 null-txid guard in publishPendingCheckpoints.)
     // The id lists backfillBatch stamps: the round's own when the archive landed whole,
     // the '__partial__' sentinel (and no rewards) when it did not.
     archiveBackfillIds(round, lostChunks, onChainValid, noTxid){

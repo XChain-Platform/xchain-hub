@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // The block-PINNED _getActiveOraclePublishPubkeys path must mirror
-// _resolveCapabilitySet: primary source is the deterministic capability
+// resolveCapabilitySet: primary source is the deterministic capability
 // snapshot; on a miss, the local capability_snapshots table stands in ONLY on
 // regtest (seeded stacks with no live snapshot resolution). Before the
 // fallback existed, such a venue resolved an empty election set for every

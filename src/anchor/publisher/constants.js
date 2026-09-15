@@ -26,7 +26,7 @@ const ark = require('../anchor_reward_key.js');
 
 // The reward types the indexer re-derives from chain above a flag-day, split by WHICH
 // flag-day judges them. One definition, read by both forms of the eligibility rule
-// (_isChainDerivedReward and its SQL twin), so a new type cannot be added to one alone.
+// (isChainDerivedReward and its SQL twin), so a new type cannot be added to one alone.
 const ANCHOR_FLAG_DAY_REWARD_TYPES = ['anchor_BTC', 'anchor_LTC', 'anchor_DOGE', 'anchor_bundle'];
 const ARCHIVE_FLAG_DAY_REWARD_TYPE = ark.ARCHIVE_REWARD_TYPE;
 

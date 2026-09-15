@@ -312,10 +312,10 @@ it('resolves the election set at the RAW epoch, letting CapabilitySnapshot bury 
             assert.ok(call, 'the election set must be resolved');
             assert.deepStrictEqual(call.args, ['oracle_publish', EPOCH]);
         });
-it('borrows StateAnchorPublisher._resolveCapabilitySet when the anchor rail is up', async function () {
+it('borrows StateAnchorPublisher.resolveCapabilitySet when the anchor rail is up', async function () {
             wireRpc({ tip: 36 });
             const resolve = sinon.stub().resolves(PKS.map(pk => ({ pubkey: pk, amount: '1', source: 's' })));
-            const eng = makeEngine({ stateAnchorPublisher: { _resolveCapabilitySet: resolve } });
+            const eng = makeEngine({ stateAnchorPublisher: { resolveCapabilitySet: resolve } });
             await eng._tick();
             assert.deepStrictEqual(resolve.getCall(0).args, ['oracle_publish', EPOCH, 'regtest']);
             assert.strictEqual(eng.hub.capabilitySnapshot.getWeightSnapshot.callCount, 0,

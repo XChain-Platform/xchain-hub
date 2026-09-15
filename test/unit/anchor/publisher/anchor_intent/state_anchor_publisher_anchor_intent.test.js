@@ -49,7 +49,7 @@ function mkRow(){
     };
 }
 
-// A publisher wired so _publishPendingCheckpoints reaches the broadcast decision with
+// A publisher wired so publishPendingCheckpoints reaches the broadcast decision with
 // the election, flag-day and identity machinery out of the way.
 function mkPub(db){
     const pub = new StateAnchorPublisher({ db: db, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });

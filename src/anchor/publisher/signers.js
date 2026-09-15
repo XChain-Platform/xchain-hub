@@ -49,7 +49,7 @@ module.exports = {
                         return [...new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()))].sort();
                 } catch(e){ snapErr = e; }
             }
-            // Local-table fallback, the twin of the one in _resolveCapabilitySet
+            // Local-table fallback, the twin of the one in resolveCapabilitySet
             // and gated the same way: the per-hub capability_snapshots table is a
             // valid source only on seeded/regtest stacks, where the deterministic
             // snapshot path may simply not be wired. Off regtest a miss means THIS
@@ -84,7 +84,7 @@ module.exports = {
         } catch(e){ return []; }
     },
 
-    // Flag-day aware, exactly like _resolveCapabilitySet: at/above
+    // Flag-day aware, exactly like resolveCapabilitySet: at/above
     // STAKE_WEIGHTED_QUORUM the membership authority is the WEIGHT snapshot
     // (getstakeweightsbycapability), below it the count snapshot
     // (getcapabilityvalidators). Those are distinct indexer queries with

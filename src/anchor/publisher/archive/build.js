@@ -38,7 +38,7 @@ module.exports = {
     // cannot disagree about the key no matter what else diverges.
     //
     // The batch_seq is deliberately NOT in the key. It came from
-    // _getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own
+    // getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own
     // cross_chain_matches / cross_chain_calls / validator_rewards, with no consensus
     // step: it is only fleet-uniform while backfillBatch plus the XANC_FINALIZED gossip
     // have landed everywhere. Once two hubs' tables differ by one missed back-fill they
@@ -52,7 +52,7 @@ module.exports = {
     // ladder (`_rankUnlocked` against electionBlock - snapshot_block) is what moves the
     // publish off a dead leader, which is exactly the job a STABLE anchor is needed for.
     // `batchSeq` is accepted and ignored so existing call sites/stubs stay valid.
-    _archiveElectionKey(cp, batchSeq){                      // eslint-disable-line no-unused-vars
+    archiveElectionKey(cp, batchSeq){                      // eslint-disable-line no-unused-vars
         return 'XANCV2|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq);
     },
 
@@ -101,7 +101,7 @@ module.exports = {
     // local capability_snapshots table only holds rows a hub persisted while
     // leading, so it can't be the shared source). Falls back to the local
     // table for seeded/regtest stacks with no live BTC resolution.
-    async _resolveCapabilitySet(capability, block, network){
+    async resolveCapabilitySet(capability, block, network){
         // Derive the weighted-vs-count set for the RECORD's network (callers
         // pass resolveQuorumNetwork(record, this.network) / the archive network),
         // matching the round/verify gate that judges the resulting set. On a scoped
@@ -182,7 +182,7 @@ module.exports = {
             let key = w.block + '|' + w.capability;
             if(seen.has(key)) continue;
             seen.add(key);
-            let set = await this._resolveCapabilitySet(w.capability, w.block, network);
+            let set = await this.resolveCapabilitySet(w.capability, w.block, network);
             // Total order: pubkey then source. Equal pubkeys are legitimately
             // possible in weighted snapshots (one row per (source, pubkey), a key
             // may be delegated by multiple sources); a two-branch comparator that

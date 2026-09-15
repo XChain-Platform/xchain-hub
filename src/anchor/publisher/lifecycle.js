@@ -139,7 +139,7 @@ module.exports = {
         this._deferTimer = setInterval(() => {
             this.drainDeferredBundleDone().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred BUNDLE_DONE drain error:', err && err.message)));
             this.drainDeferredFinalized().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred FINALIZED drain error:', err && err.message)));
-            this._drainDeferredRewardAttest().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message)));
+            this.drainDeferredRewardAttest().catch(err => logger.error(nodeUtil.format('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message)));
         }, this.announceRetryMs);
         if(this._deferTimer.unref) this._deferTimer.unref();
         // The failover wake. Re-runs flush in failover-only mode so a
@@ -203,10 +203,10 @@ module.exports = {
         this._attestRound = null;
         // Mirror the _attestRound teardown for its archive twin: runArchiveAttestationRound
         // is an awaited promise settled only by an unref'd timer, so without this a stop()
-        // mid-round leaves _publishArchive hung during shutdown.
+        // mid-round leaves publishArchive hung during shutdown.
         if(this._archiveAttestRound && this._archiveAttestRound.timer) clearTimeout(this._archiveAttestRound.timer);
         if(this._archiveAttestRound && !this._archiveAttestRound.done && this._archiveAttestRound.resolve)
-            this._archiveAttestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting _publishArchive
+            this._archiveAttestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting publishArchive
         this._archiveAttestRound = null;
     },
 
@@ -282,7 +282,7 @@ module.exports = {
             .catch(err => logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
         await this.drainDeferredFinalized()
             .catch(err => logger.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
-        await this._drainDeferredRewardAttest()
+        await this.drainDeferredRewardAttest()
             .catch(err => logger.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
     },
 
@@ -361,8 +361,8 @@ module.exports = {
             let refused  = await this.flushRefusal(signer);
             if(refused) return refused;
 
-            let anchored = await this._publishPendingCheckpoints(signer, btcBlock, failoverOnly);
-            let archive  = await this._startArchiveRound(signer, btcBlock, failoverOnly);
+            let anchored = await this.publishPendingCheckpoints(signer, btcBlock, failoverOnly);
+            let archive  = await this.startArchiveRound(signer, btcBlock, failoverOnly);
             // Bound the durable marker tables. Runs at the end of a flush that actually
             // reached the publishing stage, so it never fires on a hub that is paused,
             // out of balance or without a pipeline, and never before the intents this

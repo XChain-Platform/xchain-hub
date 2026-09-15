@@ -96,7 +96,7 @@ function makePublisher(localRewardRows, oraclePublishSet) {
 // is now refused for completeness before these reward assertions are ever reached.
 // Nothing about the cross-pubkey guard under test changes.
 const verify = async (pub, ar) => {
-    let set   = await pub._resolveCapabilitySet('oracle_publish', BLOCK, '');
+    let set   = await pub.resolveCapabilitySet('oracle_publish', BLOCK, '');
     let snaps = set.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
     return pub.verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });

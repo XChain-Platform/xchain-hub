@@ -65,7 +65,7 @@ function mkRow() {
   };
 }
 
-// A publisher wired so _publishPendingCheckpoints reaches the broadcast decision with
+// A publisher wired so publishPendingCheckpoints reaches the broadcast decision with
 // the election, flag-day and identity machinery out of the way.
 function mkPub(db) {
   const pub = new StateAnchorPublisher({
@@ -208,9 +208,9 @@ function registerSplitSuitePart3() {
     const pub = mkPub(db);
     pub.drainDeferredBundleDone = async () => {};
     pub.drainDeferredFinalized = async () => {};
-    pub._drainDeferredRewardAttest = async () => {};
-    pub._publishPendingCheckpoints = async () => [];
-    pub._startArchiveRound = async () => 'none';
+    pub.drainDeferredRewardAttest = async () => {};
+    pub.publishPendingCheckpoints = async () => [];
+    pub.startArchiveRound = async () => 'none';
     pub.broadcastFn = async () => ({
       txid: 'x'
     });
@@ -224,12 +224,12 @@ function registerSplitSuitePart3() {
     const pub = mkPub(db);
     pub.drainDeferredBundleDone = async () => {};
     pub.drainDeferredFinalized = async () => {};
-    pub._drainDeferredRewardAttest = async () => {};
-    pub._publishPendingCheckpoints = async () => [{
+    pub.drainDeferredRewardAttest = async () => {};
+    pub.publishPendingCheckpoints = async () => [{
       chain: 'BTC',
       txid: 'paid'
     }];
-    pub._startArchiveRound = async () => 'none';
+    pub.startArchiveRound = async () => 'none';
     pub.broadcastFn = async () => ({
       txid: 'x'
     });

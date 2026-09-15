@@ -124,7 +124,7 @@ module.exports = {
     // The archive path DOES have a mined-state fallback, just not through
     // getanchoraction, which serves CHECKPOINT_VERSIONS only. getarchiveanchor answers
     // "did we already publish THIS batch" from the batch's own content (checkpoint
-    // identity + crc + count + author), and _publishArchive passes it to
+    // identity + crc + count + author), and publishArchive passes it to
     // broadcastWithRetry as the head's existsCheck via findExistingArchiveAnchor, plus
     // findExistingArchiveChunk per continuation chunk. What that lookup cannot see is a
     // send that has not mined yet: it answers from parsed on-chain actions, so an archive
@@ -200,7 +200,7 @@ module.exports = {
     // Two invariants dominate these DELETEs, both load-bearing on a money-bearing path:
     //
     //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row that survived is the
-    //      AMBIGUOUS-send record: _publishPendingCheckpoints deliberately keeps the
+    //      AMBIGUOUS-send record: publishPendingCheckpoints deliberately keeps the
     //      intent when the failure could have reached the DOGE node (the `if(!(e &&
     //      e.anchorAmbiguousSend))` guard), and the empty-txid path keeps it too. That
     //      row is the only durable trace that DOGE may already have paid, so it is

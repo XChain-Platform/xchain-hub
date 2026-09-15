@@ -30,10 +30,10 @@ module.exports = {
 
     initRoundState(){
         this._archiveRound     = null;  // leader-side archive signing round (one at a time)
-        // The round whose _publishArchive is IN FLIGHT. _archiveRound covers only the
+        // The round whose publishArchive is IN FLIGHT. _archiveRound covers only the
         // signature-collection phase and is cleared the moment quorum is met, which leaves
         // the whole publish unguarded: quorum can arrive on a peer message (handleSign),
-        // outside flush()'s _flushing mutex, and _publishArchive does not arm its durable
+        // outside flush()'s _flushing mutex, and publishArchive does not arm its durable
         // dedupe marker (recordArchiveIntent) until AFTER the publisher-attestation round,
         // so a timer flush in that window rebuilds the same still-pending rows and spends
         // DOGE a second time. This field covers quorum-to-return.
@@ -140,7 +140,7 @@ module.exports = {
         // refusal naming the refuser's own consumed seq, or an archive head resolved
         // on-chain. -1 means "nothing beyond what our tables show".
         //
-        // _getNextBatchSeq is MAX(batch_seq)+1 over THIS hub's rows, which equals the
+        // getNextBatchSeq is MAX(batch_seq)+1 over THIS hub's rows, which equals the
         // federation's next seq only while every back-fill has landed. A hub that missed
         // one (a withheld/dropped XANC_FINALIZED) draws a seq the federation already
         // spent and rebuilds rows it already archived. This floor carries that knowledge
@@ -216,7 +216,7 @@ module.exports = {
         // a COLLECT-spendable validator_rewards row from it, so an evicted or reorged
         // anchor would mint a permanent reward for a transaction the chain never
         // carried. Confirm THEN write: the attestation is queued here and only written
-        // by _drainDeferredRewardAttest, on the same size + TTL knobs as the two
+        // by drainDeferredRewardAttest, on the same size + TTL knobs as the two
         // announcement queues.
         this._deferredRewardAttest = new Map();
         this.announceRetryMs      = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min

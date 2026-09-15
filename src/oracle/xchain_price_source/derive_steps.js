@@ -99,7 +99,7 @@ const deriveSteps = {
     // Selects the round's fill window from the indexer. Returns the selection, or
     // null to abstain.
     async findWindowFills(referenceHeight) {
-        let selection = await getWindowFills(this._db(), {
+        let selection = await getWindowFills(this.openIndexerDb(), {
             referenceHeight:    referenceHeight,
             confirmationBuffer: this.confirmationBuffer,
             windowLength:       this.windowBlocks,

@@ -251,7 +251,7 @@ module.exports = {
     // The byte-determinism rule (D5) is what makes this sound in a race: two publishers
     // building the same bundle emit identical bytes, so a section adopted here is the
     // section we would have published.
-    async _findExistingBundle(sections){
+    async findExistingBundle(sections){
         let txid = null;
         for(let s of sections || []){
             let r = await this.findExistingCheckpointAnchor(s);   // throws when undetermined
@@ -267,13 +267,13 @@ module.exports = {
     // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1 head + its v2
     // chunks), the archive-path sibling of findExistingCheckpointAnchor above.
     //
-    // The archive path publishes BEFORE it records: _publishArchive broadcasts the head
+    // The archive path publishes BEFORE it records: publishArchive broadcasts the head
     // and every continuation chunk, and only then does backfillBatch stamp the rows. A
     // crash in that window leaves the rows pending, so the next flush re-elects exactly
     // the same matches and pays for the whole archive a second time. The checkpoint
     // path's guard could not be reused, because the identity every archive read is keyed
     // on (match_batch_seq) is precisely what the restart does not preserve:
-    // _getNextBatchSeq is MAX(batch_seq)+1 fleet-wide, so a peer that archived in the
+    // getNextBatchSeq is MAX(batch_seq)+1 fleet-wide, so a peer that archived in the
     // meantime moves the seq, and the re-election publishes the identical bytes under a
     // number nothing on-chain carries.
     //
@@ -332,7 +332,7 @@ module.exports = {
     // existsCheck for the ARCHIVE HEAD broadcast (v1). The head landing is the spend
     // this guard exists to make at-most-once; the chunk-level check below covers the
     // rest of the batch. `archiveAnchor` rides along on the adopt result so
-    // _publishArchive can address the remaining chunk slots under the seq the batch
+    // publishArchive can address the remaining chunk slots under the seq the batch
     // actually landed under, which this process no longer knows.
     async findExistingArchiveAnchor(cp, round){
         let res = await this.archiveAnchorLookup(cp, round);

@@ -70,7 +70,7 @@ function makePublisher(rewardType, localAmount) {
 }
 
 const verify = async (pub, reward) => {
-    let set   = await pub._resolveCapabilitySet('oracle_publish', BLOCK, NETWORK);
+    let set   = await pub.resolveCapabilitySet('oracle_publish', BLOCK, NETWORK);
     let snaps = set.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
     return pub.verifyArchiveAgainstLocal({

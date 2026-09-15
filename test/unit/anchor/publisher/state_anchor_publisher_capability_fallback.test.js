@@ -14,13 +14,13 @@ const { expect }            = require('chai');
 const StateAnchorPublisher  = require('../../../../src/anchor/publisher');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
-// #1224: _resolveCapabilitySet's local capability_snapshots-table fallback must be
+// #1224: resolveCapabilitySet's local capability_snapshots-table fallback must be
 // gated to seeded/regtest stacks. On mainnet/testnet a null snapshot means THIS
 // hub's indexer is down (CapabilitySnapshot returns null on any fetch/auth/echo
 // failure), so resolving from per-hub-local rows while healthy peers resolve the
 // on-chain snapshot forks the set bytes for the same (capability, block). It must
 // fail closed off regtest, matching the sibling resolvers.
-describe('StateAnchorPublisher._resolveCapabilitySet local-table gating (#1224)', () => {
+describe('StateAnchorPublisher.resolveCapabilitySet local-table gating (#1224)', () => {
 
     function buildPub(network) {
         let queried = { count: 0 };
@@ -41,7 +41,7 @@ describe('StateAnchorPublisher._resolveCapabilitySet local-table gating (#1224)'
     it('fails closed on mainnet when the snapshot resolver returns null (no local-table read)', async () => {
         let { pub, queried } = buildPub('mainnet');
         let threw = false;
-        try { await pub._resolveCapabilitySet('cross_chain', 100); }
+        try { await pub.resolveCapabilitySet('cross_chain', 100); }
         catch (e) { threw = true; expect(e.message).to.match(/not a valid shared source off regtest/); }
         expect(threw).to.equal(true);
         expect(queried.count).to.equal(0);   // never touched the local table
@@ -50,7 +50,7 @@ describe('StateAnchorPublisher._resolveCapabilitySet local-table gating (#1224)'
     it('fails closed on testnet when the snapshot resolver returns null', async () => {
         let { pub, queried } = buildPub('testnet');
         let threw = false;
-        try { await pub._resolveCapabilitySet('cross_chain', 100); }
+        try { await pub.resolveCapabilitySet('cross_chain', 100); }
         catch (e) { threw = true; }
         expect(threw).to.equal(true);
         expect(queried.count).to.equal(0);
@@ -58,7 +58,7 @@ describe('StateAnchorPublisher._resolveCapabilitySet local-table gating (#1224)'
 
     it('still uses the local-table fallback on regtest (seeded stack path unchanged)', async () => {
         let { pub, queried } = buildPub('regtest');
-        let set = await pub._resolveCapabilitySet('cross_chain', 100);
+        let set = await pub.resolveCapabilitySet('cross_chain', 100);
         expect(queried.count).to.equal(1);
         expect(set).to.deep.equal([{ pubkey: 'aa'.repeat(16), amount: '1', source: '' }]);
     });

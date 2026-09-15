@@ -197,8 +197,8 @@ function registerSplitSuitePart3() {
       verdict: 'verified'
     });
     r.pub.deferBundleDone(r.d, r.me, 'absent');
-    r.pub._publishPendingCheckpoints = async () => []; // isolate flush from the publish pipeline
-    r.pub._startArchiveRound = async () => 'none';
+    r.pub.publishPendingCheckpoints = async () => []; // isolate flush from the publish pipeline
+    r.pub.startArchiveRound = async () => 'none';
     await r.pub.flush();
     expect(r.updates.length, 'queued announcement applied during flush').to.equal(2);
     expect(r.pub._deferredBundleDone.size).to.equal(0);

@@ -79,7 +79,7 @@ function buildPub() {
 // hashOrder and pinning nothing.
 function archiveRound(wantLeader) {
     let { pub, me } = buildPub();
-    let key = pub._archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
+    let key = pub.archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
     let peer = null;
     for (let i = 0; i < 256 && peer === null; i++) {
         let candidate = String(20 + (i % 80)).repeat(32).slice(0, 64);
@@ -90,9 +90,9 @@ function archiveRound(wantLeader) {
     expect(peer, 'a peer producing the requested rank must exist').to.not.equal(null);
     let published = [];
     pub._getActiveOraclePublishPubkeys = async () => [me, peer];
-    pub._resolveCapabilitySet          = async () => [{ pubkey: me, amount: '1', source: '' }];
-    pub._getNextBatchSeq               = async () => BATCH_SEQ;
-    pub._publishArchive                = async (round) => { published.push(round); };
+    pub.resolveCapabilitySet          = async () => [{ pubkey: me, amount: '1', source: '' }];
+    pub.getNextBatchSeq               = async () => BATCH_SEQ;
+    pub.publishArchive                = async (round) => { published.push(round); };
     return { pub, me, peer, published };
 }
 
@@ -153,13 +153,13 @@ function registerLeaderWakeTests() {
 
         it('a normal flush still lets the rank-0 leader publish its archive', async function () {
             let { pub, published } = archiveRound(true);
-            expect(await pub._startArchiveRound(null, BLOCK)).to.equal('published');
+            expect(await pub.startArchiveRound(null, BLOCK)).to.equal('published');
             expect(published.length).to.equal(1);
         });
 
         it('a WAKE flush does not: the leader keeps its interval and size triggers', async function () {
             let { pub, published } = archiveRound(true);
-            expect(await pub._startArchiveRound(null, BLOCK, true)).to.equal('none');
+            expect(await pub.startArchiveRound(null, BLOCK, true)).to.equal('none');
             expect(published.length, 'no extra DOGE archive on the wake cadence').to.equal(0);
         });
     });
@@ -172,14 +172,14 @@ function registerBackupWakeTests() {
         it('a backup whose rank has NOT unlocked still stands down', async function () {
             let { pub, published } = archiveRound(false);
             // since = electionBlock - snapshot_block = 0 blocks, so rank 1 is locked.
-            expect(await pub._startArchiveRound(null, BLOCK, true)).to.equal('none');
+            expect(await pub.startArchiveRound(null, BLOCK, true)).to.equal('none');
             expect(published.length).to.equal(0);
         });
 
         it('a backup whose rank HAS unlocked publishes the stranded batch', async function () {
             let { pub, published } = archiveRound(false);
             let unlocked = BLOCK + pub.electionToleranceBlocks;   // one ladder step past the anchor point
-            expect(await pub._startArchiveRound(null, unlocked, true)).to.equal('published');
+            expect(await pub.startArchiveRound(null, unlocked, true)).to.equal('published');
             expect(published.length, 'the dead leader no longer strands the batch for a cycle').to.equal(1);
         });
 
@@ -187,7 +187,7 @@ function registerBackupWakeTests() {
             // The control: the same unlocked backup is only ever asked at all
             // because something re-ran flush. Rank is evaluated nowhere else.
             let { pub, me, peer } = archiveRound(false);
-            let key   = pub._archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
+            let key   = pub.archiveElectionKey(pub.cpFromRow(CP_ROW), BATCH_SEQ);
             let order = StateAnchorPublisher.hashOrder(key, [me, peer]);
             expect(order.indexOf(me), 'this hub is the backup').to.equal(1);
             expect(pub._rankUnlocked(order, me, 0), 'locked at the anchor point').to.equal(false);
@@ -198,14 +198,14 @@ function registerBackupWakeTests() {
 
 function registerRankZeroTests() {
 
-    describe('_isRankZero', function () {
+    describe('isRankZero', function () {
 
         it('is true only for the hub that leads the order', function () {
             let { pub, me } = buildPub();
-            expect(pub._isRankZero([me, 'aa'.repeat(32)])).to.equal(true);
-            expect(pub._isRankZero(['aa'.repeat(32), me])).to.equal(false);
-            expect(pub._isRankZero([])).to.equal(false);
-            expect(pub._isRankZero(null)).to.equal(false);
+            expect(pub.isRankZero([me, 'aa'.repeat(32)])).to.equal(true);
+            expect(pub.isRankZero(['aa'.repeat(32), me])).to.equal(false);
+            expect(pub.isRankZero([])).to.equal(false);
+            expect(pub.isRankZero(null)).to.equal(false);
         });
     });
 }

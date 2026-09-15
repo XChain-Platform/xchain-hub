@@ -15,7 +15,7 @@
 // start, and the 15-minute rank wake runs failover-only, which skips every
 // election this hub leads. A federation recreated more often than once a day
 // therefore cut checkpoints on cadence and anchored none of them, silently:
-// the two publish-decision skips in _publishPendingCheckpoints logged nothing,
+// the two publish-decision skips in publishPendingCheckpoints logged nothing,
 // so getanchorstatus read active:true, anchorsPublished:0, balance healthy.
 //
 // These tests pin the three halves of the fix: start() schedules ONE normal
@@ -71,7 +71,7 @@ function buildPub() {
 // that puts this hub at rank 0 or rank 1 in the real hash order.
 function pendingRow(wantLeader) {
     let { pub, me } = buildPub();
-    let key  = pub._bundleElectionKey(CP_ROW);
+    let key  = pub.bundleElectionKey(CP_ROW);
     let peer = null;
     for (let i = 0; i < 256 && peer === null; i++) {
         let candidate = String(20 + (i % 80)).repeat(32).slice(0, 64);
@@ -182,7 +182,7 @@ function registerStartupFlushSkipTests() {
         it('a WAKE flush that skips a led row counts it as skippedLeaderOnWake and stays quiet', async function () {
             const { pub } = pendingRow(true);
             let lines = await captureLog(async () => {
-                let anchored = await pub._publishPendingCheckpoints(null, BLOCK, true);
+                let anchored = await pub.publishPendingCheckpoints(null, BLOCK, true);
                 expect(anchored).to.deep.equal([]);
             });
             expect(pub.getAnchorStats().skippedLeaderOnWake).to.equal(1);
@@ -192,7 +192,7 @@ function registerStartupFlushSkipTests() {
         it('a LEADER flush on a row another hub leads counts skippedNotOurElection and logs once', async function () {
             const { pub } = pendingRow(false);
             let lines = await captureLog(async () => {
-                let anchored = await pub._publishPendingCheckpoints(null, BLOCK, false);
+                let anchored = await pub.publishPendingCheckpoints(null, BLOCK, false);
                 expect(anchored).to.deep.equal([]);
             });
             expect(pub.getAnchorStats().skippedNotOurElection).to.equal(1);

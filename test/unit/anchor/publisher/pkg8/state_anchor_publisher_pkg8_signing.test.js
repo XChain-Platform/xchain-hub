@@ -76,7 +76,7 @@ function registerSplitSuitePart1() {
     let {
       pub
     } = buildPub();
-    pub._resolveCapabilitySet = async () => []; // resolver divergence: unresolved at snapshot_block
+    pub.resolveCapabilitySet = async () => []; // resolver divergence: unresolved at snapshot_block
     let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
     expect(r.met, 'must not claim quorum off an unresolved set').to.equal(false);
     expect(r.sigs).to.deep.equal([]);
@@ -88,7 +88,7 @@ function registerSplitSuitePart1() {
       identity
     } = buildPub();
     let me = identity.getPubkeyHex().toLowerCase();
-    pub._resolveCapabilitySet = async () => [{
+    pub.resolveCapabilitySet = async () => [{
       pubkey: me,
       amount: '1',
       source: ''
@@ -102,7 +102,7 @@ function registerSplitSuitePart1() {
     let {
       pub
     } = buildPub();
-    pub._resolveCapabilitySet = async () => [{
+    pub.resolveCapabilitySet = async () => [{
       pubkey: 'ab'.repeat(33),
       amount: '1',
       source: ''
@@ -114,7 +114,7 @@ function registerSplitSuitePart1() {
     let {
       pub
     } = buildPub();
-    pub._resolveCapabilitySet = async () => [];
+    pub.resolveCapabilitySet = async () => [];
     let r = await pub.runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
     expect(r.met).to.equal(false);
     expect(r.sigs).to.deep.equal([]);
@@ -127,7 +127,7 @@ function registerSplitSuitePart2() {
       identity
     } = buildPub();
     let me = identity.getPubkeyHex().toLowerCase();
-    pub._resolveCapabilitySet = async () => [{
+    pub.resolveCapabilitySet = async () => [{
       pubkey: me,
       amount: '1',
       source: ''
@@ -137,7 +137,7 @@ function registerSplitSuitePart2() {
     expect(r.sigs.length).to.equal(1);
   });
 
-  // _resolveCapabilitySet fails CLOSED off regtest (it THROWS when the deterministic
+  // resolveCapabilitySet fails CLOSED off regtest (it THROWS when the deterministic
   // snapshot is unavailable). Inside these two rounds that throw would abort the whole
   // anchor / discard an already-collected archive quorum, which is exactly what the
   // publish path's own liveness note forbids: "a failed reward attestation must NEVER
@@ -148,7 +148,7 @@ function registerSplitSuitePart2() {
     } = buildPub({
       network: 'mainnet'
     });
-    pub._resolveCapabilitySet = async () => {
+    pub.resolveCapabilitySet = async () => {
       throw new Error('deterministic snapshot unavailable');
     };
     let r = await pub.runPublisherAttestationRound(CP, 'D'.repeat(34));
@@ -163,7 +163,7 @@ function registerSplitSuitePart3() {
     } = buildPub({
       network: 'mainnet'
     });
-    pub._resolveCapabilitySet = async () => {
+    pub.resolveCapabilitySet = async () => {
       throw new Error('deterministic snapshot unavailable');
     };
     let r = await pub.runArchiveAttestationRound(CP, 7, 'D'.repeat(34));

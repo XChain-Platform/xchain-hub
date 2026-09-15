@@ -13,7 +13,7 @@
 // Durable at-most-once for the ARCHIVE spend, the twin of the checkpoint marker
 // pinned in StateAnchorPublisher.anchor-intent.test.js.
 //
-// _publishArchive broadcasts a v1 head plus N v2 chunks and only afterwards stamps the
+// publishArchive broadcasts a v1 head plus N v2 chunks and only afterwards stamps the
 // source rows (backfillBatch). It passes NO existsCheck, because the archive path has
 // no mined-state query surface at all (getanchoraction serves CHECKPOINT_VERSIONS
 // only), so everything that knew a send had gone out lived in memory. A crash between
@@ -118,7 +118,7 @@ function mkPub(db){
     return { pub: pub, identity: identity };
 }
 
-// A round shaped exactly like the one _startArchiveRound hands to _publishArchive,
+// A round shaped exactly like the one startArchiveRound hands to publishArchive,
 // single-member signing set (so the on-chain-validity gate short-circuits true).
 function mkRound(pub, identity, broadcastFn, batchSeq){
     const cp        = pub.cpFromRow(CP_ROW);
@@ -207,7 +207,7 @@ function registerArchiveMarkerTests() {
 
 function registerArchiveStartTests() {
 
-    describe('_startArchiveRound', function () {
+    describe('startArchiveRound', function () {
         // flush() hands over whatever hub._resolveBtcLatestBlock() returned, and that is
         // null on a stale pushed tip, an over-lag indexer, or a failed RPC. A non-finite
         // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch (the
@@ -225,7 +225,7 @@ function registerArchiveStartTests() {
                     return [identity.getPubkeyHex().toLowerCase()];
                 };
                 let broadcasts = 0;
-                const out = await pub._startArchiveRound(
+                const out = await pub.startArchiveRound(
                     { broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, bad);
                 expect(out, 'an unresolved tip must defer, like the empty-set case').to.equal('none');
                 expect(elections, 'the unpinned election set was never resolved').to.equal(0);
@@ -248,7 +248,7 @@ function registerArchiveStartOutcomeTests() {
                 elections++;
                 return [identity.getPubkeyHex().toLowerCase()];
             };
-            await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
+            await pub.startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
             expect(elections, 'a finite tip still resolves the election set').to.be.greaterThan(0);
             expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(1);
         });
@@ -257,7 +257,7 @@ function registerArchiveStartOutcomeTests() {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ txid: 'earlier-v1' })] });
             const { pub } = mkPub(db);
             let broadcasts = 0;
-            const out = await pub._startArchiveRound({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, BLOCK);
+            const out = await pub.startArchiveRound({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, BLOCK);
             expect(out).to.equal('intent_held');
             expect(broadcasts).to.equal(0);
             expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(0);   // no seq drawn, no co-sign round opened
@@ -267,7 +267,7 @@ function registerArchiveStartOutcomeTests() {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ intent_at: new Date(Date.now() - 60000) })] });
             const { pub } = mkPub(db);
             pub.anchorIntentTtlMs = 1000;
-            const out = await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
+            const out = await pub.startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
             expect(out).to.not.equal('intent_held');
             expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(1);
         });
@@ -275,7 +275,7 @@ function registerArchiveStartOutcomeTests() {
         it('proceeds when the only marker for the network is settled', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ sent_at: new Date(), settled_at: new Date() })] });
             const { pub } = mkPub(db);
-            const out = await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
+            const out = await pub.startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
             expect(out).to.not.equal('intent_held');
             expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(1);
         });
@@ -283,13 +283,13 @@ function registerArchiveStartOutcomeTests() {
         it('ignores an unsettled intent belonging to another network', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ network: 'mainnet' })] });
             const { pub } = mkPub(db);
-            const out = await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
+            const out = await pub.startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
             expect(out).to.not.equal('intent_held');
         });
 }
 
 function registerArchivePublishTests() {
-    describe('_publishArchive', function () {
+    describe('publishArchive', function () {
         it('arms intent BEFORE the v1 send, confirms it after, and settles once the back-fill lands', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS });
             const { pub, identity } = mkPub(db);
@@ -298,7 +298,7 @@ function registerArchivePublishTests() {
                 armedBeforeSend = armedBeforeSend || sqlHits(db, 'INSERT INTO anchor_published_archives').length === 1;
                 return { txid: 'v1-tx' };
             }, 7);
-            await pub._publishArchive(round);
+            await pub.publishArchive(round);
             expect(armedBeforeSend, 'intent armed before money could move').to.equal(true);
             expect(sqlHits(db, 'UPDATE anchor_published_archives SET txid')).to.have.length(1);
             expect(db.archives[0].settled_at, 'window closed once bookkeeping landed').to.not.equal(null);
@@ -307,7 +307,7 @@ function registerArchivePublishTests() {
         it('leaves the intent UNSETTLED when the v1 broadcast returned no txid (not proof nothing was sent)', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS });
             const { pub, identity } = mkPub(db);
-            await pub._publishArchive(mkRound(pub, identity, async () => ({ txid: null }), 7));
+            await pub.publishArchive(mkRound(pub, identity, async () => ({ txid: null }), 7));
             expect(sqlHits(db, 'UPDATE anchor_published_archives SET settled_at')).to.have.length(0);
             expect(db.archives[0].settled_at == null).to.equal(true);
         });
@@ -317,7 +317,7 @@ function registerArchivePublishTests() {
             const { pub, identity } = mkPub(db);
             let threw = false;
             try {
-                await pub._publishArchive(mkRound(pub, identity, async () => { throw new Error('no UTXOs available for Dpub1'); }, 7));
+                await pub.publishArchive(mkRound(pub, identity, async () => { throw new Error('no UTXOs available for Dpub1'); }, 7));
             } catch(e){ threw = true; }
             expect(threw).to.equal(true);
             expect(sqlHits(db, 'DELETE FROM anchor_published_archives')).to.have.length(1);
@@ -328,7 +328,7 @@ function registerArchivePublishTests() {
             const db = mkDb({ rows: ARCHIVE_ROWS });
             const { pub, identity } = mkPub(db);
             try {
-                await pub._publishArchive(mkRound(pub, identity, async () => {
+                await pub.publishArchive(mkRound(pub, identity, async () => {
                     const e = new Error('socket hang up'); e.anchorAmbiguousSend = true; throw e;
                 }, 7));
             } catch(e){ /* deferred to a later flush */ }
@@ -341,7 +341,7 @@ function registerArchivePublishTests() {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ batch_seq: 3, sent_at: new Date(), txid: 'earlier-v1' })] });
             const { pub, identity } = mkPub(db);
             let broadcasts = 0;
-            const out = await pub._publishArchive(mkRound(pub, identity, async () => { broadcasts++; return { txid: 'fresh' }; }, 7));
+            const out = await pub.publishArchive(mkRound(pub, identity, async () => { broadcasts++; return { txid: 'fresh' }; }, 7));
             expect(out).to.equal('intent_held');
             expect(broadcasts).to.equal(0);
             expect(sqlHits(db, 'UPDATE cross_chain_matches SET batch_seq')).to.have.length(0);
@@ -359,7 +359,7 @@ function registerArchiveCrashTests() {
             const { pub, identity } = mkPub(db);
             let broadcasts = 0;
             try {
-                await pub._publishArchive(mkRound(pub, identity, async () => {
+                await pub.publishArchive(mkRound(pub, identity, async () => {
                     broadcasts++;
                     const e = new Error('socket hang up mid-send'); e.anchorAmbiguousSend = true; throw e;
                 }, 7));
@@ -368,7 +368,7 @@ function registerArchiveCrashTests() {
 
             // Restart: fresh publisher, same durable DB, same still-pending rows.
             const restarted = mkPub(db).pub;
-            const out = await restarted._startArchiveRound({ broadcastFn: async () => { broadcasts++; return { txid: 'second-fee' }; } }, BLOCK);
+            const out = await restarted.startArchiveRound({ broadcastFn: async () => { broadcasts++; return { txid: 'second-fee' }; } }, BLOCK);
             expect(out).to.equal('intent_held');
             expect(broadcasts, 'no second archive was paid for').to.equal(1);
         });

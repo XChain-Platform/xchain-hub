@@ -55,7 +55,7 @@ module.exports = {
             return null;
         }
         let order = canonicalForms.hashOrder(
-            this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
+            this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
         return order;
     },
 
@@ -72,7 +72,7 @@ module.exports = {
         // without this the 15-minute wake would replace the leader's
         // ANCHOR_INTERVAL_MS cadence and it would anchor a fresh bundle every wake
         // instead of one per cycle (each superseding the last, all real DOGE).
-        if(failoverOnly && this._isRankZero(order)){
+        if(failoverOnly && this.isRankZero(order)){
             this._skippedLeaderOnWake += group.length;
             skipped.rows += group.length;
             return true;
@@ -94,7 +94,7 @@ module.exports = {
         }
         if(held){
             let mined = null;
-            try { mined = await this._findExistingBundle(group); }
+            try { mined = await this.findExistingBundle(group); }
             catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
             if(!(mined && mined.exists)){
                 logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
@@ -153,7 +153,7 @@ module.exports = {
 
     // The v0 payload this bundle will sign and send, or null when it does not fit.
     buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock){
-        let payload = this._buildV7Payload(group, me, attestSigs);
+        let payload = this.buildV7Payload(group, me, attestSigs);
         // Last byte-budget gate, on the payload that will actually be signed and sent.
         // splitBundle sizes an ESTIMATED tail before the attestation round runs, and
         // after a split it estimates at the caller's network-wide oracle_publish set
@@ -184,7 +184,7 @@ module.exports = {
         let result;
         try {
             result = await this.broadcastWithRetry(broadcaster, payload, undefined,
-                () => this._findExistingBundle(group));
+                () => this.findExistingBundle(group));
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so

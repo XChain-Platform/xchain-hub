@@ -55,7 +55,7 @@ function buildPub() {
 // key. Found by search over the real hashOrder, not by stubbing it, so the ranking
 // under test is the shipped one.
 function outrankingPeer(pub, me) {
-    let key = pub._bundleElectionKey({ network: NETWORK, snapshot_block: OLD_BLOCK });
+    let key = pub.bundleElectionKey({ network: NETWORK, snapshot_block: OLD_BLOCK });
     for (let i = 0; i < 512; i++) {
         let candidate = String(20 + (i % 80)).repeat(32).slice(0, 64);
         if (candidate === me) continue;
@@ -94,7 +94,7 @@ function registerSplitBundleElectionSetTests() {
         // and no longer holds it at the network max. Electing over the max-height set (the
         // pre-fix behaviour) leaves this hub alone and therefore rank 0.
         const setAt = { [OLD_BLOCK]: [me, peer], [MAX_BLOCK]: [me] };
-        const key   = pub._bundleElectionKey({ network: NETWORK, snapshot_block: OLD_BLOCK });
+        const key   = pub.bundleElectionKey({ network: NETWORK, snapshot_block: OLD_BLOCK });
         expect(StateAnchorPublisher.hashOrder(key, setAt[MAX_BLOCK])[0]).to.equal(me);
         expect(StateAnchorPublisher.hashOrder(key, setAt[OLD_BLOCK])[0]).to.equal(peer);
 
