@@ -29,10 +29,10 @@ const { seedAll }        = require('./helpers/seed-data');
 const { measure, Histogram } = require('./helpers/metrics');
 const { blast }          = require('./helpers/concurrent');
 
-describe('Performance: Oracle Round Under Load', function () {
-    this.timeout(120000);
 
-    let cluster;
+
+let cluster;
+function registerBeforeHook() {
 
     before(async function () {
         try {
@@ -51,20 +51,32 @@ describe('Performance: Oracle Round Under Load', function () {
         let db = cluster.getDb();
         await seedAll(db, { validators: 5, priceRounds: 50 });
     });
+}
+
+function registerAfterHook() {
 
     after(async function () {
         if (cluster) await cluster.stop();
         mockApi.teardown();
         await testDb.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         mockApi.reset();
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerOracleRoundExecutionTests() {
 
     // ─── Single Oracle Round Timing ─────────────────────────────────
 
@@ -105,6 +117,9 @@ describe('Performance: Oracle Round Under Load', function () {
                 'oracle round p99 should be within 5x of median (or under the 5ms floor)');
         });
     });
+}
+
+function registerOracleRoundWithConcurrentQueryLoadTests() {
 
     // ─── Oracle Round + Concurrent Queries ──────────────────────────
 
@@ -153,6 +168,9 @@ describe('Performance: Oracle Round Under Load', function () {
                 'query p95 degradation during oracle should be < 5x baseline');
         });
     });
+}
+
+function registerAggregationWithManySubmissionsTests() {
 
     // ─── Aggregation Performance ────────────────────────────────────
 
@@ -189,6 +207,9 @@ describe('Performance: Oracle Round Under Load', function () {
             expect(durationMs).to.be.below(500, 'reading submissions should be < 500ms');
         });
     });
+}
+
+function registerPriceFetchPerformanceTests() {
 
     // ─── Price Fetch Timing ─────────────────────────────────────────
 
@@ -239,4 +260,15 @@ describe('Performance: Oracle Round Under Load', function () {
             expect(durationMs).to.be.above(2000);
         });
     });
+}
+describe('Performance: Oracle Round Under Load', function () {
+    this.timeout(120000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerOracleRoundExecutionTests();
+    registerOracleRoundWithConcurrentQueryLoadTests();
+    registerAggregationWithManySubmissionsTests();
+    registerPriceFetchPerformanceTests();
 });
