@@ -25,10 +25,10 @@ const { makeValidator, SAMPLE_PRICES } = require('../helpers/fixtures');
 const { measure, Histogram } = require('./helpers/metrics');
 const { blast }          = require('./helpers/concurrent');
 
-describe('Performance: Database Stress', function () {
-    this.timeout(120000);
 
-    let db;
+
+let db;
+function registerBeforeHook() {
 
     before(async function () {
         try {
@@ -39,19 +39,24 @@ describe('Performance: Database Stress', function () {
             this.skip();
         }
     });
+}
+
+function registerAfterHook() {
 
     after(async function () {
         await testDb.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(async function () {
         if (!testDb.isAvailable()) return this.skip();
         await testDb.truncateAll();
     });
+}
 
-    // ─── Write Throughput ───────────────────────────────────────────
-
-    describe('write throughput', function () {
+function registerWriteThroughputTestCases1() {
         it('insertion rate for oracle_submissions', async function () {
             let hist = new Histogram('insert-submission');
             let count = 200;
@@ -93,6 +98,9 @@ describe('Performance: Database Stress', function () {
             expect(errors).to.equal(0, 'should have zero write errors');
             expect(histogram.p95).to.be.below(500, 'concurrent write p95 should be < 500ms');
         });
+}
+
+function registerWriteThroughputTestCases2() {
 
         it('concurrent writes to price_snapshots', async function () {
             let { histogram, errors } = await blast(
@@ -111,11 +119,20 @@ describe('Performance: Database Stress', function () {
             histogram.report();
             expect(errors).to.equal(0);
         });
+
+}
+
+function registerWriteThroughputTests() {
+
+    // ─── Write Throughput ───────────────────────────────────────────
+
+    describe('write throughput', function () {
+        registerWriteThroughputTestCases1();
+        registerWriteThroughputTestCases2();
     });
+}
 
-    // ─── Read Throughput ────────────────────────────────────────────
-
-    describe('read throughput', function () {
+function registerReadThroughputTestCases1() {
         before(async function () {
             // Seed data for reads
             for (let r = 1; r <= 100; r++) {
@@ -170,7 +187,19 @@ describe('Performance: Database Stress', function () {
             console.log('    Read 1000 snapshots: %.2fms', durationMs);
             expect(durationMs).to.be.below(1000, 'large read should be < 1s');
         });
+
+}
+
+function registerReadThroughputTests() {
+
+    // ─── Read Throughput ────────────────────────────────────────────
+
+    describe('read throughput', function () {
+        registerReadThroughputTestCases1();
     });
+}
+
+function registerMixedReadWriteConcurrencyTests() {
 
     // ─── Mixed Read/Write Concurrency ───────────────────────────────
 
@@ -216,6 +245,9 @@ describe('Performance: Database Stress', function () {
             expect(errors).to.equal(0, 'no errors during mixed operations');
         });
     });
+}
+
+function registerConnectionPoolBehaviorTests() {
 
     // ─── Connection Pool Saturation ─────────────────────────────────
 
@@ -254,6 +286,9 @@ describe('Performance: Database Stress', function () {
             expect(histogram.p95).to.be.below(200, 'post-overload p95 should be < 200ms');
         });
     });
+}
+
+function registerParameterizedQueriesTests() {
 
     // ─── Parameterized Query Performance ────────────────────────────
 
@@ -312,4 +347,15 @@ describe('Performance: Database Stress', function () {
             expect(hist.p95).to.be.below(100, 'getAllConfigs p95 should be < 100ms');
         });
     });
+}
+describe('Performance: Database Stress', function () {
+    this.timeout(120000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerWriteThroughputTests();
+    registerReadThroughputTests();
+    registerMixedReadWriteConcurrencyTests();
+    registerConnectionPoolBehaviorTests();
+    registerParameterizedQueriesTests();
 });
