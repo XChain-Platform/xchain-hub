@@ -20,16 +20,21 @@ const { SAMPLE_PRICES }        = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
-describe('Chaos: Single Price Source Failure (API-1)', function () {
-    this.timeout(10000);
+function registerBeforeHook() {
 
     before(function () {
         mockApi.setup();
     });
+}
+
+function registerAfterHook() {
 
     after(function () {
         mockApi.teardown();
     });
+}
+
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         mockApi.reset();
@@ -37,10 +42,16 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerCoinGecko500UsesCoinMarketCapDataOnlyTest() {
 
     it('CoinGecko 500 → uses CoinMarketCap data only', async function () {
         let fetcher = new PriceFetcher({
@@ -75,6 +86,9 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
             }
         });
     });
+}
+
+function registerCoinMarketCap503UsesCoinGeckoDataOnlyTest() {
 
     it('CoinMarketCap 503 → uses CoinGecko data only', async function () {
         let fetcher = new PriceFetcher({
@@ -102,6 +116,9 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
             }
         });
     });
+}
+
+function registerCoinGecko429RateLimitedDegradesGracefullyTest() {
 
     it('CoinGecko 429 rate limited → degrades gracefully', async function () {
         let fetcher = new PriceFetcher({
@@ -118,6 +135,9 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
             expect(p.sources).to.equal(1);
         }
     });
+}
+
+function registerSourceFailureDoesNotAffectOracleTest() {
 
     it('source failure does not affect oracle round broadcast', async function () {
         let hub = createMockHub();
@@ -138,6 +158,9 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
         expect(broadcastArgs[1].prices).to.have.length(3);
         expect(broadcastArgs[1].prices[0].sources).to.equal(1);
     });
+}
+
+function registerRecoveryBothSourcesReturnSourceCountTest() {
 
     it('recovery: both sources return → source count restores to 2', async function () {
         let fetcher = new PriceFetcher({
@@ -160,4 +183,16 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
         let recovered = await fetcher.fetchPrices();
         expect(recovered[0].sources).to.equal(2);
     });
+}
+describe('Chaos: Single Price Source Failure (API-1)', function () {
+    this.timeout(10000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerCoinGecko500UsesCoinMarketCapDataOnlyTest();
+    registerCoinMarketCap503UsesCoinGeckoDataOnlyTest();
+    registerCoinGecko429RateLimitedDegradesGracefullyTest();
+    registerSourceFailureDoesNotAffectOracleTest();
+    registerRecoveryBothSourcesReturnSourceCountTest();
 });
