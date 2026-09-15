@@ -99,9 +99,33 @@ describe('anchor_reward_activation parity (hub copy)', function () {
     });
 });
 
-describe('anchor_reward_activation: isAnchorAttestBarrierHorizonActive (the 0 >= null trap)', function () {
+function registerSharedArmingSeamTest() {
+it('shares the family\'s arming seam, so one venue lever arms both flag days', function () {
+        const MODULE_PATH = require.resolve(LOCAL_PATH);
+        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../src/mirror_admission_activation.js'));
+        const savedEnv    = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+        const savedLocal  = require.cache[MODULE_PATH];
+        const savedMirror = require.cache[MIRROR_PATH];
+        try {
+            process.env.XC_MIRROR_ADMISSION_ACTIVATION = 'armed';
+            delete require.cache[MODULE_PATH];
+            delete require.cache[MIRROR_PATH];
+            const armed  = require(LOCAL_PATH);
+            const family = require(MIRROR_PATH);
+            expect(armed.isAnchorAttestBarrierHorizonActive('regtest', 0)).to.equal(true);
+            expect(family.isMirrorAdmissionProducerActive('BTC', 'regtest', 0)).to.equal(true);
+            expect(family.isMirrorAdmissionConsumerActive('BTC', 'regtest', 0)).to.equal(true);
+        } finally {
+            if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
+            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
+            require.cache[MODULE_PATH] = savedLocal;
+            require.cache[MIRROR_PATH] = savedMirror;
+        }
+    });
+}
 
-    it('holds an INERT network inert at height 0 and at a huge height', function () {
+function registerBarrierHorizonTests() {
+it('holds an INERT network inert at height 0 and at a huge height', function () {
         for (const net of ['mainnet', 'testnet']) {
             expect(local.ANCHOR_ATTEST_BARRIER_ACTIVATION[net],
                 'not vacuous: ' + net + ' must still be the inert null this case is about').to.equal(null);
@@ -151,29 +175,13 @@ describe('anchor_reward_activation: isAnchorAttestBarrierHorizonActive (the 0 >=
             require.cache[MIRROR_PATH] = savedMirror;
         }
     });
+}
+
+describe('anchor_reward_activation: isAnchorAttestBarrierHorizonActive (the 0 >= null trap)', function () {
+
+    registerBarrierHorizonTests();
 
     // ONE venue lever arms BOTH flag days. A drill that armed the admission axis while leaving
     // the horizon inert would rehearse a split the fleet is never supposed to be in.
-    it('shares the family\'s arming seam, so one venue lever arms both flag days', function () {
-        const MODULE_PATH = require.resolve(LOCAL_PATH);
-        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../src/mirror_admission_activation.js'));
-        const savedEnv    = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-        const savedLocal  = require.cache[MODULE_PATH];
-        const savedMirror = require.cache[MIRROR_PATH];
-        try {
-            process.env.XC_MIRROR_ADMISSION_ACTIVATION = 'armed';
-            delete require.cache[MODULE_PATH];
-            delete require.cache[MIRROR_PATH];
-            const armed  = require(LOCAL_PATH);
-            const family = require(MIRROR_PATH);
-            expect(armed.isAnchorAttestBarrierHorizonActive('regtest', 0)).to.equal(true);
-            expect(family.isMirrorAdmissionProducerActive('BTC', 'regtest', 0)).to.equal(true);
-            expect(family.isMirrorAdmissionConsumerActive('BTC', 'regtest', 0)).to.equal(true);
-        } finally {
-            if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
-            require.cache[MODULE_PATH] = savedLocal;
-            require.cache[MIRROR_PATH] = savedMirror;
-        }
-    });
+    registerSharedArmingSeamTest();
 });
