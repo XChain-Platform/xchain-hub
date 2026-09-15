@@ -36,6 +36,11 @@ const path = require('path');
 const VENDORED = [
     ['xchainPrice.js',           'consensus/xchain_price.js',       'consensus/xchainPrice.js'],
     ['xchainPriceQuery.js',      'consensus/xchain_price_query.js', 'consensus/xchainPriceQuery.js'],
+    // The query module's SQL, which both repos keep at the same src/db/price/ path
+    // (the query module resolves it from the package root, so the depth difference
+    // above never reaches the require text). It is a consensus input like the
+    // predicates it spells, so it is held to the same byte identity.
+    ['db/price/xchain_price_query_sql.js', 'db/price/xchain_price_query_sql.js'],
     ['price_pair_activation.js', 'price_pair_activation.js'],
 ];
 
