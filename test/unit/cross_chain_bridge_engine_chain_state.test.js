@@ -75,13 +75,7 @@ function makeEngine(opts){
     return { engine, db, hub };
 }
 
-describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, and the live gates', function(){
-
-    afterEach(function(){ sinon.restore(); });
-
-    // -------------------------------------------------------------------------
-    describe('getbridgebalances is the chain half of getbridgeinvariant', function(){
-
+function registerChainReadCoreTests() {
         // The whole point of the wiring: one JSON-RPC call per (chain, tick), on the same
         // per-chain client the pending poll uses, and no second name for the read.
         it('asks every chain that carries the tick, by name, through the indexer client', async function(){
@@ -131,7 +125,7 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(inv.XCHAIN.DOGE.delta).to.equal('0');
         });
 
-        it('counts in-flight against the escrow before judging the delta', async function(){
+    it('counts in-flight against the escrow before judging the delta', async function(){
             const { engine } = makeEngine();
             engine._pendingInFlight = new Map([['XCHAIN|DOGE', ['4']]]);
             engine._indexerCall = async (coin) =>
@@ -140,7 +134,9 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(inv.XCHAIN.DOGE.in_flight).to.equal('4');
             expect(inv.XCHAIN.DOGE.delta).to.equal('0');
         });
+}
 
+function registerChainReadDegradationTests() {
         // The failure this degradation exists for: the indexer half of the read lands on the
         // same train, so a hub rolled first sees "method not found" on every chain.
         it('degrades to null with one logged line when the method is absent', async function(){
@@ -175,7 +171,9 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(inv.XCHAIN.LTC.escrow).to.equal('0');     // BTC still answered for LTC
             expect(inv.XCHAIN.LTC.delta).to.equal('0');
         });
+}
 
+function registerChainOriginTests() {
         // A token's origin is learned from the pending read's transfer_kind. Until it is
         // known the hub must not read a backing balance off a chain that holds no escrow.
         it('leaves escrow null for a token whose origin this hub has not learned yet', async function(){
@@ -210,8 +208,18 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(engine._indexerCall.called).to.equal(false);
             expect(inv.XCHAIN.DOGE.escrow).to.equal('2');
         });
-    });
+}
 
+function registerBridgeBalanceTests() {
+    // -------------------------------------------------------------------------
+    describe('getbridgebalances is the chain half of getbridgeinvariant', function(){
+        registerChainReadCoreTests();
+        registerChainReadDegradationTests();
+        registerChainOriginTests();
+    });
+}
+
+function registerTruncatedSnapshotTests() {
     // -------------------------------------------------------------------------
     describe('the TRUNCATED capability-snapshot refusal', function(){
 
@@ -264,7 +272,9 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(db.calls.slice(before).filter(c => /capability_snapshots/i.test(c.sql)).length).to.be.above(0);
         });
     });
+}
 
+function registerFlagDayTests() {
     // -------------------------------------------------------------------------
     describe('the vendored flag-day twins on a regtest hub', function(){
 
@@ -301,4 +311,11 @@ describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, an
             expect(engine._indexerCall.getCalls().some(c => c.args[1] === 'getpendingbridgetransfers')).to.equal(true);
         });
     });
+}
+
+describe('CrossChainBridgeEngine: chain-state wiring, the truncation refusal, and the live gates', function(){
+    afterEach(function(){ sinon.restore(); });
+    registerBridgeBalanceTests();
+    registerTruncatedSnapshotTests();
+    registerFlagDayTests();
 });
