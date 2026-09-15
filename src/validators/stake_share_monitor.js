@@ -90,13 +90,13 @@ class StakeShareMonitor {
         this._warnAt = {};
     }
 
-    _key(chain, capability) {
+    buildKey(chain, capability) {
         return String(chain) + ':' + String(capability);
     }
 
     // Fold one evaluation in and log the transition. Returns the stored entry.
     record(chain, capability, evaluation) {
-        let key  = this._key(chain, capability);
+        let key  = this.buildKey(chain, capability);
         let now  = this._now();
         let prev = this.entries.get(key);
         let entry = Object.assign({ chain: String(chain), capability: String(capability), at: now }, evaluation);
