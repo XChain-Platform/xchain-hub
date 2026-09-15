@@ -78,6 +78,7 @@
 const path = require('path');
 
 const SpendCeiling = require('./spend_ceiling.js');
+const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 // The await-safe reservation and the restart persistence live in
@@ -110,7 +111,7 @@ class SpendGuard {
     // label:  capability label used in log lines and the pause registry key.
     constructor(prefix, cfg, label){
         cfg = cfg || {};
-        let env = process.env;
+        let env = hubConfig.env();
         this.prefix = prefix;
         this.label  = label || prefix;
 

@@ -77,7 +77,7 @@ const CLI_CREDENTIAL_ENV_KEYS = [
 // today; it is in the list so a future branch that omits it cannot inherit the
 // operator's dir by accident.
 function childEnv(authEnv) {
-    const env = { ...process.env };
+    const env = { ...hubConfig.env() };
     for (const key of CLI_CREDENTIAL_ENV_KEYS) delete env[key];
     return { ...env, ...(authEnv || {}) };
 }
