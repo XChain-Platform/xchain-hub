@@ -232,95 +232,117 @@ function registerPriceaggregatorReceivevalidatedbatch1Hooks() {
 
 function registerPriceaggregatorReceivevalidatedbatch1Tests1() {
 
-    // ---- D13: per-round dedupe, the defect this row exists to prevent ----
+    // ---- D14: the pair-name flag day keys on the batch's block_time ----
 
-    it('stores the five good rounds of a six-round batch when ONE round is already finalized (D13)', async function () {
-        let inserts = stubDb([102]);                 // round 102 already has a finalized row
-        let events  = [];
-        agg.on('row:inserted', e => events.push(e));
+    it('keys the pair-name flag day on the batch block_time, not on the round timestamps (D14)', async function () {
+        // The subject is WHICH timestamp keys the gate, not which network is armed.
+        // Mainnet armed at genesis on 2026-09-09, so nothing shipped straddles a
+        // threshold any more; this pins one on mainnet for the duration of the case.
+        // The rounds are stamped far below it and the landing block is above it, which
+        // is exactly the ~70 minute hub/chain skew batching creates: keyed on the round
+        // timestamps the hub would refuse a whole hour the chain accepted.
+        const shipped = PRICE_PAIR_WIDEN_ACTIVATION.mainnet;
+        PRICE_PAIR_WIDEN_ACTIVATION.mainnet = 5000000000;
+        try {
+            hub.network = 'mainnet';
+            let inserts = stubDb([]);
+            let rounds  = makeRounds().map(r => ({
+                ...r,
+                btc_block_height: 799000,                 // one side of every mainnet flag day
+                pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]   // 6-character ticker, widened bound only
+            }));
+            // Every round shares anchor 799000, so the header anchor is 799000 too (§4).
+            let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
 
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch());
+            let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: 799000, block_time: 10000000000
+            }));
 
-        expect(result).to.deep.equal({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
+            expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+            expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
 
-        // Five INSERTs, one per stored round, and NONE for the deduped round.
-        expect(inserts.length).to.equal(5);
-        let storedRounds = inserts.map(p => decodeInsert(p)[0].round_number);
-        expect(storedRounds).to.deep.equal([100, 101, 103, 104, 105]);
-
-        // The whole-call early return this replaces would have lost five rounds no
-        // other action carries.
-        expect(storedRounds).to.not.include(102);
-        expect(events.length).to.equal(10);          // 5 rounds x 2 pairs, on the WS mirror stream
-    });
-
-    it('stores every round when none is a duplicate, and reports zero duplicates', async function () {
-        let inserts = stubDb([]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-        expect(inserts.length).to.equal(6);
-    });
-
-    it('accepts a fully-duplicate re-push without storing anything (failover double-publish)', async function () {
-        let inserts = stubDb([100, 101, 102, 103, 104, 105]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
-        expect(inserts.length).to.equal(0);
+            // Same batch, landing block BELOW the widening: the legacy 5-character bound
+            // applies and the pair is refused.
+            let below = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: 799000, block_time: 1700004000
+            }));
+            expect(below.accepted).to.equal(false);
+            expect(below.reason).to.equal('invalid pairs');
+        } finally { PRICE_PAIR_WIDEN_ACTIVATION.mainnet = shipped; }
     });
 }
 
-function registerPriceaggregatorReceivevalidatedbatch1Tests4() {
+function registerPriceaggregatorReceivevalidatedbatch1Tests2() {
 
-    // ---- Column semantics (D8, D23) ----
-
-    it('writes the ROUND timestamp as block_timestamp and the PUSH block_index as reference_block (D8)', async function () {
+    it('admits the widened pair on a genesis-armed mainnet, at any landing block (2026-09-09)', async function () {
+        // The shipped rule, with no threshold pinned: 0 PRICE actions have ever been
+        // indexed on any mainnet chain (measured 2026-09-09), so the widened bound is
+        // in force from the first mainnet block that carries a batch.
+        expect(PRICE_PAIR_WIDEN_ACTIVATION.mainnet).to.equal(0);
+        hub.network = 'mainnet';
         let inserts = stubDb([]);
-        let rounds  = makeRounds();
-
-        await agg.receiveValidatedBatch('BTC', makeBatch({ rounds }));
-
-        expect(inserts.length).to.equal(6);
-        inserts.forEach((params, i) => {
-            let rows = decodeInsert(params);
-            rows.forEach(row => {
-                // block_timestamp is the ROUND's own timestamp, the field the fee path reads
-                expect(row.block_timestamp, 'round ' + rounds[i].round + ' block_timestamp')
-                    .to.equal(rounds[i].timestamp);
-                // reference_block is the LANDING block, identical to the v0 ingest path,
-                // and NOT the round's BTC anchor: two consensus readers read this column
-                // and a v2 row that differed here would fork them.
-                expect(row.reference_block, 'round ' + rounds[i].round + ' reference_block')
-                    .to.equal(BLOCK_INDEX);
-                expect(row.reference_block).to.not.equal(rounds[i].btc_block_height);
-                expect(row.reference_block).to.not.equal(BATCH_ANCHOR);
-                expect(row.source_chain).to.equal('BTC');
-                expect(row.source_action_index).to.equal(ACTION_INDEX);
-            });
-        });
+        let rounds  = makeRounds().map(r => ({
+            ...r,
+            btc_block_height: 799000,
+            pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]
+        }));
+        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: 799000, block_time: 1700004000
+        }));
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
     });
 
-    it('writes consensus_proof as {batch:{first_round,last_round,btc_block_height},sigs:[...]} in that key order (D23)', async function () {
+    // ---- Reorg fence ----
+
+    it('drops a batch whose push generation sits at or below a kept retraction generation', async function () {
         let inserts = stubDb([]);
-        let batch   = makeBatch();
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 3, from_action_index: 10 });
+        sinon.stub(console, 'warn');
 
-        await agg.receiveValidatedBatch('BTC', batch);
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ push_generation: 3 }));
 
-        let proof = decodeInsert(inserts[0])[0].consensus_proof;
-        // Byte-exact, because a cross-node comparison of the SERIALIZED value is part
-        // of the acceptance test: a reordering reads as a mismatch on identical content.
-        let expected = JSON.stringify({
-            batch: { first_round: FIRST_ROUND, last_round: LAST_ROUND, btc_block_height: BATCH_ANCHOR },
-            sigs:  batch.sigs.map(s => ({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() }))
-        });
-        expect(proof).to.equal(expected);
-        expect(proof.indexOf('{"batch":{"first_round":')).to.equal(0);
-        // Every round of the batch carries the SAME proof: one signature set, one window.
-        inserts.forEach(p => decodeInsert(p).forEach(row => expect(row.consensus_proof).to.equal(proof)));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.equal('stale (retracted generation)');
+        expect(result.rejected).to.equal(6);
+        expect(inserts.length).to.equal(0);
+        // Never silent: a rebuilt indexer trips this fence on every push.
+        expect(console.warn.calledOnce).to.equal(true);
+        expect(console.warn.firstCall.args[0]).to.match(/PRICE batch/);
+    });
+
+    it('accepts the re-published batch at a higher generation and stamps it on every row', async function () {
+        let inserts = stubDb([]);
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 3, from_action_index: 10 });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ push_generation: 4 }));
+
+        expect(result.accepted).to.equal(true);
+        expect(decodeInsert(inserts[0])[0].push_generation).to.equal(4);
+    });
+}
+
+function registerPriceaggregatorReceivevalidatedbatch1Tests5() {
+
+    it('fails closed when the validator snapshot is unavailable or truncated', async function () {
+        stubDb([]);
+        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(null) };
+        let r1 = await agg.receiveValidatedBatch('BTC', makeBatch());
+        expect(r1.reason).to.equal('validator snapshot unavailable');
+
+        hub.network = 'regtest';                       // stake-weighted quorum active at genesis
+        hub.capabilitySnapshot = {
+            getWeightSnapshot: sinon.stub().resolves({ ...snapshotOf(V), truncated: true })
+        };
+        let r2 = await agg.receiveValidatedBatch('BTC', makeBatch());
+        expect(r2.reason).to.equal('validator snapshot truncated');
     });
 }
 
 describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
     registerPriceaggregatorReceivevalidatedbatch1Tests1();
-    registerPriceaggregatorReceivevalidatedbatch1Tests4();
+    registerPriceaggregatorReceivevalidatedbatch1Tests2();
+    registerPriceaggregatorReceivevalidatedbatch1Tests5();
 });

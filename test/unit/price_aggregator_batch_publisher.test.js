@@ -230,97 +230,56 @@ function registerPriceaggregatorReceivevalidatedbatch1Hooks() {
     });
 }
 
-function registerPriceaggregatorReceivevalidatedbatch1Tests1() {
+function registerHandingALandedBatchTo2Tests1() {
+        it('tells the publisher the range landed when EVERY round is a duplicate, which is the validator case', async function () {
+            stubDb([100, 101, 102, 103, 104, 105]);        // this hub finalized them all itself
+            let publisher = { noteBatchLanded: sinon.stub().returns(6) };
+            hub.oraclePublisher = publisher;
 
-    // ---- D13: per-round dedupe, the defect this row exists to prevent ----
+            let result = await agg.receiveValidatedBatch('DOGE', makeBatch());
 
-    it('stores the five good rounds of a six-round batch when ONE round is already finalized (D13)', async function () {
-        let inserts = stubDb([102]);                 // round 102 already has a finalized row
-        let events  = [];
-        agg.on('row:inserted', e => events.push(e));
-
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch());
-
-        expect(result).to.deep.equal({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
-
-        // Five INSERTs, one per stored round, and NONE for the deduped round.
-        expect(inserts.length).to.equal(5);
-        let storedRounds = inserts.map(p => decodeInsert(p)[0].round_number);
-        expect(storedRounds).to.deep.equal([100, 101, 103, 104, 105]);
-
-        // The whole-call early return this replaces would have lost five rounds no
-        // other action carries.
-        expect(storedRounds).to.not.include(102);
-        expect(events.length).to.equal(10);          // 5 rounds x 2 pairs, on the WS mirror stream
-    });
-
-    it('stores every round when none is a duplicate, and reports zero duplicates', async function () {
-        let inserts = stubDb([]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-        expect(inserts.length).to.equal(6);
-    });
-
-    it('accepts a fully-duplicate re-push without storing anything (failover double-publish)', async function () {
-        let inserts = stubDb([100, 101, 102, 103, 104, 105]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
-        expect(inserts.length).to.equal(0);
-    });
-}
-
-function registerPriceaggregatorReceivevalidatedbatch1Tests4() {
-
-    // ---- Column semantics (D8, D23) ----
-
-    it('writes the ROUND timestamp as block_timestamp and the PUSH block_index as reference_block (D8)', async function () {
-        let inserts = stubDb([]);
-        let rounds  = makeRounds();
-
-        await agg.receiveValidatedBatch('BTC', makeBatch({ rounds }));
-
-        expect(inserts.length).to.equal(6);
-        inserts.forEach((params, i) => {
-            let rows = decodeInsert(params);
-            rows.forEach(row => {
-                // block_timestamp is the ROUND's own timestamp, the field the fee path reads
-                expect(row.block_timestamp, 'round ' + rounds[i].round + ' block_timestamp')
-                    .to.equal(rounds[i].timestamp);
-                // reference_block is the LANDING block, identical to the v0 ingest path,
-                // and NOT the round's BTC anchor: two consensus readers read this column
-                // and a v2 row that differed here would fork them.
-                expect(row.reference_block, 'round ' + rounds[i].round + ' reference_block')
-                    .to.equal(BLOCK_INDEX);
-                expect(row.reference_block).to.not.equal(rounds[i].btc_block_height);
-                expect(row.reference_block).to.not.equal(BATCH_ANCHOR);
-                expect(row.source_chain).to.equal('BTC');
-                expect(row.source_action_index).to.equal(ACTION_INDEX);
-            });
+            expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
+            expect(publisher.noteBatchLanded.calledOnce).to.equal(true);
+            expect(publisher.noteBatchLanded.firstCall.args).to.deep.equal(
+                [FIRST_ROUND, LAST_ROUND, { sourceChain: 'DOGE', actionIndex: ACTION_INDEX }]);
         });
-    });
 
-    it('writes consensus_proof as {batch:{first_round,last_round,btc_block_height},sigs:[...]} in that key order (D23)', async function () {
-        let inserts = stubDb([]);
-        let batch   = makeBatch();
+        it('hands over a batch that stored rows too, and never one it refused', async function () {
+            stubDb([]);
+            let publisher = { noteBatchLanded: sinon.stub().returns(6) };
+            hub.oraclePublisher = publisher;
 
-        await agg.receiveValidatedBatch('BTC', batch);
+            let ok = await agg.receiveValidatedBatch('DOGE', makeBatch());
+            expect(ok.accepted).to.equal(true);
+            expect(publisher.noteBatchLanded.calledOnce).to.equal(true);
 
-        let proof = decodeInsert(inserts[0])[0].consensus_proof;
-        // Byte-exact, because a cross-node comparison of the SERIALIZED value is part
-        // of the acceptance test: a reordering reads as a mismatch on identical content.
-        let expected = JSON.stringify({
-            batch: { first_round: FIRST_ROUND, last_round: LAST_ROUND, btc_block_height: BATCH_ANCHOR },
-            sigs:  batch.sigs.map(s => ({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() }))
+            let refused = await agg.receiveValidatedBatch('DOGE', makeBatch({ signers: V.slice(0, 2) }));
+            expect(refused.accepted).to.equal(false);
+            expect(publisher.noteBatchLanded.calledOnce, 'a refused batch is not on chain as far as this hub can prove').to.equal(true);
         });
-        expect(proof).to.equal(expected);
-        expect(proof.indexOf('{"batch":{"first_round":')).to.equal(0);
-        // Every round of the batch carries the SAME proof: one signature set, one window.
-        inserts.forEach(p => decodeInsert(p).forEach(row => expect(row.consensus_proof).to.equal(proof)));
-    });
+
+        it('a publisher failure or a publisher without the seam never turns an accepted batch into a refusal', async function () {
+            stubDb([100, 101, 102, 103, 104, 105]);
+            sinon.stub(console, 'warn');
+            hub.oraclePublisher = { noteBatchLanded: sinon.stub().throws(new Error('buffer file unwritable')) };
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+            expect(console.warn.calledOnce).to.equal(true);
+
+            hub.oraclePublisher = {};
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+            delete hub.oraclePublisher;
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+        });
+
 }
 
 describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
-    registerPriceaggregatorReceivevalidatedbatch1Tests1();
-    registerPriceaggregatorReceivevalidatedbatch1Tests4();
+
+
+
+    // ---- a landed batch is handed to the publisher even when nothing was stored ----
+    describe('handing a landed batch to the publisher', function () {
+        registerHandingALandedBatchTo2Tests1();
+    });
 });

@@ -232,95 +232,107 @@ function registerPriceaggregatorReceivevalidatedbatch1Hooks() {
 
 function registerPriceaggregatorReceivevalidatedbatch1Tests1() {
 
-    // ---- D13: per-round dedupe, the defect this row exists to prevent ----
-
-    it('stores the five good rounds of a six-round batch when ONE round is already finalized (D13)', async function () {
-        let inserts = stubDb([102]);                 // round 102 already has a finalized row
-        let events  = [];
+    it('re-emits every stored row on the WS mirror stream in the v0 row shape', async function () {
+        stubDb([]);
+        let events = [];
         agg.on('row:inserted', e => events.push(e));
 
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch());
+        await agg.receiveValidatedBatch('BTC', makeBatch());
 
-        expect(result).to.deep.equal({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
-
-        // Five INSERTs, one per stored round, and NONE for the deduped round.
-        expect(inserts.length).to.equal(5);
-        let storedRounds = inserts.map(p => decodeInsert(p)[0].round_number);
-        expect(storedRounds).to.deep.equal([100, 101, 103, 104, 105]);
-
-        // The whole-call early return this replaces would have lost five rounds no
-        // other action carries.
-        expect(storedRounds).to.not.include(102);
-        expect(events.length).to.equal(10);          // 5 rounds x 2 pairs, on the WS mirror stream
+        expect(events.length).to.equal(12);
+        expect(events.every(e => e.table === 'price_snapshots')).to.equal(true);
+        let first = events[0].row;
+        expect(Object.keys(first)).to.deep.equal([
+            'round_number', 'coin_pair', 'price', 'reference_block', 'reference_chain',
+            'block_timestamp', 'validator_count', 'consensus_round', 'consensus_proof',
+            'status', 'source_chain', 'source_action_index', 'push_generation',
+            'batch_block_time', 'created_at', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'
+        ]);
+        // A legacy round (every round below the activation) mirrors NULL admission columns.
+        expect([first.admit_block_btc, first.admit_block_ltc, first.admit_block_doge]).to.deep.equal([null, null, null]);
+        // The landing clock is the LANDING BLOCK's own time, which is neither the round's
+        // pricing timestamp nor a height: that distinction is the only reason the column
+        // exists, so assert it here rather than only that the key is present.
+        expect(first.batch_block_time).to.equal(BLOCK_TIME);
+        expect(first.batch_block_time).to.not.equal(BLOCK_INDEX);
+        expect(first.batch_block_time).to.not.equal(first.block_timestamp);
+        expect(first.round_number).to.equal(100);
+        expect(first.status).to.equal('finalized');
+        expect(first.consensus_round).to.equal(1);
+        expect(first.validator_count).to.equal(3);
     });
 
-    it('stores every round when none is a duplicate, and reports zero duplicates', async function () {
+    // ---- Whole-batch rejection: signatures and structure are atomic ----
+
+    it('rejects the WHOLE batch when the signature set is short of quorum, storing nothing', async function () {
         let inserts = stubDb([]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-        expect(inserts.length).to.equal(6);
-    });
+        let batch   = makeBatch({ signers: V.slice(0, 2) });   // 2 of 4, quorum is 3
 
-    it('accepts a fully-duplicate re-push without storing anything (failover double-publish)', async function () {
-        let inserts = stubDb([100, 101, 102, 103, 104, 105]);
-        let result  = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
+        let result = await agg.receiveValidatedBatch('BTC', batch);
+
+        expect(result.accepted).to.equal(false);
+        expect(result.stored).to.equal(0);
+        expect(result.duplicates).to.equal(0);
+        expect(result.rejected).to.equal(6);
+        expect(result.reason).to.match(/insufficient quorum/);
         expect(inserts.length).to.equal(0);
     });
 }
 
-function registerPriceaggregatorReceivevalidatedbatch1Tests4() {
+function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
 
-    // ---- Column semantics (D8, D23) ----
-
-    it('writes the ROUND timestamp as block_timestamp and the PUSH block_index as reference_block (D8)', async function () {
+    it('rejects the WHOLE batch when one round was tampered with after signing', async function () {
         let inserts = stubDb([]);
         let rounds  = makeRounds();
+        let sigs    = signBatch(rounds);
+        rounds[3].pairs[0].price = '99999';           // repriced after the validators signed
 
-        await agg.receiveValidatedBatch('BTC', makeBatch({ rounds }));
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds, sigs }));
 
-        expect(inserts.length).to.equal(6);
-        inserts.forEach((params, i) => {
-            let rows = decodeInsert(params);
-            rows.forEach(row => {
-                // block_timestamp is the ROUND's own timestamp, the field the fee path reads
-                expect(row.block_timestamp, 'round ' + rounds[i].round + ' block_timestamp')
-                    .to.equal(rounds[i].timestamp);
-                // reference_block is the LANDING block, identical to the v0 ingest path,
-                // and NOT the round's BTC anchor: two consensus readers read this column
-                // and a v2 row that differed here would fork them.
-                expect(row.reference_block, 'round ' + rounds[i].round + ' reference_block')
-                    .to.equal(BLOCK_INDEX);
-                expect(row.reference_block).to.not.equal(rounds[i].btc_block_height);
-                expect(row.reference_block).to.not.equal(BATCH_ANCHOR);
-                expect(row.source_chain).to.equal('BTC');
-                expect(row.source_action_index).to.equal(ACTION_INDEX);
-            });
-        });
+        expect(result.accepted).to.equal(false);
+        expect(result.rejected).to.equal(6);
+        expect(inserts.length).to.equal(0);
     });
 
-    it('writes consensus_proof as {batch:{first_round,last_round,btc_block_height},sigs:[...]} in that key order (D23)', async function () {
+    it('rejects a batch whose rounds are not strictly ascending, or fall outside the declared window', async function () {
         let inserts = stubDb([]);
-        let batch   = makeBatch();
 
-        await agg.receiveValidatedBatch('BTC', batch);
+        let dupRounds = makeRounds();
+        dupRounds[2].round = dupRounds[1].round;      // repeated round number
+        let r1 = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds: dupRounds }));
+        expect(r1.accepted).to.equal(false);
+        expect(r1.reason).to.match(/ascending/);
 
-        let proof = decodeInsert(inserts[0])[0].consensus_proof;
-        // Byte-exact, because a cross-node comparison of the SERIALIZED value is part
-        // of the acceptance test: a reordering reads as a mismatch on identical content.
-        let expected = JSON.stringify({
-            batch: { first_round: FIRST_ROUND, last_round: LAST_ROUND, btc_block_height: BATCH_ANCHOR },
-            sigs:  batch.sigs.map(s => ({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() }))
-        });
-        expect(proof).to.equal(expected);
-        expect(proof.indexOf('{"batch":{"first_round":')).to.equal(0);
-        // Every round of the batch carries the SAME proof: one signature set, one window.
-        inserts.forEach(p => decodeInsert(p).forEach(row => expect(row.consensus_proof).to.equal(proof)));
+        let outside = makeRounds();
+        outside[5].round = LAST_ROUND + 9;            // beyond last_round
+        let r2 = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds: outside }));
+        expect(r2.accepted).to.equal(false);
+        expect(r2.reason).to.match(/outside window/);
+
+        expect(inserts.length).to.equal(0);
+    });
+
+    it('rejects a batch with an empty round list, a bad window or a missing block_time', async function () {
+        stubDb([]);
+        let empty = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds: [] }));
+        expect(empty).to.deep.equal({ accepted: false, stored: 0, duplicates: 0, rejected: 0, reason: 'invalid batchData' });
+
+        let inverted = await agg.receiveValidatedBatch('BTC', makeBatch({ first_round: 200 }));
+        expect(inverted.accepted).to.equal(false);
+        expect(inverted.reason).to.equal('invalid round window');
+
+        let noTime = await agg.receiveValidatedBatch('BTC', makeBatch({ block_time: undefined }));
+        expect(noTime.accepted).to.equal(false);
+        expect(noTime.reason).to.equal('invalid block_time');
+
+        // A coerced-to-zero block_time would read as "before every flag day"; refused.
+        let zeroTime = await agg.receiveValidatedBatch('BTC', makeBatch({ block_time: 0 }));
+        expect(zeroTime.reason).to.equal('invalid block_time');
     });
 }
 
 describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
     registerPriceaggregatorReceivevalidatedbatch1Tests1();
-    registerPriceaggregatorReceivevalidatedbatch1Tests4();
+    registerPriceaggregatorReceivevalidatedbatch1Tests3();
 });
