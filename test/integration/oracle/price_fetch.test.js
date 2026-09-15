@@ -20,7 +20,17 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
     after(function ()  { mockApi.teardown(); });
     beforeEach(function () { mockApi.reset(); });
 
-    // SC-1.1: Normal dual-source price fetch and aggregation
+    registerDualSourceTests();
+    registerSingleSourceTests();
+    registerBothSourcesFailTests();
+    registerTimeoutTests();
+    registerMalformedResponseTests();
+    registerApiKeyTests();
+    registerMultiFiatTests();
+});
+
+// SC-1.1: Normal dual-source price fetch and aggregation
+function registerDualSourceTests() {
     describe('SC-1.1: Dual-source fetch', function () {
         it('computes local median from CoinGecko and CoinMarketCap', async function () {
             mockApi.mockCoinGeckoSuccess({ bitcoin: { usd: 100000 }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 } });
@@ -54,8 +64,10 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(doge.sources).to.equal(2);
         });
     });
+}
 
-    // SC-1.2: Single source failure with graceful degradation
+// SC-1.2: Single source failure with graceful degradation
+function registerSingleSourceTests() {
     describe('SC-1.2: Single source failure', function () {
         it('returns prices from CoinGecko when CoinMarketCap fails', async function () {
             mockApi.mockCoinGeckoSuccess();
@@ -88,8 +100,10 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(btc.sources).to.equal(1);
         });
     });
+}
 
-    // SC-1.3: Both sources fail
+// SC-1.3: Both sources fail
+function registerBothSourcesFailTests() {
     describe('SC-1.3: Both sources fail', function () {
         it('returns empty array when all sources fail', async function () {
             mockApi.mockCoinGeckoError(500);
@@ -104,8 +118,10 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(prices).to.be.an('array').with.lengthOf(0);
         });
     });
+}
 
-    // SC-1.4: API timeout handling
+// SC-1.4: API timeout handling
+function registerTimeoutTests() {
     describe('SC-1.4: Timeout handling', function () {
         it('handles CoinGecko timeout while using CoinMarketCap', async function () {
             this.timeout(10000);
@@ -123,8 +139,10 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(btc.sources).to.equal(1);
         });
     });
+}
 
-    // SC-1.5: Malformed API response
+// SC-1.5: Malformed API response
+function registerMalformedResponseTests() {
     describe('SC-1.5: Malformed response', function () {
         it('handles CoinGecko returning incomplete data', async function () {
             mockApi.mockCoinGeckoSuccess({ bitcoin: {} });
@@ -146,8 +164,10 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(prices).to.be.an('array').with.lengthOf(0);
         });
     });
+}
 
-    // SC-1.6: API key header propagation
+// SC-1.6: API key header propagation
+function registerApiKeyTests() {
     describe('SC-1.6: API key headers', function () {
         it('sends CoinGecko API key header when configured', async function () {
             let scope = nockCoinGeckoWithHeaderCheck('test-cg-key');
@@ -173,12 +193,14 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(scope.isDone()).to.be.true;
         });
     });
+}
 
-    // SC-1.7: Full multi-fiat fetch: all 3 coins × 12 fiats = 36 pairs.
-    // The other scenarios use USD-only fixtures; this one exercises the complete
-    // multi-fiat parse + median path and guards precision at high magnitudes
-    // (KRW/JPY values near the price cap), where parseFloat + toFixed(8) is most
-    // susceptible to floating-point regressions.
+// SC-1.7: Full multi-fiat fetch: all 3 coins × 12 fiats = 36 pairs.
+// The other scenarios use USD-only fixtures; this one exercises the complete
+// multi-fiat parse + median path and guards precision at high magnitudes
+// (KRW/JPY values near the price cap), where parseFloat + toFixed(8) is most
+// susceptible to floating-point regressions.
+function registerMultiFiatTests() {
     describe('SC-1.7: Full multi-fiat fetch (all 36 pairs)', function () {
         it('returns all 36 coin/fiat pairs from a full dual-source response', async function () {
             mockApi.mockCoinGeckoSuccess(mockApi.FULL_COINGECKO_RESPONSE);
@@ -226,7 +248,7 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(byPair['LTC/JPY'].price).to.equal('13345.50000000');
         });
     });
-});
+}
 
 // Helper: nock interceptor that validates the CoinGecko API key header
 function nockCoinGeckoWithHeaderCheck(apiKey) {
