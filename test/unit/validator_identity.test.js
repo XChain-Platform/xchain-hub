@@ -13,13 +13,24 @@
 const { expect }          = require('chai');
 const ValidatorIdentity   = require('../../src/validators/identity');
 
-describe('ValidatorIdentity', function () {
+// Pre-generate a keypair for reuse across tests
+let keypair;
 
-    // Pre-generate a keypair for reuse across tests
-    let keypair;
+describe('ValidatorIdentity', function () {
     before(function () {
         keypair = ValidatorIdentity.generate();
     });
+
+    registerIdentityGenerationTests();
+    registerIdentityConstructorTests();
+    registerIdentityPubkeyTests();
+    registerIdentitySignatureTests();
+    registerIdentityEnvelopeTests();
+    registerIdentityBindingTests();
+    registerIdentityConversionTests();
+});
+
+function registerIdentityGenerationTests() {
 
     // -----------------------------------------------------------------
     // generate()
@@ -39,6 +50,9 @@ describe('ValidatorIdentity', function () {
             expect(a.privkeyHex).to.not.equal(b.privkeyHex);
         });
     });
+}
+
+function registerIdentityConstructorTests() {
 
     // -----------------------------------------------------------------
     // constructor
@@ -76,6 +90,9 @@ describe('ValidatorIdentity', function () {
             expect(() => new ValidatorIdentity('zz' + 'aa'.repeat(31))).to.throw();
         });
     });
+}
+
+function registerIdentityPubkeyTests() {
 
     // -----------------------------------------------------------------
     // getPubkeyHex()
@@ -87,6 +104,9 @@ describe('ValidatorIdentity', function () {
             expect(id.getPubkeyHex()).to.match(/^[0-9a-f]{64}$/);
         });
     });
+}
+
+function registerIdentitySignatureTests() {
 
     // -----------------------------------------------------------------
     // sign() / verify()
@@ -130,6 +150,9 @@ describe('ValidatorIdentity', function () {
             expect(ValidatorIdentity.verify('test', 'not-valid-hex', keypair.pubkeyHex)).to.be.false;
         });
     });
+}
+
+function registerIdentityEnvelopeTests() {
 
     // -----------------------------------------------------------------
     // signEnvelope() / verifyEnvelope()
@@ -168,6 +191,9 @@ describe('ValidatorIdentity', function () {
             expect(Object.keys(parsed)).to.deep.equal(['id', 'type', 'sender', 'timestamp', 'data']);
         });
     });
+}
+
+function registerIdentityBindingTests() {
 
     // -----------------------------------------------------------------
     // Option A: sig_pubkey binding into the canonical payload
@@ -212,6 +238,9 @@ describe('ValidatorIdentity', function () {
             expect(ValidatorIdentity.verifyEnvelope(env, keypair.pubkeyHex)).to.be.false;
         });
     });
+}
+
+function registerIdentityConversionTests() {
 
     // -----------------------------------------------------------------
     // pubkeyFromHex()
@@ -231,4 +260,4 @@ describe('ValidatorIdentity', function () {
             expect(() => ValidatorIdentity.pubkeyFromHex(null)).to.throw();
         });
     });
-});
+}
