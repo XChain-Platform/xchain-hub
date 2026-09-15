@@ -31,101 +31,112 @@ const proxyquire = require('proxyquire').noPreserveCache();
 const { waitUntil } = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub');
 
-describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
-    this.timeout(20000);
+function makeApiDoubles(hubOverrides) {
+    const captured = { methods: null, routes: new Map(), middlewares: [] };
+    const mockApp = {
+        use: sinon.stub().callsFake((...args) => {
+            const fn = args[args.length - 1];
+            if(typeof fn === 'function') captured.middlewares.push({ path: (typeof args[0] === 'string' ? args[0] : null), fn });
+        }),
+        get: sinon.stub().callsFake((path, handler) => {
+            if(typeof path === 'string' && typeof handler === 'function') captured.routes.set(path, handler);
+        }),
+        post: sinon.stub(), set: sinon.stub(),
+        listen: sinon.stub().callsFake((port, host, cb) => { if(cb) cb(); })
+    };
+    const mockExpress = sinon.stub().returns(mockApp);
+    mockExpress.json = sinon.stub().returns(function expressJson(){});
+    const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if(cb) cb(); }), on: sinon.stub() };
+    const mockHub = Object.assign({
+        // Spread first so the /hub-db/snapshot routes' named methods
+        // (findBridgeTransfers, findPolicySnapshots, ...) still route through the
+        // doQuery stub below rather than throwing "is not a function".
+        db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), getChainTip: sinon.stub().resolves(null) },
+        network: 'regtest',
+        capabilitySnapshot: null,
+        getPeerManager: () => null,
+        getAttestationRound: () => null,
+        getProviderRegistry: () => null,
+        _resolveBtcIndexerUrl: async () => null,
+        btcIndexerHeaders: () => ({}),
+        start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
+        startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
+        startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
+        on: () => {}
+    }, hubOverrides || {});
+    return { captured, mockExpress, mockServer, mockHub };
+}
 
-    async function bootApi({ envOverrides, hubOverrides } = {}){
-        const captured = { methods: null, routes: new Map(), middlewares: [] };
-        const mockApp = {
-            use: sinon.stub().callsFake((...args) => {
-                const fn = args[args.length - 1];
-                if(typeof fn === 'function') captured.middlewares.push({ path: (typeof args[0] === 'string' ? args[0] : null), fn });
-            }),
-            get: sinon.stub().callsFake((path, handler) => {
-                if(typeof path === 'string' && typeof handler === 'function') captured.routes.set(path, handler);
-            }),
-            post: sinon.stub(), set: sinon.stub(),
-            listen: sinon.stub().callsFake((port, host, cb) => { if(cb) cb(); })
-        };
-        const mockExpress = sinon.stub().returns(mockApp);
-        mockExpress.json = sinon.stub().returns(function expressJson(){});
-        const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if(cb) cb(); }), on: sinon.stub() };
+function saveApiEnvironment(envOverrides) {
+    const envKeys = ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
+                     'P2P_VALIDATOR_ADDR', 'ORACLE_EPOCH_START', 'HUB_NETWORK'];
+    const saved = {};
+    for(const k of envKeys){ saved[k] = process.env[k]; delete process.env[k]; }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '0', HUB_API_KEY: 'bulkkey'
+    }, envOverrides || {});
+    return saved;
+}
 
-        const mockHub = Object.assign({
-            // Spread first so the /hub-db/snapshot routes' named methods
-            // (findBridgeTransfers, findPolicySnapshots, ...) still route through the
-            // doQuery stub below rather than throwing "is not a function".
-            db: { ...DB_METHODS, doQuery: sinon.stub().resolves([]), getChainTip: sinon.stub().resolves(null) },
-            network: 'regtest',
-            capabilitySnapshot: null,
-            getPeerManager: () => null,
-            getAttestationRound: () => null,
-            getProviderRegistry: () => null,
-            _resolveBtcIndexerUrl: async () => null,
-            btcIndexerHeaders: () => ({}),
-            start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
-            startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
-            startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
-            on: () => {}
-        }, hubOverrides || {});
-
-        const envKeys = ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
-                         'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
-                         'P2P_VALIDATOR_ADDR', 'ORACLE_EPOCH_START', 'HUB_NETWORK'];
-        const saved = {};
-        for(const k of envKeys){ saved[k] = process.env[k]; delete process.env[k]; }
-        Object.assign(process.env, {
-            HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-            HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '0', HUB_API_KEY: 'bulkkey'
-        }, envOverrides || {});
-        try {
-            proxyquire('../../src/api', {
-                'dotenv': { config: sinon.stub() },
-                'express': mockExpress,
-                'helmet': sinon.stub().returns(function helmetMw(){}),
-                'cors': sinon.stub().returns(function corsMw(){}),
-                'express-rate-limit': sinon.stub().returns(function rateLimitMw(){}),
-                'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw(){}; },
-                'http': { createServer: sinon.stub().returns(mockServer) },
-                'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-                'geoip-lite': { lookup: sinon.stub().returns(null) },
-                'axios': { post: sinon.stub().rejects(new Error('no axios stub configured')) },
-                './XChainHub': function(){ return mockHub; }
-            });
-        } finally {
-            for(const [k, v] of Object.entries(saved)){
-                if(v === undefined) delete process.env[k]; else process.env[k] = v;
-            }
-        }
-        await waitUntil(() => captured.methods, { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
-        return { methods: captured.methods, routes: captured.routes, middlewares: captured.middlewares, hub: mockHub };
+function restoreApiEnvironment(saved) {
+    for(const [k, v] of Object.entries(saved)){
+        if(v === undefined) delete process.env[k]; else process.env[k] = v;
     }
+}
 
-    // The JSON-RPC key gate, picked out by a closure reference unique to it, so the
-    // tier a method sits in is read off the code that gates real requests.
-    function keyGate(middlewares){
-        const hit = middlewares.find(m => !m.path && /callWantsConfigSecrets/.test(String(m.fn)));
-        expect(hit, 'the JSON-RPC key gate middleware must be registered').to.not.equal(undefined);
-        return hit.fn;
-    }
+function loadApi(captured, mockExpress, mockServer, mockHub) {
+    proxyquire('../../src/api', {
+        'dotenv': { config: sinon.stub() },
+        'express': mockExpress,
+        'helmet': sinon.stub().returns(function helmetMw(){}),
+        'cors': sinon.stub().returns(function corsMw(){}),
+        'express-rate-limit': sinon.stub().returns(function rateLimitMw(){}),
+        'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw(){}; },
+        'http': { createServer: sinon.stub().returns(mockServer) },
+        'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+        'geoip-lite': { lookup: sinon.stub().returns(null) },
+        'axios': { post: sinon.stub().rejects(new Error('no axios stub configured')) },
+        './XChainHub': function(){ return mockHub; }
+    });
+}
 
-    function runGate(gate, method, apiKey){
-        return new Promise((resolve) => {
-            const req = { body: { jsonrpc: '2.0', method, params: {}, id: 1 }, headers: apiKey ? { 'x-api-key': apiKey } : {} };
-            const res = { status: (code) => ({ json: (body) => resolve({ status: code, body }) }) };
-            gate(req, res, () => resolve({ status: 200 }));
-        });
-    }
+async function bootApi({ envOverrides, hubOverrides } = {}){
+    const { captured, mockExpress, mockServer, mockHub } = makeApiDoubles(hubOverrides);
+    const saved = saveApiEnvironment(envOverrides);
+    try { loadApi(captured, mockExpress, mockServer, mockHub); }
+    finally { restoreApiEnvironment(saved); }
+    await waitUntil(() => captured.methods, { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
+    return { methods: captured.methods, routes: captured.routes, middlewares: captured.middlewares, hub: mockHub };
+}
 
-    function fakeRes(){
-        const out = { status: 200, payload: null, type: function(){ return this; } };
-        out.send = (s) => { out.payload = s; return out; };
-        out.json = (j) => { out.payload = j; return out; };
-        const realStatus = (code) => { out.status = code; return out; };
-        out.status = realStatus;
-        return out;
-    }
+// The JSON-RPC key gate, picked out by a closure reference unique to it, so the
+// tier a method sits in is read off the code that gates real requests.
+function keyGate(middlewares){
+    const hit = middlewares.find(m => !m.path && /callWantsConfigSecrets/.test(String(m.fn)));
+    expect(hit, 'the JSON-RPC key gate middleware must be registered').to.not.equal(undefined);
+    return hit.fn;
+}
 
+function runGate(gate, method, apiKey){
+    return new Promise((resolve) => {
+        const req = { body: { jsonrpc: '2.0', method, params: {}, id: 1 }, headers: apiKey ? { 'x-api-key': apiKey } : {} };
+        const res = { status: (code) => ({ json: (body) => resolve({ status: code, body }) }) };
+        gate(req, res, () => resolve({ status: 200 }));
+    });
+}
+
+function fakeRes(){
+    const out = { status: 200, payload: null, type: function(){ return this; } };
+    out.send = (s) => { out.payload = s; return out; };
+    out.json = (j) => { out.payload = j; return out; };
+    const realStatus = (code) => { out.status = code; return out; };
+    out.status = realStatus;
+    return out;
+}
+
+function registerInvariantApiTests() {
     // ------------------------------------------------------------------
     describe('getbridgeinvariant', function(){
 
@@ -161,7 +172,9 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
             expect((await runGate(gate, 'updateconfig')).status).to.equal(401);
         });
     });
+}
 
+function registerReorgApiTests() {
     // ------------------------------------------------------------------
     describe('pushbridgereorg', function(){
 
@@ -216,7 +229,9 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
             expect(await run('updateconfig')).to.equal(404);      // still private-port only
         });
     });
+}
 
+function registerSnapshotRouteTests() {
     // ------------------------------------------------------------------
     describe('/hub-db/snapshot routes', function(){
 
@@ -270,4 +285,11 @@ describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
             expect(res.payload).to.deep.equal({ error: 'snapshot error' });
         });
     });
+}
+
+describe('CrossChainBridgeEngine API surfaces (hub api.js)', function(){
+    this.timeout(20000);
+    registerInvariantApiTests();
+    registerReorgApiTests();
+    registerSnapshotRouteTests();
 });
