@@ -26,73 +26,73 @@ const proxyquire = require('proxyquire').noPreserveCache();
 
 const { waitUntil } = require('../helpers/waitUntil');
 
+
+// Boot src/api.js with everything heavy stubbed and capture its RPC methods.
+async function bootApi(oracle) {
+    const captured = { methods: null };
+    const mockApp = {
+        use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
+        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
+    };
+    const mockExpress = sinon.stub().returns(mockApp);
+    mockExpress.json = sinon.stub().returns(function expressJson() {});
+    const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
+
+    const mockHub = {
+        db: { doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
+        stateAnchorPublisher: null,
+        attestationPublisher: null,
+        attestationRelay:     null,
+        hubDbBroadcaster:     null,
+        getOracle: () => oracle,
+        oracleMaxAgeSeconds: () => 1800,
+        start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
+        startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
+        startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
+        on: () => {}
+    };
+
+    const saved = {};
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
+                     'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
+        saved[k] = process.env[k];
+        delete process.env[k];
+    }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9995', HUB_API_KEY: 'k'
+    });
+
+    try {
+        proxyquire('../../src/api', {
+            'dotenv': { config: sinon.stub() },
+            'express': mockExpress,
+            'helmet': sinon.stub().returns(function helmetMw() {}),
+            'cors': sinon.stub().returns(function corsMw() {}),
+            'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
+            'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
+            'http': { createServer: sinon.stub().returns(mockServer) },
+            'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+            'geoip-lite': { lookup: sinon.stub().returns(null) },
+            './XChainHub': function () { return mockHub; }
+        });
+    } finally {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+    await waitUntil(() => captured.methods,
+        { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
+    return captured.methods;
+}
 describe('getoraclesubmissions role reporting', function () {
+
+    afterEach(function () { sinon.restore(); });
 
     // The first proxyquire boot pays the cold require of the whole hub tree.
     this.timeout(20000);
-
-    // Boot src/api.js with everything heavy stubbed and capture its RPC methods.
-    async function bootApi(oracle) {
-        const captured = { methods: null };
-        const mockApp = {
-            use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
-            listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
-        };
-        const mockExpress = sinon.stub().returns(mockApp);
-        mockExpress.json = sinon.stub().returns(function expressJson() {});
-        const mockServer = { listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); }), on: sinon.stub() };
-
-        const mockHub = {
-            db: { doQuery: sinon.stub().resolves([]), circuitState: 'closed' },
-            stateAnchorPublisher: null,
-            attestationPublisher: null,
-            attestationRelay:     null,
-            hubDbBroadcaster:     null,
-            getOracle: () => oracle,
-            oracleMaxAgeSeconds: () => 1800,
-            start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
-            startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
-            startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
-            on: () => {}
-        };
-
-        const saved = {};
-        for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
-                         'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
-                         'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
-            saved[k] = process.env[k];
-            delete process.env[k];
-        }
-        Object.assign(process.env, {
-            HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-            HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9995', HUB_API_KEY: 'k'
-        });
-
-        try {
-            proxyquire('../../src/api', {
-                'dotenv': { config: sinon.stub() },
-                'express': mockExpress,
-                'helmet': sinon.stub().returns(function helmetMw() {}),
-                'cors': sinon.stub().returns(function corsMw() {}),
-                'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
-                'express-json-rpc-router': (opts) => { captured.methods = opts.methods; return function routerMw() {}; },
-                'http': { createServer: sinon.stub().returns(mockServer) },
-                'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-                'geoip-lite': { lookup: sinon.stub().returns(null) },
-                './XChainHub': function () { return mockHub; }
-            });
-        } finally {
-            for (const [k, v] of Object.entries(saved)) {
-                if (v === undefined) delete process.env[k];
-                else process.env[k] = v;
-            }
-        }
-        await waitUntil(() => captured.methods,
-            { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
-        return captured.methods;
-    }
-
-    afterEach(function () { sinon.restore(); });
 
     it('answers active:false, with no error field, on a hub that runs no oracle round', async function () {
         const methods = await bootApi(null);
@@ -115,4 +115,5 @@ describe('getoraclesubmissions role reporting', function () {
         expect(result.submissions).to.deep.equal(info.submissions);
         expect(result.oracleMaxPriceAgeSeconds).to.equal(1800);
     });
+
 });
