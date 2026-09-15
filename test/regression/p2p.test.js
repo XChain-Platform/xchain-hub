@@ -16,19 +16,52 @@ const ValidatorIdentity  = require('../../src/validators/identity');
 const PeerManager        = require('../../src/peers/manager');
 const { DB_METHODS }     = require('../helpers/mockHub');
 
-describe('Regression: P2P & ValidatorIdentity', function () {
+// =================================================================
+// ValidatorIdentity
+// =================================================================
 
-    // =================================================================
-    // ValidatorIdentity
-    // =================================================================
-
+function registerSuitePart1() {
     describe('ValidatorIdentity', function () {
+    registerNestedSuite1Part1();
+    registerNestedSuite1Part2();
+    registerNestedSuite1Part3();
+    registerNestedSuite1Part4();
+    registerNestedSuite1Part5();
+    registerNestedSuite1Part6();
 
-        let keypair;
-        before(function () { keypair = ValidatorIdentity.generate(); });
+    });
+}
 
-        // REG-P2P-007
-        describe('REG-P2P-007: Ed25519 sign/verify round-trip', function () {
+// =================================================================
+// PeerManager
+// =================================================================
+
+function registerSuitePart2() {
+    describe('PeerManager', function () {
+    registerNestedSuite2Part1();
+    registerNestedSuite2Part2();
+    registerNestedSuite2Part3();
+    registerNestedSuite2Part4();
+    registerNestedSuite2Part5();
+    registerNestedSuite2Part6();
+    registerNestedSuite2Part7();
+    registerNestedSuite2Part8();
+
+    });
+}
+
+describe('Regression: P2P & ValidatorIdentity', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+
+});
+      let keypair;
+     function registerNestedSuite1Part1() {
+    before(function () { keypair = ValidatorIdentity.generate(); });
+}
+      // REG-P2P-007
+    function registerNestedSuite1Part2() {
+    describe('REG-P2P-007: Ed25519 sign/verify round-trip', function () {
             it('valid signature verifies successfully @regression-p0', function () {
                 let id  = new ValidatorIdentity(keypair.privkeyHex);
                 let sig = id.sign('hello world');
@@ -47,9 +80,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(ValidatorIdentity.verifyEnvelope(envelope, keypair.pubkeyHex)).to.be.true;
             });
         });
-
-        // REG-P2P-008
-        describe('REG-P2P-008: Invalid signatures rejected', function () {
+}
+      // REG-P2P-008
+    function registerNestedSuite1Part3() {
+    describe('REG-P2P-008: Invalid signatures rejected', function () {
             it('tampered payload fails verification @regression-p0', function () {
                 let id  = new ValidatorIdentity(keypair.privkeyHex);
                 let sig = id.sign('hello world');
@@ -81,9 +115,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(ValidatorIdentity.verifyEnvelope(envelope, keypair.pubkeyHex)).to.be.false;
             });
         });
-
-        // REG-P2P-010
-        describe('REG-P2P-010: Identity from 64-hex-char seed', function () {
+}
+      // REG-P2P-010
+    function registerNestedSuite1Part4() {
+    describe('REG-P2P-010: Identity from 64-hex-char seed', function () {
             it('creates identity deterministically @regression-p1', function () {
                 let a = new ValidatorIdentity(keypair.privkeyHex);
                 let b = new ValidatorIdentity(keypair.privkeyHex);
@@ -112,9 +147,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(a.pubkeyHex).to.not.equal(b.pubkeyHex);
             });
         });
-
-        // Deterministic field ordering
-        describe('Deterministic field ordering', function () {
+}
+      // Deterministic field ordering
+    function registerNestedSuite1Part5() {
+    describe('Deterministic field ordering', function () {
             it('getSignablePayload uses fixed key order @regression-p0', function () {
                 let envelope = { id: 'x', type: 'T', sender: 's', timestamp: 0, data: null };
                 let payload = ValidatorIdentity.getSignablePayload(envelope);
@@ -122,9 +158,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(Object.keys(parsed)).to.deep.equal(['id', 'type', 'sender', 'timestamp', 'data']);
             });
         });
-
-        // pubkeyFromHex
-        describe('pubkeyFromHex', function () {
+}
+      // pubkeyFromHex
+    function registerNestedSuite1Part6() {
+    describe('pubkeyFromHex', function () {
             it('returns KeyObject from valid hex @regression-p1', function () {
                 let keyObj = ValidatorIdentity.pubkeyFromHex(keypair.pubkeyHex);
                 expect(keyObj.type).to.equal('public');
@@ -134,17 +171,11 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(() => ValidatorIdentity.pubkeyFromHex('aabb')).to.throw('Invalid pubkey hex length');
             });
         });
-    });
+}
 
-    // =================================================================
-    // PeerManager
-    // =================================================================
-
-    describe('PeerManager', function () {
-
-        let config, dbStub, pm, keypair;
-
-        beforeEach(function () {
+      let config, dbStub, pm;
+      function registerNestedSuite2Part1() {
+    beforeEach(function () {
             keypair = ValidatorIdentity.generate();
             config = {
                 P2P_VALIDATOR_ADDR: 'ws://self:10001',
@@ -161,11 +192,13 @@ describe('Regression: P2P & ValidatorIdentity', function () {
             dbStub = { ...DB_METHODS, doQuery: sinon.stub().resolves([]) };
             pm = new PeerManager(config, dbStub);
         });
-
-        afterEach(function () { sinon.restore(); });
-
-        // REG-P2P-001
-        describe('REG-P2P-001: Message broadcast', function () {
+}
+      function registerNestedSuite2Part2() {
+    afterEach(function () { sinon.restore(); });
+}
+      // REG-P2P-001
+    function registerNestedSuite2Part3() {
+    describe('REG-P2P-001: Message broadcast', function () {
             it('broadcast returns envelope with correct type @regression-p1', function () {
                 let result = pm.broadcast('TEST', { val: 1 });
                 expect(result).to.have.property('id');
@@ -187,9 +220,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(a.id).to.not.equal(b.id);
             });
         });
-
-        // REG-P2P-002
-        describe('REG-P2P-002: Message deduplication', function () {
+}
+      // REG-P2P-002
+    function registerNestedSuite2Part4() {
+    describe('REG-P2P-002: Message deduplication', function () {
             let mockWs;
             beforeEach(function () {
                 mockWs = { _peerAddr: 'ws://peer:10001', send: sinon.stub() };
@@ -213,9 +247,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(emitted).to.equal(1);
             });
         });
-
-        // REG-P2P-009
-        describe('REG-P2P-009: Signature enforcement', function () {
+}
+      // REG-P2P-009
+    function registerNestedSuite2Part5() {
+    describe('REG-P2P-009: Signature enforcement', function () {
             it('valid signature accepted when REQUIRE_SIGNATURES=true @regression-p0', function () {
                 pm.requireSigs = true;
                 let identity = new ValidatorIdentity(keypair.privkeyHex);
@@ -251,9 +286,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(pm.verifySignature(env)).to.be.true;
             });
         });
-
-        // Envelope signature inclusion
-        describe('Envelope signature inclusion', function () {
+}
+      // Envelope signature inclusion
+    function registerNestedSuite2Part6() {
+    describe('Envelope signature inclusion', function () {
             it('includes sig when identity is set @regression-p1', function () {
                 let identity = new ValidatorIdentity(keypair.privkeyHex);
                 pm.setIdentity(identity);
@@ -268,9 +304,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(env.sig).to.be.undefined;
             });
         });
-
-        // Invalid JSON handling
-        describe('Invalid JSON handling', function () {
+}
+      // Invalid JSON handling
+    function registerNestedSuite2Part7() {
+    describe('Invalid JSON handling', function () {
             it('does not crash on non-JSON message @regression-p2', function () {
                 let emitted = 0;
                 pm.on('message', () => emitted++);
@@ -282,9 +319,10 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(() => pm.handleInbound(null, '', 'ws://peer:10001')).to.not.throw();
             });
         });
-
-        // Setter methods
-        describe('Setter methods', function () {
+}
+      // Setter methods
+    function registerNestedSuite2Part8() {
+    describe('Setter methods', function () {
             it('setIdentity stores identity @regression-p2', function () {
                 let identity = new ValidatorIdentity(keypair.privkeyHex);
                 pm.setIdentity(identity);
@@ -297,5 +335,4 @@ describe('Regression: P2P & ValidatorIdentity', function () {
                 expect(pm.validatorPubkeys).to.equal(map);
             });
         });
-    });
-});
+}
