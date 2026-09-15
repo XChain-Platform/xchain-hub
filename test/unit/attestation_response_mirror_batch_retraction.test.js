@@ -174,11 +174,98 @@ function identities(n){
     return out;
 }
 
-describe('retractattestbatch: the hub retraction half', function () {
+function registerBatchRetractionFaultTest() {
+it('refuses a retraction for another network, and one with no usable identity', async function () {
+        let signers = identities(2);
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        await mirror.receiveValidatedBatch('DOGE', makeBatch([makeRow()], signers));
 
-    afterEach(function () { sinon.restore(); });
+        let foreign = await mirror.retractBatchLink('DOGE', makeRetraction({ network: 'testnet' }));
+        expect(foreign.accepted).to.equal(false);
 
-    it('clears the link on every row the un-landed batch carried, and keeps the rows', async function () {
+        let noKey = await mirror.retractBatchLink('DOGE', makeRetraction({ batch_key: 'nothex' }));
+        expect(noKey.accepted).to.equal(false);
+        expect(noKey.reason).to.match(/^invalid/);
+
+        // action_index 0 is a REAL index, so only a missing one is refused; the coercion
+        // trap the receive half documents applies identically here.
+        let noIndex = await mirror.retractBatchLink('DOGE', makeRetraction({ action_index: '' }));
+        expect(noIndex.accepted).to.equal(false);
+
+        let badWindow = await mirror.retractBatchLink('DOGE',
+            makeRetraction({ window_start: WINDOW_END, window_end: WINDOW_START }));
+        expect(badWindow.accepted).to.equal(false);
+
+        expect(hub.db.table[0].batch_action_index,
+            'no refusal may clear anything').to.equal(ACTION_INDEX);
+    });
+}
+
+function registerBatchRetractionEdgeTests() {
+it('is an accepted no-op when nothing is linked, so a replayed retraction never parks', async function () {
+        let signers = identities(2);
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        await mirror.receiveValidatedBatch('DOGE', makeBatch([makeRow()], signers));
+
+        let first  = await mirror.retractBatchLink('DOGE', makeRetraction());
+        hub.hubDbBroadcaster.broadcastRow.resetHistory();
+        let second = await mirror.retractBatchLink('DOGE', makeRetraction());
+
+        expect(first.cleared).to.equal(1);
+        // Accepted, not rejected: the indexer's durable retraction row is uncapped, so a
+        // rejection here would be retried until the end of time.
+        expect(second.accepted).to.equal(true);
+        expect(second.cleared).to.equal(0);
+        expect(second.reason).to.equal(null);
+        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
+    });
+
+    it('lets the batch re-land after the retraction, which is why the link is cleared and not the row', async function () {
+        let signers = identities(2);
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        let rows = [makeRow()];
+
+        await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, signers));
+        await mirror.retractBatchLink('DOGE', makeRetraction());
+        expect(hub.db.table[0].batch_action_index).to.equal(null);
+
+        // The reorg's replay re-mines the batch, which lands at a new action index.
+        let relanded = Object.assign(makeBatch(rows, signers), { action_index: ACTION_INDEX + 40 });
+        let result = await mirror.receiveValidatedBatch('DOGE', relanded);
+
+        expect(result.linked, 'the set-once link only re-arms because the retraction NULLed it').to.equal(1);
+        expect(hub.db.table.length).to.equal(1);
+        expect(hub.db.table[0].batch_action_index).to.equal(ACTION_INDEX + 40);
+    });
+
+    registerBatchRetractionFaultTest();
+}
+
+function registerBatchRetractionIdempotenceTest() {
+it('leaves a link stamped by the same action index but outside the named window', async function () {
+        let signers = identities(2);
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        let inside  = makeRow({ effective_time: WINDOW_END - 1 });
+        // The window is half-open, so a row at the boundary belongs to the NEXT window.
+        let outside = makeRow({ effective_time: WINDOW_END });
+
+        await mirror.receiveValidatedBatch('DOGE', makeBatch([inside, outside], signers));
+        expect(hub.db.table.every(r => r.batch_action_index === ACTION_INDEX)).to.equal(true);
+
+        let result = await mirror.retractBatchLink('DOGE', makeRetraction());
+
+        expect(result.cleared).to.equal(1);
+        expect(hub.db.row(inside.request_id).batch_action_index).to.equal(null);
+        expect(hub.db.row(outside.request_id).batch_action_index).to.equal(ACTION_INDEX);
+    });
+}
+
+function registerBatchRetractionCoreTests() {
+it('clears the link on every row the un-landed batch carried, and keeps the rows', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers });
         let mirror = new AttestationResponseMirror(hub);
@@ -224,85 +311,14 @@ describe('retractattestbatch: the hub retraction half', function () {
         expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
     });
 
-    it('leaves a link stamped by the same action index but outside the named window', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        let inside  = makeRow({ effective_time: WINDOW_END - 1 });
-        // The window is half-open, so a row at the boundary belongs to the NEXT window.
-        let outside = makeRow({ effective_time: WINDOW_END });
+    registerBatchRetractionIdempotenceTest();
+}
 
-        await mirror.receiveValidatedBatch('DOGE', makeBatch([inside, outside], signers));
-        expect(hub.db.table.every(r => r.batch_action_index === ACTION_INDEX)).to.equal(true);
+describe('retractattestbatch: the hub retraction half', function () {
 
-        let result = await mirror.retractBatchLink('DOGE', makeRetraction());
+    afterEach(function () { sinon.restore(); });
 
-        expect(result.cleared).to.equal(1);
-        expect(hub.db.row(inside.request_id).batch_action_index).to.equal(null);
-        expect(hub.db.row(outside.request_id).batch_action_index).to.equal(ACTION_INDEX);
-    });
+    registerBatchRetractionCoreTests();
 
-    it('is an accepted no-op when nothing is linked, so a replayed retraction never parks', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        await mirror.receiveValidatedBatch('DOGE', makeBatch([makeRow()], signers));
-
-        let first  = await mirror.retractBatchLink('DOGE', makeRetraction());
-        hub.hubDbBroadcaster.broadcastRow.resetHistory();
-        let second = await mirror.retractBatchLink('DOGE', makeRetraction());
-
-        expect(first.cleared).to.equal(1);
-        // Accepted, not rejected: the indexer's durable retraction row is uncapped, so a
-        // rejection here would be retried until the end of time.
-        expect(second.accepted).to.equal(true);
-        expect(second.cleared).to.equal(0);
-        expect(second.reason).to.equal(null);
-        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
-    });
-
-    it('lets the batch re-land after the retraction, which is why the link is cleared and not the row', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        let rows = [makeRow()];
-
-        await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, signers));
-        await mirror.retractBatchLink('DOGE', makeRetraction());
-        expect(hub.db.table[0].batch_action_index).to.equal(null);
-
-        // The reorg's replay re-mines the batch, which lands at a new action index.
-        let relanded = Object.assign(makeBatch(rows, signers), { action_index: ACTION_INDEX + 40 });
-        let result = await mirror.receiveValidatedBatch('DOGE', relanded);
-
-        expect(result.linked, 'the set-once link only re-arms because the retraction NULLed it').to.equal(1);
-        expect(hub.db.table.length).to.equal(1);
-        expect(hub.db.table[0].batch_action_index).to.equal(ACTION_INDEX + 40);
-    });
-
-    it('refuses a retraction for another network, and one with no usable identity', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        await mirror.receiveValidatedBatch('DOGE', makeBatch([makeRow()], signers));
-
-        let foreign = await mirror.retractBatchLink('DOGE', makeRetraction({ network: 'testnet' }));
-        expect(foreign.accepted).to.equal(false);
-
-        let noKey = await mirror.retractBatchLink('DOGE', makeRetraction({ batch_key: 'nothex' }));
-        expect(noKey.accepted).to.equal(false);
-        expect(noKey.reason).to.match(/^invalid/);
-
-        // action_index 0 is a REAL index, so only a missing one is refused; the coercion
-        // trap the receive half documents applies identically here.
-        let noIndex = await mirror.retractBatchLink('DOGE', makeRetraction({ action_index: '' }));
-        expect(noIndex.accepted).to.equal(false);
-
-        let badWindow = await mirror.retractBatchLink('DOGE',
-            makeRetraction({ window_start: WINDOW_END, window_end: WINDOW_START }));
-        expect(badWindow.accepted).to.equal(false);
-
-        expect(hub.db.table[0].batch_action_index,
-            'no refusal may clear anything').to.equal(ACTION_INDEX);
-    });
+    registerBatchRetractionEdgeTests();
 });
