@@ -23,21 +23,20 @@ const proxyquire = require('proxyquire');
 const { ConsensusInputMonitor, REASONS, classifyFetchError } =
     require('../../src/validators/consensus_input_monitor.js');
 
-describe('ConsensusInputMonitor', function () {
+// Injected clock + log sink: the monitor's throttle and streak are
+// time-based, and a real clock would make these tests either slow or flaky.
+function makeMonitor(opts) {
+    const lines = [];
+    const clock = { t: 1000000 };
+    const monitor = new ConsensusInputMonitor(Object.assign({
+        throttleMs: 60000,
+        now: () => clock.t,
+        log: (msg) => lines.push(msg)
+    }, opts || {}));
+    return { monitor, lines, clock };
+}
 
-    // Injected clock + log sink: the monitor's throttle and streak are
-    // time-based, and a real clock would make these tests either slow or flaky.
-    function makeMonitor(opts) {
-        const lines = [];
-        const clock = { t: 1000000 };
-        const monitor = new ConsensusInputMonitor(Object.assign({
-            throttleMs: 60000,
-            now: () => clock.t,
-            log: (msg) => lines.push(msg)
-        }, opts || {}));
-        return { monitor, lines, clock };
-    }
-
+function registerCountingTests() {
     describe('counting', function () {
 
         it('counts failures per reason and tracks the consecutive streak', function () {
@@ -74,7 +73,9 @@ describe('ConsensusInputMonitor', function () {
             expect(monitor.snapshot().streak_age_s).to.equal(90);
         });
     });
+}
 
+function registerAlertingTests() {
     describe('alerting', function () {
 
         it('does NOT alert on a single blip (a rolling indexer restart)', function () {
@@ -131,7 +132,9 @@ describe('ConsensusInputMonitor', function () {
             expect(lines.filter(l => l.indexOf('ALERT:') === 0).length).to.equal(2);
         });
     });
+}
 
+function registerThrottleTests() {
     describe('log throttling', function () {
 
         it('logs one line per reason per window', function () {
@@ -169,7 +172,9 @@ describe('ConsensusInputMonitor', function () {
             expect(lines.filter(l => l.indexOf('(unreachable)') !== -1).length).to.equal(2);
         });
     });
+}
 
+function registerFetchClassificationTests() {
     describe('classifyFetchError()', function () {
 
         it('separates an auth mismatch from an outage', function () {
@@ -180,6 +185,13 @@ describe('ConsensusInputMonitor', function () {
             expect(classifyFetchError(undefined)).to.equal(REASONS.UNREACHABLE);
         });
     });
+}
+
+describe('ConsensusInputMonitor', function () {
+    registerCountingTests();
+    registerAlertingTests();
+    registerThrottleTests();
+    registerFetchClassificationTests();
 });
 
 // -----------------------------------------------------------------
@@ -188,33 +200,23 @@ describe('ConsensusInputMonitor', function () {
 // the regression that matters, because the fail-closed nulls are correct
 // and would stay correct while going silent again.
 // -----------------------------------------------------------------
-describe('CapabilitySnapshot consensus-input alarms', function () {
+let axiosStub, CapabilitySnapshot;
 
-    let axiosStub, CapabilitySnapshot;
+function makeHub(opts) {
+    opts = opts || {};
+    return {
+        capabilityRegistry: opts.registry || null,
+        _resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
+        btcIndexerHeaders: () => ({})
+    };
+}
 
-    beforeEach(function () {
-        axiosStub = { post: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
-        // Silence the loud operator lines; the assertions read the monitor.
-        sinon.stub(console, 'error');
-    });
+function okData(block) {
+    return { data: { result: { capability: 'attestation', block_index: block, count: 1,
+                               validators: [{ pubkey: 'ab', amount: '50000' }] } } };
+}
 
-    afterEach(function () { sinon.restore(); });
-
-    function makeHub(opts) {
-        opts = opts || {};
-        return {
-            capabilityRegistry: opts.registry || null,
-            _resolveBtcIndexerUrl: async () => (opts.url === undefined ? 'http://indexer.local/rpc' : opts.url),
-            btcIndexerHeaders: () => ({})
-        };
-    }
-
-    function okData(block) {
-        return { data: { result: { capability: 'attestation', block_index: block, count: 1,
-                                   validators: [{ pubkey: 'ab', amount: '50000' }] } } };
-    }
-
+function registerSnapshotFailureTests() {
     it('records an unreachable indexer (previously the silent case)', async function () {
         axiosStub.post.rejects(new Error('ECONNREFUSED'));
         const snap = new CapabilitySnapshot(makeHub());
@@ -267,7 +269,9 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
             .filter(l => l.indexOf('(min_stake_unconfigured)') !== -1);
         expect(lines.length).to.equal(2);
     });
+}
 
+function registerSnapshotAlertTests() {
     it('a fault-injected outage raises the alert after the third failed fetch', async function () {
         // Fault-inject the consensus input and
         // the alert must fire. Distinct methods/heights so the 60s snapshot
@@ -309,7 +313,9 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
         expect(snap.monitor.snapshot().failures).to.equal(0);
         expect(snap.monitor.snapshot().alerting).to.equal(false);
     });
+}
 
+function registerAlertThresholdTests() {
     describe('HUB_CONSENSUS_INPUT_ALERT_AFTER', function () {
 
         afterEach(function () { delete process.env.HUB_CONSENSUS_INPUT_ALERT_AFTER; });
@@ -329,4 +335,19 @@ describe('CapabilitySnapshot consensus-input alarms', function () {
             expect(new CapabilitySnapshot(makeHub()).monitor.alertAfterFailures).to.equal(3);
         });
     });
+}
+
+describe('CapabilitySnapshot consensus-input alarms', function () {
+    beforeEach(function () {
+        axiosStub = { post: sinon.stub() };
+        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', { axios: axiosStub });
+        // Silence the loud operator lines; the assertions read the monitor.
+        sinon.stub(console, 'error');
+    });
+
+    afterEach(function () { sinon.restore(); });
+
+    registerSnapshotFailureTests();
+    registerSnapshotAlertTests();
+    registerAlertThresholdTests();
 });
