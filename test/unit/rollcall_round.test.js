@@ -142,80 +142,62 @@ function parseWire(payload) {
              publisher: f[4], sigCount: Number(f[5]), pairs };
 }
 
-describe('RollcallRound', function () {
+let savedRegtestActivation;
 
-    // These are ENGINE tests: they drive signing, ranks, sweepers and self-publish,
-    // all of which need a network the engine will actually start on. Regtest went
-    // INERT on 2026-08-31 (a single-coin BTC regtest venue has no DOGE peer to prove
-    // a close), so the suite arms it for its own duration and restores it after.
-    // Whether regtest ships armed is asserted by RollcallRound.invariants.test.js,
-    // deliberately in a different file so this stub can never mask that question.
-    let savedRegtestActivation;
+function installSuiteHooks1() {
     before(function () {
-        savedRegtestActivation = rca.ROLLCALL_ACTIVATION.regtest;
-        rca.ROLLCALL_ACTIVATION.regtest = 0;
-    });
+            savedRegtestActivation = rca.ROLLCALL_ACTIVATION.regtest;
+            rca.ROLLCALL_ACTIVATION.regtest = 0;
+        });
     after(function () { rca.ROLLCALL_ACTIVATION.regtest = savedRegtestActivation; });
-
     beforeEach(function () {
-        savedEnv = {};
-        for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rollcall-test-'));
-        for (const k of ENV_KEYS) delete process.env[k];
-        process.env.BTC_INDEXER_URL   = BTC_URL;
-        process.env.DOGE_INDEXER_URL  = DOGE_URL;
-        process.env.ROLLCALL_SPEND_LOG_PATH = path.join(tmpDir, 'spend.jsonl');
-        process.env.ROLLCALL_SIGN_LOG_PATH  = path.join(tmpDir, 'sign.jsonl');
-        // Keep the SpendGuard's state file out of the checkout.
-        process.env.ROLLCALL_SPEND_STATE_PATH = path.join(tmpDir, 'guard.json');
-        loadModule();
-    });
-
+            savedEnv = {};
+            for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+            tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rollcall-test-'));
+            for (const k of ENV_KEYS) delete process.env[k];
+            process.env.BTC_INDEXER_URL   = BTC_URL;
+            process.env.DOGE_INDEXER_URL  = DOGE_URL;
+            process.env.ROLLCALL_SPEND_LOG_PATH = path.join(tmpDir, 'spend.jsonl');
+            process.env.ROLLCALL_SIGN_LOG_PATH  = path.join(tmpDir, 'sign.jsonl');
+            // Keep the SpendGuard's state file out of the checkout.
+            process.env.ROLLCALL_SPEND_STATE_PATH = path.join(tmpDir, 'guard.json');
+            loadModule();
+        });
     afterEach(function () {
-        sinon.restore();
-        for (const k of ENV_KEYS) {
-            if (savedEnv[k] === undefined) delete process.env[k];
-            else process.env[k] = savedEnv[k];
-        }
-        delete process.env.ROLLCALL_SPEND_STATE_PATH;
-        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-    });
+            sinon.restore();
+            for (const k of ENV_KEYS) {
+                if (savedEnv[k] === undefined) delete process.env[k];
+                else process.env[k] = savedEnv[k];
+            }
+            delete process.env.ROLLCALL_SPEND_STATE_PATH;
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        });
+}
 
-    // ── epoch selection ──────────────────────────────────────────────────────
-
-    describe('epoch selection', function () {
-
-        it('picks the newest epoch that is buried and still inside the accept window', function () {
+describe('RollcallRound', function () {
+    installSuiteHooks1();
+describe('epoch selection', function () {
+it('picks the newest epoch that is buried and still inside the accept window', function () {
             const eng = makeEngine({});
             assert.strictEqual(eng.newestSignableEpoch(36), EPOCH, 'buried by exactly the reorg buffer');
             assert.strictEqual(eng.newestSignableEpoch(42), EPOCH, 'the last block of the window');
         });
-
-        it('refuses an epoch that is not yet buried by CANONICAL_REORG_BUFFER', function () {
+it('refuses an epoch that is not yet buried by CANONICAL_REORG_BUFFER', function () {
             const eng = makeEngine({});
             // A signature over a ledger_hash that can still be reorged out is a
             // signature no peer will ever be able to verify.
             assert.strictEqual(eng.newestSignableEpoch(35), null, 'since=5 is inside the reorg buffer');
             assert.strictEqual(eng.newestSignableEpoch(30), null, 'the epoch block itself');
         });
-
-        it('refuses an epoch whose accept window has closed', function () {
+it('refuses an epoch whose accept window has closed', function () {
             const eng = makeEngine({});
             assert.strictEqual(eng.newestSignableEpoch(43), null, 'since=13 is past the 12-block window');
         });
-
-        // The subject is the falsy-zero trap in the epoch arithmetic, not which
-        // networks ship armed: epoch 0 must survive `if(!epoch)` wherever a network
-        // IS armed from genesis, which the suite-level hook above supplies.
-        it('treats epoch 0 as a real epoch where a network is armed from genesis', function () {
+it('treats epoch 0 as a real epoch where a network is armed from genesis', function () {
             const eng = makeEngine({});
             assert.strictEqual(eng.newestSignableEpoch(6), 0, 'a falsy height check would skip epoch 0');
         });
-
-        // Mainnet arms at 0 by the 2026-09-09 ruling, so the null case is driven through
-        // a temporary key on the live map: the subject is the JS coercion trap, not which
-        // network happens to be unarmed.
-        it('is inert on a network whose ROLLCALL_ACTIVATION is null', function () {
+it('is inert on a network whose ROLLCALL_ACTIVATION is null', function () {
             const NET = 'unarmednet';
             rca.ROLLCALL_ACTIVATION[NET] = null;
             try {
@@ -228,8 +210,7 @@ describe('RollcallRound', function () {
                 assert.strictEqual(eng.newestSignableEpoch(1008 + 10), null);
             } finally { delete rca.ROLLCALL_ACTIVATION[NET]; }
         });
-
-        it('signs epochs on a genesis-armed mainnet', function () {
+it('signs epochs on a genesis-armed mainnet', function () {
             const eng = makeEngine({});
             eng.network = 'mainnet';
             eng.interval = 1008;
@@ -238,13 +219,13 @@ describe('RollcallRound', function () {
             // exist from genesis and the newest signable one is the last interval boundary.
             assert.strictEqual(eng.newestSignableEpoch(1008 + 10), 1008);
         });
-    });
+});
+});
 
-    // ── sign + gossip ────────────────────────────────────────────────────────
-
-    describe('sign and gossip', function () {
-
-        it('signs the ledger-hash-bound canonical and broadcasts XROLLCALL_SIGN', async function () {
+describe('RollcallRound', function () {
+    installSuiteHooks1();
+describe('sign and gossip', function () {
+it('signs the ledger-hash-bound canonical and broadcasts XROLLCALL_SIGN', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
             await eng._tick();
@@ -259,8 +240,7 @@ describe('RollcallRound', function () {
             const canon = eng._canonical(EPOCH, LEDGER_HASH);
             assert.strictEqual(ValidatorIdentity.verify(canon, d.sig, PKS[0]), true);
         });
-
-        it('signs even with no DOGE wallet and no broadcast rail', async function () {
+it('signs even with no DOGE wallet and no broadcast rail', async function () {
             // The sweepers exist precisely so a wallet-less validator still gets
             // rolled; gating signing on a publish rail would evict exactly those.
             wireRpc({ tip: 36 });
@@ -270,24 +250,27 @@ describe('RollcallRound', function () {
             assert.strictEqual(eng.hub._pm.broadcast.getCalls()
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN').length, 1);
         });
-
-        it('ABSTAINS for the epoch when the federation snapshot is unresolved', async function () {
+it('ABSTAINS for the epoch when the federation snapshot is unresolved', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({ members: null });
             await eng._tick();
             assert.strictEqual(eng.rounds.size, 0, 'no round state is created');
             assert.strictEqual(eng.hub._pm.broadcast.callCount, 0, 'nothing is gossiped');
         });
-
-        it('does not sign when the BTC indexer has no ledger_hash for the epoch', async function () {
+it('does not sign when the BTC indexer has no ledger_hash for the epoch', async function () {
             wireRpc({ tip: 36, ledgerHash: null });
             const eng = makeEngine({});
             await eng._tick();
             assert.strictEqual(eng.rounds.size, 0);
             assert.strictEqual(eng.hub._pm.broadcast.callCount, 0);
         });
+});
+});
 
-        it('writes the signature durably and re-emits it after a restart without re-signing', async function () {
+describe('RollcallRound', function () {
+    installSuiteHooks1();
+describe('sign and gossip', function () {
+it('writes the signature durably and re-emits it after a restart without re-signing', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
             await first._tick();
@@ -311,8 +294,7 @@ describe('RollcallRound', function () {
                 .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1].sig;
             assert.strictEqual(reEmitted, emitted);
         });
-
-        it('re-signs after a restart when the epoch ledger_hash changed under it', async function () {
+it('re-signs after a restart when the epoch ledger_hash changed under it', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
             await first._tick();
@@ -327,8 +309,13 @@ describe('RollcallRound', function () {
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
         });
+});
+});
 
-        it('ignores a stored signature another identity wrote and signs fresh under its own key', async function () {
+describe('RollcallRound', function () {
+    installSuiteHooks1();
+describe('sign and gossip', function () {
+it('ignores a stored signature another identity wrote and signs fresh under its own key', async function () {
             wireRpc({ tip: 36 });
             const first = makeEngine({});
             await first._tick();
@@ -352,8 +339,7 @@ describe('RollcallRound', function () {
             assert.ok(ValidatorIdentity.verify(state.canonical, own.sig, own.pubkey),
                 'what this hub broadcasts must verify under its own pubkey');
         });
-
-        it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
+it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
             const eng   = makeEngine({});
             const mine  = eng.ownPubkey();
             const other = new ValidatorIdentity(SEEDS[1]).getPubkeyHex().toLowerCase();
@@ -372,963 +358,5 @@ describe('RollcallRound', function () {
             const last = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8').trim().split('\n').pop();
             assert.strictEqual(JSON.parse(last).pubkey, mine);
         });
-    });
-
-    // ── collect ──────────────────────────────────────────────────────────────
-
-    describe('collect', function () {
-
-        async function collecting() {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            await eng._tick();
-            return eng;
-        }
-
-        function signOf(eng, idx) {
-            return IDS[idx].sign(eng._canonical(EPOCH, LEDGER_HASH));
-        }
-
-        it('keeps a peer signature that verifies and is in the snapshot', async function () {
-            const eng = await collecting();
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true);
-        });
-
-        it('keeps a peer signature that arrived BEFORE this hub opened the epoch', async function () {
-            // A peer broadcasts once, when it signs, and never again. On the
-            // acceptance venue (epoch 4980, 2026-09-04) the elected leader was the
-            // hub that signed last, so it dropped the earlier signer's gossip on
-            // "no such round" and led with a partial set for the whole window.
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
-            assert.strictEqual(eng.rounds.has(EPOCH), false, 'the round is not open yet');
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true,
-                'the early signature must be applied when the round opens');
-            assert.strictEqual(eng._earlySigs.size, 0, 'the holding area is drained');
-        });
-
-        it('judges an early signature by the same rule as a live one', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(eng._canonical(60, LEDGER_HASH)) } });
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false,
-                'a held signature that does not verify is dropped at the drain, never admitted unverified');
-        });
-
-        it('drops a signature that does not verify over OUR canonical', async function () {
-            const eng = await collecting();
-            // A real signature by the right key over a DIFFERENT epoch: correct
-            // shape, correct signer, wrong binding.
-            const wrongEpochSig = IDS[1].sign(eng._canonical(60, LEDGER_HASH));
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: wrongEpochSig } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false);
-        });
-
-        it('drops a signer that is not in the federation snapshot', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({ members: [PKS[0]] });
-            await eng._tick();
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false);
-        });
-
-        it('a garbage pair arriving FIRST cannot suppress the real signature', async function () {
-            // Marking a key seen on first sight instead of after verification is
-            // how a spam pair reads downstream as an absence, and an absence over
-            // K epochs is an eviction.
-            const eng = await collecting();
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: 'a'.repeat(128) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false);
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.get(PKS[1]), signOf(eng, 1));
-        });
-
-        it('dedupes by pubkey: the first verified signature wins', async function () {
-            const eng = await collecting();
-            const real = signOf(eng, 1);
-            eng._handleMessage({ type: 'XROLLCALL_SIGN', data: { epoch: EPOCH, pubkey: PKS[1], sig: real } });
-            // A second, differently-shaped payload for the same key must not replace it.
-            eng._handleMessage({ type: 'XROLLCALL_SIGN', data: { epoch: EPOCH, pubkey: PKS[1], sig: 'b'.repeat(128) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.get(PKS[1]), real);
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.size, 2, 'ours plus one peer');
-        });
-
-        it('ignores malformed pubkeys, malformed signatures and unknown epochs', async function () {
-            const eng = await collecting();
-            const before = eng.rounds.get(EPOCH).sigs.size;
-            eng._handleMessage({ type: 'XROLLCALL_SIGN', data: { epoch: EPOCH, pubkey: 'zz', sig: signOf(eng, 1) } });
-            eng._handleMessage({ type: 'XROLLCALL_SIGN', data: { epoch: EPOCH, pubkey: PKS[1], sig: 'short' } });
-            eng._handleMessage({ type: 'XROLLCALL_SIGN', data: { epoch: 999, pubkey: PKS[1], sig: signOf(eng, 1) } });
-            eng._handleMessage({ type: 'SOMETHING_ELSE', data: { epoch: EPOCH } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.size, before);
-        });
-
-        it('applies NO stake floor and computes NO quorum', async function () {
-            // A member with dust weight is kept: the chain decides membership, and
-            // a hub-side floor could only ever discard a signature it would count.
-            wireRpc({ tip: 36 });
-            const hub = makeHub({});
-            hub.capabilitySnapshot.getActiveWeightSnapshot = sinon.stub().resolves({
-                validators: [{ pubkey: PKS[0], source: 's', weight: '1000' },
-                             { pubkey: PKS[1], source: 's', weight: '0.00000001' }]
-            });
-            const eng = new RollcallRound(hub);
-            eng.hub = hub;
-            await eng._tick();
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(eng._canonical(EPOCH, LEDGER_HASH)) } });
-            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true);
-        });
-    });
-
-    // ── elect ────────────────────────────────────────────────────────────────
-
-    describe('elect', function () {
-
-        it('resolves the election set at the RAW epoch, letting CapabilitySnapshot bury it once', async function () {
-            // CapabilitySnapshot subtracts CANONICAL_REORG_BUFFER itself, so E lands
-            // on E-6, which is where the chain resolves R(E). Passing an already
-            // buried height would resolve at E-12 and elect a leader the BTC close
-            // does not pay.
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            await eng._tick();
-            const call = eng.hub.capabilitySnapshot.getWeightSnapshot.getCall(0);
-            assert.ok(call, 'the election set must be resolved');
-            assert.deepStrictEqual(call.args, ['oracle_publish', EPOCH]);
-        });
-
-        it('borrows StateAnchorPublisher._resolveCapabilitySet when the anchor rail is up', async function () {
-            wireRpc({ tip: 36 });
-            const resolve = sinon.stub().resolves(PKS.map(pk => ({ pubkey: pk, amount: '1', source: 's' })));
-            const eng = makeEngine({ stateAnchorPublisher: { _resolveCapabilitySet: resolve } });
-            await eng._tick();
-            assert.deepStrictEqual(resolve.getCall(0).args, ['oracle_publish', EPOCH, 'regtest']);
-            assert.strictEqual(eng.hub.capabilitySnapshot.getWeightSnapshot.callCount, 0,
-                'one resolver, so the hub cannot disagree with the chain two ways');
-        });
-
-        it('orders by hashOrder over XROLLCALL|network|epoch', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            const order = await eng._electionOrder(EPOCH);
-            assert.deepStrictEqual(order, orderFor(PKS, EPOCH));
-            // The key really binds the epoch, or every epoch would elect the same leader.
-            assert.notDeepStrictEqual(orderFor(PKS, EPOCH), orderFor(PKS, EPOCH + 30));
-        });
-
-        it('abstains from publishing when the election set is unresolved', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({ candidates: null });
-            await eng._tick();
-            assert.strictEqual(await eng._electionOrder(EPOCH), null);
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-    });
-
-    // ── publish ──────────────────────────────────────────────────────────────
-
-    describe('publish', function () {
-
-        // Build an engine whose identity sits at `rank` in the real election order.
-        //
-        // The self-publish deadline is pushed out of reach unless a test sets it:
-        // at the REGTEST defaults it is 6, equal to CANONICAL_REORG_BUFFER, so it is
-        // already past on the first tick a round can exist at and would fire in
-        // every one of these cases (see the pinned finding in
-        // RollcallRound.invariants.test.js). The escape hatch has its own describe
-        // block below; here it must not stand in for the publish path.
-        function atRank(rank, env, hubOpts) {
-            const order = orderFor(PKS, EPOCH);
-            const idx   = PKS.indexOf(order[rank]);
-            return makeEngine(Object.assign({ identity: IDS[idx] }, hubOpts || {}),
-                              Object.assign({ ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
-        }
-
-        it('the leader publishes every collected signature once the delay has passed', async function () {
-            wireRpc({ tip: 38 });
-            const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8 });
-            await eng._tick();
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1);
-            const w = parseWire(bc.getCall(0).args[0]);
-            assert.strictEqual(w.action, 'ROLLCALL');
-            assert.strictEqual(w.epoch, EPOCH);
-            assert.strictEqual(w.ledgerHash, LEDGER_HASH);
-            assert.strictEqual(w.publisher, eng.identity.getPubkeyHex().toLowerCase());
-            assert.strictEqual(w.sigCount, w.pairs.length);
-        });
-
-        it('the leader does NOT publish before E + ROLLCALL_PUBLISH_DELAY_BLOCKS', async function () {
-            wireRpc({ tip: 37 });                       // since = 7, delay = 8
-            const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('a sweeper stays locked until its rank comes up on the ladder', async function () {
-            // Rank 2 at ladder step 2 needs since >= 4; the round is created at
-            // since = 6, so pin the step high enough that it is still locked.
-            wireRpc({ tip: 36 });
-            const eng = atRank(2, { ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 5 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
-                'rank 2 needs since >= 10, and since is 6');
-            assert.strictEqual(eng.rounds.get(EPOCH).myRank, 2);
-        });
-
-        it('a sweeper publishes ONLY the signatures the leader left off chain', async function () {
-            const order = orderFor(PKS, EPOCH);
-            // Everyone but the last-ranked key is already on chain.
-            const onChain = {};
-            for (const pk of order.slice(0, order.length - 1)) onChain[pk] = LEDGER_HASH;
-            const missing = order[order.length - 1];
-
-            wireRpc({ tip: 38, onChain });
-            const eng = atRank(1, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 2 });
-            // Collect every peer's real signature so there is something to sweep.
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
-            for (let i = 0; i < IDS.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                     data: { epoch: EPOCH, pubkey: PKS[i], sig: IDS[i].sign(canon) } });
-            await eng._tick();
-
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1);
-            const w = parseWire(bc.getCall(0).args[0]);
-            assert.deepStrictEqual(w.pairs.map(p => p.pubkey), [missing],
-                'a sweeper that re-publishes what already landed is paying a fee for nothing');
-        });
-
-        it('an on-chain row under a DIFFERENT ledger_hash does not count as present', async function () {
-            // Such a row is one the BTC close discards, so treating it as presence
-            // would suppress the real publish and read as an absence.
-            const order   = orderFor(PKS, EPOCH);
-            const onChain = {};
-            for (const pk of order) onChain[pk] = 'c'.repeat(64);
-            wireRpc({ tip: 38, onChain });
-            const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 1);
-        });
-
-        it('publishes nothing when every collected signature is already on chain', async function () {
-            const onChain = {};
-            for (const pk of PKS) onChain[pk] = LEDGER_HASH;
-            wireRpc({ tip: 38, onChain });
-            const eng = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('on an undecidable DOGE read the leader publishes and a sweeper defers', async function () {
-            wireRpc({ tip: 38, dogeFail: true });
-            const leader = atRank(0, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await leader._tick();
-            assert.strictEqual(leader.hub.oraclePublisher.broadcastFn.callCount, 1,
-                'the leader publishes every epoch; a duplicate costs a fee the union rule absorbs');
-
-            loadModule();
-            wireRpc({ tip: 38, dogeFail: true });
-            const sweeper = atRank(1, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 2 });
-            await sweeper._tick();
-            assert.strictEqual(sweeper.hub.oraclePublisher.broadcastFn.callCount, 0,
-                'a sweeper that cannot see the gaps has nothing to add');
-        });
-
-        it('a null hcut is not a positive "nobody signed"', async function () {
-            wireRpc({ tip: 38, dogeHcutNull: true });
-            const eng = atRank(1, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_ELECTION_TOLERANCE_BLOCKS: 2 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('a key outside the elected set never publishes as leader or sweeper', async function () {
-            wireRpc({ tip: 42 });
-            const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-            assert.strictEqual(eng.rounds.get(EPOCH).myRank, -1);
-        });
-
-        it('splits past 41 pairs into several actions', async function () {
-            const many = [];
-            const ids  = [];
-            for (let i = 0; i < 45; i++) {
-                const id = new ValidatorIdentity(i.toString(16).padStart(2, '0').repeat(32));
-                ids.push(id);
-                many.push(id.getPubkeyHex().toLowerCase());
-            }
-            const order = orderFor(many, EPOCH);
-            const leaderIdx = many.indexOf(order[0]);
-            // Round created at since = 6 with the delay at 8, so the first tick
-            // collects and does not publish; the peers' signatures land, then the
-            // tip moves to since = 8 and the whole set goes out at once.
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
-            for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                     data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
-            wireRpc({ tip: 38 });
-            await eng._tick();
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 2);
-            assert.deepStrictEqual(bc.getCalls().map(c => parseWire(c.args[0]).sigCount), [41, 4]);
-        });
-    });
-
-    // ── self-publish ─────────────────────────────────────────────────────────
-
-    describe('self-publish', function () {
-
-        it('lands a one-signature roll call when our own signature is not on chain', async function () {
-            // Not in the elected set, so no ladder rank will ever carry us; the
-            // escape hatch is the only route this key has to the chain.
-            wireRpc({ tip: 42, onChain: {} });                 // since = 12 >= self-publish 6
-            const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
-                                   { ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1);
-            const w = parseWire(bc.getCall(0).args[0]);
-            assert.strictEqual(w.sigCount, 1);
-            assert.strictEqual(w.pairs[0].pubkey, PKS[0]);
-            assert.strictEqual(w.publisher, PKS[0]);
-            assert.strictEqual(ValidatorIdentity.verify(eng._canonical(EPOCH, LEDGER_HASH),
-                                                        w.pairs[0].sig, PKS[0]), true);
-        });
-
-        it('does not self-publish before E + ROLLCALL_SELF_PUBLISH_BLOCKS', async function () {
-            wireRpc({ tip: 38 });                              // since = 8 < 9
-            const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
-                                   { ROLLCALL_SELF_PUBLISH_BLOCKS: 9 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('does not self-publish when our signature is already on chain', async function () {
-            wireRpc({ tip: 42, onChain: { [PKS[0]]: LEDGER_HASH } });
-            const eng = makeEngine({ identity: IDS[0], candidates: [PKS[1], PKS[2]] },
-                                   { ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('does not self-publish when our own publish already carried it', async function () {
-            wireRpc({ tip: 42 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1, 'the leader publish, and no second self-publish behind it');
-        });
-    });
-
-    // ── the broadcast gate ───────────────────────────────────────────────────
-
-    describe('broadcast capability', function () {
-
-        it('never publishes without a signer module exporting broadcast(payload)', async function () {
-            // walletSign alone loads cleanly through signer-loader and can sign
-            // every roll call, but the built-in pipeline fails closed on the P2SH
-            // two-phase encoding, so a publish would strand the payload.
-            wireRpc({ tip: 42 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({
-                identity: IDS[PKS.indexOf(order[0])],
-                oraclePublisher: { broadcastFn: null, walletSignFn: sinon.stub(),
-                                   getBalanceFn: sinon.stub().resolves(1000), encoder: {} }
-            }, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 6 });
-            await eng._tick();
-            assert.strictEqual(eng.broadcastCapable(), false);
-            assert.strictEqual(eng.rounds.get(EPOCH).txids.length, 0);
-            assert.strictEqual(fs.existsSync(process.env.ROLLCALL_SPEND_LOG_PATH), false,
-                'no publish was even attempted, so no fee intent was ever recorded');
-        });
-
-        it('reports capability off the resolved signer, hooks or borrowed', function () {
-            const eng = makeEngine({ oraclePublisher: null });
-            assert.strictEqual(eng.broadcastCapable(), false);
-            eng.setBroadcastHook(() => {});
-            assert.strictEqual(eng.broadcastCapable(), true);
-        });
-    });
-
-    // ── spend guard + durable intent ─────────────────────────────────────────
-
-    describe('spend safety', function () {
-
-        // Self-publish pushed out of reach for the same reason as in `publish`
-        // above: this block is about the fee-bearing sweep path.
-        function leader(env, hubOpts) {
-            const order = orderFor(PKS, EPOCH);
-            return makeEngine(Object.assign({ identity: IDS[PKS.indexOf(order[0])] }, hubOpts || {}),
-                              Object.assign({ ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
-        }
-
-        it('refuses to publish with the wallet under DOGE_LOW_BALANCE_THRESHOLD', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, DOGE_LOW_BALANCE_THRESHOLD: '10' },
-                               { oraclePublisher: { broadcastFn: sinon.stub().resolves({ txid: 't' }),
-                                                    walletSignFn: sinon.stub(),
-                                                    getBalanceFn: sinon.stub().resolves(1), encoder: null } });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('fails closed when the wallet balance is unreadable', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, DOGE_LOW_BALANCE_THRESHOLD: '10' },
-                               { oraclePublisher: { broadcastFn: sinon.stub().resolves({ txid: 't' }),
-                                                    walletSignFn: sinon.stub(),
-                                                    getBalanceFn: sinon.stub().rejects(new Error('rpc down')),
-                                                    encoder: null } });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('refuses to publish while the effector is paused', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            eng.spendGuard.pause('drill');
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('writes a durable intent BEFORE the money moves and gates the send on it', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
-            const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
-                            .trim().split('\n').map(JSON.parse);
-            assert.strictEqual(lines[0].phase, 'intent');
-            assert.strictEqual(lines[0].epoch, EPOCH);
-            assert.strictEqual(lines[1].phase, 'sent');
-            assert.strictEqual(lines[1].txid, 'txid-1');
-        });
-
-        it('defers the publish when the spend-audit path is unwritable', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            sinon.stub(eng, 'recordSpend').returns(false);
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
-                'a real DOGE fee must never be spent with no recoverable trace');
-            assert.strictEqual(eng.rounds.get(EPOCH).published, false, 'the slot is released for a retry');
-        });
-
-        it('a restart does not re-publish an epoch a prior process committed', async function () {
-            wireRpc({ tip: 38 });
-            const first = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await first._tick();
-            assert.strictEqual(first.hub.oraclePublisher.broadcastFn.callCount, 1);
-
-            loadModule();
-            wireRpc({ tip: 38 });
-            const second = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            second.loadSpendLog();
-            await second._tick();
-            assert.strictEqual(second.hub.oraclePublisher.broadcastFn.callCount, 0);
-        });
-
-        it('a definitively FAILED publish clears the commitment so a retry can run', async function () {
-            wireRpc({ tip: 38 });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 },
-                               { oraclePublisher: { broadcastFn: sinon.stub().rejects(Object.assign(
-                                                        new Error('encoder rejected: bad payload'), { response: { status: 400 } })),
-                                                    walletSignFn: sinon.stub(),
-                                                    getBalanceFn: sinon.stub().resolves(1000), encoder: null } });
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).published, false);
-            const phases = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
-                             .trim().split('\n').map(l => JSON.parse(l).phase);
-            assert.deepStrictEqual(phases, ['intent', 'failed']);
-            assert.strictEqual(eng._committed.has(String(EPOCH)), false);
-        });
-
-        it('an AMBIGUOUS send keeps the epoch claimed rather than risking a double spend', async function () {
-            wireRpc({ tip: 38 });
-            const timeout = Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' });
-            const eng = leader({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 },
-                               { oraclePublisher: { broadcastFn: sinon.stub().rejects(timeout),
-                                                    walletSignFn: sinon.stub(),
-                                                    getBalanceFn: sinon.stub().resolves(1000), encoder: null } });
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).published, true, 'the slot stays claimed');
-            assert.strictEqual(eng._committed.has(String(EPOCH)), true);
-            const phases = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
-                             .trim().split('\n').map(l => JSON.parse(l).phase);
-            assert.deepStrictEqual(phases, ['intent', 'ambiguous']);
-        });
-    });
-
-    // ── multi-chunk publish ──────────────────────────────────────────────────
-    //
-    // Everything past 41 signatures becomes several ROLLCALL actions, and one
-    // action is one transaction and one fee. The two things that must hold per
-    // CHUNK rather than per batch are the spend reservation and the record of
-    // what actually reached the wire.
-
-    describe('multi-chunk publish', function () {
-
-        // A 45-signer federation whose leader is this hub: two chunks, 41 + 4.
-        // The round opens at since = 6 with the delay at 8, so the first tick
-        // collects, the peers' signatures land, and the second tick publishes.
-        async function twoChunkLeader(env) {
-            const many = [];
-            const ids  = [];
-            for (let i = 0; i < 45; i++) {
-                const id = new ValidatorIdentity(i.toString(16).padStart(2, '0').repeat(32));
-                ids.push(id);
-                many.push(id.getPubkeyHex().toLowerCase());
-            }
-            const order     = orderFor(many, EPOCH);
-            const leaderIdx = many.indexOf(order[0]);
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
-                                   Object.assign({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 8,
-                                                   ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH);
-            for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                     data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
-            wireRpc({ tip: 38 });
-            return { eng, many, myPubkey: many[leaderIdx] };
-        }
-
-        function spendPhases() {
-            let text;
-            try { text = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8'); }
-            catch (_) { return []; }
-            return text.trim() ? text.trim().split('\n').map(l => JSON.parse(l).phase) : [];
-        }
-
-        it('does not send a two-action roll call with only one publish left in the window', async function () {
-            // The ceiling is checked once before chunking, so without a per-chunk
-            // reservation both actions go out and the window overruns by one fee.
-            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 1 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
-                'a batch the window cannot afford in full must send nothing');
-            assert.strictEqual(eng.rounds.get(EPOCH).published, false, 'the slot is released for a later tick');
-            assert.deepStrictEqual(spendPhases(), [],
-                'a declined batch leaves no orphan intent line on disk');
-            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 0,
-                'a publish that never went out consumes no budget');
-            assert.ok(eng.spendGuard.blocked.spend >= 1,
-                'the COUNT ceiling is what refused the second action, not some other gate');
-        });
-
-        it('spends exactly one window slot per action, never one per batch', async function () {
-            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 2 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 2);
-            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 2,
-                'two transactions are two spends, not one');
-            assert.strictEqual(eng.spendGuard.spentInWindow(),
-                2 * eng.spendGuard.estSpendUsdCents,
-                'the reservation IS the spend; record() alongside it would double-count');
-        });
-
-        it('a mid-batch failure gives back the budget the untried action never spent', async function () {
-            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
-            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 4 });
-            eng.hub.oraclePublisher.broadcastFn = sinon.stub();
-            eng.hub.oraclePublisher.broadcastFn.onCall(0).resolves({ txid: 'txid-a' });
-            eng.hub.oraclePublisher.broadcastFn.onCall(1).rejects(bad);
-            await eng._tick();
-            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 1,
-                'the action that landed is a spend; the one that was refused is not');
-        });
-
-        it('retries only the actions that never reached the wire', async function () {
-            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
-            const { eng } = await twoChunkLeader();
-            const bc = sinon.stub();
-            bc.onCall(0).resolves({ txid: 'txid-a' });
-            bc.onCall(1).rejects(bad);
-            bc.resolves({ txid: 'txid-b' });
-            eng.hub.oraclePublisher.broadcastFn = bc;
-
-            await eng._tick();
-            const state = eng.rounds.get(EPOCH);
-            assert.strictEqual(state.published, false, 'the slot is released so the tail can still land');
-            assert.strictEqual(state.sent.size, 41, 'the action that landed is remembered');
-            assert.strictEqual(eng._committed.has(String(EPOCH)), false);
-
-            wireRpc({ tip: 39 });
-            await eng._tick();
-            assert.strictEqual(bc.callCount, 3, 'the retry sends one action, not the whole set again');
-            const first = parseWire(bc.getCall(0).args[0]).pairs.map(p => p.pubkey);
-            const retry = parseWire(bc.getCall(2).args[0]).pairs.map(p => p.pubkey);
-            assert.strictEqual(retry.length, 4);
-            for (const pk of retry)
-                assert.ok(!first.includes(pk), 'a signature already broadcast is never re-paid for');
-            const everySent = first.concat(retry).sort();
-            assert.strictEqual(new Set(everySent).size, 45, 'every signature reached the wire exactly once');
-        });
-
-        it('counts our own signature as on the wire once ITS action landed', async function () {
-            // ownSigOnWire was all-or-nothing on the batch, so a later action's
-            // failure left it false and provoked a redundant self-publish of a
-            // signature this hub had already broadcast and paid for.
-            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
-            const { eng, myPubkey } = await twoChunkLeader();
-            const bc = sinon.stub();
-            bc.onCall(0).resolves({ txid: 'txid-a' });
-            bc.onCall(1).rejects(bad);
-            eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
-            const state = eng.rounds.get(EPOCH);
-            assert.ok(state.sent.has(myPubkey), 'our signature rode the first action');
-            assert.strictEqual(state.ownSigOnWire, true,
-                'our own signature is on the wire even though a later action failed');
-        });
-
-        it('records how many signatures had already landed when a batch failed', async function () {
-            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
-            const { eng } = await twoChunkLeader();
-            const bc = sinon.stub();
-            bc.onCall(0).resolves({ txid: 'txid-a' });
-            bc.onCall(1).rejects(bad);
-            eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
-            const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
-                            .trim().split('\n').map(JSON.parse);
-            assert.deepStrictEqual(lines.map(l => l.phase), ['intent', 'sent', 'failed']);
-            assert.strictEqual(lines[2].delivered, 41,
-                'an operator reconciling on chain needs to know the failure was partial');
-        });
-
-        // The operator pause is an out-of-band runtime toggle, so it can land while a
-        // chunk is in flight. Both the pre-loop check() and the reservations were taken
-        // in one earlier synchronous turn and cannot see it, so without a per-chunk
-        // re-read the remaining actions keep spending after the operator said stop.
-        it('an operator pause landing mid-batch stops the actions that have not gone out', async function () {
-            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 4 });
-            const bc = sinon.stub();
-            bc.onCall(0).callsFake(async () => {
-                eng.spendGuard.pause('operator incident');   // paused while action 1 is in flight
-                return { txid: 'txid-a' };
-            });
-            bc.resolves({ txid: 'txid-b' });
-            eng.hub.oraclePublisher.broadcastFn = bc;
-            await eng._tick();
-            assert.strictEqual(bc.callCount, 1, 'a paused hub broadcasts nothing further');
-            const state = eng.rounds.get(EPOCH);
-            assert.strictEqual(state.sent.size, 41, 'the action that already landed still counts as sent');
-            assert.strictEqual(state.published, false, 'the slot is released so the tail can land after a resume');
-            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 1,
-                'the action the pause stopped gives its budget back');
-            const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
-                            .trim().split('\n').map(JSON.parse);
-            assert.deepStrictEqual(lines.map(l => l.phase), ['intent', 'sent', 'failed'],
-                'phase failed, not an unknown phase: only failed un-commits the epoch on restart');
-            assert.strictEqual(lines[2].remaining, 1);
-            assert.match(lines[2].error, /PAUSED/,
-                'the PAUSE is what stopped it, not the count ceiling or the wallet floor');
-        });
-    });
-
-    // ── status ───────────────────────────────────────────────────────────────
-
-    describe('getStatus', function () {
-
-        it('reports publisher state and NO ledger facts', async function () {
-            wireRpc({ tip: 38 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1 });
-            await eng._tick();
-            const s = eng.getStatus();
-            assert.deepStrictEqual(Object.keys(s).sort(),
-                ['broadcast_capable', 'epoch', 'gossiped_count', 'leader', 'on_chain_count',
-                 'our_rank', 'signed', 'txids'].sort());
-            assert.strictEqual(s.epoch, EPOCH);
-            assert.strictEqual(s.signed, true);
-            assert.strictEqual(s.leader, order[0]);
-            assert.strictEqual(s.our_rank, 0);
-            assert.strictEqual(s.broadcast_capable, true);
-            assert.deepStrictEqual(s.txids, ['txid-1']);
-            for (const forbidden of ['last_rolled_epoch', 'absent_streak', 'evicted', 'absences'])
-                assert.strictEqual(forbidden in s, false,
-                    forbidden + ' is a BTC-indexer ledger fact and is authoritative there, not here');
-        });
-
-        it('is fully shaped before any epoch has been seen', function () {
-            const eng = makeEngine({});
-            const s = eng.getStatus();
-            assert.strictEqual(s.epoch, null);
-            assert.strictEqual(s.signed, false);
-            assert.strictEqual(s.gossiped_count, 0);
-            assert.strictEqual(s.on_chain_count, null);
-            assert.strictEqual(s.our_rank, -1);
-            assert.deepStrictEqual(s.txids, []);
-        });
-    });
-
-    // ── lifecycle ────────────────────────────────────────────────────────────
-
-    describe('lifecycle', function () {
-
-        it('start() subscribes to peer messages and stop() unsubscribes', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({}, { ROLLCALL_POLL_MS: 3600000 });
-            await eng.start();
-            assert.strictEqual(eng.hub._pm.listenerCount('message'), 1);
-            assert.strictEqual(eng.rounds.has(EPOCH), true);
-            await eng.stop();
-            assert.strictEqual(eng.hub._pm.listenerCount('message'), 0);
-        });
-
-        it('ROLLCALL_ENABLED=false keeps the engine entirely idle', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({}, { ROLLCALL_ENABLED: 'false' });
-            await eng.start();
-            assert.strictEqual(eng.rounds.size, 0);
-            assert.strictEqual(eng.hub._pm.listenerCount('message'), 0);
-            await eng.stop();
-        });
-
-        it('prunes rounds once the window and its retention have passed', async function () {
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            await eng._tick();
-            assert.strictEqual(eng.rounds.has(EPOCH), true);
-            wireRpc({ tip: 200 });
-            await eng._tick();
-            assert.strictEqual(eng.rounds.has(EPOCH), false);
-        });
-
-        it('a BTC indexer failure is survived, not fatal', async function () {
-            wireRpc({ tip: 36, btcFail: true });
-            const eng = makeEngine({});
-            await assert.rejects(() => eng._indexerCall('getblockhashes', {}));
-            assert.strictEqual(eng._ticking, false, 'the in-flight guard must not wedge on a rejection');
-        });
-    });
-
-    // ── tunables ─────────────────────────────────────────────────────────────
-
-    describe('tunables', function () {
-
-        it('takes the per-network defaults with no env set', function () {
-            const eng = makeEngine({});
-            assert.strictEqual(eng.publishDelayBlocks, RollcallRound.PUBLISH_DELAY_DEFAULTS.regtest);
-            assert.strictEqual(eng.electionToleranceBlocks, RollcallRound.ELECTION_TOLERANCE_DEFAULTS.regtest);
-            assert.strictEqual(eng.selfPublishBlocks, RollcallRound.SELF_PUBLISH_DEFAULTS.regtest);
-        });
-
-        it('the roll-call ladder step is independent of the anchor ladder step', function () {
-            process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS = '999';
-            const eng = makeEngine({});
-            assert.strictEqual(eng.electionToleranceBlocks, RollcallRound.ELECTION_TOLERANCE_DEFAULTS.regtest,
-                'a roll-call cadence change must not be able to re-inert the anchor ladder, or the reverse');
-            delete process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS;
-        });
-
-        it('falls back to the default on a garbage tunable rather than disabling the gate', function () {
-            // A NaN delay would compare false forever and publish nothing, which is
-            // exactly the silent inertness this engine must not have.
-            const eng = makeEngine({}, { ROLLCALL_PUBLISH_DELAY_BLOCKS: 'soon' });
-            assert.strictEqual(eng.publishDelayBlocks, RollcallRound.PUBLISH_DELAY_DEFAULTS.regtest);
-        });
-
-        it('reads the consensus constants from the twin, never from env', function () {
-            const rca = require('../../src/rollcall_activation.js');
-            process.env.ROLLCALL_INTERVAL_BLOCKS = '7';
-            process.env.ROLLCALL_ACCEPT_WINDOW_BLOCKS = '7';
-            const eng = makeEngine({});
-            assert.strictEqual(eng.interval, rca.ROLLCALL_INTERVAL_BLOCKS.regtest);
-            assert.strictEqual(eng.acceptWindow, rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS.regtest);
-            delete process.env.ROLLCALL_INTERVAL_BLOCKS;
-            delete process.env.ROLLCALL_ACCEPT_WINDOW_BLOCKS;
-        });
-    });
-
-    // ── ROLLCALL v1: the GATES form ──────────────────────────────────────────
-    //
-    // Keyed on the EPOCH height, so the whole difference between the two forms is
-    // one threshold. The threshold is stubbed here rather than armed through
-    // XC_ROLLCALL_GATES_REGTEST_ACTIVATION because that variable is read ONCE at
-    // require time: setting it in this file would arm the module for every other
-    // suite mocha loads in the same process. The env grammar itself is the gate
-    // module's own test (row 4).
-
-    describe('ROLLCALL v1 above the gates height', function () {
-
-        const GATES = knownGateKeys().join(',');
-
-        let savedGates;
-        beforeEach(function () { savedGates = rga.ROLLCALL_GATES_ACTIVATION.regtest; });
-        afterEach(function () { rga.ROLLCALL_GATES_ACTIVATION.regtest = savedGates; });
-
-        // v1 pushes the pairs one field right of v0, so parseWire cannot read it.
-        function parseWireV1(payload) {
-            const f = payload.split('|');
-            const pairs = [];
-            for (let i = 7; i < f.length; i += 2) pairs.push({ pubkey: f[i], sig: f[i + 1] });
-            return { action: f[0], version: f[1], epoch: Number(f[2]), ledgerHash: f[3],
-                     publisher: f[4], gates: f[5], sigCount: Number(f[6]), pairs };
-        }
-
-        it('publishes v1 carrying this build\'s gate list, signed over the v1 canonical', async function () {
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
-            wireRpc({ tip: 42 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1);
-            const w = parseWireV1(bc.getCall(0).args[0]);
-            assert.strictEqual(w.version, '1');
-            assert.strictEqual(w.gates, GATES, 'GATES is knownGateKeys() joined, as published');
-            assert.strictEqual(w.sigCount, w.pairs.length);
-            // The signature on the wire must verify over the canonical the DOGE parser
-            // rebuilds from the CARRIED gates, and must NOT verify over the v0 form:
-            // a site that quietly dropped GATES would still accept it otherwise.
-            const v1 = eng._canonical(EPOCH, LEDGER_HASH, GATES);
-            const v0 = eng._canonical(EPOCH, LEDGER_HASH);
-            const mine = w.pairs.find(p => p.pubkey === order[0]);
-            assert.ok(mine, 'the publisher signed its own roll call');
-            assert.strictEqual(ValidatorIdentity.verify(v1, mine.sig, order[0]), true);
-            assert.strictEqual(ValidatorIdentity.verify(v0, mine.sig, order[0]), false,
-                'the v1 signature must be bound to the gates commitment');
-        });
-
-        it('verifies a peer\'s signature against the SAME canonical for the epoch', async function () {
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            await eng._tick();
-            const state = eng.rounds.get(EPOCH);
-            assert.strictEqual(state.gates, GATES);
-            assert.strictEqual(state.canonical, eng._canonical(EPOCH, LEDGER_HASH, GATES));
-
-            // A peer on the same build: counted.
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(state.canonical) } });
-            assert.strictEqual(state.sigs.has(PKS[1]), true);
-            // A peer still signing the v0 canonical (an un-upgraded build, or one whose
-            // gate list differs) verifies against nothing and is simply absent. This is
-            // the cost §7.2 names: roll the fleet BETWEEN epochs, never across one.
-            eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                 data: { epoch: EPOCH, pubkey: PKS[2],
-                                         sig: IDS[2].sign(eng._canonical(EPOCH, LEDGER_HASH)) } });
-            assert.strictEqual(state.sigs.has(PKS[2]), false);
-        });
-
-        it('is v0, byte for byte, for an epoch BELOW the gates height', async function () {
-            // The same engine, one block of threshold apart: the only thing that
-            // decides the form is the epoch height.
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = EPOCH + 1;
-            wireRpc({ tip: 42 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 1);
-            const w = parseWire(bc.getCall(0).args[0]);
-            assert.strictEqual(w.version, '0');
-            assert.strictEqual(w.sigCount, w.pairs.length);
-            const mine = w.pairs.find(p => p.pubkey === order[0]);
-            assert.strictEqual(ValidatorIdentity.verify(eng._canonical(EPOCH, LEDGER_HASH),
-                                                        mine.sig, order[0]), true);
-        });
-
-        it('stays v0 where the height is the INERT null placeholder', async function () {
-            // `0 >= null` is true in JS; only the isFinite guard keeps an unarmed
-            // network on v0, and an accidental v1 there forks the whole federation.
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = null;
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({});
-            await eng._tick();
-            assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
-        });
-
-        it('splits at the DERIVED v1 cap, not the v0 41', async function () {
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
-            const cap = RollcallRound.maxPairsForGates(GATES);
-            assert.ok(cap > 0 && cap < RollcallRound.MAX_PAIRS_PER_ACTION,
-                'the live gate list must cost pairs, or this case proves nothing');
-
-            const many = [];
-            const ids  = [];
-            for (let i = 0; i < cap + 4; i++) {
-                const id = new ValidatorIdentity(i.toString(16).padStart(2, '0').repeat(32));
-                ids.push(id);
-                many.push(id.getPubkeyHex().toLowerCase());
-            }
-            const order = orderFor(many, EPOCH);
-            wireRpc({ tip: 36 });
-            const eng = makeEngine({ identity: ids[many.indexOf(order[0])], members: many, candidates: many },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            const canon = eng._canonical(EPOCH, LEDGER_HASH, GATES);
-            for (let i = 0; i < ids.length; i++)
-                eng._handleMessage({ type: 'XROLLCALL_SIGN',
-                                     data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
-            wireRpc({ tip: 38 });
-            await eng._tick();
-
-            const bc = eng.hub.oraclePublisher.broadcastFn;
-            assert.strictEqual(bc.callCount, 2);
-            assert.deepStrictEqual(bc.getCalls().map(c => parseWireV1(c.args[0]).sigCount), [cap, 4]);
-            // The bound that matters is the byte one: an action past the ceiling is
-            // dropped by the decoder with nothing going red anywhere.
-            for (const c of bc.getCalls())
-                assert.ok(Buffer.byteLength(c.args[0], 'utf8') <= RollcallRound.ACTION_DATA_CEILING,
-                    'a published v1 action is ' + Buffer.byteLength(c.args[0], 'utf8') + ' bytes');
-            // Every signature rides exactly one action; a split may cost a fee and
-            // must never cost a signature.
-            const seen = new Set();
-            for (const c of bc.getCalls()) for (const p of parseWireV1(c.args[0]).pairs) seen.add(p.pubkey);
-            assert.strictEqual(seen.size, cap + 4);
-        });
-
-        it('refuses to publish rather than build an action past the ceiling', async function () {
-            // A GATES list longer than the ceiling leaves room for no pair at all.
-            // chunkPairs falls back to the v0 41 on a non-positive size, so without
-            // the explicit refusal this would broadcast an action the decoder drops.
-            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
-            wireRpc({ tip: 42 });
-            const order = orderFor(PKS, EPOCH);
-            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            await eng._tick();
-            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 1, 'the normal list publishes');
-
-            loadModule();
-            wireRpc({ tip: 42 });
-            const eng2 = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
-                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
-            eng2.gatesFor = () => 'a.B,'.repeat(3000);
-            await eng2._tick();
-            assert.strictEqual(eng2.hub.oraclePublisher.broadcastFn.callCount, 0,
-                'an oversize GATES list must stop the publish, not ride out un-decodable');
-            assert.strictEqual(eng2.rounds.get(EPOCH).published, false, 'the slot is released for a retry');
-        });
-    });
+});
 });
