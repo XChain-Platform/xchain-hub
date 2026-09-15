@@ -13,6 +13,45 @@
 const { expect } = require('chai');
 const constants  = require('../../../src/constants');
 
+function getOracleBandMirrors() {
+    return {
+        'xchain-vm':            'src/protocol/constants.js',
+        'xchain-indexer':       'src/protocol/constants.js',
+        'xchain-sdk':           'src/protocol/constants.js',
+        'xchain-explorer':      'src/protocol/constants.js',
+        'xchain-decoder':       'src/protocol/constants.js',
+        'xchain-documentation': 'protocol/constants.js'
+    };
+}
+
+function findRepoRoot(fs, path) {
+    let dir = __dirname;
+    while (!fs.existsSync(path.join(dir, 'package.json'))) {
+        const up = path.dirname(dir);
+        if (up === dir) throw new Error('no package.json above ' + __dirname);
+        dir = up;
+    }
+    return dir;
+}
+
+function assertIndexerConfigMatchesBothLanes(ctx, fs, path) {
+    const REPO_ROOT = findRepoRoot(fs, path);
+    const abs = path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'config.js');
+    if (!fs.existsSync(abs)) {
+        if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+            throw new Error('price-lane parity gate cannot run: xchain-indexer/src/config.js ' +
+                'missing at ' + abs + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
+        ctx.skip();
+        return;
+    }
+    const resolved = require.resolve(abs);
+    delete require.cache[resolved];
+    const cfg = require(resolved).getConfig('BTC', 'mainnet');
+    expect(cfg.COINS, 'indexer COINS vs hub PRICE_V1_COINS').to.deep.equal(constants.PRICE_V1_COINS);
+    expect(Object.keys(cfg.FIATS), 'indexer FIATS vs hub PRICE_V1_FIATS')
+        .to.deep.equal(constants.PRICE_V1_FIATS);
+}
+
 // #1299: PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are federation-uniform oracle
 // band constants that must have a single source of truth (constants.js). This is
 // the hub-local conformance guard against the "re-introduced literal" drift vector:
@@ -70,26 +109,11 @@ describe('oracle band constants agree across the mirror repos (#3886)', function
     const GATED = ['PRICE_MAX', 'ORACLE_DEVIATION_THRESHOLD'];
 
     // Listed rather than globbed, so a repo that quietly drops its copy reddens here.
-    const MIRRORS = {
-        'xchain-vm':            'src/protocol/constants.js',
-        'xchain-indexer':       'src/protocol/constants.js',
-        'xchain-sdk':           'src/protocol/constants.js',
-        'xchain-explorer':      'src/protocol/constants.js',
-        'xchain-decoder':       'src/protocol/constants.js',
-        'xchain-documentation': 'protocol/constants.js'
-    };
+    const MIRRORS = getOracleBandMirrors();
 
     // Walk up to the nearest package.json rather than counting '..' hops, matching
     // xchain-indexer/test/unit/xcall-constants-cross-repo.test.js.
-    const REPO_ROOT = (function () {
-        let dir = __dirname;
-        while (!fs.existsSync(path.join(dir, 'package.json'))) {
-            const up = path.dirname(dir);
-            if (up === dir) throw new Error('no package.json above ' + __dirname);
-            dir = up;
-        }
-        return dir;
-    })();
+    const REPO_ROOT = findRepoRoot(fs, path);
     const PLATFORM_ROOT = path.dirname(REPO_ROOT);
 
     // Same required-sibling policy as the xcall gate: a missing checkout skips by
@@ -254,28 +278,6 @@ describe('PRICE v0 and v1 lanes accept the same coin/fiat universe (#7215)', fun
     // narrower one refuses a push the chain accepted. Same required-sibling policy as
     // the mirror gate above, so bin/ci-all.sh can never pass this green-by-skip.
     it('the indexer config agrees with both lanes', function () {
-        const REPO_ROOT = (function () {
-            let dir = __dirname;
-            while (!fs.existsSync(path.join(dir, 'package.json'))) {
-                const up = path.dirname(dir);
-                if (up === dir) throw new Error('no package.json above ' + __dirname);
-                dir = up;
-            }
-            return dir;
-        })();
-        const abs = path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'config.js');
-        if (!fs.existsSync(abs)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('price-lane parity gate cannot run: xchain-indexer/src/config.js ' +
-                    'missing at ' + abs + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
-            this.skip();
-            return;
-        }
-        const resolved = require.resolve(abs);
-        delete require.cache[resolved];
-        const cfg = require(resolved).getConfig('BTC', 'mainnet');
-        expect(cfg.COINS, 'indexer COINS vs hub PRICE_V1_COINS').to.deep.equal(constants.PRICE_V1_COINS);
-        expect(Object.keys(cfg.FIATS), 'indexer FIATS vs hub PRICE_V1_FIATS')
-            .to.deep.equal(constants.PRICE_V1_FIATS);
+        assertIndexerConfigMatchesBothLanes(this, fs, path);
     });
 });
