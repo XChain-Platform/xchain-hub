@@ -52,14 +52,18 @@ const REPO_ROOT = (function () {
             return dir;
         })();
 
-const MIRROR = path.join(path.dirname(REPO_ROOT),
-            'xchain-indexer', 'src', 'attestation', 'providerRegistry.js');
+// The indexer renamed its copy to snake_case; the camelCase name is what an indexer
+// origin from before that rename carries, so the first of the two that exists is read.
+const MIRROR = ['provider_registry.js', 'providerRegistry.js']
+    .map((name) => path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'attestation', name))
+    .find((p) => fs.existsSync(p)) ||
+    path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'attestation', 'provider_registry.js');
 
 // ── cross-repo genesis-floor parity ─────────────────────────────
 // min_stake_xchain became consensus input when the responsible-set derivation
 // started dropping below-floor sources at/above STAKE_WEIGHTED_QUORUM. The
 // indexer resolves the same value from its OWN shipped copy
-// (xchain-indexer/src/attestation/providerRegistry.js PROVIDERS), because it
+// (xchain-indexer/src/attestation/provider_registry.js PROVIDERS), because it
 // mirrors no hub governance table and cannot read this one. Two copies of a
 // consensus number need a guard tying them together, or a well-meant edit to
 // one silently splits the responsible set.
@@ -75,7 +79,7 @@ it('the indexer ships the identical genesis floor for every provider', function 
             if (!fs.existsSync(MIRROR)) {
                 if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
                     throw new Error('provider stake-floor parity gate cannot run: xchain-indexer ' +
-                        'providerRegistry.js missing at ' + MIRROR +
+                        'provider_registry.js missing at ' + MIRROR +
                         '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
                 this.skip();
                 return;
