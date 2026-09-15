@@ -215,10 +215,17 @@ async function orderAt(nd, bus){
 const v1s = (nd) => nd.published.filter(p => String(p).split('|')[1] === '1');
 const seqOf = (payload) => Number(String(payload).split('|')[11]);   // ANCHOR|1|chain|net|bi|bh|lh|ah|ch|seq|snap|BATCH_SEQ
 
-describe('StateAnchorPublisher: archive election survives a batch-seq divergence', function () {
+let rigs = [];
+let savedAnchorFlagDay, savedArchiveFlagDay;
 
-    let rigs = [];
-    let savedAnchorFlagDay, savedArchiveFlagDay;
+describe('StateAnchorPublisher: archive election survives a batch-seq divergence', function () {
+    registerArchiveHooks();
+    registerArchiveOrderingTests();
+    registerDuplicateArchiveTest();
+    registerArchiveConvergenceTests();
+});
+
+function registerArchiveHooks() {
     beforeEach(function () {
         // Keep the mainnet reward flag-days where they are; the fixture block (100) is
         // already below them, but pin them so a future constant move cannot silently
@@ -234,41 +241,43 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         for(let bus of rigs) for(let nd of bus.nodes) await nd.pub.stop();
         rigs = [];
     });
+}
 
-    // Round one, with the FINALIZED withheld from one hub. Returns { bus, leader, lagging }
-    // where `lagging` never learned that batch 0 was consumed: its own tables still say
-    // next seq 0 while the leader's say 1. This is the production state the defect needs.
-    async function divergeOnRoundOne(btcBlock){
-        let bus = buildRig({ btcBlock: btcBlock });
-        rigs.push(bus);
-        for(let nd of bus.nodes) await nd.pub.start();
+// Round one, with the FINALIZED withheld from one hub. Returns { bus, leader, lagging }
+// where `lagging` never learned that batch 0 was consumed: its own tables still say
+// next seq 0 while the leader's say 1. This is the production state the defect needs.
+async function divergeOnRoundOne(btcBlock){
+    let bus = buildRig({ btcBlock: btcBlock });
+    rigs.push(bus);
+    for(let nd of bus.nodes) await nd.pub.start();
 
-        let order  = await orderAt(bus.nodes[0], bus);
-        let leader = bus.nodes.find(n => n.pubkey === order[0]);
-        let laggy  = bus.nodes.find(n => n.pubkey === order[1]);
+    let order  = await orderAt(bus.nodes[0], bus);
+    let leader = bus.nodes.find(n => n.pubkey === order[0]);
+    let laggy  = bus.nodes.find(n => n.pubkey === order[1]);
 
-        bus.deaf.add(laggy.i);
-        bus.withhold.add('XANC_FINALIZED');
-        await leader.pub.flush();
-        await waitUntil(() => v1s(leader).length === 1 && leader.db.matches[0].batch_seq === 0,
-                        { label: 'round one to publish and back-fill the leader' });
-        bus.withhold.clear();
-        bus.deaf.clear();
+    bus.deaf.add(laggy.i);
+    bus.withhold.add('XANC_FINALIZED');
+    await leader.pub.flush();
+    await waitUntil(() => v1s(leader).length === 1 && leader.db.matches[0].batch_seq === 0,
+                    { label: 'round one to publish and back-fill the leader' });
+    bus.withhold.clear();
+    bus.deaf.clear();
 
-        expect(laggy.db.matches[0].batch_seq, 'the lagging hub missed the back-fill').to.equal(null);
-        expect(await leader.pub._getNextBatchSeq(), 'leader has consumed batch 0').to.equal(1);
-        expect(await laggy.pub._getNextBatchSeq(), 'lagging hub still thinks 0 is free').to.equal(0);
+    expect(laggy.db.matches[0].batch_seq, 'the lagging hub missed the back-fill').to.equal(null);
+    expect(await leader.pub._getNextBatchSeq(), 'leader has consumed batch 0').to.equal(1);
+    expect(await laggy.pub._getNextBatchSeq(), 'lagging hub still thinks 0 is free').to.equal(0);
 
-        // Fresh cargo for round two, pending on BOTH hubs.
-        for(let nd of bus.nodes){
-            let row = Object.assign({}, matchRow('m2'));
-            row.validator_signatures = JSON.stringify(bus.nodes.map(n =>
-                ({ pubkey: n.pubkey, sig: n.identity.sign(matchCanonical(row)) })));
-            nd.db.matches.push(row);
-        }
-        return { bus, leader, laggy };
+    // Fresh cargo for round two, pending on BOTH hubs.
+    for(let nd of bus.nodes){
+        let row = Object.assign({}, matchRow('m2'));
+        row.validator_signatures = JSON.stringify(bus.nodes.map(n =>
+            ({ pubkey: n.pubkey, sig: n.identity.sign(matchCanonical(row)) })));
+        nd.db.matches.push(row);
     }
+    return { bus, leader, laggy };
+}
 
+function registerArchiveOrderingTests() {
     it('both hubs derive the SAME rank order for the wrapper though their batch seqs differ', async function () {
         const { bus, leader, laggy } = await divergeOnRoundOne(BLOCK);
 
@@ -301,7 +310,9 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         await waitUntil(() => v1s(leader).length === 2, { label: 'the unlocked rank-0 leader to publish round two' });
         expect(seqOf(v1s(leader)[1]), 'leader draws its own next seq').to.equal(1);
     });
+}
 
+function registerDuplicateArchiveTest() {
     it('the lagging hub does NOT publish a second archive for the wrapper under a stale seq', async function () {
         // Ladder unlocked for rank 1 (since = TOL), so the lagging hub really does open a
         // round: this is the case the old key turned into a duplicate archive.
@@ -325,7 +336,9 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         // Convergence: the lagging hub's next seq is now the leader's.
         expect(await laggy.pub._getNextBatchSeq()).to.equal(await leader.pub._getNextBatchSeq());
     });
+}
 
+function registerArchiveConvergenceTests() {
     it('a signed refusal is required: an unsigned or non-member one cannot abandon a round', async function () {
         const { bus, leader, laggy } = await divergeOnRoundOne(BLOCK + TOL);
 
@@ -371,4 +384,4 @@ describe('StateAnchorPublisher: archive election survives a batch-seq divergence
         expect(laggy.db.matches[0].batch_seq, 'and the missed back-fill actually landed').to.equal(0);
         expect(await laggy.pub._getNextBatchSeq()).to.equal(await leader.pub._getNextBatchSeq());
     });
-});
+}
