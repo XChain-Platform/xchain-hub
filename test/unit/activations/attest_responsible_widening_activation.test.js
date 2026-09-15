@@ -12,9 +12,9 @@
 
 const { expect } = require('chai');
 const crypto = require('crypto');
-const wid = require('../../src/attest_responsible_widening_activation.js');
-const zc  = require('../../src/attest_zero_conf_activation.js');
-const AttestationRound = require('../../src/attestation/round.js');
+const wid = require('../../../src/attest_responsible_widening_activation.js');
+const zc  = require('../../../src/attest_zero_conf_activation.js');
+const AttestationRound = require('../../../src/attestation/round.js');
 
 // The measured incident this ladder exists for: BTC testnet4 request
 // 77f37a86..., admitted at 150699 with deadlineBlocks 10, redundancy 3.

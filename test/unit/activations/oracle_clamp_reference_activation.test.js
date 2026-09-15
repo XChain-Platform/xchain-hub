@@ -15,8 +15,8 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const ocr        = require('../../src/oracle_clamp_reference_activation.js');
-const crd        = require('../../src/consensus_rules_digest.js');
+const ocr        = require('../../../src/oracle_clamp_reference_activation.js');
+const crd        = require('../../../src/consensus_rules_digest.js');
 
 const MODULE_BASENAME = 'oracle_clamp_reference_activation';
 
@@ -49,7 +49,7 @@ describe('oracle_clamp_reference_activation: the per-network table', function ()
     it('shares the v0.17.0 hub roll boundary with the leader-silence skip', function () {
         // One activation boundary for the whole roll, so the wave has one thing to
         // rehearse, watch and roll back rather than two.
-        const lss = require('../../src/attest_leader_silence_skip_activation.js');
+        const lss = require('../../../src/attest_leader_silence_skip_activation.js');
         expect(ocr.ORACLE_CLAMP_REFERENCE_ACTIVATION.testnet)
             .to.equal(lss.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.testnet);
     });

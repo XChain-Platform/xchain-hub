@@ -30,15 +30,15 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const local = require('../../src/price_sig_tally_activation.js');
+const local = require('../../../src/price_sig_tally_activation.js');
 
 // Sibling checkout, same resolution convention as price_pair_activation.test.js:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'price_sig_tally_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'price_sig_tally_activation.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'price_sig_tally_activation.js');
 
 describe('PRICE v0 signature-tally flag-day: hub copy @regression', function () {
 

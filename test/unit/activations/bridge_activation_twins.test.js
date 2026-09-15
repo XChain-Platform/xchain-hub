@@ -37,7 +37,7 @@ const TWINS = [
 
 function registerActivationTwinGateTests() {
 it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare network key', function () {
-        const { XCHAIN_BRIDGE_ACTIVATION, isXchainBridgeActive } = require('../../src/xchain_bridge_activation.js');
+        const { XCHAIN_BRIDGE_ACTIVATION, isXchainBridgeActive } = require('../../../src/xchain_bridge_activation.js');
         const saved = XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'];
         XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'] = 700;
         try {
@@ -57,10 +57,10 @@ it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare
     // on a network the fleet has not deployed the flag day to.
     it('holds every mainnet and testnet slot of all three twins unarmed', function () {
         const maps = {
-            XCHAIN_BRIDGE_ACTIVATION: require('../../src/xchain_bridge_activation.js').XCHAIN_BRIDGE_ACTIVATION,
-            TOKEN_BRIDGE_ACTIVATION:  require('../../src/token_bridge_activation.js').TOKEN_BRIDGE_ACTIVATION,
+            XCHAIN_BRIDGE_ACTIVATION: require('../../../src/xchain_bridge_activation.js').XCHAIN_BRIDGE_ACTIVATION,
+            TOKEN_BRIDGE_ACTIVATION:  require('../../../src/token_bridge_activation.js').TOKEN_BRIDGE_ACTIVATION,
             TOKEN_POLICY_INHERITANCE_ACTIVATION:
-                require('../../src/token_policy_activation.js').TOKEN_POLICY_INHERITANCE_ACTIVATION
+                require('../../../src/token_policy_activation.js').TOKEN_POLICY_INHERITANCE_ACTIVATION
         };
         for (const [name, map] of Object.entries(maps)) {
             let checked = 0;
@@ -78,8 +78,8 @@ it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare
 
 function registerActivationTwinParityTests() {
 for (const name of TWINS) {
-        const hubCopy     = path.join(__dirname, '../../src/' + name);
-        const indexerCopy = path.join(__dirname, '../../../xchain-indexer/src/' + name);
+        const hubCopy     = path.join(__dirname, '../../../src/' + name);
+        const indexerCopy = path.join(__dirname, '../../../../xchain-indexer/src/' + name);
 
         it(name + ' is byte-identical to the indexer canonical', function () {
             if (!fs.existsSync(indexerCopy)) {
@@ -97,9 +97,9 @@ for (const name of TWINS) {
     }
 
     it('the hub can require each twin and resolve its activation predicate', function () {
-        const bridge = require('../../src/xchain_bridge_activation.js');
-        const token  = require('../../src/token_bridge_activation.js');
-        const policy = require('../../src/token_policy_activation.js');
+        const bridge = require('../../../src/xchain_bridge_activation.js');
+        const token  = require('../../../src/token_bridge_activation.js');
+        const policy = require('../../../src/token_policy_activation.js');
         assert.strictEqual(typeof bridge.isXchainBridgeActive, 'function');
         assert.strictEqual(typeof token.isTokenBridgeActive, 'function');
         assert.strictEqual(typeof policy.isTokenPolicyInheritanceActive, 'function');

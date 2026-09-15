@@ -31,15 +31,15 @@ const fs                = require('fs');
 const path              = require('path');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const PriceAggregator   = require('../../src/oracle/price_aggregator');
-const { createMockHub } = require('../helpers/mockHub');
-const priceScale        = require('../../src/price_scale_activation.js');
-const { PRICE_MAX }     = require('../../src/constants.js');
+const PriceAggregator   = require('../../../src/oracle/price_aggregator');
+const { createMockHub } = require('../../helpers/mockHub');
+const priceScale        = require('../../../src/price_scale_activation.js');
+const { PRICE_MAX }     = require('../../../src/constants.js');
 // Sibling checkout, same resolution convention as price_pair_activation.test.js.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'price_scale_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'price_scale_activation.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'price_scale_activation.js');
 // The three values the loose rule admits and every other price lane refuses.
 const WIDE     = '1.' + '0'.repeat(39) + '1';   // 42 chars: over-runs price_snapshots.price
 const NEAR_ZERO = '0.000000001';                // 1e-9: bcformat(...,8) renders it '0.00000000'

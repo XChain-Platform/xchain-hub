@@ -35,15 +35,15 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const local = require('../../src/attest_relay_reject_slot_activation.js');
+const local = require('../../../src/attest_relay_reject_slot_activation.js');
 
 // Sibling checkout, same resolution convention as attest_relay_activation.test.js:
 // an explicit env path for CI, falling back to the dev sibling layout. Absent ->
 // skip, unless XCHAIN_REQUIRE_SIBLINGS=1 demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'attest_relay_reject_slot_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'attest_relay_reject_slot_activation.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'attest_relay_reject_slot_activation.js');
 
 function registerRejectSlotGateSuite() {
 describe('the arming state this hub reads', function () {

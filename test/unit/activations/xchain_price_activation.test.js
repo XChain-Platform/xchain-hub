@@ -32,8 +32,8 @@ const {
     isXchainPriceActive,
     roundStartSeconds,
     widenPrecedesComposition,
-} = require('../../src/xchain_price_activation.js');
-const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../src/price_pair_activation.js');
+} = require('../../../src/xchain_price_activation.js');
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../src/price_pair_activation.js');
 
 describe('XCHAIN/USD composition gate @regression', function () {
 

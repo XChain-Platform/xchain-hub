@@ -23,9 +23,9 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const XChainHub = require('../../src/XChainHub.js');
-const coins = require('../../src/coins');
-const activation = require('../../src/lib/fullnode_activation.js');
+const XChainHub = require('../../../src/XChainHub.js');
+const coins = require('../../../src/coins');
+const activation = require('../../../src/lib/fullnode_activation.js');
 const CANONICAL = coins.getCoinConfig('BTC', 'mainnet').FULLNODE;
 const PK1 = 'a'.repeat(64);
 const PK2 = 'b'.repeat(64);

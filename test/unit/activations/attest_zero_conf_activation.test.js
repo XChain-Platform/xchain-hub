@@ -22,18 +22,18 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const local          = require('../../src/attest_zero_conf_activation.js');
-const localWidening  = require('../../src/attest_responsible_widening_activation.js');
-const localMirror    = require('../../src/attest_response_mirror_activation.js');
-const localGates     = require('../../src/rollcall_gates_activation.js');
+const local          = require('../../../src/attest_zero_conf_activation.js');
+const localWidening  = require('../../../src/attest_responsible_widening_activation.js');
+const localMirror    = require('../../../src/attest_response_mirror_activation.js');
+const localGates     = require('../../../src/rollcall_gates_activation.js');
 
 // Sibling checkout, same resolution convention as ConsensusPrimitiveConformance:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const DOCS_DIR = process.env.XCHAIN_DOCS_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-documentation');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation');
 
 const INDEXER_ZC       = path.join(INDEXER_DIR, 'src', 'attest_zero_conf_activation.js');
 const INDEXER_WIDENING = path.join(INDEXER_DIR, 'src', 'attest_responsible_widening_activation.js');

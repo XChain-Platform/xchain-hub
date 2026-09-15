@@ -34,15 +34,15 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const local = require('../../src/attest_relay_activation.js');
+const local = require('../../../src/attest_relay_activation.js');
 
 // Sibling checkout, same resolution convention as price_pair_activation.test.js:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'attest_relay_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'attest_relay_activation.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'attest_relay_activation.js');
 
 function registerRelayGateSuite() {
 describe('the gate this hub will enforce', function () {

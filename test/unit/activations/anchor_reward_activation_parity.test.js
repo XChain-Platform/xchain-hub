@@ -27,9 +27,9 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const LOCAL_PATH   = path.resolve(__dirname, '../../src/anchor_reward_activation.js');
-const TWIN_PATH    = path.resolve(__dirname, '../../../xchain-indexer/src/anchor_reward_activation.js');
-const CANON_PATH   = path.resolve(__dirname, '../../../xchain-documentation/protocol/constants.js');
+const LOCAL_PATH   = path.resolve(__dirname, '../../../src/anchor_reward_activation.js');
+const TWIN_PATH    = path.resolve(__dirname, '../../../../xchain-indexer/src/anchor_reward_activation.js');
+const CANON_PATH   = path.resolve(__dirname, '../../../../xchain-documentation/protocol/constants.js');
 
 const local = require(LOCAL_PATH);
 
@@ -102,7 +102,7 @@ describe('anchor_reward_activation parity (hub copy)', function () {
 function registerSharedArmingSeamTest() {
 it('shares the family\'s arming seam, so one venue lever arms both flag days', function () {
         const MODULE_PATH = require.resolve(LOCAL_PATH);
-        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../src/mirror_admission_activation.js'));
+        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../../src/mirror_admission_activation.js'));
         const savedEnv    = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
         const savedLocal  = require.cache[MODULE_PATH];
         const savedMirror = require.cache[MIRROR_PATH];
@@ -147,7 +147,7 @@ it('holds an INERT network inert at height 0 and at a huge height', function () 
     // reason and the height guard would never be reached.
     it('arms at and above the threshold, and never on an unreadable height', function () {
         const MODULE_PATH = require.resolve(LOCAL_PATH);
-        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../src/mirror_admission_activation.js'));
+        const MIRROR_PATH = require.resolve(path.resolve(__dirname, '../../../src/mirror_admission_activation.js'));
         const savedEnv    = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
         const savedLocal  = require.cache[MODULE_PATH];
         const savedMirror = require.cache[MIRROR_PATH];
