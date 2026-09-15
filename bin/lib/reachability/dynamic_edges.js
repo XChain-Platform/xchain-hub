@@ -86,6 +86,25 @@ const DYNAMIC_EDGES = [
         toList: () => dbHomeMixins(),
         why: 'the db home installs the mixin files beside its index onto Database.prototype',
     },
+    {
+        from: 'src/xchainPriceQuery.js',
+        // The price query module is the indexer's byte-identical twin, filed one level
+        // shallower here, so it resolves its SQL module from the package root
+        // (path.join(REPO_ROOT, 'src', 'db', 'price', ...)) rather than by a relative
+        // literal. The joined segments are read out of that call so this edge follows
+        // a rename of the SQL module instead of restating it.
+        toList: () => {
+            const declared = fs.readFileSync(path.join(getRepoRoot(), 'src/xchainPriceQuery.js'), 'utf8');
+            const call = /require\(path\.join\(REPO_ROOT,([^)]*)\)\)/.exec(declared);
+            if (!call) {
+                throw new Error('src/xchainPriceQuery.js no longer resolves its SQL from REPO_ROOT: the price SQL edge cannot be read');
+            }
+            const segments = Array.from(call[1].matchAll(/(['"])([^'"]+)\1/g)).map((m) => m[2]);
+            if (!segments.length) throw new Error('the price SQL require joins no literal segment: the edge is stale');
+            return [path.posix.join(...segments)];
+        },
+        why: 'the price query twin requires its SQL from the package root so it stays byte-identical with the indexer copy',
+    },
 ];
 
 // The db home: an index that installs one mixin per table family onto
