@@ -66,6 +66,12 @@ function outrankingPeer(pub, me) {
 
 describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block', function () {
 
+    registerSplitBundleElectionSetTests();
+    registerSplitBundleElectionOutcomeTests();
+});
+
+function registerSplitBundleElectionSetTests() {
+
     it('resolves the election set at the bundle block, not the caller max block', async function () {
         const { pub, me } = buildPub();
         let asked = [];
@@ -104,6 +110,9 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
         expect(reachedMarker).to.equal(false);
         expect(skipped.rows).to.equal(1);
     });
+}
+
+function registerSplitBundleElectionOutcomeTests() {
 
     // Positive control for the assertion above: with no membership delta this hub IS
     // rank 0 at the bundle's own block and walks past the ladder into the marker check.
@@ -134,4 +143,4 @@ describe('StateAnchorPublisher: split bundles elect at their OWN snapshot block'
         expect(reachedMarker).to.equal(false);
         expect(skipped.rows).to.equal(0);          // deferred, not counted as another hub's election
     });
-});
+}
