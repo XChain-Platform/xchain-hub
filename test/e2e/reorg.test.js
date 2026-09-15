@@ -18,94 +18,9 @@ const { callRpc }       = require('./helpers/rpcClient');
 const { waitUntil }     = require('../helpers/waitUntil');
 const { assertReorgConfirmed } = require('./helpers/dbAssertions');
 
-describe('E2E: Reorg Handling Pipeline', function () {
+let cluster;
 
-    let cluster;
-
-    before(async function () {
-        this.timeout(15000);
-        try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable, skipping E2E reorg tests');
-            return;
-        }
-        priceMocks.setup();
-    });
-
-    after(async function () {
-        this.timeout(10000);
-        priceMocks.teardown();
-        await testDb.teardown();
-    });
-
-    beforeEach(async function () {
-        this.timeout(15000);
-        if (!testDb.isAvailable()) return this.skip();
-        await testDb.truncateAll();
-        priceMocks.reset();
-    });
-
-    afterEach(async function () {
-        this.timeout(10000);
-        if (cluster) {
-            await cluster.stop();
-            cluster = null;
-        }
-    });
-
-    // E2E-REORG-001: Reorg detection → consensus → rollback cascade
-    describe('E2E-REORG-001: Rollback cascade', function () {
-
-        it('deletes attestations and records reorg after report', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-            let db = cluster.getDb();
-
-            // Step 1: Create an attestation for BTC chain
-            await callRpc(port, 'requestattestation', {
-                source_chain: 'BTC', source_action_index: 1000, dest_chain: 'LTC'
-            });
-
-            // Verify attestation exists
-            let attBefore = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
-            expect(attBefore.length).to.equal(1);
-
-            // Step 2: Report reorg with a timestamp well before the attestation was
-            // created but inside the 24h blast-radius bound (1h ago), so the
-            // just-created attestation (created_at > timestamp) is affected.
-            // R2-C2: point the cluster's stub indexer at the reorged hash so the
-            // hub's self-node verification confirms the report.
-            let newHash = 'b'.repeat(64);
-            cluster.stubIndexer.tip = 800050;
-            cluster.stubIndexer.hashes[799999] = newHash;
-            let reorgRes = await callRpc(port, 'reportreorg', {
-                chain: 'BTC', reorg_height: 799999, timestamp: Date.now() - 3600000,
-                old_hash: 'a'.repeat(64), new_hash: newHash
-            });
-            expect(reorgRes.result.status).to.equal('success');
-
-            // Wait for the rollback the report drives: the reorg row is written at the
-            // end of it, so its arrival is what the settle was standing in for.
-            await waitUntil(async () => {
-                let rows = await db.doQuery('SELECT 1 FROM reorg_attestations');
-                return rows.length >= 1;
-            }, { timeoutMs: 10000, label: 'the reorg rollback to be recorded' });
-
-            // Step 3: Verify rollback effects
-            // Attestations for BTC created after epoch should be deleted (all of them)
-            let attAfter = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
-            expect(attAfter.length, 'BTC attestations should be deleted by reorg').to.equal(0);
-
-            // Verify reorg recorded in history
-            let reorgRows = await db.doQuery("SELECT * FROM reorg_attestations");
-            expect(reorgRows.length, 'reorg_attestations should have entry').to.be.at.least(1);
-        });
-    });
-
-    // E2E-REORG-002: Reorg on BTC doesn't affect LTC-only attestations
-    describe('E2E-REORG-002: Chain isolation', function () {
+function chainIsolationSuite() {
 
         it('BTC reorg does not invalidate LTC-DOGE attestation', async function () {
             this.timeout(15000);
@@ -161,5 +76,98 @@ describe('E2E: Reorg Handling Pipeline', function () {
             });
             expect(ltcAtt.result.status).to.equal('attested');
         });
+    }
+
+function rollbackCascadeSuite() {
+
+        it('deletes attestations and records reorg after report', async function () {
+            this.timeout(15000);
+
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
+            let db = cluster.getDb();
+
+            // Step 1: Create an attestation for BTC chain
+            await callRpc(port, 'requestattestation', {
+                source_chain: 'BTC', source_action_index: 1000, dest_chain: 'LTC'
+            });
+
+            // Verify attestation exists
+            let attBefore = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
+            expect(attBefore.length).to.equal(1);
+
+            // Step 2: Report reorg with a timestamp well before the attestation was
+            // created but inside the 24h blast-radius bound (1h ago), so the
+            // just-created attestation (created_at > timestamp) is affected.
+            // R2-C2: point the cluster's stub indexer at the reorged hash so the
+            // hub's self-node verification confirms the report.
+            let newHash = 'b'.repeat(64);
+            cluster.stubIndexer.tip = 800050;
+            cluster.stubIndexer.hashes[799999] = newHash;
+            let reorgRes = await callRpc(port, 'reportreorg', {
+                chain: 'BTC', reorg_height: 799999, timestamp: Date.now() - 3600000,
+                old_hash: 'a'.repeat(64), new_hash: newHash
+            });
+            expect(reorgRes.result.status).to.equal('success');
+
+            // Wait for the rollback the report drives: the reorg row is written at the
+            // end of it, so its arrival is what the settle was standing in for.
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM reorg_attestations');
+                return rows.length >= 1;
+            }, { timeoutMs: 10000, label: 'the reorg rollback to be recorded' });
+
+            // Step 3: Verify rollback effects
+            // Attestations for BTC created after epoch should be deleted (all of them)
+            let attAfter = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
+            expect(attAfter.length, 'BTC attestations should be deleted by reorg').to.equal(0);
+
+            // Verify reorg recorded in history
+            let reorgRows = await db.doQuery("SELECT * FROM reorg_attestations");
+            expect(reorgRows.length, 'reorg_attestations should have entry').to.be.at.least(1);
+        });
+    }
+
+function reorgPipelineSuite() {
+
+
+
+    before(async function () {
+        this.timeout(15000);
+        try { await testDb.setup(); } catch (e) {
+            console.warn('MariaDB unavailable, skipping E2E reorg tests');
+            return;
+        }
+        priceMocks.setup();
     });
-});
+
+    after(async function () {
+        this.timeout(10000);
+        priceMocks.teardown();
+        await testDb.teardown();
+    });
+
+    beforeEach(async function () {
+        this.timeout(15000);
+        if (!testDb.isAvailable()) return this.skip();
+        await testDb.truncateAll();
+        priceMocks.reset();
+    });
+
+    afterEach(async function () {
+        this.timeout(10000);
+        if (cluster) {
+            await cluster.stop();
+            cluster = null;
+        }
+    });
+
+    // E2E-REORG-001: Reorg detection → consensus → rollback cascade
+    describe('E2E-REORG-001: Rollback cascade', rollbackCascadeSuite);
+
+    // E2E-REORG-002: Reorg on BTC doesn't affect LTC-only attestations
+    describe('E2E-REORG-002: Chain isolation', chainIsolationSuite);
+}
+
+describe('E2E: Reorg Handling Pipeline', reorgPipelineSuite);
