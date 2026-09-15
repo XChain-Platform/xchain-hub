@@ -21,10 +21,10 @@ const { VALIDATORS_4, SAMPLE_PRICES }  = require('../../helpers/fixtures');
 const { buildEnvelope }                = require('../../helpers/testPeerNetwork');
 const { runExperiment }                = require('../helpers/chaosRunner');
 
-describe('Chaos: Reorg During Oracle Round', function () {
-    this.timeout(15000);
 
-    let hub, oracle, oracleCon, reorgHandler;
+
+let hub, oracle, oracleCon, reorgHandler;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -47,6 +47,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         oracle.stop();
@@ -54,6 +57,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
         reorgHandler.stop();
         sinon.restore();
     });
+}
+
+function registerReorgDuringActiveOracleRoundBothTest() {
 
     it('reorg during active oracle round: both events complete independently', async function () {
         await oracleCon.start();
@@ -104,6 +110,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
             }
         });
     });
+}
+
+function registerReorgRateLimitPreventsRapidDuplicateTest() {
 
     it('reorg rate limit prevents rapid duplicate reorgs', async function () {
         await reorgHandler.start();
@@ -122,6 +131,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
         expect(err).to.exist;
         expect(err.message).to.include('Rate limit');
     });
+}
+
+function registerReorgOnDifferentChainIsNotTest() {
 
     it('reorg on different chain is not rate limited', async function () {
         await reorgHandler.start();
@@ -138,6 +150,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
 
         expect(err).to.not.exist;
     });
+}
+
+function registerOracleRoundSubmissionsUnaffectedByReorgTest() {
 
     it('oracle round submissions unaffected by reorg on unrelated data', async function () {
         await oracleCon.start();
@@ -168,6 +183,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
         expect(subs.size).to.equal(1);
         expect(subs.has(VALIDATORS_4[1].addr)).to.be.true;
     });
+}
+
+function registerOracleFinalizationAfterReorgStillStoresTest() {
 
     it('oracle finalization after reorg still stores correct data', async function () {
         await oracleCon.start();
@@ -189,6 +207,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
             c.args[0] && c.args[0].includes('price_snapshots') && c.args[0].includes('finalized'));
         expect(snapshotCalls.length).to.be.gte(1);
     });
+}
+
+function registerReorgWithInvalidChainIsRejectedTest() {
 
     it('reorg with invalid chain is rejected', async function () {
         await reorgHandler.start();
@@ -203,6 +224,9 @@ describe('Chaos: Reorg During Oracle Round', function () {
         expect(err).to.exist;
         expect(err.message).to.include('Invalid chain');
     });
+}
+
+function registerReorgWithFutureTimestampIsRejectedTest() {
 
     it('reorg with future timestamp is rejected', async function () {
         await reorgHandler.start();
@@ -217,4 +241,16 @@ describe('Chaos: Reorg During Oracle Round', function () {
         expect(err).to.exist;
         expect(err.message).to.include('too far in the future');
     });
+}
+describe('Chaos: Reorg During Oracle Round', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerReorgDuringActiveOracleRoundBothTest();
+    registerReorgRateLimitPreventsRapidDuplicateTest();
+    registerReorgOnDifferentChainIsNotTest();
+    registerOracleRoundSubmissionsUnaffectedByReorgTest();
+    registerOracleFinalizationAfterReorgStillStoresTest();
+    registerReorgWithInvalidChainIsRejectedTest();
+    registerReorgWithFutureTimestampIsRejectedTest();
 });
