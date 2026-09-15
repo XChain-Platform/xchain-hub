@@ -43,6 +43,12 @@ const CALL_SITES = [
 
 describe('two_phase_guard', function () {
 
+    registerRejectedEncodingTests();
+    registerAcceptedEncodingTests();
+});
+
+function registerRejectedEncodingTests() {
+
     it('throws on the P2SH and P2WSH funding answers', function () {
         for (const encoding of ['P2SH', 'P2WSH', 'p2sh', 'p2wsh']) {
             assert.throws(
@@ -73,6 +79,9 @@ describe('two_phase_guard', function () {
             () => assertSingleTxEncoding({ psbt: 'aa', carrierScripts: ['00ff'] }, 'x'),
             /two-transaction/);
     });
+}
+
+function registerAcceptedEncodingTests() {
 
     it('passes the single-transaction lanes through untouched', function () {
         // The encoder reports the encoding it actually BUILT, and answers OP_RETURN when
@@ -110,4 +119,4 @@ describe('two_phase_guard', function () {
                 rel + ' must refuse a two-phase encoding BEFORE the wallet hook runs');
         }
     });
-});
+}
