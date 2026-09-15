@@ -324,7 +324,7 @@ it('borrows StateAnchorPublisher.resolveCapabilitySet when the anchor rail is up
 it('orders by hashOrder over XROLLCALL|network|epoch', async function () {
             wireRpc({ tip: 36 });
             const eng = makeEngine({});
-            const order = await eng._electionOrder(EPOCH);
+            const order = await eng.electionOrder(EPOCH);
             assert.deepStrictEqual(order, orderFor(PKS, EPOCH));
             // The key really binds the epoch, or every epoch would elect the same leader.
             assert.notDeepStrictEqual(orderFor(PKS, EPOCH), orderFor(PKS, EPOCH + 30));
@@ -333,7 +333,7 @@ it('abstains from publishing when the election set is unresolved', async functio
             wireRpc({ tip: 36 });
             const eng = makeEngine({ candidates: null });
             await eng._tick();
-            assert.strictEqual(await eng._electionOrder(EPOCH), null);
+            assert.strictEqual(await eng.electionOrder(EPOCH), null);
             assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0);
         });
 });

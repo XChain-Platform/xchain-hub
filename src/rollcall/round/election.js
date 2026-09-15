@@ -38,7 +38,7 @@ module.exports = {
     // climbable: E is fixed, so `since` grows across the whole accept window and
     // floor(window / tolerance) ranks unlock inside it. The anchor ladder is inert
     // on the bundle rail only because a checkpoint's snapshot_block chases the tip.
-    _electionKey(epoch){
+    electionKey(epoch){
         return 'XROLLCALL|' + this.network + '|' + String(epoch);
     },
 
@@ -54,7 +54,7 @@ module.exports = {
     // Returns null when the set is unresolved, and every caller treats null as
     // abstain: an empty order would make _rankUnlocked false for everyone anyway,
     // but null says WHY, and it must never be read as "the federation is empty".
-    async _electionOrder(epoch){
+    async electionOrder(epoch){
         let keys = null;
         try {
             let sap = this.hub && this.hub.stateAnchorPublisher;
@@ -79,7 +79,7 @@ module.exports = {
             return null;
         }
         if(keys === null) return null;
-        return StateAnchorPublisher.hashOrder(this._electionKey(epoch), keys);
+        return StateAnchorPublisher.hashOrder(this.electionKey(epoch), keys);
     },
 
     // Rank 0 may publish immediately; each further rank unlocks after another

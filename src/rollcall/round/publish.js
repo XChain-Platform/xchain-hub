@@ -163,7 +163,7 @@ module.exports = {
         if(!myPubkey) return;
 
         if(state.order === null){
-            let order = await this._electionOrder(state.epoch);
+            let order = await this.electionOrder(state.epoch);
             if(order === null) return;              // unresolved: abstain, retry next tick
             state.order  = order;
             state.leader = order.length > 0 ? order[0] : null;
