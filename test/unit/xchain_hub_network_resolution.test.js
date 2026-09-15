@@ -21,25 +21,50 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
+let XChainHub, axiosStub, mockDb, errorLog;
+const ENV_KEYS = ['BTC_INDEXER_API_URL', 'BTC_INDEXER_URL', 'DOGE_INDEXER_API_URL',
+                  'DOGE_INDEXER_URL', 'INDEXER_COIN_CHECK'];
+let savedEnv;
+
+// A configs tree carrying BOTH regtest and mainnet legs: the shape the finding is about.
+const MULTI_NETWORK_CONFIGS = {
+    bitcoin: {
+        regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } },
+        mainnet: { 'xchain-indexer': { host: '10.0.0.9',  port: 3500 } }
+    },
+    dogecoin: {
+        regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3524 } },
+        mainnet: { 'xchain-indexer': { host: '10.0.0.9',  port: 3520 } }
+    }
+};
+
+// Validator mode: p2pConfig carries the HUB_NETWORK api.js validated.
+function validatorHub(network, configs) {
+    const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: network });
+    mockDb.getAllConfigs.resolves(configs);
+    hub.db = mockDb;
+    return hub;
+}
+
+// Standalone mode: no p2pConfig, so this.network === '' and no consensus runs.
+function standaloneHub(configs) {
+    const hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
+    mockDb.getAllConfigs.resolves(configs);
+    hub.db = mockDb;
+    return hub;
+}
+
+// Standalone mode with a DECLARED network: no p2pConfig, but the operator set
+// HUB_NETWORK and api.js validated it, so the hub resolves like a validator
+// rather than taking the dev-loop preference order (row 40).
+function scopedStandaloneHub(network, configs) {
+    const hub = new XChainHub('h', 1, 'd', 'u', 'p', null, { network });
+    mockDb.getAllConfigs.resolves(configs);
+    hub.db = mockDb;
+    return hub;
+}
+
 describe('XChainHub network resolution honours HUB_NETWORK', function () {
-
-    let XChainHub, axiosStub, mockDb, errorLog;
-
-    const ENV_KEYS = ['BTC_INDEXER_API_URL', 'BTC_INDEXER_URL', 'DOGE_INDEXER_API_URL',
-                      'DOGE_INDEXER_URL', 'INDEXER_COIN_CHECK'];
-    let savedEnv;
-
-    // A configs tree carrying BOTH regtest and mainnet legs: the shape the finding is about.
-    const MULTI_NETWORK_CONFIGS = {
-        bitcoin: {
-            regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } },
-            mainnet: { 'xchain-indexer': { host: '10.0.0.9',  port: 3500 } }
-        },
-        dogecoin: {
-            regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3524 } },
-            mainnet: { 'xchain-indexer': { host: '10.0.0.9',  port: 3520 } }
-        }
-    };
 
     before(function () {
         this.timeout(30000);
@@ -67,35 +92,21 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         }
     });
 
-    // Validator mode: p2pConfig carries the HUB_NETWORK api.js validated.
-    function validatorHub(network, configs) {
-        const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: network });
-        mockDb.getAllConfigs.resolves(configs);
-        hub.db = mockDb;
-        return hub;
-    }
+    registerBtcNetworkResolutionSuite();
+    registerIndexerUrlResolutionSuite();
+    registerCrossNetworkTipTest();
+});
 
-    // Standalone mode: no p2pConfig, so this.network === '' and no consensus runs.
-    function standaloneHub(configs) {
-        const hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
-        mockDb.getAllConfigs.resolves(configs);
-        hub.db = mockDb;
-        return hub;
-    }
-
-    // Standalone mode with a DECLARED network: no p2pConfig, but the operator set
-    // HUB_NETWORK and api.js validated it, so the hub resolves like a validator
-    // rather than taking the dev-loop preference order (row 40).
-    function scopedStandaloneHub(network, configs) {
-        const hub = new XChainHub('h', 1, 'd', 'u', 'p', null, { network });
-        mockDb.getAllConfigs.resolves(configs);
-        hub.db = mockDb;
-        return hub;
-    }
+function registerBtcNetworkResolutionSuite() {
 
     describe('resolveBtcNetwork', function () {
+        registerValidatorNetworkResolutionTests();
+        registerStandaloneNetworkResolutionTests();
+    });
+}
 
-        it('returns HUB_NETWORK, not the regtest leg, on a multi-network tree', async function () {
+function registerValidatorNetworkResolutionTests() {
+    it('returns HUB_NETWORK, not the regtest leg, on a multi-network tree', async function () {
             const hub = validatorHub('mainnet', MULTI_NETWORK_CONFIGS);
             expect(await hub.resolveBtcNetwork()).to.equal('mainnet');
         });
@@ -153,6 +164,9 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
             expect(threw).to.not.equal(null);
             expect(threw.message).to.contain('HUB_NETWORK=testnet');
         });
+}
+
+function registerStandaloneNetworkResolutionTests() {
 
         it('returns its own network (never mainnet) when nothing is configured', async function () {
             expect(await validatorHub('regtest', {}).resolveBtcNetwork()).to.equal('regtest');
@@ -181,7 +195,9 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
             expect(threw).to.not.equal(null);
             expect(threw.message).to.contain('HUB_NETWORK=testnet');
         });
-    });
+}
+
+function registerIndexerUrlResolutionSuite() {
 
     describe('_resolveIndexerUrl', function () {
 
@@ -225,6 +241,9 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
             expect(await hub._resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
         });
     });
+}
+
+function registerCrossNetworkTipTest() {
 
     // The scheduler tick must degrade, not crash, on the fail-closed throw.
     it('_resolveBtcLatestBlock returns null instead of throwing on a cross-network tree', async function () {
@@ -235,4 +254,4 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         expect(await hub._resolveBtcLatestBlock()).to.equal(null);
         expect(errorLog.called).to.equal(true);
     });
-});
+}
