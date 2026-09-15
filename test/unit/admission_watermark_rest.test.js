@@ -68,47 +68,29 @@ function get(port, path) {
     });
 }
 
-// One api.js boot over a hub stand-in whose broadcaster serves `heights`. `heightsMode`
-// picks what the broadcaster does, so the fail-closed case runs the same routes.
-async function bootApi(heightsMode) {
-    let capturedServer = null;
-    let realExpress    = require('express');
-    let passthrough    = () => (req, res, next) => next();
+function makeWatermarkBroadcaster(heightsMode) {
+    if (heightsMode === 'absent') return null;
+    if (heightsMode === 'throws') return { admissionHeights: () => { throw new Error('watermark unreadable'); } };
+    if (heightsMode === 'empty') return { admissionHeights: () => ({}) };
+    return { admissionHeights: () => JSON.parse(JSON.stringify(CLAIM)) };
+}
 
-    let broadcaster;
-    if (heightsMode === 'absent')      broadcaster = null;
-    else if (heightsMode === 'throws') broadcaster = { admissionHeights: () => { throw new Error('watermark unreadable'); } };
-    else if (heightsMode === 'empty')  broadcaster = { admissionHeights: () => ({}) };
-    else                               broadcaster = { admissionHeights: () => JSON.parse(JSON.stringify(CLAIM)) };
-
-    let mockHub = {
+function makeWatermarkRestHub(broadcaster) {
+    return {
         network: 'regtest',
-        start: sinon.stub().resolves(),
-        startP2P: sinon.stub().resolves(),
-        startConsensus: sinon.stub().resolves(),
-        startOracle: sinon.stub().resolves(),
-        startCrossChain: sinon.stub().resolves(),
-        startReorgHandler: sinon.stub().resolves(),
-        startGovernance: sinon.stub().resolves(),
-        startAttestation: sinon.stub().resolves(),
-        startCapabilities: sinon.stub().resolves(),
-        getPriceSnapshots: sinon.stub().resolves([]),
-        oracleMaxAgeSeconds: sinon.stub().returns(900),
-        getPrice: sinon.stub().resolves(null),
-        getFeeQuote: sinon.stub().resolves({}),
-        getOracle: sinon.stub().returns(null),
-        getCrossChain: sinon.stub().returns(null),
-        getAllConfigs: sinon.stub().resolves({}),
-        getValidators: sinon.stub().resolves([]),
-        getReorgHistory: sinon.stub().resolves([]),
-        getSwaps: sinon.stub().resolves([]),
-        initiateSwap: sinon.stub().resolves(),
-        getSwap: sinon.stub().resolves({}),
-        requestAttestation: sinon.stub().resolves({}),
-        reportReorg: sinon.stub().resolves(),
-        getAttestationRound: sinon.stub().returns(null),
-        getProviderRegistry: sinon.stub().returns(null),
-        hubDbBroadcaster: broadcaster,
+        start: sinon.stub().resolves(), startP2P: sinon.stub().resolves(),
+        startConsensus: sinon.stub().resolves(), startOracle: sinon.stub().resolves(),
+        startCrossChain: sinon.stub().resolves(), startReorgHandler: sinon.stub().resolves(),
+        startGovernance: sinon.stub().resolves(), startAttestation: sinon.stub().resolves(),
+        startCapabilities: sinon.stub().resolves(), getPriceSnapshots: sinon.stub().resolves([]),
+        oracleMaxAgeSeconds: sinon.stub().returns(900), getPrice: sinon.stub().resolves(null),
+        getFeeQuote: sinon.stub().resolves({}), getOracle: sinon.stub().returns(null),
+        getCrossChain: sinon.stub().returns(null), getAllConfigs: sinon.stub().resolves({}),
+        getValidators: sinon.stub().resolves([]), getReorgHistory: sinon.stub().resolves([]),
+        getSwaps: sinon.stub().resolves([]), initiateSwap: sinon.stub().resolves(),
+        getSwap: sinon.stub().resolves({}), requestAttestation: sinon.stub().resolves({}),
+        reportReorg: sinon.stub().resolves(), getAttestationRound: sinon.stub().returns(null),
+        getProviderRegistry: sinon.stub().returns(null), hubDbBroadcaster: broadcaster,
         db: {
             // Every named db method the mixins install, spread first so the doQuery and
             // getChainTip overrides below still win: the nine snapshot routes and the
@@ -125,21 +107,38 @@ async function bootApi(heightsMode) {
             getChainTip: async () => null,
         },
     };
+}
+
+function setWatermarkRestEnv() {
+    const origEnv = {};
+    const envVars = {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '0', HUB_HOST: '127.0.0.1',
+        HUB_API_KEY: '', HUB_ALLOW_UNAUTHENTICATED: 'true', TELEMETRY_ENABLED: 'false',
+    };
+    for (const [k, v] of Object.entries(envVars)) { origEnv[k] = process.env[k]; process.env[k] = v; }
+    return () => {
+        for (const [k, v] of Object.entries(origEnv)) {
+            if (v === undefined) delete process.env[k]; else process.env[k] = v;
+        }
+    };
+}
+
+// One api.js boot over a hub stand-in whose broadcaster serves `heights`. `heightsMode`
+// picks what the broadcaster does, so the fail-closed case runs the same routes.
+async function bootApi(heightsMode) {
+    let capturedServer = null;
+    let realExpress    = require('express');
+    let passthrough    = () => (req, res, next) => next();
+    const broadcaster = makeWatermarkBroadcaster(heightsMode);
+    const mockHub = makeWatermarkRestHub(broadcaster);
 
     let mockHttp  = { createServer: (app) => { capturedServer = http.createServer(app); return capturedServer; } };
     let mockWsLib = function () {};
     mockWsLib.Server = function () { return { on: sinon.stub(), close: sinon.stub() }; };
     mockWsLib.OPEN   = 1;
 
-    let origEnv = {};
-    let envVars = {
-        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass',
-        HUB_PORT: '0', HUB_HOST: '127.0.0.1',
-        HUB_API_KEY: '', HUB_ALLOW_UNAUTHENTICATED: 'true',
-        TELEMETRY_ENABLED: 'false',
-    };
-    for (let [k, v] of Object.entries(envVars)) { origEnv[k] = process.env[k]; process.env[k] = v; }
+    const restoreEnv = setWatermarkRestEnv();
     try {
         proxyquire('../../src/api', {
             'dotenv': { config: sinon.stub() },
@@ -154,9 +153,7 @@ async function bootApi(heightsMode) {
             './XChainHub': function () { return mockHub; },
         });
     } finally {
-        for (let [k, v] of Object.entries(origEnv)) {
-            if (v === undefined) delete process.env[k]; else process.env[k] = v;
-        }
+        restoreEnv();
     }
 
     let server = await waitUntil(() => (capturedServer && capturedServer.listening ? capturedServer : null),
