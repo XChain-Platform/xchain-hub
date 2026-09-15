@@ -65,56 +65,8 @@ function declaredCharset(column) {
     return m ? m[1].toLowerCase() : null;
 }
 
-describe('attestation_responses holds every provider body the on-chain path holds', function () {
-
-    beforeEach(function () {
-        sinon.stub(console, 'log');
-        sinon.stub(console, 'error');
-    });
-    afterEach(() => sinon.restore());
-
-    describe('the definition (what a fresh hub gets from verifyTables)', function () {
-        for (const column of PROVIDER_BYTE_COLUMNS) {
-            it(column + ' is declared utf8mb4', function () {
-                expect(declaredCharset(column)).to.equal('utf8mb4');
-            });
-        }
-
-        it('control: a column that carries no provider bytes stays on the table tail', function () {
-            // signer_pubkeys is hex the hub composes itself. If this ever reads utf8mb4 the
-            // check above has stopped distinguishing anything.
-            expect(declaredCharset('signer_pubkeys')).to.equal(null);
-        });
-    });
-
-    describe('runMigrations (what a deployed hub gets)', function () {
-        it('widens both provider-byte columns to utf8mb4', async function () {
-            const { db } = makeDb();
-            sinon.stub(db, 'migrateUniqueKey').resolves();
-            sinon.stub(db, 'migrateIndex').resolves();
-            sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, '_migrateColumnType').resolves();
-            const widen = sinon.stub(db, 'migrateColumnCharset').resolves();
-
-            await db.runMigrations();
-
-            for (const column of PROVIDER_BYTE_COLUMNS) {
-                const call = widen.getCalls().find(c => c.args[1] === column);
-                expect(call, column + ' is not widened on a deployed hub').to.exist;
-                expect(call.args[0]).to.equal('attestation_responses');
-                expect(call.args[2]).to.equal('utf8mb4');
-                // The restated column must match the definition file, or the two schema
-                // paths converge on different shapes.
-                expect(call.args[3]).to.include('CHARACTER SET utf8mb4');
-                expect(call.args[3]).to.include('COLLATE utf8mb4_general_ci');
-                expect(call.args[3]).to.not.match(/NOT\s+NULL/i);
-            }
-            expect(widen.getCall(0).args[3]).to.match(/^MEDIUMTEXT\b/);
-            expect(widen.getCall(1).args[3]).to.match(/^TEXT\b/);
-        });
-    });
-
-    describe('migrateColumnCharset', function () {
+function registerCharsetMigrationHelperSuite() {
+describe('migrateColumnCharset', function () {
         it('issues the MODIFY when the live column is still utf8mb3', async function () {
             const { db, mockConn } = makeDb();
             mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb3' }]).onCall(1).resolves([]);
@@ -152,4 +104,64 @@ describe('attestation_responses holds every provider body the on-chain path hold
             expect(mockConn.release.called).to.be.true;
         });
     });
+}
+
+function registerCharsetMigrationsSuite() {
+describe('runMigrations (what a deployed hub gets)', function () {
+        it('widens both provider-byte columns to utf8mb4', async function () {
+            const { db } = makeDb();
+            sinon.stub(db, 'migrateUniqueKey').resolves();
+            sinon.stub(db, 'migrateIndex').resolves();
+            sinon.stub(db, 'migrateEnumColumn').resolves();
+            sinon.stub(db, '_migrateColumnType').resolves();
+            const widen = sinon.stub(db, 'migrateColumnCharset').resolves();
+
+            await db.runMigrations();
+
+            for (const column of PROVIDER_BYTE_COLUMNS) {
+                const call = widen.getCalls().find(c => c.args[1] === column);
+                expect(call, column + ' is not widened on a deployed hub').to.exist;
+                expect(call.args[0]).to.equal('attestation_responses');
+                expect(call.args[2]).to.equal('utf8mb4');
+                // The restated column must match the definition file, or the two schema
+                // paths converge on different shapes.
+                expect(call.args[3]).to.include('CHARACTER SET utf8mb4');
+                expect(call.args[3]).to.include('COLLATE utf8mb4_general_ci');
+                expect(call.args[3]).to.not.match(/NOT\s+NULL/i);
+            }
+            expect(widen.getCall(0).args[3]).to.match(/^MEDIUMTEXT\b/);
+            expect(widen.getCall(1).args[3]).to.match(/^TEXT\b/);
+        });
+    });
+}
+
+function registerCharsetDefinitionSuite() {
+describe('the definition (what a fresh hub gets from verifyTables)', function () {
+        for (const column of PROVIDER_BYTE_COLUMNS) {
+            it(column + ' is declared utf8mb4', function () {
+                expect(declaredCharset(column)).to.equal('utf8mb4');
+            });
+        }
+
+        it('control: a column that carries no provider bytes stays on the table tail', function () {
+            // signer_pubkeys is hex the hub composes itself. If this ever reads utf8mb4 the
+            // check above has stopped distinguishing anything.
+            expect(declaredCharset('signer_pubkeys')).to.equal(null);
+        });
+    });
+}
+
+describe('attestation_responses holds every provider body the on-chain path holds', function () {
+
+    beforeEach(function () {
+        sinon.stub(console, 'log');
+        sinon.stub(console, 'error');
+    });
+    afterEach(() => sinon.restore());
+
+    registerCharsetDefinitionSuite();
+
+    registerCharsetMigrationsSuite();
+
+    registerCharsetMigrationHelperSuite();
 });
