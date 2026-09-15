@@ -21,191 +21,191 @@ const { makeValidator, VALIDATORS_4 } = require('../../helpers/fixtures');
 const OLD_HASH = 'a'.repeat(64);
 const NEW_HASH = 'b'.repeat(64);
 
-describe('Boundary: ReorgHandler', function () {
+let hub, pm, rh;
 
-    let hub, pm, rh;
+describe('Boundary: ReorgHandler', registerBoundaryReorgHandler);
 
+function registerBoundaryReorgHandler() {
     beforeEach(function () {
         hub = createMockHub();
         pm  = hub._peerManager;
         rh  = new ReorgHandler(hub);
         sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(true);
     });
-
     afterEach(function () {
         for (let [, pending] of rh.pendingReorgs) {
             if (pending.timer) clearTimeout(pending.timer);
         }
         sinon.restore();
     });
-
     // -----------------------------------------------------------------
     // Height boundaries
     // -----------------------------------------------------------------
-
-    describe('reorg height boundaries', function () {
-
-        it('reorg at height 0 is valid and triggers rollback', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            await rh.reportReorg('BTC', 0, Date.now(), OLD_HASH, NEW_HASH);
-
-            expect(hub.db.doQuery.called).to.be.true;
-            // Third doQuery call is the INSERT into reorg_attestations
-            let calls = hub.db.doQuery.args;
-            let insertCall = calls.find(c => /INSERT INTO reorg_attestations/.test(c[0]));
-            expect(insertCall).to.exist;
-            expect(insertCall[1][2]).to.equal(0); // reorgHeight
-        });
-
-        it('reorg at Number.MAX_SAFE_INTEGER height is accepted', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            let height = Number.MAX_SAFE_INTEGER;
-            await rh.reportReorg('LTC', height, Date.now(), OLD_HASH, NEW_HASH);
-
-            let calls = hub.db.doQuery.args;
-            let insertCall = calls.find(c => /INSERT INTO reorg_attestations/.test(c[0]));
-            expect(insertCall).to.exist;
-            expect(insertCall[1][2]).to.equal(height);
-        });
-    });
-
+    describe('reorg height boundaries', registerReorgHeightBoundaries);
     // -----------------------------------------------------------------
     // Timestamp boundaries
     // -----------------------------------------------------------------
-
-    describe('timestamp boundaries', function () {
-
-        it('timestamp=0 (unix epoch) is REJECTED by the blast-radius bound', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            // timestamp=0 would make executeRollback DELETE every attestation and dispute
-            // every finalized price snapshot for the chain. It is far outside the recent
-            // window, so it must be refused before any rollback runs.
-            let threw = false;
-            try { await rh.reportReorg('BTC', 100, 0, OLD_HASH, NEW_HASH); }
-            catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
-            expect(threw).to.be.true;
-            expect(hub.db.doQuery.called).to.be.false;
-        });
-
-        it('far-future timestamp is rejected by validation', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            let futureTs = Date.now() + 1e13; // ~317 years from now
-            try {
-                await rh.reportReorg('DOGE', 500, futureTs, OLD_HASH, NEW_HASH);
-                expect.fail('should have thrown');
-            } catch (e) {
-                expect(e.message).to.include('future');
-            }
-        });
-    });
-
+    describe('timestamp boundaries', registerTimestampBoundaries);
     // -----------------------------------------------------------------
     // Duplicate detection
     // -----------------------------------------------------------------
-
-    describe('duplicate reorg report', function () {
-
-        it('second call with same reorgId is a silent no-op, not an error', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            let ts = Date.now() - 1000;
-            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
-            let writesAfterFirst = hub.db.doQuery.callCount;
-
-            // Second identical report: the reorgId is in `processed`, so it returns
-            // without doing anything. It used to reach the rate limiter first and
-            // throw, which turned an idempotent retry into an error for the caller.
-            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
-            expect(hub.db.doQuery.callCount).to.equal(writesAfterFirst);
-        });
-
-        it('a DIFFERENT reorg on the same chain inside the window is still rate-limited', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            let ts = Date.now() - 1000;
-            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
-
-            try {
-                await rh.reportReorg('BTC', 201, ts, OLD_HASH, NEW_HASH);
-                expect.fail('should have thrown');
-            } catch (e) {
-                expect(e.message).to.include('Rate limit');
-            }
-        });
-    });
-
+    describe('duplicate reorg report', registerDuplicateReorgReport);
     // -----------------------------------------------------------------
     // getAffectedChains
     // -----------------------------------------------------------------
-
-    describe('getAffectedChains', function () {
-
-        it("source='BTC' returns ['LTC', 'DOGE']", function () {
-            expect(rh.getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
-        });
-
-        it("source='DOGE' returns ['BTC', 'LTC']", function () {
-            expect(rh.getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
-        });
-    });
-
+    describe('getAffectedChains', registerGetAffectedChains);
     // -----------------------------------------------------------------
     // Single-node fallback
     // -----------------------------------------------------------------
-
-    describe('single-node fallback', function () {
-
-        it('stores attestation directly when validatorSet is empty and no peers', async function () {
-            rh.setValidatorSet([]);
-            pm.getPeerStatus.returns([]);
-
-            let ts = Date.now();
-            await rh.reportReorg('LTC', 300, ts, OLD_HASH, NEW_HASH);
-
-            // Should NOT broadcast: no PBFT needed
-            expect(pm.broadcast.called).to.be.false;
-
-            // Should write the reorg attestation
-            let insertCall = hub.db.doQuery.args.find(c =>
-                /INSERT INTO reorg_attestations/.test(c[0])
-            );
-            expect(insertCall).to.exist;
-            expect(insertCall[1][0]).to.equal('LTC:300:' + ts); // reorgId
-            expect(insertCall[1][5]).to.equal(1);               // validatorCount = 1
-
-            // reorgId should be in processed set
-            expect(rh.processed.has('LTC:300:' + ts)).to.be.true;
-        });
-    });
-
+    describe('single-node fallback', registerSingleNodeFallback);
     // -----------------------------------------------------------------
     // REORG_ALERT message validation
     // -----------------------------------------------------------------
+    describe('REORG_ALERT message validation', registerREORGALERTMessageValidation);
+}
 
-    describe('REORG_ALERT message validation', function () {
+function registerReorgHeightBoundaries() {
+    it('reorg at height 0 is valid and triggers rollback', testReorgAtHeight0IsValidAndTriggersRollback);
+    it('reorg at Number.MAX_SAFE_INTEGER height is accepted', testReorgAtNumberMAXSAFEINTEGERHeightIsAccepted);
+}
+async function testReorgAtHeight0IsValidAndTriggersRollback() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
 
-        it('REORG_ALERT with missing fields is ignored', function () {
-            rh.setValidatorSet(VALIDATORS_4);
+    await rh.reportReorg('BTC', 0, Date.now(), OLD_HASH, NEW_HASH);
 
-            // Emit a message with a missing reorgId field
-            pm.emit('message', {
-                type:   'REORG_ALERT',
-                sender: makeValidator(2).addr,
-                data:   { chain: 'BTC', reorgHeight: 100 /* timestamp and reorgId missing */ }
-            });
+    expect(hub.db.doQuery.called).to.be.true;
+    // Third doQuery call is the INSERT into reorg_attestations
+    let calls = hub.db.doQuery.args;
+    let insertCall = calls.find(c => /INSERT INTO reorg_attestations/.test(c[0]));
+    expect(insertCall).to.exist;
+    expect(insertCall[1][2]).to.equal(0); // reorgHeight
+}
+async function testReorgAtNumberMAXSAFEINTEGERHeightIsAccepted() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
 
-            // No pending reorg should have been started
-            expect(rh.pendingReorgs.size).to.equal(0);
-        });
+    let height = Number.MAX_SAFE_INTEGER;
+    await rh.reportReorg('LTC', height, Date.now(), OLD_HASH, NEW_HASH);
+
+    let calls = hub.db.doQuery.args;
+    let insertCall = calls.find(c => /INSERT INTO reorg_attestations/.test(c[0]));
+    expect(insertCall).to.exist;
+    expect(insertCall[1][2]).to.equal(height);
+}
+
+function registerTimestampBoundaries() {
+    it('timestamp=0 (unix epoch) is REJECTED by the blast-radius bound', testTimestamp0UnixEpochIsREJECTEDByTheBlastRadiusBound);
+    it('far-future timestamp is rejected by validation', testFarFutureTimestampIsRejectedByValidation);
+}
+async function testTimestamp0UnixEpochIsREJECTEDByTheBlastRadiusBound() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
+
+    // timestamp=0 would make executeRollback DELETE every attestation and dispute
+    // every finalized price snapshot for the chain. It is far outside the recent
+    // window, so it must be refused before any rollback runs.
+    let threw = false;
+    try { await rh.reportReorg('BTC', 100, 0, OLD_HASH, NEW_HASH); }
+    catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
+    expect(threw).to.be.true;
+    expect(hub.db.doQuery.called).to.be.false;
+}
+async function testFarFutureTimestampIsRejectedByValidation() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
+
+    let futureTs = Date.now() + 1e13; // ~317 years from now
+    try {
+        await rh.reportReorg('DOGE', 500, futureTs, OLD_HASH, NEW_HASH);
+        expect.fail('should have thrown');
+    } catch (e) {
+        expect(e.message).to.include('future');
+    }
+}
+
+function registerDuplicateReorgReport() {
+    it('second call with same reorgId is a silent no-op, not an error', testSecondCallWithSameReorgIdIsASilentNoOpNotAn);
+    it('a DIFFERENT reorg on the same chain inside the window is still rate-limited', testADIFFERENTReorgOnTheSameChainInsideTheWindowIsStill);
+}
+async function testSecondCallWithSameReorgIdIsASilentNoOpNotAn() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
+
+    let ts = Date.now() - 1000;
+    await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+    let writesAfterFirst = hub.db.doQuery.callCount;
+
+    // Second identical report: the reorgId is in `processed`, so it returns
+    // without doing anything. It once reached the rate limiter first and
+    // threw, which turned an idempotent retry into an error for the caller.
+    await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+    expect(hub.db.doQuery.callCount).to.equal(writesAfterFirst);
+}
+async function testADIFFERENTReorgOnTheSameChainInsideTheWindowIsStill() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
+
+    let ts = Date.now() - 1000;
+    await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+
+    try {
+        await rh.reportReorg('BTC', 201, ts, OLD_HASH, NEW_HASH);
+        expect.fail('should have thrown');
+    } catch (e) {
+        expect(e.message).to.include('Rate limit');
+    }
+}
+
+function registerGetAffectedChains() {
+    it("source='BTC' returns ['LTC', 'DOGE']", testSourceBTCReturnsLTCDOGE);
+    it("source='DOGE' returns ['BTC', 'LTC']", testSourceDOGEReturnsBTCLTC);
+}
+function testSourceBTCReturnsLTCDOGE() {
+    expect(rh.getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
+}
+function testSourceDOGEReturnsBTCLTC() {
+    expect(rh.getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
+}
+
+function registerSingleNodeFallback() {
+    it('stores attestation directly when validatorSet is empty and no peers', testStoresAttestationDirectlyWhenValidatorSetIsEmptyAndNoPeers);
+}
+async function testStoresAttestationDirectlyWhenValidatorSetIsEmptyAndNoPeers() {
+    rh.setValidatorSet([]);
+    pm.getPeerStatus.returns([]);
+
+    let ts = Date.now();
+    await rh.reportReorg('LTC', 300, ts, OLD_HASH, NEW_HASH);
+
+    // Should NOT broadcast: no PBFT needed
+    expect(pm.broadcast.called).to.be.false;
+
+    // Should write the reorg attestation
+    let insertCall = hub.db.doQuery.args.find(c =>
+        /INSERT INTO reorg_attestations/.test(c[0])
+    );
+    expect(insertCall).to.exist;
+    expect(insertCall[1][0]).to.equal('LTC:300:' + ts); // reorgId
+    expect(insertCall[1][5]).to.equal(1);               // validatorCount = 1
+
+    // reorgId should be in processed set
+    expect(rh.processed.has('LTC:300:' + ts)).to.be.true;
+}
+
+function registerREORGALERTMessageValidation() {
+    it('REORG_ALERT with missing fields is ignored', testREORGALERTWithMissingFieldsIsIgnored);
+}
+function testREORGALERTWithMissingFieldsIsIgnored() {
+    rh.setValidatorSet(VALIDATORS_4);
+
+    // Emit a message with a missing reorgId field
+    pm.emit('message', {
+        type:   'REORG_ALERT',
+        sender: makeValidator(2).addr,
+        data:   { chain: 'BTC', reorgHeight: 100 /* timestamp and reorgId missing */ }
     });
-});
+
+    // No pending reorg should have been started
+    expect(rh.pendingReorgs.size).to.equal(0);
+}
