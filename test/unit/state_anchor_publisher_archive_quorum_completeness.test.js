@@ -181,37 +181,43 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     });
 });
 
+const TXID = 'd'.repeat(64);
+
+// An authenticated FINALIZED from an observed elected leader. Everything the
+// guard is NOT about (membership, signature, observed-leader, content re-check)
+// is satisfied, so only the txid/status combination and the on-chain verdict
+// decide the outcome. `onChain` is what the archive-head check answers with.
+function finalized(txid, status, onChain) {
+    let { pub } = buildPub({});
+    let leader  = new ValidatorIdentity('22'.repeat(32));
+    let sender  = leader.getPubkeyHex().toLowerCase();
+    let matches = [{ match_id: MATCH_ROW.match_id, status: status }];
+    let stamped = [];
+    let asked   = [];
+
+    pub._getActiveOraclePublishPubkeys = async () => [sender];
+    pub.isObservedArchiveLeader       = () => true;
+    pub.verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
+    pub.backfillBatch                 = async (...a) => { stamped.push(a); };
+    pub.recordReward                  = async () => {};     // reward rail is #4180-adjacent, not the subject
+    pub.verifyArchiveCheckpointOnChain = async (seq, tx, expect) => {
+        asked.push({ seq: seq, txid: tx, expect: expect });
+        return onChain === undefined ? 'verified' : onChain;
+    };
+
+    let d = { batch_seq: 7, txid: txid, matches: matches, calls: [], rewards: [],
+              snapshot_block: BLOCK, sig_pubkey: sender };
+    d.sig = leader.sign(pub.finalizedCanonical(7, txid, matches.length));
+    return { pub, envelope: { data: d }, stamped, asked, sender };
+}
+
 describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unverified', () => {
 
-    const TXID = 'd'.repeat(64);
+    registerFinalizedStampTests();
+    registerFinalizedDeferredTests();
+});
 
-    // An authenticated FINALIZED from an observed elected leader. Everything the
-    // guard is NOT about (membership, signature, observed-leader, content re-check)
-    // is satisfied, so only the txid/status combination and the on-chain verdict
-    // decide the outcome. `onChain` is what the archive-head check answers with.
-    function finalized(txid, status, onChain) {
-        let { pub } = buildPub({});
-        let leader  = new ValidatorIdentity('22'.repeat(32));
-        let sender  = leader.getPubkeyHex().toLowerCase();
-        let matches = [{ match_id: MATCH_ROW.match_id, status: status }];
-        let stamped = [];
-        let asked   = [];
-
-        pub._getActiveOraclePublishPubkeys = async () => [sender];
-        pub.isObservedArchiveLeader       = () => true;
-        pub.verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
-        pub.backfillBatch                 = async (...a) => { stamped.push(a); };
-        pub.recordReward                  = async () => {};     // reward rail is #4180-adjacent, not the subject
-        pub.verifyArchiveCheckpointOnChain = async (seq, tx, expect) => {
-            asked.push({ seq: seq, txid: tx, expect: expect });
-            return onChain === undefined ? 'verified' : onChain;
-        };
-
-        let d = { batch_seq: 7, txid: txid, matches: matches, calls: [], rewards: [],
-                  snapshot_block: BLOCK, sig_pubkey: sender };
-        d.sig = leader.sign(pub.finalizedCanonical(7, txid, matches.length));
-        return { pub, envelope: { data: d }, stamped, asked, sender };
-    }
+function registerFinalizedStampTests() {
 
     it('REFUSES a null-txid FINALIZED announcing terminal statuses (permanent suppression)', async () => {
         let { pub, envelope, stamped } = finalized(null, 'settled');
@@ -252,6 +258,9 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
             .to.deep.equal([]);
         expect(pub._deferredFinalized.size, 'queued for re-verification').to.equal(1);
     });
+}
+
+function registerFinalizedDeferredTests() {
 
     it('stamps NOTHING and queues nothing when the head is positively rejected on-chain', async () => {
         let { pub, envelope, stamped } = finalized(TXID, 'settled', 'rejected:txid');
@@ -282,4 +291,4 @@ describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unv
         expect(stamped.length, 'no terminal stamp ever lands').to.equal(1);
         expect(pub._deferredFinalized.size).to.equal(0);
     });
-});
+}
