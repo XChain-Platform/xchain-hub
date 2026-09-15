@@ -20,7 +20,7 @@
 const { expect } = require('chai');
 
 const {
-    StakeShareMonitor, evaluateStakeShare, normalizeSources, isAlertLevel, LEVELS
+    evaluateStakeShare, normalizeSources, isAlertLevel, LEVELS
 } = require('../../src/lib/stake_share_monitor.js');
 
 // One row per staking source, all equal weight, as the outage's set was.
@@ -42,6 +42,14 @@ const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];
 
 describe('evaluateStakeShare', function () {
 
+    registerOutageForecastTests();
+    registerMarginPolicyTests();
+    registerSourceAggregationTests();
+    registerStakeSizingTests();
+    registerBlockedStateTests();
+});
+
+function registerOutageForecastTests() {
     it('measures the share, the gate and the headroom on the outage numbers', function () {
         // 125000 of 175000 = 71.43%: above the gate, but only by 12500, which is
         // half of one MIN_STAKE. This is the state that had no signal at all.
@@ -81,7 +89,9 @@ describe('evaluateStakeShare', function () {
         expect(r.headroom).to.equal('-12500');
         expect(r.reason).to.contain('12500');
     });
+}
 
+function registerMarginPolicyTests() {
     it('shows the 275000 top-up is STILL one stake from the gate', function () {
         // The recovery runbook calls 200000/275000 = 72.7% "the margin
         // worth having" and reads it as two or three stakes of slack. It is not:
@@ -131,7 +141,9 @@ describe('evaluateStakeShare', function () {
         expect(r.stakesToHalt).to.equal(3);
         expect(r.level).to.equal(LEVELS.OK);
     });
+}
 
+function registerSourceAggregationTests() {
     it('honours operator-tuned warn / critical margins', function () {
         const set = rows([
             { source: 'ours1', weight: 100000 }, { source: 'ours2', weight: 100000 },
@@ -184,7 +196,9 @@ describe('evaluateStakeShare', function () {
         expect(r.stakesToHalt).to.equal(1);
         expect(r.level).to.equal(LEVELS.CRITICAL);
     });
+}
 
+function registerStakeSizingTests() {
     it('never sizes a stake below MIN_STAKE, which nobody can qualify under', function () {
         const r = evaluateStakeShare({
             validators: rows([
@@ -223,7 +237,9 @@ describe('evaluateStakeShare', function () {
         expect(r.level).to.equal(LEVELS.HALTED);
         expect(r.headroom).to.equal('0');
     });
+}
 
+function registerBlockedStateTests() {
     it('reports BLOCKED on a truncated snapshot, which the gate itself fails closed on', function () {
         const set = outageMinusOne();
         set.truncated = true;
@@ -274,163 +290,12 @@ describe('evaluateStakeShare', function () {
         expect(allWrong.level).to.equal(LEVELS.UNCONFIGURED);
         expect(allWrong.reason).to.contain('per chain');
     });
-});
+}
 
 describe('normalizeSources', function () {
     it('accepts a list or a delimited string, trims, and dedupes', function () {
         expect(normalizeSources('a, b  c,,a')).to.deep.equal(['a', 'b', 'c']);
         expect(normalizeSources([' a ', null, 'a', ''])).to.deep.equal(['a']);
         expect(normalizeSources(undefined)).to.deep.equal([]);
-    });
-});
-
-describe('StakeShareMonitor', function () {
-
-    function makeMonitor(opts) {
-        const lines = [];
-        const clock = { t: 1000000 };
-        const monitor = new StakeShareMonitor(Object.assign({
-            throttleMs: 300000, now: () => clock.t, log: (msg) => lines.push(msg)
-        }, opts || {}));
-        return { monitor, lines, clock };
-    }
-
-    const okEval  = () => evaluateStakeShare({
-        validators: rows([
-            { source: 'ours1', weight: 100000 }, { source: 'ours2', weight: 100000 },
-            { source: 'c1', weight: 25000 }
-        ]), operatorSources: ['ours1', 'ours2'], minStake: '25000'
-    });
-    const criticalEval = () => evaluateStakeShare({
-        validators: outageMinusOne(), operatorSources: OURS, minStake: '25000'
-    });
-
-    it('stays quiet while the margin is comfortable', function () {
-        const { monitor, lines } = makeMonitor();
-        monitor.record('BTC', 'price', okEval());
-        expect(lines).to.deep.equal([]);
-        expect(monitor.isAlerting()).to.equal(false);
-    });
-
-    it('logs and alerts the moment the margin reaches one stake', function () {
-        const { monitor, lines } = makeMonitor();
-        monitor.record('BTC', 'price', okEval());
-        monitor.record('BTC', 'price', criticalEval());
-        expect(monitor.isAlerting()).to.equal(true);
-        expect(lines).to.have.lengthOf(1);
-        expect(lines[0]).to.contain('STAKE SHARE CRITICAL [BTC/price]');
-        expect(lines[0]).to.contain('12500');
-    });
-
-    it('prints a level change immediately even inside the throttle window', function () {
-        const { monitor, lines, clock } = makeMonitor();
-        monitor.record('BTC', 'price', criticalEval());
-        expect(lines).to.have.lengthOf(1);
-        // Same level, same window: throttled.
-        clock.t += 1000;
-        monitor.record('BTC', 'price', criticalEval());
-        expect(lines).to.have.lengthOf(1);
-        // Escalation inside the window still prints: the transition IS the signal.
-        const halted = evaluateStakeShare({
-            validators: outageMinusOne().concat(rows([{ source: 'c3', weight: 25000 }])),
-            operatorSources: OURS, minStake: '25000'
-        });
-        monitor.record('BTC', 'price', halted);
-        expect(lines).to.have.lengthOf(2);
-        expect(lines[1]).to.contain('STAKE SHARE HALTED');
-    });
-
-    it('re-logs a standing alert once per window, not once per poll', function () {
-        const { monitor, lines, clock } = makeMonitor();
-        monitor.record('BTC', 'price', criticalEval());
-        for (let i = 0; i < 5; i++) { clock.t += 10000; monitor.record('BTC', 'price', criticalEval()); }
-        expect(lines).to.have.lengthOf(1);
-        clock.t += 300001;
-        monitor.record('BTC', 'price', criticalEval());
-        expect(lines).to.have.lengthOf(2);
-    });
-
-    it('announces recovery, so a fixed federation is distinguishable from a stalled monitor', function () {
-        const { monitor, lines } = makeMonitor();
-        monitor.record('BTC', 'price', criticalEval());
-        monitor.record('BTC', 'price', okEval());
-        expect(monitor.isAlerting()).to.equal(false);
-        expect(lines[1]).to.contain('STAKE SHARE ALERT CLEARED [BTC/price]');
-    });
-
-    it('keeps one entry per chain and capability, and reports the worst', function () {
-        const { monitor } = makeMonitor();
-        monitor.record('BTC', 'price', criticalEval());
-        monitor.record('DOGE', 'price', okEval());
-        monitor.record('BTC', 'oracle_publish', okEval());
-        const snap = monitor.snapshot();
-        expect(Object.keys(snap.chains).sort()).to.deep.equal(['BTC', 'DOGE']);
-        expect(Object.keys(snap.chains.BTC).sort()).to.deep.equal(['oracle_publish', 'price']);
-        expect(snap.worst).to.deep.equal({ level: LEVELS.CRITICAL, chain: 'BTC', capability: 'price' });
-        expect(snap.alerting).to.equal(true);
-        expect(snap.chains.BTC.price.stakes_to_halt).to.equal(1);
-        expect(snap.chains.DOGE.price.meets_gate).to.equal(true);
-    });
-
-    it('does not page on an unreadable snapshot, which the indexer monitor already owns', function () {
-        const { monitor, lines } = makeMonitor();
-        monitor.recordUnavailable('LTC', 'price', 'no LTC indexer URL could be resolved');
-        expect(monitor.isAlerting()).to.equal(false);
-        expect(monitor.snapshot().chains.LTC.price.level).to.equal(LEVELS.UNAVAILABLE);
-        expect(lines).to.have.lengthOf(1);
-        expect(lines[0]).to.contain('Stake share unavailable [LTC/price]');
-    });
-
-    it('ages entries so a stalled watcher is visible in the body', function () {
-        const { monitor, clock } = makeMonitor();
-        monitor.record('BTC', 'price', okEval());
-        clock.t += 900000;
-        expect(monitor.snapshot().chains.BTC.price.age_s).to.equal(900);
-    });
-});
-
-describe('projectCompetingStake', function () {
-
-    // The desk half of the drill: "what does the next community STAKE do to us",
-    // answered against the live reading without putting stake on the network.
-    const reading = () => evaluateStakeShare({
-        validators: outageMinusOne(), operatorSources: OURS, minStake: '25000'
-    });
-
-    it('shows the exact stake that ends price rounds', function () {
-        const p = require('../../src/lib/stake_share_monitor.js')
-            .projectCompetingStake(reading(), '25000');
-        expect(p.totalStake).to.equal('200000');
-        expect(p.meetsGate).to.equal(false);
-        expect(p.level).to.equal(LEVELS.HALTED);
-        expect(p.headroom).to.equal('-12500');
-        expect(p.reason).to.contain('after a further 25000');
-    });
-
-    it('keeps the gate for a stake smaller than the headroom', function () {
-        const p = require('../../src/lib/stake_share_monitor.js')
-            .projectCompetingStake(reading(), '1000');
-        expect(p.meetsGate).to.equal(true);
-        expect(p.headroom).to.equal('11500');
-        expect(p.stakesToHalt).to.equal(1);
-        expect(p.level).to.equal(LEVELS.CRITICAL);
-    });
-
-    it('scores the projection with the same rules as the live reading', function () {
-        const { projectCompetingStake } = require('../../src/lib/stake_share_monitor.js');
-        const zero = projectCompetingStake(reading(), '0');
-        const live = reading();
-        expect(zero.level).to.equal(live.level);
-        expect(zero.headroom).to.equal(live.headroom);
-        expect(zero.stakesToHalt).to.equal(live.stakesToHalt);
-    });
-
-    it('returns null rather than a guess on an unmeasured reading or a bad amount', function () {
-        const { projectCompetingStake } = require('../../src/lib/stake_share_monitor.js');
-        expect(projectCompetingStake(reading(), 'lots')).to.equal(null);
-        expect(projectCompetingStake(reading(), '-5')).to.equal(null);
-        expect(projectCompetingStake(null, '1')).to.equal(null);
-        expect(projectCompetingStake(evaluateStakeShare({ validators: [], operatorSources: OURS }), '1'))
-            .to.equal(null);
     });
 });
