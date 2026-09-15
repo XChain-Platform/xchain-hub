@@ -15,7 +15,6 @@
 // quorum collection, FINALIZED adoption + dedup, the timeout downgrade, and the
 // fail-closed finalize (a throwing / zero-row / truncated capability-snapshot persist
 // defers the signed deletion and releases the round id instead of streaming it).
-
 const assert            = require('assert');
 const crypto            = require('crypto');
 const { EventEmitter }  = require('events');
@@ -23,7 +22,6 @@ const RetractionConsensus = require('../../src/consensus/retraction.js');
 const ValidatorIdentity   = require('../../src/validators/identity.js');
 const { waitUntil }       = require('../helpers/waitUntil');
 const { DB_METHODS } = require('../helpers/mockHub.js');
-
 // The golden canonical: MUST byte-match hub_db_sync.js canonicalRetraction()
 // in xchain-indexer / xchain-explorer (their suites sign this same literal).
 const GOLDEN_EVT = {
@@ -32,11 +30,9 @@ const GOLDEN_EVT = {
     retraction_generation: 7, snapshot_block: 5000
 };
 const GOLDEN_CANONICAL = 'XRETRACTV1|cross_chain_calls|DOGE|42|99|7|5000';
-
 function makeIdentity(){
     return new ValidatorIdentity(crypto.randomBytes(32).toString('hex'));
 }
-
 // Minimal hub stub. Weighted-quorum path is what regtest exercises (SWQ is
 // genesis-active there), so snapshot validators carry real sources/weights.
 function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p2p = {} } = {}){
@@ -67,20 +63,16 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
     hub._queries = queries;
     return hub;
 }
-
-describe('RetractionConsensus (signed retractions) @regression @tier1', function () {
-
-    it('canonicalRetraction matches the golden consumer vector byte-for-byte', function () {
+{
+    function canonicalretractionMatchesTheGoldenConsumerVectorTest2() {
         assert.strictEqual(RetractionConsensus.canonicalRetraction(GOLDEN_EVT), GOLDEN_CANONICAL);
-    });
-
-    it('canonical uses empty slots for absent to_action_index / generation', function () {
+    }
+    function canonicalUsesEmptySlotsForAbsentTest3() {
         assert.strictEqual(
             RetractionConsensus.canonicalRetraction({ table: 'cross_chain_matches', source_chain: 'LTC', from_action_index: 3, snapshot_block: 10 }),
             'XRETRACTV1|cross_chain_matches|LTC|3|||10');
-    });
-
-    it('single-node self-sign: broadcasts a signed deletion with a verifying signature', async function () {
+    }
+    async function singleNodeSelfSignBroadcastsATest4() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -97,9 +89,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.ok(hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)));
         assert.ok(hub.hubDbBroadcaster.rows.some(r => r.table === 'capability_snapshots'));
         rc.stop();
-    });
-
-    it('below the flag-day era the broadcast stays legacy-unsigned', async function () {
+    }
+    async function belowTheFlagDayEraTheTest5() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         // mainnet threshold 963000 > snapshot 5000 -> gate off
@@ -111,9 +102,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(dels[0].retraction_signatures, undefined);
         assert.strictEqual(dels[0].snapshot_block, undefined);
         rc.stop();
-    });
-
-    it('non-quorum-class tables pass through unsigned even at/after the gate', async function () {
+    }
+    async function nonQuorumClassTablesPassThroughTest6() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -122,18 +112,16 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures, undefined);
         rc.stop();
-    });
-
-    it('without a validator identity (standalone hub) the broadcast stays legacy-unsigned', async function () {
+    }
+    async function withoutAValidatorIdentityStandaloneHubTest7() {
         let hub = makeHub({ identity: null });
         let rc  = new RetractionConsensus(hub);
         await rc.submitLocal({ table: 'cross_chain_matches', source_chain: 'LTC', from_action_index: 9, retraction_generation: 2 });
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures, undefined);
         rc.stop();
-    });
-
-    it('multi-node: initiator collects follower sigs to quorum and streams the signed deletion', async function () {
+    }
+    async function multiNodeInitiatorCollectsFollowerSigsTest8() {
         let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity(), idD = makeIdentity();
         let vset = [idA, idB, idC, idD].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: idA, validators: vset, p2p: { RETRACT_ROUND_TIMEOUT_MS: 5000, RETRACT_SIGN_RETRY_MS: 5000 } });
@@ -155,9 +143,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(dels[0].retraction_signatures.length, 3);
         assert.ok(hub.peerManager.broadcasts.some(b => b.type === 'XRETRACT_FINALIZED'));
         rc.stop();
-    });
-
-    it('initiator rejects signatures from non-members and over the wrong canonical', async function () {
+    }
+    async function initiatorRejectsSignaturesFromNonMembersTest9() {
         let idA = makeIdentity(), idB = makeIdentity(), stranger = makeIdentity();
         let vset = [idA, idB].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: idA, validators: vset, p2p: { RETRACT_ROUND_TIMEOUT_MS: 5000, RETRACT_SIGN_RETRY_MS: 5000 } });
@@ -170,9 +157,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0);
         rc.stop();
-    });
-
-    it('follower signs a SIGN_REQ only when its OWN indexer pushed a matching intent', async function () {
+    }
+    async function followerSignsASignReqOnlyTest10() {
         let leader = makeIdentity(), follower = makeIdentity();
         let vset = [leader, follower].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: follower, validators: vset });
@@ -193,9 +179,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.ok(sign, 'must sign once the local intent matches');
         assert.ok(ValidatorIdentity.verify(GOLDEN_CANONICAL, sign.data.sig, follower.getPubkeyHex().toLowerCase()));
         rc.stop();
-    });
-
-    it('follower refuses a SIGN_REQ whose snapshot_block drifts beyond the bound', async function () {
+    }
+    async function followerRefusesASignReqWhoseTest11() {
         let leader = makeIdentity(), follower = makeIdentity();
         let vset = [leader, follower].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: follower, validators: vset, btcBlock: 5000 });
@@ -209,9 +194,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         await new Promise(r => setImmediate(r));
         assert.ok(!hub.peerManager.broadcasts.some(b => b.type === 'XRETRACT_SIGN'));
         rc.stop();
-    });
-
-    it('FINALIZED adoption: a non-initiator hub re-verifies the quorum and streams the signed deletion once', async function () {
+    }
+    async function finalizedAdoptionANonInitiatorHubTest12() {
         let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity(), me = makeIdentity();
         let vset = [idA, idB, idC, me].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: me, validators: vset });
@@ -227,9 +211,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         rc.stop();
-    });
-
-    it('FINALIZED with a sub-quorum signature set is ignored', async function () {
+    }
+    async function finalizedWithASubQuorumSignatureTest13() {
         let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity(), me = makeIdentity();
         let vset = [idA, idB, idC, me].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: me, validators: vset });
@@ -239,9 +222,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, '2 of 4 sources (weighted 600<=800*2/3... 3*200>2*400 false) must not stream');
         rc.stop();
-    });
-
-    it('round timeout downgrades to the legacy unsigned broadcast (never drops the retraction)', async function () {
+    }
+    async function roundTimeoutDowngradesToTheLegacyTest14() {
         let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity();
         let vset = [idA, idB, idC].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: idA, validators: vset, p2p: { RETRACT_ROUND_TIMEOUT_MS: 40, RETRACT_SIGN_RETRY_MS: 15 } });
@@ -253,14 +235,13 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(dels.length, 1, 'timed-out round must still broadcast');
         assert.strictEqual(dels[0].retraction_signatures, undefined, 'timeout downgrade is unsigned');
         rc.stop();
-    });
-
+    }
     // SWQ-TRUNC-MIRROR. The retraction rail is a fourth writer into the
     // shared capability_snapshots mirror, and `.truncated` is a JS array property with
     // no column behind it: mirroring a capped set hands the off-BTC verifiers a partial
     // stake denominator they read back as COMPLETE, while this class rejects the same
     // set at its own meetsStakeThreshold. Persist must write nothing and stream nothing.
-    it('refuses to persist or mirror a TRUNCATED capability set', async function () {
+    async function refusesToPersistOrMirrorATest15() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -272,14 +253,13 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
             'no capability_snapshots row may be written from a truncated set');
         assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0, 'nothing may be mirrored either');
         rc.stop();
-    });
-
+    }
     // Fail-closed finalize. The capability-snapshot persist is a PRECONDITION
     // of the signed deletion: mirrors verify the co-signatures against those rows, so a
     // swallowed DB throw or a silent zero-row persist would stream a deletion no mirror
     // can verify AND retire the round id forever, stranding the retracted rows live in
     // every indexer. Every failure path must stream nothing and RELEASE the round id.
-    it('fail-closed: a THROWING capability persist defers the signed retraction and releases the round', async function () {
+    async function failClosedAThrowingCapabilityPersistTest16() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -292,9 +272,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'no deletion may be streamed when the persist failed');
         assert.strictEqual(rc.finalized.size, 0, 'the round id must be released so a later delivery re-runs it');
         rc.stop();
-    });
-
-    it('fail-closed: a ZERO-row capability persist (degraded validator set) defers the signed retraction', async function () {
+    }
+    async function failClosedAZeroRowCapabilityTest17() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -312,9 +291,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'an unverifiable deletion must not be streamed');
         assert.strictEqual(rc.finalized.size, 0, 'the round id must be released');
         rc.stop();
-    });
-
-    it('fail-closed: a set that turns TRUNCATED at persist time defers rather than streaming', async function () {
+    }
+    async function failClosedASetThatTurnsTest18() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -331,9 +309,8 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0);
         assert.strictEqual(rc.finalized.size, 0, 'a truncated persist is a deferral, not a finalization');
         rc.stop();
-    });
-
-    it('a deferred FINALIZED re-runs on re-delivery once the persist recovers, then dedups', async function () {
+    }
+    async function aDeferredFinalizedReRunsOnTest19() {
         let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity(), me = makeIdentity();
         let vset = [idA, idB, idC, me].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
         let hub = makeHub({ identity: me, validators: vset });
@@ -346,25 +323,21 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         let rc   = new RetractionConsensus(hub);
         let sigs = [idA, idB, idC].map(i => ({ pubkey: i.getPubkeyHex().toLowerCase(), sig: i.sign(GOLDEN_CANONICAL) }));
         let env  = { type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } };
-
         rc._handleMessage(env);
         await waitUntil(() => rc.finalized.size === 0, { label: 'the failed round to be released' });
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'deferred, nothing streamed');
-
         healthy = true;
         rc._handleMessage(env);
         await waitUntil(() => hub.hubDbBroadcaster.deletions.length === 1, { label: 're-delivery to finalize once the DB recovers' });
         assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures.length, 3);
-
         // and the ring still dedups a third delivery of the same round
         rc._handleMessage(env);
         await new Promise(r => setImmediate(r));
         await new Promise(r => setImmediate(r));
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         rc.stop();
-    });
-
-    it('still persists an untruncated capability set (the guard is not a blanket refusal)', async function () {
+    }
+    async function stillPersistsAnUntruncatedCapabilitySetTest20() {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
@@ -373,10 +346,30 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.ok(hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)));
         assert.ok(hub.hubDbBroadcaster.rows.some(r => r.table === 'capability_snapshots'));
         rc.stop();
-    });
-
-});
-
+    }
+    function retractionconsensusSignedRetractionsRegressionTier1Suite1() {
+        it('canonicalRetraction matches the golden consumer vector byte-for-byte', canonicalretractionMatchesTheGoldenConsumerVectorTest2);
+        it('canonical uses empty slots for absent to_action_index / generation', canonicalUsesEmptySlotsForAbsentTest3);
+        it('single-node self-sign: broadcasts a signed deletion with a verifying signature', singleNodeSelfSignBroadcastsATest4);
+        it('below the flag-day era the broadcast stays legacy-unsigned', belowTheFlagDayEraTheTest5);
+        it('non-quorum-class tables pass through unsigned even at/after the gate', nonQuorumClassTablesPassThroughTest6);
+        it('without a validator identity (standalone hub) the broadcast stays legacy-unsigned', withoutAValidatorIdentityStandaloneHubTest7);
+        it('multi-node: initiator collects follower sigs to quorum and streams the signed deletion', multiNodeInitiatorCollectsFollowerSigsTest8);
+        it('initiator rejects signatures from non-members and over the wrong canonical', initiatorRejectsSignaturesFromNonMembersTest9);
+        it('follower signs a SIGN_REQ only when its OWN indexer pushed a matching intent', followerSignsASignReqOnlyTest10);
+        it('follower refuses a SIGN_REQ whose snapshot_block drifts beyond the bound', followerRefusesASignReqWhoseTest11);
+        it('FINALIZED adoption: a non-initiator hub re-verifies the quorum and streams the signed deletion once', finalizedAdoptionANonInitiatorHubTest12);
+        it('FINALIZED with a sub-quorum signature set is ignored', finalizedWithASubQuorumSignatureTest13);
+        it('round timeout downgrades to the legacy unsigned broadcast (never drops the retraction)', roundTimeoutDowngradesToTheLegacyTest14);
+        it('refuses to persist or mirror a TRUNCATED capability set', refusesToPersistOrMirrorATest15);
+        it('fail-closed: a THROWING capability persist defers the signed retraction and releases the round', failClosedAThrowingCapabilityPersistTest16);
+        it('fail-closed: a ZERO-row capability persist (degraded validator set) defers the signed retraction', failClosedAZeroRowCapabilityTest17);
+        it('fail-closed: a set that turns TRUNCATED at persist time defers rather than streaming', failClosedASetThatTurnsTest18);
+        it('a deferred FINALIZED re-runs on re-delivery once the persist recovers, then dedups', aDeferredFinalizedReRunsOnTest19);
+        it('still persists an untruncated capability set (the guard is not a blanket refusal)', stillPersistsAnUntruncatedCapabilitySetTest20);
+    }
+    describe('RetractionConsensus (signed retractions) @regression @tier1', retractionconsensusSignedRetractionsRegressionTier1Suite1);
+}
 // The parts reach canonicalRetraction and intentKey as RetractionConsensus.<static>,
 // so a static reassigned on the class (a double, a patch) is the one every signing
 // path runs, never a module-local copy the reassignment cannot reach.
