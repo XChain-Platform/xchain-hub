@@ -124,11 +124,116 @@ function cleanup(hubs) {
     }
 }
 
-describe('mirror-era ATTEST response canonical, driven through a round', function () {
+function registerCanonicalEraFinalTests() {
+it('a mirror-era round produces a canonical no legacy verifier can rebuild, and vice versa', async function () {
+        // The two eras never share a signature. Proving it directly is what makes
+        // the flag day safe: a signature harvested from one era cannot be replayed
+        // into the other even for the same request, body, status and meta.
+        let mirrorHubs = makeFederation('regtest', 3);
+        let legacyHubs = makeFederation('mainnet', 3);
+        try {
+            await driveRound(mirrorHubs, MIRROR_BLK);
+            await driveRound(legacyHubs, LEGACY_BLK);
+            let mp = mirrorHubs[0].engine.pending.get(RID);
+            let mirrorBytes = mirrorHubs[0].engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, mp.effectiveTime).toString('utf8');
+            expect(mirrorBytes).to.not.equal(LEGACY_CANONICAL_LITERAL);
 
-    afterEach(function () { sinon.restore(); });
+            let sig = mp.signatures.get(mirrorHubs[0].pubkey);
+            expect(ValidatorIdentity.verify(mirrorBytes, sig, mirrorHubs[0].pubkey)).to.equal(true);
+            expect(ValidatorIdentity.verify(LEGACY_CANONICAL_LITERAL, sig, mirrorHubs[0].pubkey)).to.equal(false);
+        } finally { cleanup(mirrorHubs); cleanup(legacyHubs); }
+    });
 
-    it('LEGACY ERA IS BYTE-PRESERVED: the round signs the captured pre-change literal', async function () {
+    it('the response hash the canonical binds is still sha256 of the body bytes', function () {
+        // Pinned because the field moved into a shared module; the hash is the one
+        // field the indexer re-derives from the stored payload rather than reading.
+        let hubs = makeFederation('mainnet', 1);
+        try {
+            let h = crypto.createHash('sha256').update(BODY, 'utf8').digest('hex');
+            expect(LEGACY_CANONICAL_LITERAL).to.contain(h);
+        } finally { cleanup(hubs); }
+    });
+}
+
+function registerCanonicalEraMetadataTests() {
+it('era selection is an ASSERTION on both sides, never a silent branch', function () {
+        let hubs = makeFederation('regtest', 1);
+        try {
+            let e = hubs[0].engine;
+            // Mirror era with no stamp: the legacy bytes would be a canonical no
+            // mirror-era verifier rebuilds, so it must not be produced at all.
+            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, null))
+                .to.throw(/mirror-era request .* has no effective_time/);
+            // Legacy era with a stamp: the inverse, and just as fatal.
+            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, undefined, NOW + 120))
+                .to.throw(/legacy-era request .* was handed effective_time/);
+            // A non-canonical spelling never reaches bytes (the shared module's
+            // contract, re-asserted here because this is the caller that relies on it).
+            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, '0120'))
+                .to.throw(/not a canonical integer spelling/);
+        } finally { cleanup(hubs); }
+    });
+
+    it('NO CALL SITE CAN FORK THE ERA: every in-file canonical build passes an explicit era', function () {
+        // A source-level pin, because the runtime assertion above only fires for a
+        // caller that already opted in. The six-argument form yields legacy bytes
+        // by design (it is what the canonical-shape suites use), so a NEW call site
+        // that forgot the era would be silently legacy - which is precisely the
+        // per-code-path fork decision D69 names. This test is the guard.
+        let src   = fs.readFileSync(path.join(__dirname, '../../src/attestation/consensus.js'), 'utf8');
+        let lines = src.split('\n');
+        let sites = [];
+        lines.forEach((line, i) => {
+            if (!/this\.(_buildCanonical|signCanonical)\(/.test(line)) return;
+            // Skip the two forwarding calls inside signCanonical itself, which are
+            // the arity fork rather than a round's call site.
+            if (/\? this\._buildCanonical|: this\._buildCanonical\(requestId/.test(line)) return;
+            sites.push({ line: i + 1, text: line.trim() });
+        });
+
+        expect(sites.length, 'call-site count changed; re-derive the list').to.equal(14);
+        for (let s of sites) {
+            let args = s.text.slice(s.text.indexOf('(') + 1);
+            // The seventh argument is the era. Counting top-level commas is enough:
+            // no argument at these sites contains one outside a nested call, and a
+            // nested call's commas only ever inflate the count, never deflate it.
+            let depth = 0, commas = 0;
+            for (let ch of args) {
+                if (ch === '(') depth++;
+                else if (ch === ')') { if (depth === 0) break; depth--; }
+                else if (ch === ',' && depth === 0) commas++;
+            }
+            expect(commas, 'line ' + s.line + ' passes no era argument: ' + s.text).to.be.at.least(6);
+            expect(/effectiveTime|wireEffective|myEffective/.test(s.text),
+                'line ' + s.line + ' passes something that is not an era: ' + s.text).to.equal(true);
+        }
+    });
+}
+
+function registerCanonicalEraOrderingTest() {
+it('a follower verifying the LEADER\'s exact wire bytes rebuilds the leader\'s canonical', async function () {
+        let hubs = makeFederation('regtest', 3);
+        try {
+            await driveRound(hubs, MIRROR_BLK);
+            let leader   = hubs[0];
+            let follower = hubs[2];
+            let lp = leader.engine.pending.get(RID);
+            let fp = follower.engine.pending.get(RID);
+
+            let leaderBytes   = leader.engine._buildCanonical(RID, PROVIDER, lp.winner.body, lp.status, lp.winner.meta, MIRROR_BLK, lp.effectiveTime);
+            let followerBytes = follower.engine._buildCanonical(RID, PROVIDER, fp.winner.body, fp.status, fp.winner.meta, MIRROR_BLK, fp.effectiveTime);
+            expect(Buffer.compare(leaderBytes, followerBytes), 'leader and follower bytes differ').to.equal(0);
+
+            // And the leader's own signature is in the follower's set, verified
+            // over the follower's own rebuild.
+            expect(fp.signatures.has(leader.pubkey)).to.equal(true);
+            expect(ValidatorIdentity.verify(followerBytes.toString('utf8'), fp.signatures.get(leader.pubkey), leader.pubkey)).to.equal(true);
+        } finally { cleanup(hubs); }
+    });
+}
+
+function registerCanonicalEraCoreTests() {
+it('LEGACY ERA IS BYTE-PRESERVED: the round signs the captured pre-change literal', async function () {
         let hubs = makeFederation('mainnet', 3);
         try {
             let finalized = await driveRound(hubs, LEGACY_BLK);
@@ -186,106 +291,17 @@ describe('mirror-era ATTEST response canonical, driven through a round', functio
             }
         } finally { cleanup(hubs); }
     });
+}
 
-    it('a follower verifying the LEADER\'s exact wire bytes rebuilds the leader\'s canonical', async function () {
-        let hubs = makeFederation('regtest', 3);
-        try {
-            await driveRound(hubs, MIRROR_BLK);
-            let leader   = hubs[0];
-            let follower = hubs[2];
-            let lp = leader.engine.pending.get(RID);
-            let fp = follower.engine.pending.get(RID);
+describe('mirror-era ATTEST response canonical, driven through a round', function () {
 
-            let leaderBytes   = leader.engine._buildCanonical(RID, PROVIDER, lp.winner.body, lp.status, lp.winner.meta, MIRROR_BLK, lp.effectiveTime);
-            let followerBytes = follower.engine._buildCanonical(RID, PROVIDER, fp.winner.body, fp.status, fp.winner.meta, MIRROR_BLK, fp.effectiveTime);
-            expect(Buffer.compare(leaderBytes, followerBytes), 'leader and follower bytes differ').to.equal(0);
+    afterEach(function () { sinon.restore(); });
 
-            // And the leader's own signature is in the follower's set, verified
-            // over the follower's own rebuild.
-            expect(fp.signatures.has(leader.pubkey)).to.equal(true);
-            expect(ValidatorIdentity.verify(followerBytes.toString('utf8'), fp.signatures.get(leader.pubkey), leader.pubkey)).to.equal(true);
-        } finally { cleanup(hubs); }
-    });
+    registerCanonicalEraCoreTests();
 
-    it('era selection is an ASSERTION on both sides, never a silent branch', function () {
-        let hubs = makeFederation('regtest', 1);
-        try {
-            let e = hubs[0].engine;
-            // Mirror era with no stamp: the legacy bytes would be a canonical no
-            // mirror-era verifier rebuilds, so it must not be produced at all.
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, null))
-                .to.throw(/mirror-era request .* has no effective_time/);
-            // Legacy era with a stamp: the inverse, and just as fatal.
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, undefined, NOW + 120))
-                .to.throw(/legacy-era request .* was handed effective_time/);
-            // A non-canonical spelling never reaches bytes (the shared module's
-            // contract, re-asserted here because this is the caller that relies on it).
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, '0120'))
-                .to.throw(/not a canonical integer spelling/);
-        } finally { cleanup(hubs); }
-    });
+    registerCanonicalEraOrderingTest();
 
-    it('NO CALL SITE CAN FORK THE ERA: every in-file canonical build passes an explicit era', function () {
-        // A source-level pin, because the runtime assertion above only fires for a
-        // caller that already opted in. The six-argument form yields legacy bytes
-        // by design (it is what the canonical-shape suites use), so a NEW call site
-        // that forgot the era would be silently legacy - which is precisely the
-        // per-code-path fork decision D69 names. This test is the guard.
-        let src   = fs.readFileSync(path.join(__dirname, '../../src/attestation/consensus.js'), 'utf8');
-        let lines = src.split('\n');
-        let sites = [];
-        lines.forEach((line, i) => {
-            if (!/this\.(_buildCanonical|signCanonical)\(/.test(line)) return;
-            // Skip the two forwarding calls inside signCanonical itself, which are
-            // the arity fork rather than a round's call site.
-            if (/\? this\._buildCanonical|: this\._buildCanonical\(requestId/.test(line)) return;
-            sites.push({ line: i + 1, text: line.trim() });
-        });
+    registerCanonicalEraMetadataTests();
 
-        expect(sites.length, 'call-site count changed; re-derive the list').to.equal(14);
-        for (let s of sites) {
-            let args = s.text.slice(s.text.indexOf('(') + 1);
-            // The seventh argument is the era. Counting top-level commas is enough:
-            // no argument at these sites contains one outside a nested call, and a
-            // nested call's commas only ever inflate the count, never deflate it.
-            let depth = 0, commas = 0;
-            for (let ch of args) {
-                if (ch === '(') depth++;
-                else if (ch === ')') { if (depth === 0) break; depth--; }
-                else if (ch === ',' && depth === 0) commas++;
-            }
-            expect(commas, 'line ' + s.line + ' passes no era argument: ' + s.text).to.be.at.least(6);
-            expect(/effectiveTime|wireEffective|myEffective/.test(s.text),
-                'line ' + s.line + ' passes something that is not an era: ' + s.text).to.equal(true);
-        }
-    });
-
-    it('a mirror-era round produces a canonical no legacy verifier can rebuild, and vice versa', async function () {
-        // The two eras never share a signature. Proving it directly is what makes
-        // the flag day safe: a signature harvested from one era cannot be replayed
-        // into the other even for the same request, body, status and meta.
-        let mirrorHubs = makeFederation('regtest', 3);
-        let legacyHubs = makeFederation('mainnet', 3);
-        try {
-            await driveRound(mirrorHubs, MIRROR_BLK);
-            await driveRound(legacyHubs, LEGACY_BLK);
-            let mp = mirrorHubs[0].engine.pending.get(RID);
-            let mirrorBytes = mirrorHubs[0].engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, mp.effectiveTime).toString('utf8');
-            expect(mirrorBytes).to.not.equal(LEGACY_CANONICAL_LITERAL);
-
-            let sig = mp.signatures.get(mirrorHubs[0].pubkey);
-            expect(ValidatorIdentity.verify(mirrorBytes, sig, mirrorHubs[0].pubkey)).to.equal(true);
-            expect(ValidatorIdentity.verify(LEGACY_CANONICAL_LITERAL, sig, mirrorHubs[0].pubkey)).to.equal(false);
-        } finally { cleanup(mirrorHubs); cleanup(legacyHubs); }
-    });
-
-    it('the response hash the canonical binds is still sha256 of the body bytes', function () {
-        // Pinned because the field moved into a shared module; the hash is the one
-        // field the indexer re-derives from the stored payload rather than reading.
-        let hubs = makeFederation('mainnet', 1);
-        try {
-            let h = crypto.createHash('sha256').update(BODY, 'utf8').digest('hex');
-            expect(LEGACY_CANONICAL_LITERAL).to.contain(h);
-        } finally { cleanup(hubs); }
-    });
+    registerCanonicalEraFinalTests();
 });
