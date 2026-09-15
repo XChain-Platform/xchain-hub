@@ -145,102 +145,83 @@ function identities(n){
     return out;
 }
 
-describe('pushattestbatch: the hub receive half', function () {
+function registerBatchReplayEdgeTests() {
+it('answers a batch whose row write threw with a retryable failure, not an accept', async function () {
+        let signers = identities(2);
+        let db = makeDb();
+        let good = makeRow(), doomed = makeRow();
+        let inner = db.doQuery.bind(db);
+        db.doQuery = async function(sql, args){
+            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql) &&
+               args.indexOf(doomed.request_id) !== -1)
+                throw new Error('Deadlock found when trying to get lock');
+            return inner(sql, args);
+        };
+        let hub = makeHub({ signers, db });
+        let mirror = new AttestationResponseMirror(hub);
 
-    afterEach(function () { sinon.restore(); });
+        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([good, doomed], signers));
 
-    it('inserts the rows a chain-only rebuild carries, and streams each one', async function () {
+        expect(result.accepted, 'a write fault must not read as a delivery').to.equal(false);
+        // Outside hub_client.js's TERMINAL_HUB_REJECTIONS, so the queued row is retained.
+        expect(result.reason).to.equal('db error');
+        // The rows that did write still count, because the replay dedupes them.
+        expect(result.stored).to.equal(1);
+        expect(db.row(good.request_id)).to.not.equal(null);
+        expect(db.row(doomed.request_id)).to.equal(null);
+    });
+
+    it('withholds the federation-wide landed marker when a row write threw', async function () {
+        let signers = identities(2);
+        let db = makeDb();
+        let doomed = makeRow();
+        let inner = db.doQuery.bind(db);
+        db.doQuery = async function(sql, args){
+            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql))
+                throw new Error('Deadlock found when trying to get lock');
+            return inner(sql, args);
+        };
+        let hub = makeHub({ signers, db });
+        let mirror = new AttestationResponseMirror(hub);
+
+        await mirror.receiveValidatedBatch('DOGE', makeBatch([doomed], signers));
+
+        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount,
+            'a window with missing rows must not be marked covered for the whole federation')
+            .to.equal(0);
+    });
+}
+
+function registerBatchReplayTests() {
+it('skips a carried row the structural gate rejects without losing the rest', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers });
         let mirror = new AttestationResponseMirror(hub);
-        let rows = [makeRow(), makeRow()];
+        // A row whose hash is not over its body is unusable on every node identically,
+        // so it is skipped rather than stored; the batch's other row still lands.
+        let junk = makeRow({ request_id: 'nothex' });
+        let good = makeRow();
 
-        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, signers));
+        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([junk, good], signers));
 
         expect(result.accepted).to.equal(true);
-        expect(result.stored).to.equal(2);
-        expect(result.linked).to.equal(2);
-        expect(hub.db.table.length).to.equal(2);
-        // Every insert is streamed with the id the table assigned, which is the cursor
-        // the mirror consumer pages on.
-        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.be.at.least(2);
-        for(let call of hub.hubDbBroadcaster.broadcastRow.getCalls())
-            expect(call.args[0].row.id, 'a streamed row must carry its id').to.be.a('number');
+        expect(result.stored).to.equal(1);
+        expect(result.rejected).to.equal(1);
+        expect(hub.db.row(good.request_id)).to.not.equal(null);
+        // The other half of the contract the write-fault cases below pin: an unusable row
+        // must NOT withhold the marker, or the pusher retries a body that can never change.
+        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount).to.equal(1);
     });
 
-    it('sets batch_action_index once and re-broadcasts the row that got the link', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        let row = makeRow();
+    // A transient write fault is the one failure a REPLAY can clear, so it must not be
+    // answered as an accepted delivery: the pusher keys its outbox delete on
+    // `accepted !== false`, and deleting on a false success destroys the only copy of a
+    // chain-only rebuild's rows.
+    registerBatchReplayEdgeTests();
+}
 
-        // The row is already held (the ordinary mirror case): the batch's job here is
-        // only the link, and the re-broadcast that carries it to the consumer.
-        await mirror.insertAndBroadcast(Object.assign({}, row, { finalized_at: 1780000200 }));
-        hub.hubDbBroadcaster.broadcastRow.resetHistory();
-
-        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([row], signers));
-
-        expect(result.stored).to.equal(0);
-        expect(result.duplicates).to.equal(1);
-        expect(result.linked).to.equal(1);
-        expect(hub.db.row(row.request_id).batch_action_index).to.equal(ACTION_INDEX);
-        expect(hub.hubDbBroadcaster.broadcastRow.callCount,
-            'the link must reach the consumer, and only a re-broadcast can carry it').to.equal(1);
-    });
-
-    it('is a no-op on replay, including a re-landed batch under a new action index', async function () {
-        let signers = identities(2);
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        let rows = [makeRow()];
-        let batch = makeBatch(rows, signers);
-
-        await mirror.receiveValidatedBatch('DOGE', batch);
-        hub.hubDbBroadcaster.broadcastRow.resetHistory();
-
-        // The identical push again (a retry), then the same rows under a LATER action
-        // index (the same batch re-landing after a DOGE reorg): neither may move the
-        // link, and neither may stream anything.
-        let replay = await mirror.receiveValidatedBatch('DOGE', batch);
-        let later  = await mirror.receiveValidatedBatch('DOGE',
-            Object.assign({}, makeBatch(rows, signers), { action_index: ACTION_INDEX + 900 }));
-
-        expect(replay.stored + later.stored).to.equal(0);
-        expect(replay.linked + later.linked, 'the first batch to carry a row owns its link').to.equal(0);
-        expect(hub.db.row(rows[0].request_id).batch_action_index).to.equal(ACTION_INDEX);
-        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
-    });
-
-    it('REFUSES a batch whose quorum does not verify, storing nothing', async function () {
-        let signers  = identities(2);
-        let stranger = identities(1)[0];
-        let hub = makeHub({ signers });
-        let mirror = new AttestationResponseMirror(hub);
-        let rows = [makeRow()];
-
-        // Signed by a key that holds no attestation capability at the anchor.
-        let outsider = await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, [stranger]));
-        expect(outsider.accepted).to.equal(false);
-        expect(outsider.reason).to.match(/stake|quorum/);
-
-        // Signed honestly, then a row TAMPERED with after signing: the canonical the hub
-        // rebuilds is not the one the set signed.
-        let tampered = makeBatch(rows, signers);
-        tampered.rows = [Object.assign({}, rows[0], { response_payload: 'rewritten' })];
-        let bad = await mirror.receiveValidatedBatch('DOGE', tampered);
-        expect(bad.accepted).to.equal(false);
-
-        // A signature that is structurally fine but is not over these bytes.
-        let forged = makeBatch(rows, signers);
-        forged.sigs = forged.sigs.map(s => ({ pubkey: s.pubkey, sig: 'ab'.repeat(64) }));
-        let forgedResult = await mirror.receiveValidatedBatch('DOGE', forged);
-        expect(forgedResult.accepted).to.equal(false);
-
-        expect(hub.db.table.length, 'a refused batch must store nothing').to.equal(0);
-    });
-
-    it('fails closed when no capability snapshot resolves at the anchor', async function () {
+function registerBatchBoundaryTests() {
+it('fails closed when no capability snapshot resolves at the anchor', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers, snapshotOverride: { validators: [], count: 0 } });
         let mirror = new AttestationResponseMirror(hub);
@@ -290,73 +271,112 @@ describe('pushattestbatch: the hub receive half', function () {
         expect(call.args[0]).to.equal(WINDOW_START);
         expect(call.args[1]).to.equal(WINDOW_END);
     });
+}
 
-    it('skips a carried row the structural gate rejects without losing the rest', async function () {
+function registerBatchValidationTests() {
+it('is a no-op on replay, including a re-landed batch under a new action index', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers });
         let mirror = new AttestationResponseMirror(hub);
-        // A row whose hash is not over its body is unusable on every node identically,
-        // so it is skipped rather than stored; the batch's other row still lands.
-        let junk = makeRow({ request_id: 'nothex' });
-        let good = makeRow();
+        let rows = [makeRow()];
+        let batch = makeBatch(rows, signers);
 
-        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([junk, good], signers));
+        await mirror.receiveValidatedBatch('DOGE', batch);
+        hub.hubDbBroadcaster.broadcastRow.resetHistory();
+
+        // The identical push again (a retry), then the same rows under a LATER action
+        // index (the same batch re-landing after a DOGE reorg): neither may move the
+        // link, and neither may stream anything.
+        let replay = await mirror.receiveValidatedBatch('DOGE', batch);
+        let later  = await mirror.receiveValidatedBatch('DOGE',
+            Object.assign({}, makeBatch(rows, signers), { action_index: ACTION_INDEX + 900 }));
+
+        expect(replay.stored + later.stored).to.equal(0);
+        expect(replay.linked + later.linked, 'the first batch to carry a row owns its link').to.equal(0);
+        expect(hub.db.row(rows[0].request_id).batch_action_index).to.equal(ACTION_INDEX);
+        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(0);
+    });
+
+    it('REFUSES a batch whose quorum does not verify, storing nothing', async function () {
+        let signers  = identities(2);
+        let stranger = identities(1)[0];
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        let rows = [makeRow()];
+
+        // Signed by a key that holds no attestation capability at the anchor.
+        let outsider = await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, [stranger]));
+        expect(outsider.accepted).to.equal(false);
+        expect(outsider.reason).to.match(/stake|quorum/);
+
+        // Signed honestly, then a row TAMPERED with after signing: the canonical the hub
+        // rebuilds is not the one the set signed.
+        let tampered = makeBatch(rows, signers);
+        tampered.rows = [Object.assign({}, rows[0], { response_payload: 'rewritten' })];
+        let bad = await mirror.receiveValidatedBatch('DOGE', tampered);
+        expect(bad.accepted).to.equal(false);
+
+        // A signature that is structurally fine but is not over these bytes.
+        let forged = makeBatch(rows, signers);
+        forged.sigs = forged.sigs.map(s => ({ pubkey: s.pubkey, sig: 'ab'.repeat(64) }));
+        let forgedResult = await mirror.receiveValidatedBatch('DOGE', forged);
+        expect(forgedResult.accepted).to.equal(false);
+
+        expect(hub.db.table.length, 'a refused batch must store nothing').to.equal(0);
+    });
+}
+
+function registerBatchAcceptanceTests() {
+it('inserts the rows a chain-only rebuild carries, and streams each one', async function () {
+        let signers = identities(2);
+        let hub = makeHub({ signers });
+        let mirror = new AttestationResponseMirror(hub);
+        let rows = [makeRow(), makeRow()];
+
+        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch(rows, signers));
 
         expect(result.accepted).to.equal(true);
-        expect(result.stored).to.equal(1);
-        expect(result.rejected).to.equal(1);
-        expect(hub.db.row(good.request_id)).to.not.equal(null);
-        // The other half of the contract the write-fault cases below pin: an unusable row
-        // must NOT withhold the marker, or the pusher retries a body that can never change.
-        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount).to.equal(1);
+        expect(result.stored).to.equal(2);
+        expect(result.linked).to.equal(2);
+        expect(hub.db.table.length).to.equal(2);
+        // Every insert is streamed with the id the table assigned, which is the cursor
+        // the mirror consumer pages on.
+        expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.be.at.least(2);
+        for(let call of hub.hubDbBroadcaster.broadcastRow.getCalls())
+            expect(call.args[0].row.id, 'a streamed row must carry its id').to.be.a('number');
     });
 
-    // A transient write fault is the one failure a REPLAY can clear, so it must not be
-    // answered as an accepted delivery: the pusher keys its outbox delete on
-    // `accepted !== false`, and deleting on a false success destroys the only copy of a
-    // chain-only rebuild's rows.
-    it('answers a batch whose row write threw with a retryable failure, not an accept', async function () {
+    it('sets batch_action_index once and re-broadcasts the row that got the link', async function () {
         let signers = identities(2);
-        let db = makeDb();
-        let good = makeRow(), doomed = makeRow();
-        let inner = db.doQuery.bind(db);
-        db.doQuery = async function(sql, args){
-            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql) &&
-               args.indexOf(doomed.request_id) !== -1)
-                throw new Error('Deadlock found when trying to get lock');
-            return inner(sql, args);
-        };
-        let hub = makeHub({ signers, db });
+        let hub = makeHub({ signers });
         let mirror = new AttestationResponseMirror(hub);
+        let row = makeRow();
 
-        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([good, doomed], signers));
+        // The row is already held (the ordinary mirror case): the batch's job here is
+        // only the link, and the re-broadcast that carries it to the consumer.
+        await mirror.insertAndBroadcast(Object.assign({}, row, { finalized_at: 1780000200 }));
+        hub.hubDbBroadcaster.broadcastRow.resetHistory();
 
-        expect(result.accepted, 'a write fault must not read as a delivery').to.equal(false);
-        // Outside hub_client.js's TERMINAL_HUB_REJECTIONS, so the queued row is retained.
-        expect(result.reason).to.equal('db error');
-        // The rows that did write still count, because the replay dedupes them.
-        expect(result.stored).to.equal(1);
-        expect(db.row(good.request_id)).to.not.equal(null);
-        expect(db.row(doomed.request_id)).to.equal(null);
+        let result = await mirror.receiveValidatedBatch('DOGE', makeBatch([row], signers));
+
+        expect(result.stored).to.equal(0);
+        expect(result.duplicates).to.equal(1);
+        expect(result.linked).to.equal(1);
+        expect(hub.db.row(row.request_id).batch_action_index).to.equal(ACTION_INDEX);
+        expect(hub.hubDbBroadcaster.broadcastRow.callCount,
+            'the link must reach the consumer, and only a re-broadcast can carry it').to.equal(1);
     });
+}
 
-    it('withholds the federation-wide landed marker when a row write threw', async function () {
-        let signers = identities(2);
-        let db = makeDb();
-        let doomed = makeRow();
-        let inner = db.doQuery.bind(db);
-        db.doQuery = async function(sql, args){
-            if(/^INSERT IGNORE INTO attestation_responses/i.test(sql))
-                throw new Error('Deadlock found when trying to get lock');
-            return inner(sql, args);
-        };
-        let hub = makeHub({ signers, db });
-        let mirror = new AttestationResponseMirror(hub);
+describe('pushattestbatch: the hub receive half', function () {
 
-        await mirror.receiveValidatedBatch('DOGE', makeBatch([doomed], signers));
+    afterEach(function () { sinon.restore(); });
 
-        expect(hub.attestationBatchPublisher.recordLandedWindow.callCount,
-            'a window with missing rows must not be marked covered for the whole federation')
-            .to.equal(0);
-    });
+    registerBatchAcceptanceTests();
+
+    registerBatchValidationTests();
+
+    registerBatchBoundaryTests();
+
+    registerBatchReplayTests();
 });
