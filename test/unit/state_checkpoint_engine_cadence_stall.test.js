@@ -37,18 +37,22 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
+let cadenceEngines = [];
+
 describe('StateCheckpointEngine cadence stall meter', function () {
-
-    let engines = [];
-
     afterEach(async function () {
-        for (let e of engines) await e.stop();
-        engines = [];
+        for (let e of cadenceEngines) await e.stop();
+        cadenceEngines = [];
     });
+
+    registerCadenceFailureTests();
+    registerCadenceRecoveryTests();
+    registerCadenceMirrorFailureTest();
+});
 
     // Minimal in-memory state_checkpoints + capability_snapshots store (same shape
     // as the cadence-latch suite; unknown SELECTs fall through to []).
-    function memDb() {
+function memDb() {
         let checkpoints = [], snapshots = [];
         return { ...DB_METHODS,
             checkpoints, snapshots,
@@ -85,7 +89,7 @@ describe('StateCheckpointEngine cadence stall meter', function () {
 
     // One engine, single-member federation by default. `state` is mutable so a test
     // can take the validator set away (or hand it back) between ticks.
-    function buildEngine(opts) {
+function buildEngine(opts) {
         opts = opts || {};
         const identity = new ValidatorIdentity('11'.repeat(32));
         const state = {
@@ -117,10 +121,11 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         };
         const engine = new StateCheckpointEngine(hub);
         engine._indexerCall = async () => (state.btcBlock == null ? null : Object.assign({}, TIP));
-        engines.push(engine);
+        cadenceEngines.push(engine);
         return { engine, state, db, identity };
     }
 
+function registerCadenceFailureTests() {
     it('a due cadence with no qualified oracle_publish set is metered and named, not silent', async function () {
         const { engine, db } = buildEngine({ validators: [] });
         expect(engine.getStats).to.be.a('function');
@@ -169,7 +174,9 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         expect(stats.cadence_stalls).to.equal(1);
         expect(stats.cadence_stall_reason).to.match(/not in the oracle_publish validator set/);
     });
+}
 
+function registerCadenceRecoveryTests() {
     it('meters an unresolvable BTC snapshot block with a null stall block', async function () {
         const { engine, state } = buildEngine();
         state.btcBlock = null;
@@ -216,7 +223,9 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         expect(stats.cadence_stall_block).to.equal(null);
         expect(stats.cadence_stalls, 'the historical count is retained').to.equal(1);
     });
+}
 
+function registerCadenceMirrorFailureTest() {
     it('a failed capability-snapshot mirror is metered and leaves the interval retryable', async function () {
         // The mirror write sits outside the per-chain guard, so a throw aborts every
         // chain's round. Running it AFTER the latch advance is the hazard: the interval was
@@ -244,26 +253,29 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         expect(db.checkpoints.length, 'the retried round finalizes').to.equal(1);
         expect((await engine.getStats()).cadence_stall_reason, 'reason clears on success').to.equal(null);
     });
-});
+}
 
 // A frozen BTC tip pins the cadence slot to one constant. Without this meter a
 // hub whose rank is not that constant returns silently from the not-my-slot
 // branch on every tick, for every chain, with cadence_stalls reading 0. Seen
 // live on a regtest venue 2026-08-19: tip frozen four days at 14671, slot 31 vs
 // rank 30, no checkpoint cut in three weeks.
+let frozenTipEngines = [];
+
 describe('StateCheckpointEngine frozen-tip livelock meter', function () {
-
-    let engines = [];
-
     afterEach(async function () {
-        for (let e of engines) await e.stop();
-        engines = [];
+        for (let e of frozenTipEngines) await e.stop();
+        frozenTipEngines = [];
     });
+
+    registerFrozenTipDetectionTests();
+    registerFrozenTipRecoveryTests();
+});
 
     // Two-member federation where OUR rank is deliberately not the slot at the
     // frozen block. Identities sort by pubkey hex, so pick the block parity from
     // the sorted rank rather than assuming it.
-    function buildTwoMember(frozenTipTicks) {
+function buildTwoMember(frozenTipTicks) {
         const me    = new ValidatorIdentity('11'.repeat(32));
         const other = new ValidatorIdentity('22'.repeat(32));
         const pubkeys = [me.getPubkeyHex().toLowerCase(), other.getPubkeyHex().toLowerCase()].sort();
@@ -293,10 +305,11 @@ describe('StateCheckpointEngine frozen-tip livelock meter', function () {
         };
         const engine = new StateCheckpointEngine(hub);
         engine._indexerCall = async () => Object.assign({}, TIP);
-        engines.push(engine);
+        frozenTipEngines.push(engine);
         return { engine, state, myRank };
     }
 
+function registerFrozenTipDetectionTests() {
     it('K consecutive not-my-slot ticks at the same btcBlock are metered as a stall', async function () {
         const K = 3;
         const { engine, state, myRank } = buildTwoMember(K);
@@ -336,7 +349,9 @@ describe('StateCheckpointEngine frozen-tip livelock meter', function () {
         expect(stats.frozen_tip_ticks, 'counter restarts at the new block').to.equal(1);
         expect(stats.frozen_tip_block).to.equal(state.btcBlock);
     });
+}
 
+function registerFrozenTipRecoveryTests() {
     it('the tip advancing to our slot clears the frozen-tip stall and leads the round', async function () {
         const { engine, state, myRank } = buildTwoMember(2);
 
@@ -382,4 +397,4 @@ describe('StateCheckpointEngine frozen-tip livelock meter', function () {
         expect(stats.frozen_tip_block, 'the block is normalised to a number').to.equal(frozen);
         expect(stats.cadence_stalls, 'the frozen tip is still metered').to.equal(1);
     });
-});
+}
