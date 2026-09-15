@@ -66,7 +66,14 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
     });
     afterEach(function () { sinon.restore(); });
 
-    // SC-6.1: Config update via PBFT (multi-validator)
+    registerPbftConfigTests();
+    registerSingleNodeConfigTests();
+    registerConsensusTimeoutTests();
+    registerConfigRoundTripTests();
+});
+
+// SC-6.1: Config update via PBFT (multi-validator)
+function registerPbftConfigTests() {
     describe('SC-6.1: PBFT config consensus', function () {
         it('applies config after PREPARE and COMMIT quorum', async function () {
             let db = testDb.getDb();
@@ -121,8 +128,10 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             await consensus.stop();
         });
     });
+}
 
-    // SC-6.2: Config update without P2P (direct write)
+// SC-6.2: Config update without P2P (direct write)
+function registerSingleNodeConfigTests() {
     describe('SC-6.2: Single-node config update', function () {
         it('applies config directly when quorum is 0', async function () {
             let db = testDb.getDb();
@@ -145,8 +154,10 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             await consensus.stop();
         });
     });
+}
 
-    // SC-6.3: Config update with consensus timeout
+// SC-6.3: Config update with consensus timeout
+function registerConsensusTimeoutTests() {
     describe('SC-6.3: Consensus timeout', function () {
         it('rejects proposal after PBFT timeout and initiates view change', async function () {
             let db = testDb.getDb();
@@ -178,8 +189,10 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             await consensus.stop();
         });
     });
+}
 
-    // SC-6.4: Config round-trip via getAllConfigs
+// SC-6.4: Config round-trip via getAllConfigs
+function registerConfigRoundTripTests() {
     describe('SC-6.4: Config round-trip', function () {
         it('retrieves applied config via getAllConfigs', async function () {
             let db = testDb.getDb();
@@ -204,4 +217,4 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             await consensus.stop();
         });
     });
-});
+}
