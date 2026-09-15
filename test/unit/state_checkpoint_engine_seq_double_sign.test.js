@@ -45,18 +45,21 @@ function blockAt(n) {
     };
 }
 
+let buses = [];
+
 describe('StateCheckpointEngine: one signed payload per sequence', function () {
-
-    let buses = [];
-
     afterEach(async function () {
         for (let bus of buses) { for (let nd of bus.nodes) await nd.engine.stop(); }
         buses = [];
     });
 
+    registerSequenceSigningTests();
+    registerLostRoundRecoveryTest();
+});
+
     // Minimal in-memory hub DB: state_checkpoints + capability_snapshots, keyed by the
     // real (chain, network, checkpoint_seq) unique index.
-    function memDb() {
+function memDb() {
         let checkpoints = [];
         let snapshots   = [];
         return { ...DB_METHODS,
@@ -109,7 +112,7 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
     // n engines over a shared in-memory gossip bus. opts is read at call time, so a test
     // moves the BTC tip (opts.btcBlock), the chain tip (opts.tip) or the drop filter
     // (opts.drop) between ticks.
-    function buildMesh(n, opts) {
+function buildMesh(n, opts) {
         let bus = { nodes: [] };
         let identities = [];
         for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)));
@@ -154,20 +157,20 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
 
     // A fresh engine over a node's existing hub + DB, which is also how a restart is
     // modelled: the process-lifetime state is gone, the durable state is not.
-    function newEngine(self, opts) {
+function newEngine(self, opts) {
         let engine = new StateCheckpointEngine(self.hub);
         engine._indexerCall = async (coin, method, params) =>
             blockAt(params && params.block_index != null ? params.block_index : opts.tip);
         return engine;
     }
 
-    function leaderNode(bus, btcBlock) {
+function leaderNode(bus, btcBlock) {
         let leaderPk = bus.nodes.map(nd => nd.pubkey).sort()[btcBlock % bus.nodes.length];
         return bus.nodes.find(nd => nd.pubkey === leaderPk);
     }
 
     // Record XCHK_SIGN co-sign broadcasts leaving a node.
-    function watchCosign(node) {
+function watchCosign(node) {
         let signs = [];
         let pm = node.engine.peerManager;
         let orig = pm.broadcast.bind(pm);
@@ -177,7 +180,7 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
 
     // A leader-signed SIGN_REQ for `blockIndex` at `snap`, exactly as a cadence leader
     // free to pick its own confirmation depth would put on the wire.
-    function signReqFor(leader, snap, blockIndex) {
+function signReqFor(leader, snap, blockIndex) {
         let bh = blockAt(blockIndex);
         let cp = {
             chain: 'BTC', network: bh.network, block_index: bh.block_index,
@@ -192,6 +195,7 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
                  data: { checkpoint: cp, sig_pubkey: leader.pubkey, sig } };
     }
 
+function registerSequenceSigningTests() {
     it('co-signs one payload at a sequence and refuses a second, different one', async function () {
         const SNAP = 500;
         let opts = { btcBlock: SNAP, tip: 500 };
@@ -225,7 +229,9 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
         expect(signs.length, 'a duplicate gossip delivery is answered, not refused').to.equal(2);
         expect(follower.engine._seqDoubleSignRefusals, 'nothing is metered').to.equal(0);
     });
+}
 
+function registerLostRoundRecoveryTest() {
     it('costs one skipped round when a leader loses a round and re-proposes a new block', async function () {
         const SNAP = 100;
         let dropSigns = true;
@@ -267,4 +273,4 @@ describe('StateCheckpointEngine: one signed payload per sequence', function () {
         expect(follower.db.checkpoints[0].checkpoint_seq,
             'and it is the next sequence, not the refused one').to.equal(SNAP + 6);
     });
-});
+}
