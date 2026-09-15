@@ -78,14 +78,7 @@ function makeOracleHub(cfg) {
     };
 }
 
-describe('await-safe spend gating on the hub effectors', function () {
-
-    afterEach(function () {
-        sinon.restore();
-        SpendGuard.unregister('OraclePublisher');
-        SpendGuard.unregister('AttestationRelay');
-    });
-
+function registerOracleOverlapTest() {
     it('OraclePublisher: two overlapping publish passes spend one window slot, not two', async function () {
         const entry  = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
@@ -122,7 +115,9 @@ describe('await-safe spend gating on the hub effectors', function () {
         expect(broadcastStub.callCount,
             'the window allows one broadcast, so the second pass must find no budget').to.equal(1);
     });
+}
 
+function registerOracleDeclineTest() {
     it('OraclePublisher: a declined round leaves no publish-intent row behind', async function () {
         const entry  = { round: 9, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
@@ -152,7 +147,9 @@ describe('await-safe spend gating on the hub effectors', function () {
         expect(intentWrites.length,
             'a round the spend gate declined must record no publish intent').to.equal(0);
     });
+}
 
+function registerRelayOverlapTest() {
     it('AttestationRelay: two overlapping broadcasts of one leg spend one window slot', async function () {
         const walDir  = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-relay-reserve-'));
         const walPath = path.join(walDir, 'queue.jsonl');
@@ -190,4 +187,16 @@ describe('await-safe spend gating on the hub effectors', function () {
 
         try { fs.rmSync(walDir, { recursive: true, force: true }); } catch (e) { /* best effort */ }
     });
+}
+
+describe('await-safe spend gating on the hub effectors', function () {
+    afterEach(function () {
+        sinon.restore();
+        SpendGuard.unregister('OraclePublisher');
+        SpendGuard.unregister('AttestationRelay');
+    });
+
+    registerOracleOverlapTest();
+    registerOracleDeclineTest();
+    registerRelayOverlapTest();
 });
