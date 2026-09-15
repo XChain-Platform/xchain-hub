@@ -113,27 +113,28 @@ describe('ATTEST_RESPONSE_BODY_MAX_BYTES module', function () {
     });
 });
 
+async function drive(body) {
+    let e = makeEngine('testnet');  // ATTEST_RESPONSE_MIRROR_ACTIVATION.testnet is null: legacy era
+    await e.engine.propose(RID, {
+        request:      { request_id: RID, block_index: LEGACY_BLK, deadline_block: LEGACY_BLK + 100 },
+        providerId:   PROVIDER,
+        redundancy:   3,
+        snapshot:     { validators: [] },
+        responsible:  [{ pubkey: e.me }, { pubkey: e.peerKey }, { pubkey: e.thirdKey }],
+        leaderPubkey: e.me,
+        role:         'leader',
+        myProposal:   { body: body, meta: META, status: 'ok' },
+        pinnedConsensusStrategy: 'byte_equality',
+        pinnedMaxResponseBytes:  65536
+    });
+    let pending = e.engine.pending.get(RID);
+    return { e, pending };
+}
+
 describe('LEADER: propose() refuses an over-cap body before broadcasting (legacy era)', function () {
 
     afterEach(function () { sinon.restore(); });
 
-    async function drive(body) {
-        let e = makeEngine('testnet');  // ATTEST_RESPONSE_MIRROR_ACTIVATION.testnet is null: legacy era
-        await e.engine.propose(RID, {
-            request:      { request_id: RID, block_index: LEGACY_BLK, deadline_block: LEGACY_BLK + 100 },
-            providerId:   PROVIDER,
-            redundancy:   3,
-            snapshot:     { validators: [] },
-            responsible:  [{ pubkey: e.me }, { pubkey: e.peerKey }, { pubkey: e.thirdKey }],
-            leaderPubkey: e.me,
-            role:         'leader',
-            myProposal:   { body: body, meta: META, status: 'ok' },
-            pinnedConsensusStrategy: 'byte_equality',
-            pinnedMaxResponseBytes:  65536
-        });
-        let pending = e.engine.pending.get(RID);
-        return { e, pending };
-    }
 
     it('proposes and broadcasts a body exactly at the cap', async function () {
         let { e, pending } = await drive(AT_CAP_BODY);
