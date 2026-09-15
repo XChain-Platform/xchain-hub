@@ -55,7 +55,6 @@ for (const spelling of ['../../../xchain-sdk/src/protocol/light_client.js',
 try { Anchor = require('../../../xchain-indexer/src/actions/anchor/index.js'); } catch (e) { anchorErr = e; }
 try { AnchorRecovery = require('../../../xchain-indexer/bin/recovery.js'); } catch (e) { recoveryErr = e; }
 const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
-
 // before() hook shared by every sibling-gated block: escalate to a throw when the
 // required-siblings lane is active, otherwise skip. Named so the failure message
 // says which sibling failed to load and why.
@@ -72,17 +71,14 @@ function requireSiblings() {
     }
     this.skip();
 }
-
 // regtest activates at genesis (threshold 0) → gate ON; mainnet is placeholder-
 // disabled at a far-future height → gate OFF for any realistic block.
 const cpOn  = { chain:'BTC', network:'regtest', block_index:500, block_hash:'bh',
                 ledger_hash:'lh', actions_hash:'ah', contract_hash:'ch',
                 checkpoint_seq:7, snapshot_block:480 };
 const cpOff = Object.assign({}, cpOn, { network:'mainnet', snapshot_block:5 });
-
 const RAW_ON  = 'XCHECKPOINT|BTC|regtest|500|bh|lh|ah|ch|7|480';
 const RAW_OFF = 'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|5';
-
 // Minimal indexer Anchor (constructor only assigns; canonical uses `d` + eq).
 const anchor = Anchor ? new Anchor({ config:{}, decoderDb:null, indexerDb:null, util:null, mapper:null }) : null;
 // The rootless BASE _canonical builds for any format that adds no extension: it is what
@@ -93,15 +89,12 @@ const dBase = { CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
 const dV1 = Object.assign({}, dBase, { FORMAT:1, MATCH_BATCH_SEQ:3, MATCH_COUNT:10,
               BATCH_CRC32:'cc', TOTAL_CHUNKS:2 });
 const RAW_V1 = RAW_ON + '|3|10|cc|2';
-
 // key = the slice between the literal "EQUIV|" and the "||" boundary.
 function keyOf(canon){
     expect(canon.startsWith('EQUIV|')).to.equal(true);
     return canon.slice('EQUIV|'.length, canon.indexOf('||'));
 }
-
-describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
-
+function registerGateBehaviorTests() {
     describe('gate behavior (per-block checkpoint)', function () {
         it('below the flag-day → bare raw bytes (regression-safe)', function () {
             expect(SCE.canonicalCheckpoint(cpOff)).to.equal(RAW_OFF);
@@ -114,10 +107,10 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(SCE.rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
         });
     });
-
+}
+function registerCrossServiceTests() {
     describe('cross-service byte parity', function () {
         before(requireSiblings);
-
         it('hub == sdk (above gate)', function () {
             expect(sdkCheckpoint.canonicalCheckpoint(cpOn)).to.equal(SCE.canonicalCheckpoint(cpOn));
         });
@@ -132,7 +125,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(anchor.canonical(off)).to.equal(RAW_OFF);
         });
     });
-
+}
     // ── ANCHOR v0 SECTION canonical: the rooted shape mainnet signs today ──
     //
     // Every fixture above is ROOTLESS, and the indexer appends the SPV root suffix only
@@ -157,32 +150,28 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
     // hub is the producer of the bytes validators sign and the indexer is their on-chain
     // verifier, and those are the two copies nothing else pins on this shape (the SDK,
     // sync and explorer copies are each pinned elsewhere).
-    describe('ANCHOR v0 section canonical: hub == sdk == indexer', function () {
-        before(requireSiblings);
-
-        const SR = 'd4'.repeat(32), BMR = 'e5'.repeat(32);
-        const cpRootsOn   = Object.assign({}, cpOn, {
-            state_root: SR, state_root_version: 1,
-            block_merkle_root: BMR, block_merkle_version: 1 });
-        const cpRootsMain = Object.assign({}, cpRootsOn, { network:'mainnet', snapshot_block:961000 });
-
+const SR = 'd4'.repeat(32), BMR = 'e5'.repeat(32);
+const cpRootsOn   = Object.assign({}, cpOn, {
+    state_root: SR, state_root_version: 1,
+    block_merkle_root: BMR, block_merkle_version: 1 });
+const cpRootsMain = Object.assign({}, cpRootsOn, { network:'mainnet', snapshot_block:961000 });
         // ONE fixture, projected into the indexer's field naming, so a transcription
         // slip cannot make the two sides agree for the wrong reason. `headerNetwork`
         // is the bundle header's NETWORK, which _parseBundle stamps onto every section
         // before handing it to _canonical; SNAPSHOT_BLOCK is the section's own block,
         // never the bundle MAX, because that is what the signatures were made over.
-        function indexerSection(cp, headerNetwork) {
-            return anchor.canonical({
-                FORMAT: 0, CHAIN: cp.chain, NETWORK: headerNetwork || cp.network,
-                BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
-                LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
-                CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
-                SNAPSHOT_BLOCK: cp.snapshot_block,
-                STATE_ROOT: cp.state_root, STATE_ROOT_VERSION: cp.state_root_version,
-                BLOCK_MERKLE_ROOT: cp.block_merkle_root, BLOCK_MERKLE_VERSION: cp.block_merkle_version
-            });
-        }
-
+function indexerSection(cp, headerNetwork) {
+    return anchor.canonical({
+        FORMAT: 0, CHAIN: cp.chain, NETWORK: headerNetwork || cp.network,
+        BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
+        LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
+        CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
+        SNAPSHOT_BLOCK: cp.snapshot_block,
+        STATE_ROOT: cp.state_root, STATE_ROOT_VERSION: cp.state_root_version,
+        BLOCK_MERKLE_ROOT: cp.block_merkle_root, BLOCK_MERKLE_VERSION: cp.block_merkle_version
+    });
+}
+function registerAnchorRootTests() {
         it('regtest, roots present: hub == sdk == indexer(v0 section)', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsOn);
             expect(sdkCheckpoint.canonicalCheckpoint(cpRootsOn), 'SDK checkpoint.js drifted from the hub root suffix')
@@ -195,7 +184,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON +
                 '|' + SR + '|1|' + BMR + '|1');
         });
-
         it('mainnet at/above 961000: rooted AND header-wrapped, all three agree', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsMain);
             expect(sdkCheckpoint.canonicalCheckpoint(cpRootsMain)).to.equal(hub);
@@ -203,7 +191,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|mainnet|500|7|0||' +
                 'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|961000|' + SR + '|1|' + BMR + '|1');
         });
-
         it('binds the root field ORDER identically in all three (a root swap diverges everywhere)', function () {
             // Without this, swapping state_root and block_merkle_root on ONE side would
             // still satisfy the equalities above for any fixture whose two roots matched.
@@ -213,7 +200,8 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(sdkCheckpoint.canonicalCheckpoint(swapped)).to.equal(hub);
             expect(indexerSection(swapped)).to.equal(hub);
         });
-
+}
+function registerAnchorVectorTests() {
         it('every section of the frozen v0 vector: hub == sdk == indexer, through the SDK parser', function () {
             // The three literal-driven cases above bind the builders to a hand-written
             // fixture. This one binds them to the bytes the protocol froze: the SDK's own
@@ -250,7 +238,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
                     '|' + src.block_merkle_root + '|' + src.block_merkle_version)).to.equal(true);
             }
         });
-
         it('a null-root row keeps the rootless canonical on both sides (the base the archive leg nests)', function () {
             // The complement, and the reason the two gates may legitimately differ: the hub
             // withholds the suffix when a root is absent, and the indexer's shared base (the
@@ -260,11 +247,17 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(sdkCheckpoint.canonicalCheckpoint(cpOn)).to.equal(SCE.canonicalCheckpoint(cpOn));
             expect(anchor.canonical(dBase)).to.equal(SCE.canonicalCheckpoint(cpOn));
         });
+}
+function registerAnchorSectionTests() {
+    describe('ANCHOR v0 section canonical: hub == sdk == indexer', function () {
+        before(requireSiblings);
+        registerAnchorRootTests();
+        registerAnchorVectorTests();
     });
-
+}
+function registerEquivocationKeyTests() {
     describe('checkpoint/archive equivocation-key split (R-4)', function () {
         before(requireSiblings);
-
         it('v1 archive canonical is header-wrapped with batch_seq in the round id', function () {
             expect(anchor.canonical(dV1))
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
@@ -277,7 +270,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(k0).to.not.equal(k1);
         });
     });
-
+}
     // ── v1 archive canonical: three-way byte parity (item 2461) ─────────────
     //
     // The archive extension is an independent three-way agreement, and until now
@@ -298,39 +291,35 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
     // string builders over their argument plus module-level helpers, so they are
     // invoked off the prototype with a null receiver: no hub, indexer, DB or
     // identity is constructed, and nothing about the unit under test is stubbed.
-    describe('v1 archive canonical: hub == indexer anchor == recovery', function () {
-        before(requireSiblings);
-
-        // ONE fixture, projected into each service's own field naming, so a
-        // transcription slip cannot make the three agree for the wrong reason.
-        const ARCHIVE = { batch_seq: 3, count: 10, crc: 'cc', total_chunks: 2 };
-
-        function hubCanonical(cp) {
-            return SAP.prototype.archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
-                ARCHIVE.count, ARCHIVE.crc, ARCHIVE.total_chunks);
-        }
-        function indexerCanonical(cp, format) {
-            return Anchor.prototype.canonical.call(null, {
-                FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
-                BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
-                LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
-                CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
-                SNAPSHOT_BLOCK: cp.snapshot_block,
-                MATCH_BATCH_SEQ: ARCHIVE.batch_seq, MATCH_COUNT: ARCHIVE.count,
-                BATCH_CRC32: ARCHIVE.crc, TOTAL_CHUNKS: ARCHIVE.total_chunks
-            });
-        }
-        function recoveryCanonical(cp) {
-            return AnchorRecovery.prototype.wrapperCanonical.call(null, {
-                chain: cp.chain, network: cp.network, block_index: cp.block_index,
-                block_hash: cp.block_hash, ledger_hash: cp.ledger_hash,
-                actions_hash: cp.actions_hash, contract_hash: cp.contract_hash,
-                checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block,
-                match_batch_seq: ARCHIVE.batch_seq, match_count: ARCHIVE.count,
-                batch_crc32: ARCHIVE.crc, total_chunks: ARCHIVE.total_chunks
-            });
-        }
-
+// ONE fixture, projected into each service's own field naming, so a
+// transcription slip cannot make the three agree for the wrong reason.
+const ARCHIVE = { batch_seq: 3, count: 10, crc: 'cc', total_chunks: 2 };
+function hubCanonical(cp) {
+    return SAP.prototype.archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
+        ARCHIVE.count, ARCHIVE.crc, ARCHIVE.total_chunks);
+}
+function indexerCanonical(cp, format) {
+    return Anchor.prototype.canonical.call(null, {
+        FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
+        BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
+        LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
+        CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
+        SNAPSHOT_BLOCK: cp.snapshot_block,
+        MATCH_BATCH_SEQ: ARCHIVE.batch_seq, MATCH_COUNT: ARCHIVE.count,
+        BATCH_CRC32: ARCHIVE.crc, TOTAL_CHUNKS: ARCHIVE.total_chunks
+    });
+}
+function recoveryCanonical(cp) {
+    return AnchorRecovery.prototype.wrapperCanonical.call(null, {
+        chain: cp.chain, network: cp.network, block_index: cp.block_index,
+        block_hash: cp.block_hash, ledger_hash: cp.ledger_hash,
+        actions_hash: cp.actions_hash, contract_hash: cp.contract_hash,
+        checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block,
+        match_batch_seq: ARCHIVE.batch_seq, match_count: ARCHIVE.count,
+        batch_crc32: ARCHIVE.crc, total_chunks: ARCHIVE.total_chunks
+    });
+}
+function registerArchiveBasics() {
         // Above the flag day the header wrapper and the `|batch_seq` ROUND_ID suffix
         // are both in play, so this is the case that pins the suffix across all three.
         it('above the EQUIV flag day: all three produce identical bytes (v1)', function () {
@@ -340,7 +329,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             // Pinned literal so a THREE-sided edit (all copies changed together) still fails.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
         });
-
         // The publisher tail is attested separately and is NOT part of the wrapper
         // canonical, so a v1 with an ATTEST_SIG_COUNT of 0 and one with a full quorum sign
         // the same bytes: _canonical takes no tail argument at all, which is what makes the
@@ -354,7 +342,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(indexerCanonical(cpOn, 6)).to.not.equal(indexerCanonical(cpOn, 1));
             expect(indexerCanonical(cpOn, 6)).to.not.equal(hubCanonical(cpOn));
         });
-
         // Below the flag day the bytes are bare and the ROUND_ID suffix is absent, so
         // this branch exercises code the regtest-only archive suites never reach.
         it('below the EQUIV flag day: all three produce identical bare bytes (v1)', function () {
@@ -363,7 +350,8 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(indexerCanonical(cpOff, 1)).to.equal(hub);
             expect(recoveryCanonical(cpOff)).to.equal(hub);
         });
-
+}
+function registerArchiveBindingTests() {
         // Field ORDER, not just field presence: a swap inside the batch segment keeps
         // the same characters and would slip past a set-equality style check.
         it('binds the archive field ORDER identically in all three (crc/count swap diverges)', function () {
@@ -379,7 +367,6 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
                 ARCHIVE.count = swapped.count; ARCHIVE.crc = swapped.crc;
             }
         });
-
         // The archive round id must carry batch_seq in all three, or two archive
         // batches of the same checkpoint collide into one equivocation key.
         it('all three derive the same equivocation key, and it includes batch_seq', function () {
@@ -396,5 +383,18 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
                 expect(keyOf(recoveryCanonical(cpOn))).to.equal(keyOf(hubCanonical(cpOn)));
             } finally { ARCHIVE.batch_seq = prev; }
         });
+}
+function registerArchiveTests() {
+    describe('v1 archive canonical: hub == indexer anchor == recovery', function () {
+        before(requireSiblings);
+        registerArchiveBasics();
+        registerArchiveBindingTests();
     });
+}
+describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
+    registerGateBehaviorTests();
+    registerCrossServiceTests();
+    registerAnchorSectionTests();
+    registerEquivocationKeyTests();
+    registerArchiveTests();
 });
