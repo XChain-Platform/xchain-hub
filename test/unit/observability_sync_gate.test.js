@@ -35,13 +35,15 @@
 // The ported suite headers in the consumer repos are checked too, against the
 // sibling checkout when it is there: a header that describes a mechanism which
 // does not exist is how this started.
-
-const { expect } = require('chai');
-const { spawnSync } = require('node:child_process');
+const {
+  expect
+} = require('chai');
+const {
+  spawnSync
+} = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const SCRIPT = path.join(REPO_ROOT, 'bin', 'sync-observability.sh');
 const CANONICAL_DIR = path.join(REPO_ROOT, 'src', 'observability');
@@ -51,185 +53,169 @@ const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..
 // restated, so adding a consumer or a file there cannot leave this suite
 // asserting against a stale copy of the truth.
 const SCRIPT_TEXT = fs.readFileSync(SCRIPT, 'utf8');
-
 function bashArray(name) {
-    const match = SCRIPT_TEXT.match(new RegExp(`^${name}=\\((.*)\\)$`, 'm'));
-    return match ? match[1].split(/\s+/).filter(Boolean) : [];
+  const match = SCRIPT_TEXT.match(new RegExp(`^${name}=\\((.*)\\)$`, 'm'));
+  return match ? match[1].split(/\s+/).filter(Boolean) : [];
 }
-
 const CONSUMERS = bashArray('CONSUMERS');
 const FILES = bashArray('FILES');
 
 /** A throwaway platform root holding an in-sync vendored copy per consumer. */
 function makeFixture(consumers) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-sync-gate-'));
-    for (const consumer of consumers) {
-        const dir = path.join(root, consumer, 'src', 'observability');
-        fs.mkdirSync(dir, { recursive: true });
-        for (const file of FILES) {
-            fs.copyFileSync(path.join(CANONICAL_DIR, file), path.join(dir, file));
-        }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-sync-gate-'));
+  for (const consumer of consumers) {
+    const dir = path.join(root, consumer, 'src', 'observability');
+    fs.mkdirSync(dir, {
+      recursive: true
+    });
+    for (const file of FILES) {
+      fs.copyFileSync(path.join(CANONICAL_DIR, file), path.join(dir, file));
     }
-    return root;
+  }
+  return root;
 }
-
 function runCheck(root, extraArgs = []) {
-    return spawnSync('bash', [SCRIPT, '--check', ...extraArgs], {
-        env: Object.assign({}, process.env, { XCHAIN_PLATFORM_ROOT: root }),
-        encoding: 'utf8'
-    });
+  return spawnSync('bash', [SCRIPT, '--check', ...extraArgs], {
+    env: Object.assign({}, process.env, {
+      XCHAIN_PLATFORM_ROOT: root
+    }),
+    encoding: 'utf8'
+  });
 }
-
-describe('observability shim: the vendored-copy parity gate', function () {
-    this.timeout(20000);
-
-    const roots = [];
-    function fixture(consumers = CONSUMERS) {
-        const root = makeFixture(consumers);
-        roots.push(root);
-        return root;
+const observabilityShimTheVendoredCopyParityGateSuite1Roots = [];
+function observabilityShimTheVendoredCopyParityGateSuite1Fixture(consumers = CONSUMERS) {
+  const root = makeFixture(consumers);
+  observabilityShimTheVendoredCopyParityGateSuite1Roots.push(root);
+  return root;
+}
+function registerObservabilityShimTheVendoredCopyParityGateSuite1Part1() {
+  this.timeout(20000);
+  after(function () {
+    for (const root of observabilityShimTheVendoredCopyParityGateSuite1Roots) {
+      fs.rmSync(root, {
+        recursive: true,
+        force: true
+      });
     }
-
-    after(function () {
-        for (const root of roots) {
-            fs.rmSync(root, { recursive: true, force: true });
-        }
+  });
+  it('reads a non-empty consumer roster and file list from the script', function () {
+    // Everything below is asserted against these two lists; empty lists would
+    // make the whole suite vacuously green.
+    expect(CONSUMERS).to.have.length.of.at.least(1);
+    expect(FILES).to.have.length.of.at.least(1);
+    for (const consumer of CONSUMERS) expect(consumer).to.match(/^xchain-[a-z-]+$/);
+  });
+}
+function registerObservabilityShimTheVendoredCopyParityGateSuite1Part2() {
+  describe('behaviour', function () {
+    it('passes when every vendored copy is byte-identical', function () {
+      const res = runCheck(observabilityShimTheVendoredCopyParityGateSuite1Fixture());
+      expect(res.status, res.stdout + res.stderr).to.equal(0);
+      expect(res.stdout).to.contain('OK:');
+      expect(res.stdout).to.not.contain('DRIFT');
     });
-
-    it('reads a non-empty consumer roster and file list from the script', function () {
-        // Everything below is asserted against these two lists; empty lists would
-        // make the whole suite vacuously green.
-        expect(CONSUMERS).to.have.length.of.at.least(1);
-        expect(FILES).to.have.length.of.at.least(1);
-        for (const consumer of CONSUMERS) expect(consumer).to.match(/^xchain-[a-z-]+$/);
+    it('fails on a deliberate one-byte edit to a vendored copy', function () {
+      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture();
+      const victim = path.join(root, CONSUMERS[0], 'src', 'observability', FILES[0]);
+      fs.appendFileSync(victim, '\n');
+      const res = runCheck(root);
+      expect(res.status, 'a drifted copy must exit non-zero').to.equal(1);
+      expect(res.stdout).to.contain(`DRIFT  ${CONSUMERS[0]}/src/observability/${FILES[0]}`);
+      expect(res.stderr).to.contain('drifted from xchain-hub/src/observability');
     });
-
-    describe('behaviour', function () {
-
-        it('passes when every vendored copy is byte-identical', function () {
-            const res = runCheck(fixture());
-            expect(res.status, res.stdout + res.stderr).to.equal(0);
-            expect(res.stdout).to.contain('OK:');
-            expect(res.stdout).to.not.contain('DRIFT');
-        });
-
-        it('fails on a deliberate one-byte edit to a vendored copy', function () {
-            const root = fixture();
-            const victim = path.join(root, CONSUMERS[0], 'src', 'observability', FILES[0]);
-            fs.appendFileSync(victim, '\n');
-
-            const res = runCheck(root);
-            expect(res.status, 'a drifted copy must exit non-zero').to.equal(1);
-            expect(res.stdout).to.contain(`DRIFT  ${CONSUMERS[0]}/src/observability/${FILES[0]}`);
-            expect(res.stderr).to.contain('drifted from xchain-hub/src/observability');
-        });
-
-        it('fails when a vendored file has been deleted outright', function () {
-            const root = fixture();
-            fs.rmSync(path.join(root, CONSUMERS[0], 'src', 'observability', FILES[0]));
-
-            const res = runCheck(root);
-            expect(res.status).to.equal(1);
-            expect(res.stdout).to.contain('DRIFT');
-        });
-
-        it('fails when a consumer checkout is absent, instead of skipping green', function () {
-            // The failure mode this replaces: a venue missing one consumer
-            // compared five of six and printed OK, so the sixth could drift for
-            // as long as the layout stayed broken.
-            const absent = CONSUMERS[CONSUMERS.length - 1];
-            const root = fixture(CONSUMERS.filter((c) => c !== absent));
-
-            const res = runCheck(root);
-            expect(res.status, 'an absent consumer must be red').to.equal(1);
-            expect(res.stdout).to.contain(`MISSING ${absent}`);
-            expect(res.stderr).to.contain('proved nothing');
-        });
-
-        it('accepts an absent consumer only when --allow-missing is passed', function () {
-            const absent = CONSUMERS[CONSUMERS.length - 1];
-            const root = fixture(CONSUMERS.filter((c) => c !== absent));
-
-            const res = runCheck(root, ['--allow-missing']);
-            expect(res.status, res.stdout + res.stderr).to.equal(0);
-            expect(res.stdout).to.contain(`skip   ${absent}`);
-        });
-
-        it('rejects an unknown flag rather than silently checking nothing', function () {
-            const res = runCheck(fixture(), ['--not-a-flag']);
-            expect(res.status).to.equal(2);
-        });
+    it('fails when a vendored file has been deleted outright', function () {
+      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture();
+      fs.rmSync(path.join(root, CONSUMERS[0], 'src', 'observability', FILES[0]));
+      const res = runCheck(root);
+      expect(res.status).to.equal(1);
+      expect(res.stdout).to.contain('DRIFT');
     });
-
-    describe('wiring: the check is reachable from something that runs', function () {
-
-        it('is exposed as the check:observability-sync npm script', function () {
-            const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
-            const script = pkg.scripts['check:observability-sync'];
-            expect(script, 'package.json must expose the check as a script').to.be.a('string');
-            expect(script).to.contain('bin/sync-observability.sh');
-            expect(script).to.contain('--check');
-            expect(script, 'the gate must not opt out of the missing-consumer failure')
-                .to.not.contain('--allow-missing');
-        });
-
-        it('runs as a drift tier of bin/ci-full.sh, the pre-push venue gate', function () {
-            const ciFull = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'ci-full.sh'), 'utf8');
-            expect(ciFull).to.contain('check:observability-sync');
-            expect(ciFull, 'the tier must be declared with run_tier so a failure is reported')
-                .to.match(/run_tier "drift: vendored observability shim[^"]*"/);
-        });
-
-        it('requires every consumer checkout in bin/ci-full.sh, so the tier cannot skip', function () {
-            const ciFull = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'ci-full.sh'), 'utf8');
-            const needSib = ciFull.match(/^need_sib [\s\S]*?(?=\n\n)/m);
-            expect(needSib, 'bin/ci-full.sh must call need_sib').to.not.equal(null);
-            const required = needSib[0].replace(/\\\n/g, ' ').split(/\s+/);
-            for (const consumer of CONSUMERS) {
-                expect(required, `${consumer} must be required by ci-full.sh`).to.contain(consumer);
-            }
-        });
-
-        it('runs in the drift-guards job of .github/workflows/ci.yml', function () {
-            const ci = fs.readFileSync(
-                path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
-            const driftJob = ci.slice(ci.indexOf('\n  drift-guards:'));
-            expect(driftJob, 'ci.yml must have a drift-guards job').to.not.equal('');
-            expect(driftJob).to.contain('check:observability-sync');
-            expect(driftJob, 'the job must clone the consumers it compares against')
-                .to.contain('sync-observability.sh');
-        });
-
-        it('declares every consumer in .ci-siblings, so the venue ships them', function () {
-            const declared = fs.readFileSync(path.join(REPO_ROOT, '.ci-siblings'), 'utf8')
-                .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-            for (const consumer of CONSUMERS) {
-                expect(declared, `${consumer} is compared by the gate but never checked out`)
-                    .to.contain(consumer);
-            }
-        });
+    it('fails when a consumer checkout is absent, instead of skipping green', function () {
+      // The failure mode this replaces: a venue missing one consumer
+      // compared five of six and printed OK, so the sixth could drift for
+      // as long as the layout stayed broken.
+      const absent = CONSUMERS[CONSUMERS.length - 1];
+      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture(CONSUMERS.filter(c => c !== absent));
+      const res = runCheck(root);
+      expect(res.status, 'an absent consumer must be red').to.equal(1);
+      expect(res.stdout).to.contain(`MISSING ${absent}`);
+      expect(res.stderr).to.contain('proved nothing');
     });
-
-    describe('the ported suite headers describe the mechanism that exists', function () {
-
-        // Skips per consumer when the sibling is absent, the same way every other
-        // cross-repo guard here does; test/unit/sibling_coverage.test.js is what
-        // reports which of them could not run.
-        //
-        // It reports an absent CHECKOUT, not an absent SUITE, so a consumer that
-        // vendors the code and never ported the suite skips here and is reported
-        // nowhere. Read a green run as "every ported suite named the gate".
-        for (const consumer of CONSUMERS) {
-            it(`${consumer}: its ported observability suite names the real gate`, function () {
-                const suite = path.join(SIBLING_ROOT, consumer, 'test', 'unit', 'observability.test.js');
-                if (!fs.existsSync(suite)) return this.skip();
-
-                const header = fs.readFileSync(suite, 'utf8').split('\nconst ')[0];
-                expect(header, 'the header must name the script that enforces parity')
-                    .to.contain('sync-observability.sh');
-                expect(header, 'a header claiming a check "in CI" without naming it is what drifted')
-                    .to.not.match(/parity is gated by a\s*\n\/\/ check across the vendored copies in CI/);
-            });
-        }
+    it('accepts an absent consumer only when --allow-missing is passed', function () {
+      const absent = CONSUMERS[CONSUMERS.length - 1];
+      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture(CONSUMERS.filter(c => c !== absent));
+      const res = runCheck(root, ['--allow-missing']);
+      expect(res.status, res.stdout + res.stderr).to.equal(0);
+      expect(res.stdout).to.contain(`skip   ${absent}`);
     });
+    it('rejects an unknown flag rather than silently checking nothing', function () {
+      const res = runCheck(observabilityShimTheVendoredCopyParityGateSuite1Fixture(), ['--not-a-flag']);
+      expect(res.status).to.equal(2);
+    });
+  });
+}
+function registerObservabilityShimTheVendoredCopyParityGateSuite1Part3() {
+  describe('wiring: the check is reachable from something that runs', function () {
+    it('is exposed as the check:observability-sync npm script', function () {
+      const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+      const script = pkg.scripts['check:observability-sync'];
+      expect(script, 'package.json must expose the check as a script').to.be.a('string');
+      expect(script).to.contain('bin/sync-observability.sh');
+      expect(script).to.contain('--check');
+      expect(script, 'the gate must not opt out of the missing-consumer failure').to.not.contain('--allow-missing');
+    });
+    it('runs as a drift tier of bin/ci-full.sh, the pre-push venue gate', function () {
+      const ciFull = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'ci-full.sh'), 'utf8');
+      expect(ciFull).to.contain('check:observability-sync');
+      expect(ciFull, 'the tier must be declared with run_tier so a failure is reported').to.match(/run_tier "drift: vendored observability shim[^"]*"/);
+    });
+    it('requires every consumer checkout in bin/ci-full.sh, so the tier cannot skip', function () {
+      const ciFull = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'ci-full.sh'), 'utf8');
+      const needSib = ciFull.match(/^need_sib [\s\S]*?(?=\n\n)/m);
+      expect(needSib, 'bin/ci-full.sh must call need_sib').to.not.equal(null);
+      const required = needSib[0].replace(/\\\n/g, ' ').split(/\s+/);
+      for (const consumer of CONSUMERS) {
+        expect(required, `${consumer} must be required by ci-full.sh`).to.contain(consumer);
+      }
+    });
+    it('runs in the drift-guards job of .github/workflows/ci.yml', function () {
+      const ci = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+      const driftJob = ci.slice(ci.indexOf('\n  drift-guards:'));
+      expect(driftJob, 'ci.yml must have a drift-guards job').to.not.equal('');
+      expect(driftJob).to.contain('check:observability-sync');
+      expect(driftJob, 'the job must clone the consumers it compares against').to.contain('sync-observability.sh');
+    });
+    it('declares every consumer in .ci-siblings, so the venue ships them', function () {
+      const declared = fs.readFileSync(path.join(REPO_ROOT, '.ci-siblings'), 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      for (const consumer of CONSUMERS) {
+        expect(declared, `${consumer} is compared by the gate but never checked out`).to.contain(consumer);
+      }
+    });
+  });
+}
+function registerObservabilityShimTheVendoredCopyParityGateSuite1Part4() {
+  describe('the ported suite headers describe the mechanism that exists', function () {
+    // Skips per consumer when the sibling is absent, the same way every other
+    // cross-repo guard here does; test/unit/sibling_coverage.test.js is what
+    // reports which of them could not run.
+    //
+    // It reports an absent CHECKOUT, not an absent SUITE, so a consumer that
+    // vendors the code and never ported the suite skips here and is reported
+    // nowhere. Read a green run as "every ported suite named the gate".
+    for (const consumer of CONSUMERS) {
+      it(`${consumer}: its ported observability suite names the real gate`, function () {
+        const suite = path.join(SIBLING_ROOT, consumer, 'test', 'unit', 'observability.test.js');
+        if (!fs.existsSync(suite)) return this.skip();
+        const header = fs.readFileSync(suite, 'utf8').split('\nconst ')[0];
+        expect(header, 'the header must name the script that enforces parity').to.contain('sync-observability.sh');
+        expect(header, 'a header claiming a check "in CI" without naming it is what drifted').to.not.match(/parity is gated by a\s*\n\/\/ check across the vendored copies in CI/);
+      });
+    }
+  });
+}
+describe('observability shim: the vendored-copy parity gate', function () {
+  registerObservabilityShimTheVendoredCopyParityGateSuite1Part1.call(this);
+  registerObservabilityShimTheVendoredCopyParityGateSuite1Part2.call(this);
+  registerObservabilityShimTheVendoredCopyParityGateSuite1Part3.call(this);
+  registerObservabilityShimTheVendoredCopyParityGateSuite1Part4.call(this);
 });
