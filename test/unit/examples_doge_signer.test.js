@@ -78,21 +78,7 @@ function loadSigner(encoder, wallet) {
 // clean pre-send failure and requeues, which re-enters broadcast(), runs
 // createTx over fresh UTXOs and funds the same payload a SECOND time. Once
 // phase 1 is on the wire the signer owes the caller the fact that money moved.
-describe('examples/doge-signer (post-funding failures)', function () {
-    const PHASE1 = 'f'.repeat(64);
-
-    function encoderStub(overrides) {
-        return Object.assign({
-            createTx:    async () => ({ psbt: 'psbt-1', encoding: 'P2SH' }),
-            broadcastTx: async () => ({ txid: PHASE1 }),
-            spendP2sh:   async () => ({ psbt: 'psbt-2' })
-        }, overrides || {});
-    }
-    const wallet = {
-        signPsbt:       () => ({ psbt: 'psbt-1', txHex: 'hex-1', txid: PHASE1 }),
-        signRevealPsbt: () => ({ txHex: 'hex-2', txid: 'e'.repeat(64) })
-    };
-
+function registerPostFundingFailureTests(PHASE1, encoderStub, wallet) {
     it('marks a definitive spendP2sh rejection as funds-committed, keeping the original error', async function () {
         const signer = loadSigner(encoderStub({
             spendP2sh: async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent'); }
@@ -120,7 +106,9 @@ describe('examples/doge-signer (post-funding failures)', function () {
         assert.strictEqual(caught.fundsCommitted, true);
         assert.strictEqual(caught.phase1Txid, PHASE1);
     });
+}
 
+function registerFundingOutcomeTests(PHASE1, encoderStub, wallet) {
     it('leaves a PRE-funding failure untagged, so it stays cleanly retryable', async function () {
         const signer = loadSigner(encoderStub({
             createTx: async () => { throw new Error('Encoder RPC error: no UTXOs available'); }
@@ -145,4 +133,23 @@ describe('examples/doge-signer (post-funding failures)', function () {
         assert.strictEqual(res.phase1_txid, PHASE1);
         assert.strictEqual(res.txid, 'e'.repeat(64));
     });
+}
+
+describe('examples/doge-signer (post-funding failures)', function () {
+    const PHASE1 = 'f'.repeat(64);
+
+    function encoderStub(overrides) {
+        return Object.assign({
+            createTx:    async () => ({ psbt: 'psbt-1', encoding: 'P2SH' }),
+            broadcastTx: async () => ({ txid: PHASE1 }),
+            spendP2sh:   async () => ({ psbt: 'psbt-2' })
+        }, overrides || {});
+    }
+    const wallet = {
+        signPsbt:       () => ({ psbt: 'psbt-1', txHex: 'hex-1', txid: PHASE1 }),
+        signRevealPsbt: () => ({ txHex: 'hex-2', txid: 'e'.repeat(64) })
+    };
+
+    registerPostFundingFailureTests(PHASE1, encoderStub, wallet);
+    registerFundingOutcomeTests(PHASE1, encoderStub, wallet);
 });
