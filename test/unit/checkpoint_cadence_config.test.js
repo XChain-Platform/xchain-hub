@@ -28,19 +28,7 @@ function makeHub(p2pConfig) {
     return { db: { doQuery: async () => [] }, p2pConfig: p2pConfig || {} };
 }
 
-describe('checkpoint cadence config guards', function () {
-    let saved = {};
-    let warn;
-    beforeEach(function () {
-        for (let k of KNOBS) { saved[k] = process.env[k]; delete process.env[k]; }
-        warn = console.warn;
-        console.warn = () => {};
-    });
-    afterEach(function () {
-        for (let k of KNOBS) { if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k]; }
-        console.warn = warn;
-    });
-
+function registerIntervalResolutionTests() {
     describe('resolveCheckpointIntervalBlocks()', function () {
         it('defaults to 6 with nothing configured', function () {
             expect(resolveCheckpointIntervalBlocks({})).to.equal(6);
@@ -58,7 +46,9 @@ describe('checkpoint cadence config guards', function () {
             }
         });
     });
+}
 
+function registerCadenceParityTests() {
     // The drift the publisher's own comment claims cannot happen. Before both readers
     // shared one resolver, 'abc' gave the engine NaN against the publisher's 6, and
     // '-3' gave the engine -3 against the publisher's floor of 1.
@@ -73,7 +63,9 @@ describe('checkpoint cadence config guards', function () {
             });
         }
     });
+}
 
+function registerEngineKnobTests() {
     describe('StateCheckpointEngine cadence knobs', function () {
         it('never leaves pollMs or roundTimeoutMs NaN or non-positive', function () {
             for (let bad of ['abc', '0', '-1']) {
@@ -92,4 +84,22 @@ describe('checkpoint cadence config guards', function () {
             expect(new StateCheckpointEngine(makeHub({ CHECKPOINT_CONFIRMATIONS: '-2' })).confirmations).to.equal(6);
         });
     });
+}
+
+describe('checkpoint cadence config guards', function () {
+    let saved = {};
+    let warn;
+    beforeEach(function () {
+        for (let k of KNOBS) { saved[k] = process.env[k]; delete process.env[k]; }
+        warn = console.warn;
+        console.warn = () => {};
+    });
+    afterEach(function () {
+        for (let k of KNOBS) { if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k]; }
+        console.warn = warn;
+    });
+
+    registerIntervalResolutionTests();
+    registerCadenceParityTests();
+    registerEngineKnobTests();
 });
