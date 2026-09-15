@@ -21,12 +21,16 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
+let XChainHub, axiosStub, mockDb, hub, errorLog;
+const ENV_KEYS = ['BTC_INDEXER_API_URL', 'BTC_INDEXER_URL', 'INDEXER_COIN_CHECK'];
+let savedEnv;
+
+// The indexer's getblockhashes response names the chain it answers for.
+function coinReply(coin) {
+    return { data: { result: { coin: coin, network: 'regtest', block_index: 218 } } };
+}
+
 describe('XChainHub BTC indexer coin guard', function () {
-
-    let XChainHub, axiosStub, mockDb, hub, errorLog;
-
-    const ENV_KEYS = ['BTC_INDEXER_API_URL', 'BTC_INDEXER_URL', 'INDEXER_COIN_CHECK'];
-    let savedEnv;
 
     before(function () {
         this.timeout(30000);
@@ -56,10 +60,11 @@ describe('XChainHub BTC indexer coin guard', function () {
         }
     });
 
-    // The indexer's getblockhashes response names the chain it answers for.
-    function coinReply(coin) {
-        return { data: { result: { coin: coin, network: 'regtest', block_index: 218 } } };
-    }
+    registerIndexerCoinIdentityTests();
+    registerIndexerCoinCacheTests();
+});
+
+function registerIndexerCoinIdentityTests() {
 
     it('returns the URL when the indexer confirms it serves BTC', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
@@ -101,6 +106,9 @@ describe('XChainHub BTC indexer coin guard', function () {
         axiosStub.post.resolves({ data: { result: { error: 'indexer database not ready' } } });
         expect(await hub._resolveBtcIndexerUrl()).to.equal('http://127.0.0.1:3514');
     });
+}
+
+function registerIndexerCoinCacheTests() {
 
     it('caches the confirmation so the probe costs one round trip, not one per call', async function () {
         process.env.BTC_INDEXER_API_URL = 'http://127.0.0.1:3514';
@@ -145,4 +153,4 @@ describe('XChainHub BTC indexer coin guard', function () {
             delete process.env.DOGE_INDEXER_API_URL;
         }
     });
-});
+}
