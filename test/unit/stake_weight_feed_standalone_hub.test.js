@@ -97,9 +97,9 @@ function warnLines(stub, pattern) {
         .filter(line => pattern.test(line));
 }
 
-describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot', function () {
+let hub, pm, db, axiosStub, CapabilitySnapshot, oracle, oc, logs;
 
-    let hub, pm, db, axiosStub, CapabilitySnapshot, oracle, oc, logs;
+describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot', function () {
 
     beforeEach(function () {
         axiosStub = { post: sinon.stub().callsFake(async (url, body) => {
@@ -147,6 +147,13 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
 
     afterEach(function () { sinon.restore(); });
 
+    registerStandaloneStakeFeedResolutionTests();
+    registerStandaloneStakeFeedQuorumTest();
+    registerMissingStakeFeedTest();
+});
+
+function registerStandaloneStakeFeedResolutionTests() {
+
     it('resolves the canonical federation floor when the registry has none', function () {
         expect(hub.capabilityRegistry.getMinStake('price', BURIED)).to.equal(null);
         expect(hub.stakeWeightFeed.minStake('price')).to.equal(CANONICAL_PRICE_FLOOR);
@@ -164,6 +171,9 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
         // Attributed to the PROVEN signing key of each peer, never a placeholder.
         expect(inserts.map(a => a[2]).sort()).to.deep.equal(FEDERATION.map(v => v.pubkey).sort());
     });
+}
+
+function registerStandaloneStakeFeedQuorumTest() {
 
     it('finalizes under the weight snapshot the indexer served, not a count fallback', async function () {
         // Resolve the snapshot first and hold the object: CapabilitySnapshot caches
@@ -193,6 +203,9 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
         expect(weightCall.args[1].params.min_stake).to.equal(CANONICAL_PRICE_FLOOR);
         expect(weightCall.args[1].params.block_index).to.equal(BURIED);
     });
+}
+
+function registerMissingStakeFeedTest() {
 
     it('a hub with NO feed behaves exactly as today: no RPC, no snapshot, round skipped', async function () {
         hub.stakeWeightFeed = null;
@@ -214,4 +227,4 @@ describe('StakeWeightFeed: a standalone hub reads the federation stake snapshot'
         // Fail-closed means the indexer is never asked at all.
         expect(axiosStub.post.called).to.equal(false);
     });
-});
+}
