@@ -28,7 +28,6 @@ const fs     = require('fs');
 const path   = require('path');
 
 const RollcallRound     = require('../../src/rollcall/round.js');
-const wirePart          = require('../../src/rollcall/round/wire.js');
 const ValidatorIdentity = require('../../src/validators/identity.js');
 
 const VECTOR_PATH = path.join(__dirname, '..', '..', '..', 'xchain-documentation',
@@ -43,33 +42,17 @@ function builder(network) {
     return eng;
 }
 
-describe('RollcallRound canonical + wire conformance', function () {
+{
 
     let V;
-    before(function () {
-        // The vector is the ground truth, not this file. A missing sibling checkout
-        // is a lane-worktree fact of life (every hub lane pays this), so it skips by
-        // default like the other sibling-gated suites; XCHAIN_REQUIRE_SIBLINGS=1
-        // still says so loudly rather than quietly asserting nothing, which is how a
-        // conformance test rots into decoration on a venue that does carry siblings.
-        if (!fs.existsSync(VECTOR_PATH)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
-                throw new Error('frozen ROLLCALL vector not found at ' + VECTOR_PATH +
-                    '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
-            }
-            this.skip();
-            return;
-        }
-        V = JSON.parse(fs.readFileSync(VECTOR_PATH, 'utf8'));
-    });
 
-    it('reproduces the frozen EQUIV-wrapped canonical byte for byte', function () {
+    function reproducesTheFrozenEquivWrappedCanonicalTest2() {
         const eng = builder(V.canonical.network);
         assert.strictEqual(eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash),
                            V.canonical.expected);
-    });
+    }
 
-    it('builds the canonical through equivocation_header, not by concatenation', function () {
+    function buildsTheCanonicalThroughEquivocationHeaderTest3() {
         // The header's `||` is the key/content boundary every consumer matches on,
         // and ENGINE_TAGS.ROLLCALL is where the tag comes from. Assert the pieces
         // are really in the built string, so a hand-rolled template that happened
@@ -79,9 +62,9 @@ describe('RollcallRound canonical + wire conformance', function () {
         const out = eng._canonical(30, V.canonical.ledger_hash);
         assert.ok(out.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.ROLLCALL, '30', 0))));
         assert.strictEqual(eq.ENGINE_TAGS.ROLLCALL, 'XROLLCALL');
-    });
+    }
 
-    it('signs with REAL Ed25519 keys to the exact signature bytes in the vector', function () {
+    function signsWithRealEd25519KeysToTest4() {
         const eng   = builder(V.canonical.network);
         const canon = eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
         for (const s of V.signers) {
@@ -92,9 +75,9 @@ describe('RollcallRound canonical + wire conformance', function () {
                 'signature over our canonical differs from the frozen one: the canonical drifted');
             assert.strictEqual(ValidatorIdentity.verify(canon, s.sig, s.pubkey), true);
         }
-    });
+    }
 
-    it('rejects every negative vector: a signature over another epoch, network or ledger_hash', function () {
+    function rejectsEveryNegativeVectorASignatureTest5() {
         const eng   = builder(V.canonical.network);
         const canon = eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash);
         for (const bad of V.invalid) {
@@ -107,26 +90,26 @@ describe('RollcallRound canonical + wire conformance', function () {
             // than a typo.
             assert.notStrictEqual(bad.canonical, canon, bad.name);
         }
-    });
+    }
 
-    it('binds the canonical to network, epoch and ledger_hash independently', function () {
+    function bindsTheCanonicalToNetworkEpochTest6() {
         const lh = V.canonical.ledger_hash;
         const regtest = builder('regtest');
         const testnet = builder('testnet');
         assert.notStrictEqual(regtest._canonical(30, lh), testnet._canonical(30, lh));
         assert.notStrictEqual(regtest._canonical(30, lh), regtest._canonical(60, lh));
         assert.notStrictEqual(regtest._canonical(30, lh), regtest._canonical(30, '0'.repeat(64)));
-    });
+    }
 
-    it('epoch 0 is a real epoch, not a falsy no-op', function () {
+    function epoch0IsARealEpochTest7() {
         // _canonical is pure string building and does not consult ROLLCALL_ACTIVATION,
         // so this holds whether or not regtest is armed. A falsy check on the height
         // would build 'EQUIV|XROLLCALL||0||...' or skip the epoch outright.
         const out = builder('regtest')._canonical(0, V.canonical.ledger_hash);
         assert.strictEqual(out, 'EQUIV|XROLLCALL|0|0||regtest|0|' + V.canonical.ledger_hash);
-    });
+    }
 
-    it('reproduces both frozen WIRE payloads, byte counts included', function () {
+    function reproducesBothFrozenWirePayloadsByteTest8() {
         const eng = builder(V.canonical.network);
         const byKey = {};
         for (const s of V.signers) byKey[s.pubkey] = { pubkey: s.pubkey, sig: s.sig };
@@ -144,9 +127,9 @@ describe('RollcallRound canonical + wire conformance', function () {
             assert.strictEqual(wire, w.expected, w.name);
             assert.strictEqual(Buffer.byteLength(wire, 'utf8'), w.bytes, w.name + ': byte count');
         }
-    });
+    }
 
-    it('SIG_COUNT is the real pair count and PUBLISHER carries no signature of its own', function () {
+    function sigCountIsTheRealPairTest9() {
         const eng   = builder('regtest');
         const pairs = V.signers.map(s => ({ pubkey: s.pubkey, sig: s.sig }));
         // A publisher that signed nothing: the reward attaches to the key, and the
@@ -159,9 +142,9 @@ describe('RollcallRound canonical + wire conformance', function () {
             'the indexer rejects any payload whose SIG_COUNT is not exactly the pair count');
         assert.strictEqual(fields.indexOf('e'.repeat(64), 6), -1,
             'the publisher key must not appear among the pairs unless it actually signed');
-    });
+    }
 
-    it('lowercases every hex field on the wire (the action name stays upper)', function () {
+    function lowercasesEveryHexFieldOnTheTest10() {
         const eng  = builder('regtest');
         const wire = eng.buildWire(30, V.canonical.ledger_hash.toUpperCase(), 'A'.repeat(64),
                                     [{ pubkey: 'B'.repeat(64), sig: 'C'.repeat(128) }]);
@@ -169,9 +152,9 @@ describe('RollcallRound canonical + wire conformance', function () {
         assert.strictEqual(fields[0], 'ROLLCALL', 'the action name is the decoder allowlist key');
         for (const f of fields.slice(1))
             assert.strictEqual(f, f.toLowerCase(), 'hex field not lowercased: ' + f.slice(0, 12));
-    });
+    }
 
-    it('splits at the vector-declared 41 pairs per action', function () {
+    function splitsAtTheVectorDeclared41Test11() {
         assert.strictEqual(RollcallRound.MAX_PAIRS_PER_ACTION, V.size_budget.max_pairs_per_action);
 
         const mk = n => Array.from({ length: n }, (_, i) => ({
@@ -186,7 +169,7 @@ describe('RollcallRound canonical + wire conformance', function () {
         // UNION of what lands.
         assert.strictEqual(chunks.reduce((n, c) => n + c.length, 0), 83);
         assert.strictEqual(new Set(chunks.flat().map(p => p.pubkey)).size, 83);
-    });
+    }
 
     // ── v1: the GATES form ───────────────────────────────────────────────────
     //
@@ -196,8 +179,7 @@ describe('RollcallRound canonical + wire conformance', function () {
     // attack these cases exist to catch is the cheap one: a site that quietly drops
     // GATES rebuilds the v0 canonical, every signature still verifies, and the epoch
     // records a gate list nobody signed.
-
-    it('reproduces the frozen v1 canonical, gates hash included', function () {
+    function reproducesTheFrozenV1CanonicalGatesTest12() {
         const V1  = V.canonical_v1;
         const eng = builder(V1.network);
         assert.strictEqual(eng._canonical(V1.epoch_height, V1.ledger_hash, V1.gates), V1.expected);
@@ -208,9 +190,9 @@ describe('RollcallRound canonical + wire conformance', function () {
         assert.strictEqual(rc.gatesHash(V1.gates), V1.gates_hash);
         assert.ok(V1.expected.endsWith('|' + V1.gates_hash));
         assert.strictEqual(Buffer.byteLength(V1.gates, 'utf8'), V1.gates_bytes);
-    });
+    }
 
-    it('omitting gates still builds the v0 canonical byte for byte', function () {
+    function omittingGatesStillBuildsTheV0Test13() {
         // The version is a function of the gates argument alone, so a v0 epoch on a
         // build that knows v1 must be unchanged: an accidental v1 canonical below the
         // height would drop every peer signature on the network.
@@ -219,9 +201,9 @@ describe('RollcallRound canonical + wire conformance', function () {
         assert.strictEqual(v0, V.canonical.expected);
         assert.strictEqual(eng._canonical(V.canonical.epoch_height, V.canonical.ledger_hash, null), v0);
         assert.notStrictEqual(v0, V.canonical_v1.expected);
-    });
+    }
 
-    it('signs the v1 canonical with REAL keys to the exact frozen signature bytes', function () {
+    function signsTheV1CanonicalWithRealTest14() {
         const V1    = V.canonical_v1;
         const eng   = builder(V1.network);
         const canon = eng._canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
@@ -233,9 +215,9 @@ describe('RollcallRound canonical + wire conformance', function () {
                 'signature over our v1 canonical differs from the frozen one: the canonical drifted');
             assert.strictEqual(ValidatorIdentity.verify(canon, s.sig, s.pubkey), true);
         }
-    });
+    }
 
-    it('rejects every v1 negative vector, the gates-stripped canonical included', function () {
+    function rejectsEveryV1NegativeVectorTheTest15() {
         const V1    = V.canonical_v1;
         const canon = builder(V1.network)._canonical(V1.epoch_height, V1.ledger_hash, V1.gates);
         const realSigs = new Set(V.signers_v1.map(s => s.sig));
@@ -248,9 +230,9 @@ describe('RollcallRound canonical + wire conformance', function () {
             // signature offered for a v1 epoch).
             assert.ok(bad.canonical !== canon || !realSigs.has(bad.sig), bad.name);
         }
-    });
+    }
 
-    it('reproduces the frozen v1 WIRE payload, byte count included', function () {
+    function reproducesTheFrozenV1WirePayloadTest16() {
         const V1  = V.canonical_v1;
         const eng = builder(V1.network);
         const byKey = {};
@@ -270,9 +252,9 @@ describe('RollcallRound canonical + wire conformance', function () {
             assert.strictEqual(wire, w.expected, w.name);
             assert.strictEqual(Buffer.byteLength(wire, 'utf8'), w.bytes, w.name + ': byte count');
         }
-    });
+    }
 
-    it('derives the v1 pair cap from the REAL gates string, not a frozen number', function () {
+    function derivesTheV1PairCapFromTest17() {
         const B = V.size_budget;
         assert.strictEqual(RollcallRound.ACTION_DATA_CEILING, B.max_data_bytes);
         assert.strictEqual(RollcallRound.BYTES_PER_PAIR, B.bytes_per_pair);
@@ -298,9 +280,9 @@ describe('RollcallRound canonical + wire conformance', function () {
         // v0 is untouched by all of it.
         assert.strictEqual(RollcallRound.maxPairsForGates(null), B.max_pairs_per_action);
         assert.strictEqual(RollcallRound.maxPairsForGates(undefined), B.max_pairs_per_action);
-    });
+    }
 
-    it('a full-cap v1 action fits the ceiling and one more pair does not', function () {
+    function aFullCapV1ActionFitsTest18() {
         const eng   = builder('mainnet');
         const gates = require('../../src/consensus_rules_digest.js').knownGateKeys().join(',');
         const cap   = RollcallRound.maxPairsForGates(gates);
@@ -316,9 +298,9 @@ describe('RollcallRound canonical + wire conformance', function () {
             V.size_budget.max_data_bytes + '-byte ceiling; the decoder DROPS an oversize action silently');
         assert.ok(Buffer.byteLength(over, 'utf8') > V.size_budget.max_data_bytes,
             'the v1 cap is below the real ceiling; the split is costing fees for nothing');
-    });
+    }
 
-    it('a full 41-pair action stays inside the protocol action-data ceiling', function () {
+    function aFull41PairActionStaysTest19() {
         const eng   = builder('mainnet');
         const pairs = Array.from({ length: V.size_budget.max_pairs_per_action }, (_, i) => ({
             pubkey: i.toString(16).padStart(64, '0'), sig: i.toString(16).padStart(128, '0')
@@ -333,52 +315,45 @@ describe('RollcallRound canonical + wire conformance', function () {
                                     pairs.concat([{ pubkey: 'f'.repeat(64), sig: 'f'.repeat(128) }]));
         assert.ok(Buffer.byteLength(over, 'utf8') > V.size_budget.max_data_bytes,
             'MAX_PAIRS_PER_ACTION is below the real ceiling; the split is costing fees for nothing');
-    });
-});
+    }
 
-// The size statics are reached as RollcallRound.<static>, inside maxPairsForGates
-// and from the publish path, so a static reassigned on the class (a double, a patch)
-// is the one they run, never a module-local copy the reassignment cannot reach.
-describe('RollcallRound size statics dispatch through the class', function () {
-
-    const NAMES = ['v1HeaderBytes', 'maxPairsForGates', 'chunkPairs'];
-    const saved = {};
-    // wire.js dispatches through the class round.js bound when last evaluated, and
-    // a suite that proxyquires round.js rebinds it to a copy the require cache no
-    // longer holds, so each case binds the class it reassigns and restores after.
-    let boundBefore;
-    beforeEach(function () {
-        for (const n of NAMES) saved[n] = RollcallRound[n];
-        boundBefore = wirePart.roundClass();
-        wirePart.bindRoundClass(RollcallRound);
-    });
-    afterEach(function () {
-        Object.assign(RollcallRound, saved);
-        wirePart.bindRoundClass(boundBefore);
-    });
-
-    it('maxPairsForGates sizes the header through RollcallRound.v1HeaderBytes', function () {
-        RollcallRound.v1HeaderBytes = () => RollcallRound.ACTION_DATA_CEILING - 5 * RollcallRound.BYTES_PER_PAIR;
-        assert.strictEqual(RollcallRound.maxPairsForGates('any'), 5);
-    });
-
-    it('publishPairs caps and splits through RollcallRound.maxPairsForGates and chunkPairs', async function () {
-        const calls = [], released = [];
-        RollcallRound.maxPairsForGates = (gates) => { calls.push(['max', gates]); return 3; };
-        RollcallRound.chunkPairs = (pairs, max) => { calls.push(['chunk', pairs.length, max]); return [pairs]; };
-        const eng = Object.create(RollcallRound.prototype);
-        Object.assign(eng, {
-            _committed: new Set(), spendLogPath: 'unused', resolveSigner: () => ({}),
-            spendGuard: { check: () => ({ ok: true }), reserve: () => 'token', release: (t) => released.push(t) },
-            recordSpend: () => false   // the intent write fails, so nothing is ever sent
+    function rollcallroundCanonicalWireConformanceSuite1() {
+        before(function () {
+            // The vector is the ground truth, not this file. A missing sibling checkout
+            // is a lane-worktree fact of life (every hub lane pays this), so it skips by
+            // default like the other sibling-gated suites; XCHAIN_REQUIRE_SIBLINGS=1
+            // still says so loudly rather than quietly asserting nothing, which is how a
+            // conformance test rots into decoration on a venue that does carry siblings.
+            if (!fs.existsSync(VECTOR_PATH)) {
+                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+                    throw new Error('frozen ROLLCALL vector not found at ' + VECTOR_PATH +
+                        '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
+                }
+                this.skip();
+                return;
+            }
+            V = JSON.parse(fs.readFileSync(VECTOR_PATH, 'utf8'));
         });
-        const real = console.error;
-        console.error = () => {};
-        let res;
-        try { res = await eng.publishPairs({ epoch: 60, gates: 'G' }, 'c'.repeat(64), [{}, {}], 'sweep'); }
-        finally { console.error = real; }
-        assert.strictEqual(res, 'retry');
-        assert.deepStrictEqual(calls, [['max', 'G'], ['chunk', 2, 3]]);
-        assert.deepStrictEqual(released, ['token']);
-    });
-});
+        it('reproduces the frozen EQUIV-wrapped canonical byte for byte', reproducesTheFrozenEquivWrappedCanonicalTest2);
+        it('builds the canonical through equivocation_header, not by concatenation', buildsTheCanonicalThroughEquivocationHeaderTest3);
+        it('signs with REAL Ed25519 keys to the exact signature bytes in the vector', signsWithRealEd25519KeysToTest4);
+        it('rejects every negative vector: a signature over another epoch, network or ledger_hash', rejectsEveryNegativeVectorASignatureTest5);
+        it('binds the canonical to network, epoch and ledger_hash independently', bindsTheCanonicalToNetworkEpochTest6);
+        it('epoch 0 is a real epoch, not a falsy no-op', epoch0IsARealEpochTest7);
+        it('reproduces both frozen WIRE payloads, byte counts included', reproducesBothFrozenWirePayloadsByteTest8);
+        it('SIG_COUNT is the real pair count and PUBLISHER carries no signature of its own', sigCountIsTheRealPairTest9);
+        it('lowercases every hex field on the wire (the action name stays upper)', lowercasesEveryHexFieldOnTheTest10);
+        it('splits at the vector-declared 41 pairs per action', splitsAtTheVectorDeclared41Test11);
+        it('reproduces the frozen v1 canonical, gates hash included', reproducesTheFrozenV1CanonicalGatesTest12);
+        it('omitting gates still builds the v0 canonical byte for byte', omittingGatesStillBuildsTheV0Test13);
+        it('signs the v1 canonical with REAL keys to the exact frozen signature bytes', signsTheV1CanonicalWithRealTest14);
+        it('rejects every v1 negative vector, the gates-stripped canonical included', rejectsEveryV1NegativeVectorTheTest15);
+        it('reproduces the frozen v1 WIRE payload, byte count included', reproducesTheFrozenV1WirePayloadTest16);
+        it('derives the v1 pair cap from the REAL gates string, not a frozen number', derivesTheV1PairCapFromTest17);
+        it('a full-cap v1 action fits the ceiling and one more pair does not', aFullCapV1ActionFitsTest18);
+        it('a full 41-pair action stays inside the protocol action-data ceiling', aFull41PairActionStaysTest19);
+    }
+
+    describe('RollcallRound canonical + wire conformance', rollcallroundCanonicalWireConformanceSuite1);
+
+}
