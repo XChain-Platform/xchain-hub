@@ -91,7 +91,7 @@ function makeRegtestRound(dbRows) {
     });
     let reg = makeProviderRegistry();
     let ar  = new AttestationRound(hub, reg);
-    sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+    sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
     return { ar: ar, reg: reg, request: {
         request_id: 'ef'.repeat(32), provider_id: 'http_get', redundancy: 1,
         block_index: 500, action_index: 1, deadline_block: 510,
@@ -109,7 +109,7 @@ it('refuses a re-poll of a request this hub already finalized before any provide
         let fetchStub = reg.getModule().fetch;
         fetchStub.resetHistory();
         sinon.stub(console, 'log');
-        await ar._startRound(request, 500);
+        await ar.startRound(request, 500);
         sinon.restore();
         expect(ar.consensus.isFinalized.calledWith(request.request_id), 'the ring was asked about this rid').to.be.true;
         expect(fetchStub.called, 'a finalized request must not reach the provider').to.be.false;
@@ -132,7 +132,7 @@ it('refuses a re-poll of a request this hub already finalized before any provide
         // the two assertions below (it just pays the provider once more, on a table
         // this test never counts). Pin the warn itself so that regresses loudly.
         let warnStub = sinon.stub(console, 'warn');
-        await ar._startRound(request, 500);
+        await ar.startRound(request, 500);
         sinon.restore();
         expect(warnStub.getCalls().some(c => String(c.args[0]).includes('fetch-cache read failed')),
             'the durable-cache read must not have failed and fallen back').to.be.false;
@@ -153,7 +153,7 @@ it('starts both counters at zero and exposes them', function () {
     it('counts a provider call the hub actually issued', async function () {
         let { ar, reg, request } = makeRegtestRound([]);
         sinon.stub(console, 'log');
-        await ar._startRound(request, 500);
+        await ar.startRound(request, 500);
         sinon.restore();
         expect(reg.getModule().fetch.called, 'guard: the provider was called').to.be.true;
         expect(ar.getStats().fetch_count).to.equal(1);
@@ -234,7 +234,7 @@ describe('the round-start line (spec §10 ZC1)', function () {
             };
             let hub = makeHub({ network: 'regtest', capabilitySnapshot: capSS });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
             let request = Object.assign({
                 request_id:     'cd'.repeat(32),
                 provider_id:    'http_get',
@@ -252,7 +252,7 @@ describe('the round-start line (spec §10 ZC1)', function () {
             let logs = [];
             // The start line is written through the logger now, not bare console.
             sinon.stub(require('../../../src/observability').getLogger(), 'info').callsFake(l => logs.push(String(l)));
-            await ar._startRound(request, 500);
+            await ar.startRound(request, 500);
             sinon.restore();
             let starting = logs.filter(l => l.indexOf('AttestationRound: starting ') === 0);
             expect(starting.length, 'exactly one start line per started round').to.equal(1);
@@ -265,11 +265,11 @@ describe('the round-start line (spec §10 ZC1)', function () {
 
         it('is silent on a hub that is not in the responsible set', async function () {
             let { ar, request } = makeRegtestRound();
-            ar._computeResponsibleSet.returns([{ pubkey: 'ff'.repeat(32), hash: '00' }]);
+            ar.computeResponsibleSet.returns([{ pubkey: 'ff'.repeat(32), hash: '00' }]);
             let logs = [];
             sinon.stub(console, 'log').callsFake(l => logs.push(String(l)));
             sinon.stub(console, 'warn');
-            await ar._startRound(request, 500);
+            await ar.startRound(request, 500);
             sinon.restore();
             expect(logs.filter(l => l.indexOf('AttestationRound: starting ') === 0)).to.have.length(0);
         });
@@ -287,7 +287,7 @@ describe('the poll gate reads confirmationsFor, not this.confirmations', functio
             });
             let hub = makeHub({ network: network, _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            let spy = sinon.stub(ar, '_startRound').resolves();
+            let spy = sinon.stub(ar, 'startRound').resolves();
             return ar.pollPending().then(() => spy);
         }
 

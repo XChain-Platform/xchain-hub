@@ -228,7 +228,7 @@ describe('attest_responsible_widening: the V2 ladder (zero-conf armed, D27, D28)
     });
 });
 
-describe('AttestationRound._computeResponsibleSet: widening', function () {
+describe('AttestationRound.computeResponsibleSet: widening', function () {
 
     // Seven staked keys, matching the size of the live testnet4 federation the
     // incident was measured on.
@@ -239,7 +239,7 @@ describe('AttestationRound._computeResponsibleSet: widening', function () {
     const round = Object.create(AttestationRound.prototype);
 
     const setFor = (widen) =>
-        round._computeResponsibleSet(validators, rid, 3, false, null, widen)
+        round.computeResponsibleSet(validators, rid, 3, false, null, widen)
             .map(v => v.pubkey);
 
     it('is byte-for-byte the legacy fixed-REDUNDANCY set at widen 0', function () {

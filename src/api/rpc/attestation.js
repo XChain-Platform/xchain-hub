@@ -135,7 +135,7 @@ function attestationLookupRpc(ctx) {
     };
 }
 
-// Read-only mirror of the ranking AttestationRound._computeResponsibleSet applies
+// Read-only mirror of the ranking AttestationRound.computeResponsibleSet applies
 // when it decides whether THIS hub must serve a request. Exists so a caller (the
 // e2e venue, an operator) can ask who is responsible without re-deriving the rule:
 // every input below is resolved through the hub's own engines, never recomputed
@@ -154,7 +154,7 @@ function responsibleSetRpc(ctx) {
             if(!/^[0-9a-f]{64}$/.test(rid))
                 return {error: "request_id must be a 64-character hex string"};
             let round = hub.getAttestationRound();
-            if(!round || typeof round._computeResponsibleSet !== 'function')
+            if(!round || typeof round.computeResponsibleSet !== 'function')
                 return {error: "attestation round engine not active"};
             try {
                 let found = await findPendingAttestationRequest(rid);
@@ -184,7 +184,7 @@ function responsibleSetRpc(ctx) {
                 let widen = (Number.isFinite(found.latestBlock) && found.latestBlock > 0)
                     ? wid.widenSlots(found.latestBlock, declaredBlock, Number(request.deadline_block), hub.network)
                     : 0;
-                let responsible = round._computeResponsibleSet(
+                let responsible = round.computeResponsibleSet(
                     snapshot.validators, rid, redundancy, weighted, providerFloor, widen
                 ).map(v => v.pubkey);
 

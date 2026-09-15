@@ -68,7 +68,7 @@ module.exports = {
         // than re-evaluating the activation, so a round cannot straddle the height even
         // if the fleet crosses it mid-round.
         let requestBlock  = Number(roundState.request.block_index);
-        let mirrorEra     = this._isMirrorEra(requestBlock);
+        let mirrorEra     = this.isMirrorEra(requestBlock);
         // This hub's candidate stamp, picked here at proposal time. It is the
         // ROUND's effective time only if this hub is the elected leader; every hub
         // settles on the leader's in resolveRoundEffectiveTime. Picking one
@@ -115,7 +115,7 @@ module.exports = {
         // max(quorum, redundancy) VALID signatures, and signatures can only ever
         // come from responsible-set members (_handleCommit rejects non-members).
         // When the block-anchored snapshot or weighted source-dedup shrinks the
-        // responsible set below that threshold (AttestationRound._computeResponsibleSet
+        // responsible set below that threshold (AttestationRound.computeResponsibleSet
         // slices to max(1, redundancy) + widen and can return fewer), signatures.size can
         // never reach `needed`: every PROPOSE/PREPARE/COMMIT cycle stalls to
         // timeout, including the non-ok outcome paths. Do NOT lower the gates to
@@ -245,7 +245,7 @@ module.exports = {
             ...this.pinnedRoundFields(roundState),
             finalized:    false,
             // The round's admission map, pinned at proposal time above. Every canonical
-            // built for this rid reads it through _roundAdmitBlocks, so no two messages
+            // built for this rid reads it through roundAdmitBlocks, so no two messages
             // of one round can carry heights from two different tip readings.
             admitBlocks:  myAdmit,
             timer:        null
@@ -304,7 +304,7 @@ module.exports = {
         if(!pending){
             // Round not started yet; buffer for drain in propose(). Without
             // this, the first proposer's PROPOSE is lost to peers whose
-            // _startRound hasn't run yet, and PBFT can't reach 2f+1.
+            // startRound hasn't run yet, and PBFT can't reach 2f+1.
             this.bufferEarlyMessage(rid, envelope);
             return null;
         }

@@ -215,7 +215,7 @@ const MAX_SOURCE_ADDRESS_LENGTH = 100;
 // Default ATTEST PBFT round lifetime (2 min per request lifecycle). Shared, not
 // copied, because AttestationRound floors its `seen` retry window at this value
 // plus one poll: that floor exists precisely to stop the seen window nesting
-// inside a live consensus round (a nested window re-`_startRound`s a request
+// inside a live consensus round (a nested window re-`startRound`s a request
 // whose round is still pending and pays for a second provider fetch). A bare
 // literal on each side kept the two coupled only while the copies happened to
 // be equal, so a one-sided raise of the consensus default silently re-opened

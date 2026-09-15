@@ -35,7 +35,7 @@ function mkIdentity() {
 }
 function pub(id) { return id.getPubkeyHex().toLowerCase(); }
 
-// Mirror of AttestationConsensus._buildCanonical so peers can sign the exact
+// Mirror of AttestationConsensus.buildCanonical so peers can sign the exact
 // bytes the consensus engine will verify against.
 function buildCanonical(rid, providerId, body, status, meta) {
     let hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
@@ -119,32 +119,32 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 {
 const hookAt12026 = () => sinon.restore();
 
-describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('_buildCanonical hashes the body and concatenates the fields deterministically', function () {
+describe('AttestationConsensus: buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('buildCanonical hashes the body and concatenates the fields deterministically', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         let body = Buffer.from('payload');
-        let out = c._buildCanonical('rid1', 'http_get', body, 'ok', 'm');
+        let out = c.buildCanonical('rid1', 'http_get', body, 'ok', 'm');
         let expected = 'rid1' + 'http_get' +
             crypto.createHash('sha256').update(body, 'utf8').digest('hex') + 'ok' + 'm';
         expect(out.toString('utf8')).to.equal(expected);
         // Empty meta normalises to ''.
-        let out2 = c._buildCanonical('rid1', 'http_get', body, 'ok', null);
+        let out2 = c.buildCanonical('rid1', 'http_get', body, 'ok', null);
         expect(out2.toString('utf8')).to.equal('rid1http_get' +
             crypto.createHash('sha256').update(body, 'utf8').digest('hex') + 'ok');
     }); });
 
-describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null when there is no identity', function () {
+describe('AttestationConsensus: buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null when there is no identity', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = null;
         expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     }); });
 
-describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null (not throw) when identity.sign throws', function () {
+describe('AttestationConsensus: buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null (not throw) when identity.sign throws', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         c.identity = { sign: () => { throw new Error('hsm offline'); } };
         expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
     }); });
 
-describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical produces a verifiable signature with a real identity', function () {
+describe('AttestationConsensus: buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical produces a verifiable signature with a real identity', function () {
         let id = mkIdentity();
         let hub = createMockHub({ identity: id });
         let c = new AttestationConsensus(hub, makeProviderRegistry());

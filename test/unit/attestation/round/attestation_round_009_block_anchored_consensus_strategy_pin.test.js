@@ -121,14 +121,14 @@ function makeStrategyHub() {
     // than read live at each of the six decision sites: hotReload() re-parses every
     // provider def from the local configs table on EVERY proposal:finalized event, so a
     // live read could flip a hub's machine between two messages of one round.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('_startRound resolves the strategy at the REQUEST block and pins it on roundState', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('startRound resolves the strategy at the REQUEST block and pins it on roundState', async function () {
             let reg = makeProviderRegistry({
                 getConsensusStrategy: sinon.stub().returns('judge_model'),
                 getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' }) })
             });
             let ar = new AttestationRound(makeStrategyHub(), reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
-            await ar._startRound(makeRequest(), 4242);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar.startRound(makeRequest(), 4242);
             expect(reg.getConsensusStrategy.calledWith('http_get', 4242)).to.be.true;
             let rs = [...ar.rounds.values()][0];
             expect(rs.pinnedConsensusStrategy).to.equal('judge_model');
@@ -139,15 +139,15 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // than read live at each of the six decision sites: hotReload() re-parses every
     // provider def from the local configs table on EVERY proposal:finalized event, so a
     // live read could flip a hub's machine between two messages of one round.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('_startRound skips the round, and the paid fetch, when the strategy is unanchorable', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('startRound skips the round, and the paid fetch, when the strategy is unanchorable', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let reg = makeProviderRegistry({
                 getConsensusStrategy: sinon.stub().returns(null),
                 getModule:            sinon.stub().returns({ fetch: fetchStub })
             });
             let ar = new AttestationRound(makeStrategyHub(), reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
-            await ar._startRound(makeRequest(), 4242);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar.startRound(makeRequest(), 4242);
             expect(ar.rounds.size).to.equal(0);
             expect(fetchStub.called, 'an unanchorable strategy must not trigger a paid fetch').to.be.false;
         }); }); });
@@ -165,15 +165,15 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         // AttestationConsensus, whose dispatch is positive equality against the two
         // implemented names, so the round runs the byte_equality branches with the
         // no_quorum self-derivation gate (items 2641/2579) inactive.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('_startRound skips the round, and the paid fetch, on a strategy this build does not implement', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('startRound skips the round, and the paid fetch, on a strategy this build does not implement', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let reg = makeProviderRegistry({
                 getConsensusStrategy: sinon.stub().returns('threshold_vote'),
                 getModule:            sinon.stub().returns({ fetch: fetchStub })
             });
             let ar = new AttestationRound(makeStrategyHub(), reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
-            await ar._startRound(makeRequest(), 4242);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar.startRound(makeRequest(), 4242);
             expect(ar.rounds.size, 'an unsupported strategy must not pin a round').to.equal(0);
             expect(fetchStub.called, 'an unsupported strategy must not trigger a paid fetch').to.be.false;
         }); }); });
@@ -187,15 +187,15 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 
         // Guards the allowlist against over-tightening: both implemented names must still
         // admit, or the gate above turns every live round into an expiry + refund.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('_startRound still admits both strategies this build implements', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored consensus_strategy pin', function () { it('startRound still admits both strategies this build implements', async function () {
             for (let strategy of ['byte_equality', 'judge_model']) {
                 let reg = makeProviderRegistry({
                     getConsensusStrategy: sinon.stub().returns(strategy),
                     getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' }) })
                 });
                 let ar = new AttestationRound(makeStrategyHub(), reg);
-                sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
-                await ar._startRound(makeRequest(), 4242);
+                sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+                await ar.startRound(makeRequest(), 4242);
                 expect(ar.rounds.size, strategy + ' must still start a round').to.equal(1);
                 expect([...ar.rounds.values()][0].pinnedConsensusStrategy).to.equal(strategy);
             }

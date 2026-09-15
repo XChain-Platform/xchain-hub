@@ -34,7 +34,7 @@ module.exports = {
     // `latestBlock` is the indexer tip observed by the poll that surfaced this
     // request; it drives the deterministic leader-rotation + model-fallback
     // ladders (attestation_escalation.js).
-    async _startRound(request, latestBlock){
+    async startRound(request, latestBlock){
         let rid          = String(request.request_id).toLowerCase();
         let providerId   = String(request.provider_id);
         let redundancy   = Number(request.redundancy) || 1;

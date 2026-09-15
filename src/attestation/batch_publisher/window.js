@@ -110,7 +110,7 @@ module.exports = {
 
         let rows;
         try {
-            rows = await this._selectWindowRows(windowStart, windowEnd);
+            rows = await this.selectWindowRows(windowStart, windowEnd);
         } catch(e){
             logger.warn('AttestationBatchPublisher: cannot read window ' + windowStart +
                          ' from attestation_responses (' + (e && e.message) + '); deferring');
@@ -124,7 +124,7 @@ module.exports = {
             return false;
         }
 
-        let anchor = await this._resolveAnchor();
+        let anchor = await this.resolveAnchor();
         if(anchor === null){
             this.warnNoAnchor(windowStart);
             this.stats.windowsDeferred++;
@@ -229,7 +229,7 @@ module.exports = {
     // JSON.stringify inside the signed canonical, where '120' and 120 are different
     // bytes. So every numeric column is coerced here, once, and every text column is
     // stringified; a verifier rebuilding from the wire sees the same spellings.
-    async _selectWindowRows(windowStart, windowEnd){
+    async selectWindowRows(windowStart, windowEnd){
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') throw new Error('no hub DB');
         let rows = await db.findAttestationResponsesInBatchWindow(

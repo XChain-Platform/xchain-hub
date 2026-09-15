@@ -89,7 +89,7 @@ async function openRound(f) {
 // A leader PREPARE stamped `wireEt`. `signOver` lets a case sign real bytes even
 // when `wireEt` itself is a spelling the canonical builder refuses to accept.
 function leaderPrepare(f, wireEt, signOver) {
-    let canonical = f.engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK,
+    let canonical = f.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK,
         signOver === undefined ? wireEt : signOver).toString('utf8');
     return {
         type: 'ATTEST_PREPARE',
@@ -126,7 +126,7 @@ it('REJECTS a no_quorum PREPARE it cannot derive, leaving its own stamp in place
         expect(ownStamp, 'the follower stamped its own candidate at propose()').to.equal(EXPECTED);
         // In-window, so the bounds guard passes and only the derivation gate refuses.
         let wireEt = EXPECTED + 900;
-        let canonical = f.engine._buildCanonical(RID, PROVIDER, Buffer.alloc(0), 'no_quorum', '', BLK, wireEt).toString('utf8');
+        let canonical = f.engine.buildCanonical(RID, PROVIDER, Buffer.alloc(0), 'no_quorum', '', BLK, wireEt).toString('utf8');
         f.engine.handlePrepare({
             type: 'ATTEST_PREPARE',
             data: { requestId: RID, providerId: PROVIDER, body_b64: '', meta: '', status: 'no_quorum',
@@ -146,7 +146,7 @@ it('REJECTS a no_quorum PREPARE it cannot derive, leaving its own stamp in place
         // envelope is a leader-chosen field too and gets the same treatment.
         let f = makeFollower();
         let pending = await openRound(f);
-        let bad = f.engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK, NOW - 10).toString('utf8');
+        let bad = f.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK, NOW - 10).toString('utf8');
         f.engine._handlePropose({
             type: 'ATTEST_PROPOSE',
             data: { requestId: RID, providerId: PROVIDER, body_b64: BODY.toString('base64'), meta: META,
@@ -223,7 +223,7 @@ it('ACCEPTS the value an honest leader computes from the same frozen constant', 
         expect(pending.effectiveTime, 'the round adopted the leader\'s stamp').to.equal(EXPECTED);
         expect(pending.signatures.has(f.leaderKey), 'the leader\'s signature was counted').to.equal(true);
         // And this hub co-signed the adopted bytes rather than its own.
-        let adopted = f.engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK, pending.effectiveTime).toString('utf8');
+        let adopted = f.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, BLK, pending.effectiveTime).toString('utf8');
         expect(ValidatorIdentity.verify(adopted, pending.signatures.get(f.me), f.me)).to.equal(true);
     });
 

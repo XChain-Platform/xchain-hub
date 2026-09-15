@@ -118,7 +118,7 @@ module.exports = {
     //
     // This is a CONSENSUS read. AttestationConsensus branches its whole PBFT phase
     // transition on the answer, so the value a round runs on is resolved ONCE at
-    // _startRound against the request's own block and pinned into roundState; the six
+    // startRound against the request's own block and pinned into roundState; the six
     // decision sites read the pinned value and never the registry. Resolving per
     // message instead let a hotReload land mid-round and flip a hub's state machine
     // between two messages of the same round.

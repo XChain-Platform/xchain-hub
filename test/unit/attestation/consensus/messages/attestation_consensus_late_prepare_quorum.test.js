@@ -41,7 +41,7 @@ let hub, consensus, me, peerB, peerC, pending;
 
 function registerLatePrepareQuorumTest() {
 it('finalizes the round when peer C\'s PREPARE (its COMMIT was lost) completes quorum', function () {
-        let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
+        let canonical = consensus.buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
         let finalized = sinon.spy();
         consensus.on('request:finalized', finalized);
 
@@ -84,7 +84,7 @@ describe('AttestationConsensus: late PREPARE completes commit quorum after COMMI
 
         // Canonical bytes every co-signer signs over (built by the engine so
         // the equiv-header gating matches exactly).
-        let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
+        let canonical = consensus.buildCanonical(RID, 'http_get', BODY, 'ok', '', 0).toString('utf8');
 
         // A round with the winner established, this node already committed
         // (_commitSent=true), holding 2 of 3 required verifying signatures.

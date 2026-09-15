@@ -99,7 +99,7 @@ module.exports = {
         let redundancy   = ranking.redundancy;
         let widen        = ranking.widen;
         let responsible  = (requestBlock != null)
-            ? await this._computeResponsible(rid, requestBlock, redundancy, ranking.eventProvider, widen) : null;
+            ? await this.computeResponsible(rid, requestBlock, redundancy, ranking.eventProvider, widen) : null;
         let leaderPubkey = event.leaderPubkey ? String(event.leaderPubkey).toLowerCase()
                          : (responsible && responsible.length ? responsible[0] : null);
 
@@ -156,7 +156,7 @@ module.exports = {
     finalizedRankInputs(event){
         let requestBlock = (event.request && event.request.block_index != null) ? Number(event.request.block_index) : null;
         // Normalize redundancy with the SAME rule the other two copies of the
-        // responsible-set derivation use (AttestationRound._computeResponsibleSet,
+        // responsible-set derivation use (AttestationRound.computeResponsibleSet,
         // the indexer's attest/index.js): Math.max(1, Number(redundancy) || 1). The prior
         // event.signatures.length fallback produced a responsible list of a
         // different LENGTH than consensus and the indexer derived whenever the
@@ -168,7 +168,7 @@ module.exports = {
         let redundancy   = Math.max(1, Number(event.request && event.request.redundancy) || 1);
         // Provider id for the block-anchored stake floor. The event carries it
         // directly; the request row is the fallback for an event shaped by an older
-        // publisher. Absent on both, _computeResponsible fails closed on the weighted
+        // publisher. Absent on both, computeResponsible fails closed on the weighted
         // path rather than rank against a set the other two copies do not agree with.
         let eventProvider = (event.providerId != null) ? event.providerId
                           : ((event.request && event.request.provider_id != null) ? event.request.provider_id : null);

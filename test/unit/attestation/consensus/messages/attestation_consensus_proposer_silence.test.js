@@ -40,7 +40,7 @@ const RID  = 'ab'.repeat(16);
 const BODY = Buffer.from('a-body');
 
 function proposeEnvelope(signer) {
-    let canonical = consensus._buildCanonical(RID, 'http_get', BODY, 'ok', '', 0, null).toString('utf8');
+    let canonical = consensus.buildCanonical(RID, 'http_get', BODY, 'ok', '', 0, null).toString('utf8');
     return {
         type: 'ATTEST_PROPOSE',
         data: {

@@ -36,8 +36,8 @@ module.exports = {
     // this hub's own snapshot of the world (§4.3). Returns {ok, error}.
     //
     // Every helper here is the hub's OWN copy of a consensus rule, called rather than
-    // re-implemented: _computeResponsibleSet is the ranking that picks the signers in
-    // AttestationRound, and _buildCanonical is the byte string they sign. A second
+    // re-implemented: computeResponsibleSet is the ranking that picks the signers in
+    // AttestationRound, and buildCanonical is the byte string they sign. A second
     // spelling of either would be a fork surface that no suite compares, which is why
     // this reaches for two "private" methods instead of copying twenty lines.
     async verifyGossipedRow(row, request, latestBlock){
@@ -105,18 +105,18 @@ module.exports = {
     // responsible validators actually verify against it.
     responsibleSignatureVerdict(row, rid, sigs, bodyBytes, snapshot, weighted, providerFloor, widen, redundancy, declaredBlock){
         let round = this.hub && this.hub.attestationRound;
-        if(!round || typeof round._computeResponsibleSet !== 'function')
+        if(!round || typeof round.computeResponsibleSet !== 'function')
             return { ok: false, error: 'no AttestationRound to resolve the responsible set' };
         // Derived from the snapshot above, so membership here already implies holding
         // the attestation capability at that height. The indexer needs two filters
         // because its capability read and its responsible read are separate queries
         // that can disagree; here they are one set, so one filter is the same rule.
-        let responsible = new Set(round._computeResponsibleSet(
+        let responsible = new Set(round.computeResponsibleSet(
             snapshot.validators, rid, redundancy, weighted, providerFloor, widen
         ).map(v => String(v.pubkey).toLowerCase()));
 
         let consensus = this.hub && this.hub.attestationConsensus;
-        if(!consensus || typeof consensus._buildCanonical !== 'function')
+        if(!consensus || typeof consensus.buildCanonical !== 'function')
             return { ok: false, error: 'no AttestationConsensus to rebuild the canonical' };
         let canonical;
         try {
@@ -129,7 +129,7 @@ module.exports = {
             // rebuild legacy bytes for an admission-era row. Passing the row's map is also
             // what makes the era gate a real check here, since it refuses when the row's
             // map and the request's era disagree.
-            canonical = consensus._buildCanonical(
+            canonical = consensus.buildCanonical(
                 rid, String(row.provider_id), bodyBytes, String(row.status),
                 String(row.meta == null ? '' : row.meta), declaredBlock, Number(row.effective_time),
                 ah.rowAdmitBlocks(row));

@@ -25,7 +25,7 @@
 'use strict';
 const bc     = require('../../bcmath.js');
 const esc    = require('../escalation.js');
-// SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
+// SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist startRound declines an
 // unrecognised block-anchored strategy against; shared with the dispatch sites it names.
 const { SUPPORTED_CONSENSUS_STRATEGIES } = require('../../constants.js');
 const { getLogger } = require('../../observability');

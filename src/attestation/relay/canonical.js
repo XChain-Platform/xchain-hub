@@ -34,7 +34,7 @@ module.exports = {
     // silently shifts every field after it. Such a request cannot be relayed at all;
     // it expires on its origin deadline, which is the honest outcome versus spending
     // a BTC fee on an action every indexer will misparse.
-    _wireFault(row, sigCount){
+    wireFault(row, sigCount){
         let response = (row.phase === 'response');
         // v4 carries the body as base64, whose alphabet excludes '|', so only the
         // free-form META can shift the positional fields on that leg.
@@ -46,7 +46,7 @@ module.exports = {
                 return name + ' contains a "|", which the positional wire cannot carry';
         }
         let stub  = new Array(sigCount).fill({ pubkey: '0'.repeat(64), sig: '0'.repeat(128) });
-        let wire  = response ? this._buildResponseWire(row, stub) : this._buildRequestWire(row, stub);
+        let wire  = response ? this.buildResponseWire(row, stub) : this.buildRequestWire(row, stub);
         let bytes = Buffer.byteLength(wire, 'utf8');
         if(bytes > ATTEST_WIRE_MAX_BYTES)
             return 'ATTEST v' + (response ? '4' : '3') + ' wire is ' + bytes + ' bytes with ' + sigCount +
@@ -56,8 +56,8 @@ module.exports = {
 
     // ----- canonical (the cross-service contract) -----
 
-    // MUST byte-match the indexer's Attest._relayRequestCanonical /
-    // _relayResponseCanonical. A one-byte disagreement is not a visible failure: the
+    // MUST byte-match the indexer's Attest.relayRequestCanonical /
+    // relayResponseCanonical. A one-byte disagreement is not a visible failure: the
     // signatures simply never verify and every peer's v3 is dropped as unquorate.
     // Pinned by xchain-indexer/test/unit/actions/attest_relay.test.js and cross-checked
     // against the indexer's own implementation in AttestationRelay.canonical.test.js.
@@ -67,11 +67,11 @@ module.exports = {
     // has no way to learn one. The signature therefore stays valid across a PBFT view
     // change, which is correct here: the round's VALUE never changes with the view.
     _canonicalMatch(row, view){   // eslint-disable-line no-unused-vars
-        if(row.phase === 'response') return this._relayResponseCanonical(row);
-        return this._relayRequestCanonical(row);
+        if(row.phase === 'response') return this.relayResponseCanonical(row);
+        return this.relayRequestCanonical(row);
     },
 
-    _relayRequestCanonical(r){
+    relayRequestCanonical(r){
         let raw = [
             'ATTEST', 'RELAY_REQUEST', String(r.request_id), String(r.snapshot_block), String(r.network),
             String(r.origin_chain), String(r.origin_action_index), String(r.provider_id),
@@ -88,7 +88,7 @@ module.exports = {
     // response body enters ALREADY HASHED, and the indexer hashes the raw
     // base64-DECODED bytes, not the base64 text, which is why responseFieldsFromHome
     // hashes the bytes it is about to encode rather than the string it read.
-    _relayResponseCanonical(r){
+    relayResponseCanonical(r){
         let raw = [
             'ATTEST', 'RELAY_RESPONSE', String(r.request_id), String(r.snapshot_block), String(r.network),
             String(r.origin_chain), String(r.home_response_action_index), String(r.provider_id),
@@ -100,7 +100,7 @@ module.exports = {
         return raw;
     },
 
-    _buildRequestWire(row, sigs){
+    buildRequestWire(row, sigs){
         let parts = [
             'ATTEST',
             '3',
@@ -121,7 +121,7 @@ module.exports = {
         return parts.join('|');
     },
 
-    _buildResponseWire(row, sigs){
+    buildResponseWire(row, sigs){
         let parts = [
             'ATTEST',
             '4',

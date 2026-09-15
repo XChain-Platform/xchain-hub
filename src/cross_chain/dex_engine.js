@@ -260,7 +260,7 @@ class CrossChainDexEngine extends EventEmitter {
         // The admission map, height-gated on the ROW's own snapshot_block and never on a
         // consumer's height, so the rule for a match is fixed the moment it is produced and
         // the two eras can never share a signature. Refuses in BOTH directions, exactly as
-        // AttestationConsensus._buildCanonical does for the mirror era. Appended LAST so its
+        // AttestationConsensus.buildCanonical does for the mirror era. Appended LAST so its
         // '|' separator argument holds whatever the royalty gate did before it.
         raw += ah.admissionCanonicalField('CrossChainDex', r.network, r.snapshot_block, ah.rowAdmitBlocks(r));
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))

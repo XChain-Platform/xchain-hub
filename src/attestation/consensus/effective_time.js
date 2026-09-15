@@ -64,7 +64,7 @@ module.exports = {
     // True when the response to a request admitted at `requestBlock` is served by
     // the mirror. Keyed on the request's own block, so the rule for a given request
     // is fixed the moment it is admitted and cannot move under it mid-round.
-    _isMirrorEra(requestBlock){
+    isMirrorEra(requestBlock){
         return isResponseMirrorActive(requestBlock, this.hub && this.hub.network);
     },
 

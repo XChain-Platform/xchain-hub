@@ -16,7 +16,7 @@
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
  * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * _computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -83,7 +83,7 @@ function readQueue(file) {
 
 // ---------- _myRank ---------------------------------------------------------
 
-// ---------- _computeResponsible ---------------------------------------------
+// ---------- computeResponsible ---------------------------------------------
 
 // ---------- _resolveBtcIndexerUrl -------------------------------------------
 
@@ -128,35 +128,35 @@ const RICH = [
         { pubkey: OTHER_PUB, source: 'sC', weight: '10000' }
     ];
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when capabilitySnapshot is not available', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when capabilitySnapshot is not available', async function () {
         const pub = makePublisher(MY_PUB, { capabilitySnapshot: null });
-        const result = await pub._computeResponsible('req' + '00'.repeat(30), 100, 2);
+        const result = await pub.computeResponsible('req' + '00'.repeat(30), 100, 2);
         expect(result).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when snapshot returns no validators', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when snapshot returns no validators', async function () {
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => ({ validators: [] }) }
         });
-        const result = await pub._computeResponsible('req' + '00'.repeat(30), 100, 2);
+        const result = await pub.computeResponsible('req' + '00'.repeat(30), 100, 2);
         expect(result).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when snapshot returns null', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when snapshot returns null', async function () {
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => null }
         });
-        const result = await pub._computeResponsible('req' + '00'.repeat(30), 100, 2);
+        const result = await pub.computeResponsible('req' + '00'.repeat(30), 100, 2);
         expect(result).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns a sorted slice of pubkeys based on SHA256(rid || pubkey)', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns a sorted slice of pubkeys based on SHA256(rid || pubkey)', async function () {
         const validators = [MY_PUB, LEADER_PUB, OTHER_PUB].map(pk => ({ pubkey: pk }));
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => ({ validators }) }
         });
         const rid = '11'.repeat(32);
-        const result = await pub._computeResponsible(rid, 100, 2);
+        const result = await pub.computeResponsible(rid, 100, 2);
         expect(Array.isArray(result)).to.equal(true);
         expect(result.length).to.equal(2);
         // All results should be known pubkeys
@@ -165,52 +165,52 @@ describe('AttestationPublisher: _computeResponsible', function () { afterEach(ho
         }
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('is deterministic (same inputs → same ordering)', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('is deterministic (same inputs → same ordering)', async function () {
         const validators = [MY_PUB, LEADER_PUB, OTHER_PUB].map(pk => ({ pubkey: pk }));
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => ({ validators }) }
         });
         const rid = 'deadbeef'.repeat(8);
-        const r1 = await pub._computeResponsible(rid, 100, 3);
-        const r2 = await pub._computeResponsible(rid, 100, 3);
+        const r1 = await pub.computeResponsible(rid, 100, 3);
+        const r2 = await pub.computeResponsible(rid, 100, 3);
         expect(r1).to.deep.equal(r2);
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when getSnapshot throws', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when getSnapshot throws', async function () {
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => { throw new Error('DB down'); } }
         });
-        const result = await pub._computeResponsible('req' + '00'.repeat(30), 100, 2);
+        const result = await pub.computeResponsible('req' + '00'.repeat(30), 100, 2);
         expect(result).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('limits result to redundancy (max 1 when redundancy=1)', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('limits result to redundancy (max 1 when redundancy=1)', async function () {
         const validators = [MY_PUB, LEADER_PUB, OTHER_PUB].map(pk => ({ pubkey: pk }));
         const pub = makePublisher(MY_PUB, {
             capabilitySnapshot: { getSnapshot: async () => ({ validators }) }
         });
-        const result = await pub._computeResponsible('11'.repeat(32), 100, 1);
+        const result = await pub.computeResponsible('11'.repeat(32), 100, 1);
         expect(result.length).to.equal(1);
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('drops below-floor sources on the weighted path', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('drops below-floor sources on the weighted path', async function () {
         const pub = makePublisher(MY_PUB, weightedHub(RICH, '10000'));
-        const result = await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get');
+        const result = await pub.computeResponsible('11'.repeat(32), 100, 3, 'http_get');
         expect(result).to.have.members([MY_PUB, OTHER_PUB]);
         expect(result).to.not.include(LEADER_PUB);
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when the provider floor cannot be resolved', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when the provider floor cannot be resolved', async function () {
         const pub = makePublisher(MY_PUB, weightedHub(RICH, null));
-        expect(await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
+        expect(await pub.computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null when the floor excludes every source', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null when the floor excludes every source', async function () {
         const pub = makePublisher(MY_PUB, weightedHub(RICH, '999999'));
-        expect(await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
+        expect(await pub.computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('does not consult the floor below the STAKE_WEIGHTED_QUORUM gate', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('does not consult the floor below the STAKE_WEIGHTED_QUORUM gate', async function () {
         // network mainnet + block 100 is far below the 961000 anchor, so the unweighted
         // snapshot runs and its weightless rows must still select normally.
         const pub = makePublisher(MY_PUB, {
@@ -218,15 +218,15 @@ describe('AttestationPublisher: _computeResponsible', function () { afterEach(ho
             capabilitySnapshot: { getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }, { pubkey: LEADER_PUB }] }) },
             providerRegistry: { getMinStake: () => { throw new Error('must not be consulted below the gate'); } }
         });
-        const result = await pub._computeResponsible('11'.repeat(32), 100, 2, 'http_get');
+        const result = await pub.computeResponsible('11'.repeat(32), 100, 2, 'http_get');
         expect(result).to.have.lengthOf(2);
     }); });
 
-describe('AttestationPublisher: _computeResponsible', function () { afterEach(hookAt28895); it('returns null on the weighted path when the event carried no provider id', async function () {
+describe('AttestationPublisher: computeResponsible', function () { afterEach(hookAt28895); it('returns null on the weighted path when the event carried no provider id', async function () {
         // Fail closed: without a provider id this copy cannot resolve the same floor the
         // other three do, so ranking against an unfiltered set would be worse than not
         // ranking at all (the caller falls back to event.leaderPubkey).
         const pub = makePublisher(MY_PUB, weightedHub(RICH, '10000'));
-        expect(await pub._computeResponsible('11'.repeat(32), 100, 3)).to.be.null;
+        expect(await pub.computeResponsible('11'.repeat(32), 100, 3)).to.be.null;
     }); });
 }

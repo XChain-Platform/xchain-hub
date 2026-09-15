@@ -268,8 +268,8 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             hubB.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sentByB.push({ type, data }); } };
 
             let pA = makePublisher(hubA), pB = makePublisher(hubB);
-            let rowsA = await pA._selectWindowRows(start, now);
-            let rowsB = await pB._selectWindowRows(start, now);
+            let rowsA = await pA.selectWindowRows(start, now);
+            let rowsB = await pB.selectWindowRows(start, now);
             expect(rowsA.length, 'hub A must hold the boundary row for this window').to.equal(1);
             expect(rowsB.length, 'hub B must hold the SAME row for the SAME window').to.equal(1);
             expect(rowsA).to.deep.equal(rowsB);

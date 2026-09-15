@@ -80,7 +80,7 @@ module.exports = {
         // mirror must write NOTHING: a row here would be a second delivery of the
         // same response under a canonical the signatures do not cover.
         let requestBlock = Number(event.request && event.request.block_index);
-        if(!this._isMirrorEra(requestBlock)) return null;
+        if(!this.isMirrorEra(requestBlock)) return null;
 
         let rid = String(event.requestId).toLowerCase();
         let status = String(event.status || 'ok');
@@ -163,7 +163,7 @@ module.exports = {
             // on-chain path, so the applier's row is shaped like a v1's.
             response_payload:     bodyBytes.toString('utf8'),
             // Over the BYTES the signatures cover, computed the same way
-            // AttestationConsensus._buildCanonical computes it. Not over the decoded
+            // AttestationConsensus.buildCanonical computes it. Not over the decoded
             // string above: for a body that is valid UTF-8 the two coincide, and for
             // one that is not, this field stays honest about what was signed and the
             // row is inert on every node identically instead of forking one.

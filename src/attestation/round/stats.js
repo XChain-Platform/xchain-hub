@@ -39,7 +39,7 @@ module.exports = {
             if(entry.error) failed++;
             else proposed++;
         }
-        // In-flight = seen but _startRound not yet resolved. Counted directly
+        // In-flight = seen but startRound not yet resolved. Counted directly
         // (seen keys with no rounds entry) rather than `seen.size - rounds.size`:
         // the two maps evict on different windows (seen ~retryAfterMs, rounds
         // roundsTtlMs), so the raw size difference can go negative.

@@ -147,7 +147,7 @@ class AttestationConsensus extends EventEmitter {
         // Spelling guard first (see readWireEffectiveTime).
         let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
+        let canonical = this.buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig || ''), senderPubkey)){
             logger.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
             return;
@@ -171,7 +171,7 @@ class AttestationConsensus extends EventEmitter {
         // does NOT verify over the winner canonical. Re-verify here before counting it,
         // mirroring handlePrepare (614) and _handleCommit; an unverifiable sig inflates
         // signatures.size and the indexer would deterministically reject the response.
-        let winnerCanonical = this._buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
+        let winnerCanonical = this.buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
             let pHash = crypto.createHash('sha256').update(p.body).digest();
             let matchesWinner = (Buffer.compare(pHash, winnerHash) === 0 && p.meta === winner.meta);
@@ -213,7 +213,7 @@ class AttestationConsensus extends EventEmitter {
         // exactly as on the ok path. Anything else (e.g. this hub's own OK proposal
         // ahead of a no_quorum verdict) needs a fresh signature over the non-ok
         // canonical.
-        let winnerCanonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
+        let winnerCanonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
             if(ValidatorIdentity.verify(winnerCanonical, String(p.sig), pubkey))
                 pending.signatures.set(pubkey, String(p.sig));
@@ -234,7 +234,7 @@ class AttestationConsensus extends EventEmitter {
     verifyNonOkPrepare(pending, d, rid, body, meta, status, senderPubkey){
         let wireEffective = this.readWireEffectiveTime(pending, d, 'non-ok PREPARE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
+        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
             logger.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
             return;
@@ -267,7 +267,7 @@ class AttestationConsensus extends EventEmitter {
     verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey){
         let wireEffective = this.readWireEffectiveTime(pending, d, 'PREPARE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
+        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
             logger.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
             return;
@@ -338,7 +338,7 @@ class AttestationConsensus extends EventEmitter {
     // stamp is not counted here for the same reason a peer that settled on a
     // different body is not - the emitted response carries one canonical.
     countLatePrepare(pending, rid, d, senderPubkey){
-        let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
+        let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
         if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
             pending.signatures.set(senderPubkey, String(d.sig));
         } else {
@@ -354,7 +354,7 @@ class AttestationConsensus extends EventEmitter {
         if(d.sig && d.sig_pubkey){
             // Over the round's settled canonical, stamp included (see the matching
             // note on countLatePrepare).
-            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
+            let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             }

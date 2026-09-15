@@ -133,55 +133,55 @@ function setup(regOverrides) {
                 ...(regOverrides || {})
             });
             let ar = new AttestationRound(hub, reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: ME, hash: '00' }, { pubkey: BB, hash: '01' }]);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: ME, hash: '00' }, { pubkey: BB, hash: '01' }]);
             let consensus = { propose: sinon.stub().resolves() };
             ar.setConsensus(consensus);
             return { ar, fetchStub, consensus };
         }
 
-// ── _startRound escalation ladders (Phase 4) ─────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() escalation ladders', function () { it('keeps slot 0 as leader inside the first rotation window', async function () {
+// ── startRound escalation ladders (Phase 4) ─────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() escalation ladders', function () { it('keeps slot 0 as leader inside the first rotation window', async function () {
             let { ar, consensus } = setup();
             // confirmations=3: serviceable from block 103; tip 104 is step 0.
-            await ar._startRound(makeRequest(), 104);
+            await ar.startRound(makeRequest(), 104);
             let state = consensus.propose.firstCall.args[1];
             expect(state.leaderPubkey).to.equal(ME);
             expect(state.role).to.equal('leader');
         }); }); });
 
-// ── _startRound escalation ladders (Phase 4) ─────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() escalation ladders', function () { it('rotates the leader one slot after a silent rotation window', async function () {
+// ── startRound escalation ladders (Phase 4) ─────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() escalation ladders', function () { it('rotates the leader one slot after a silent rotation window', async function () {
             let { ar, consensus } = setup();
             // step = floor((106-103)/2) = 1 → leader slot 1 (BB); I follow.
-            await ar._startRound(makeRequest(), 106);
+            await ar.startRound(makeRequest(), 106);
             let state = consensus.propose.firstCall.args[1];
             expect(state.leaderPubkey).to.equal(BB);
             expect(state.role).to.equal('follower');
         }); }); });
 
-// ── _startRound escalation ladders (Phase 4) ─────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() escalation ladders', function () { it('pins the primary model in the first deadline segment', async function () {
+// ── startRound escalation ladders (Phase 4) ─────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() escalation ladders', function () { it('pins the primary model in the first deadline segment', async function () {
             let { ar, fetchStub } = setup();
             // span [103,120] = 17 blocks, 2 models → segment 8.5; tip 106 → rank 0
-            await ar._startRound(makeRequest(), 106);
+            await ar.startRound(makeRequest(), 106);
             expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('claude-sonnet-4-6');
             expect(fetchStub.firstCall.args[1].modelRank).to.equal(0);
         }); }); });
 
-// ── _startRound escalation ladders (Phase 4) ─────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() escalation ladders', function () { it('escalates to the fallback model in the second deadline segment', async function () {
+// ── startRound escalation ladders (Phase 4) ─────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() escalation ladders', function () { it('escalates to the fallback model in the second deadline segment', async function () {
             let { ar, fetchStub } = setup();
             // tip 115: elapsed 12 ≥ 8.5 → rank 1 (gpt-5-mini)
-            await ar._startRound(makeRequest(), 115);
+            await ar.startRound(makeRequest(), 115);
             expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('gpt-5-mini');
             expect(fetchStub.firstCall.args[1].modelRank).to.equal(1);
         }); }); });
 
-// ── _startRound escalation ladders (Phase 4) ─────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() escalation ladders', function () { it('proposes a provider_error round (empty body/meta) when the fetch fails', async function () {
+// ── startRound escalation ladders (Phase 4) ─────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() escalation ladders', function () { it('proposes a provider_error round (empty body/meta) when the fetch fails', async function () {
             let { ar, fetchStub, consensus } = setup();
             fetchStub.rejects(new Error('vendor 529'));
-            await ar._startRound(makeRequest(), 104);
+            await ar.startRound(makeRequest(), 104);
             expect(consensus.propose.calledOnce).to.be.true;
             let state = consensus.propose.firstCall.args[1];
             expect(state.myProposal.status).to.equal('provider_error');

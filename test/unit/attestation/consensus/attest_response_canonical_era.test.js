@@ -135,7 +135,7 @@ it('a mirror-era round produces a canonical no legacy verifier can rebuild, and 
             await driveRound(mirrorHubs, MIRROR_BLK);
             await driveRound(legacyHubs, LEGACY_BLK);
             let mp = mirrorHubs[0].engine.pending.get(RID);
-            let mirrorBytes = mirrorHubs[0].engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, mp.effectiveTime).toString('utf8');
+            let mirrorBytes = mirrorHubs[0].engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, mp.effectiveTime).toString('utf8');
             expect(mirrorBytes).to.not.equal(LEGACY_CANONICAL_LITERAL);
 
             let sig = mp.signatures.get(mirrorHubs[0].pubkey);
@@ -162,14 +162,14 @@ it('era selection is an ASSERTION on both sides, never a silent branch', functio
             let e = hubs[0].engine;
             // Mirror era with no stamp: the legacy bytes would be a canonical no
             // mirror-era verifier rebuilds, so it must not be produced at all.
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, null))
+            expect(() => e.buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, null))
                 .to.throw(/mirror-era request .* has no effective_time/);
             // Legacy era with a stamp: the inverse, and just as fatal.
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, undefined, NOW + 120))
+            expect(() => e.buildCanonical(RID, PROVIDER, BODY, 'ok', META, undefined, NOW + 120))
                 .to.throw(/legacy-era request .* was handed effective_time/);
             // A non-canonical spelling never reaches bytes (the shared module's
             // contract, re-asserted here because this is the caller that relies on it).
-            expect(() => e._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, '0120'))
+            expect(() => e.buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, '0120'))
                 .to.throw(/not a canonical integer spelling/);
         } finally { cleanup(hubs); }
     });
@@ -184,10 +184,10 @@ it('era selection is an ASSERTION on both sides, never a silent branch', functio
         let lines = src.split('\n');
         let sites = [];
         lines.forEach((line, i) => {
-            if (!/this\.(_buildCanonical|signCanonical)\(/.test(line)) return;
+            if (!/this\.(buildCanonical|signCanonical)\(/.test(line)) return;
             // Skip the two forwarding calls inside signCanonical itself, which are
             // the arity fork rather than a round's call site.
-            if (/\? this\._buildCanonical|: this\._buildCanonical\(requestId/.test(line)) return;
+            if (/\? this\.buildCanonical|: this\.buildCanonical\(requestId/.test(line)) return;
             sites.push({ line: i + 1, text: line.trim() });
         });
 
@@ -220,8 +220,8 @@ it('a follower verifying the LEADER\'s exact wire bytes rebuilds the leader\'s c
             let lp = leader.engine.pending.get(RID);
             let fp = follower.engine.pending.get(RID);
 
-            let leaderBytes   = leader.engine._buildCanonical(RID, PROVIDER, lp.winner.body, lp.status, lp.winner.meta, MIRROR_BLK, lp.effectiveTime);
-            let followerBytes = follower.engine._buildCanonical(RID, PROVIDER, fp.winner.body, fp.status, fp.winner.meta, MIRROR_BLK, fp.effectiveTime);
+            let leaderBytes   = leader.engine.buildCanonical(RID, PROVIDER, lp.winner.body, lp.status, lp.winner.meta, MIRROR_BLK, lp.effectiveTime);
+            let followerBytes = follower.engine.buildCanonical(RID, PROVIDER, fp.winner.body, fp.status, fp.winner.meta, MIRROR_BLK, fp.effectiveTime);
             expect(Buffer.compare(leaderBytes, followerBytes), 'leader and follower bytes differ').to.equal(0);
 
             // And the leader's own signature is in the follower's set, verified
@@ -247,7 +247,7 @@ it('LEGACY ERA IS BYTE-PRESERVED: the round signs the captured pre-change litera
                 let p = h.engine.pending.get(RID);
                 expect(p.mirrorEra, 'mainnet activation is null, so legacy').to.equal(false);
                 expect(p.effectiveTime, 'no stamp exists in the legacy era').to.equal(null);
-                let canonical = h.engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, LEGACY_BLK, p.effectiveTime);
+                let canonical = h.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, LEGACY_BLK, p.effectiveTime);
                 expect(canonical.toString('utf8')).to.equal(LEGACY_CANONICAL_LITERAL);
             }
 
@@ -270,7 +270,7 @@ it('LEGACY ERA IS BYTE-PRESERVED: the round signs the captured pre-change litera
                 expect(p.mirrorEra, 'regtest activation is 0').to.equal(true);
                 // Every hub settled on the LEADER's stamp, not its own.
                 expect(p.effectiveTime, 'hub ' + h.pubkey.substring(0, 8)).to.equal(expectedStamp);
-                canonicals.add(h.engine._buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, p.effectiveTime).toString('utf8'));
+                canonicals.add(h.engine.buildCanonical(RID, PROVIDER, BODY, 'ok', META, MIRROR_BLK, p.effectiveTime).toString('utf8'));
             }
             expect(canonicals.size, 'one canonical across the whole federation').to.equal(1);
 

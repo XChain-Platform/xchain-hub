@@ -263,7 +263,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.seen.set('rid1', Date.now()); // already seen
-            let _startRoundSpy = sinon.spy(ar, '_startRound');
+            let _startRoundSpy = sinon.spy(ar, 'startRound');
             await ar.pollPending();
             expect(_startRoundSpy.called).to.be.false;
         }); }); });
@@ -283,7 +283,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             });
             let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            let spy = sinon.spy(ar, '_startRound');
+            let spy = sinon.spy(ar, 'startRound');
             await ar.pollPending();
             expect(spy.called).to.be.false;
         }); }); });
@@ -300,8 +300,8 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             });
             let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            // Stub _startRound to avoid execution
-            sinon.stub(ar, '_startRound').resolves();
+            // Stub startRound to avoid execution
+            sinon.stub(ar, 'startRound').resolves();
             await ar.pollPending();
             // Full page → cursor set to last item's coords
             expect(ar.pollCursor).to.deep.equal({ block_index: 50, action_index: 99 });
@@ -315,7 +315,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             ar.pollCursor = { block_index: 40, action_index: 0 };
-            sinon.stub(ar, '_startRound').resolves();
+            sinon.stub(ar, 'startRound').resolves();
             await ar.pollPending();
             // Short page → cursor reset to null
             expect(ar.pollCursor).to.be.null;

@@ -35,7 +35,7 @@ function mkIdentity() {
 }
 function pub(id) { return id.getPubkeyHex().toLowerCase(); }
 
-// Mirror of AttestationConsensus._buildCanonical so peers can sign the exact
+// Mirror of AttestationConsensus.buildCanonical so peers can sign the exact
 // bytes the consensus engine will verify against.
 function buildCanonical(rid, providerId, body, status, meta) {
     let hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
@@ -200,7 +200,7 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
 
 describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3949)', function () { beforeEach(hookAt39097); afterEach(hookAt39259); it('a leader whose own fetch FAILED does not re-sign the winner (#2235: symmetric to the follower abstention)', async function () {
         c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'judge_model'));
-        // _startRound stores a failed fetch as an error proposal: empty body,
+        // startRound stores a failed fetch as an error proposal: empty body,
         // status 'provider_error'. The leader still runs agree() over the
         // followers' ok bodies, but it must NOT vouch for bytes it never
         // fetched or evaluated - that improper vote is the one that would push

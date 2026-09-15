@@ -195,7 +195,7 @@ describe('FOLLOWER: _handlePropose refuses an over-cap peer proposal (legacy era
     }
 
     function peerProposeEnvelope(e, body) {
-        let canonical = e.engine._buildCanonical(RID, PROVIDER, body, 'ok', META, LEGACY_BLK).toString('utf8');
+        let canonical = e.engine.buildCanonical(RID, PROVIDER, body, 'ok', META, LEGACY_BLK).toString('utf8');
         return {
             type: 'ATTEST_PROPOSE',
             data: {
@@ -253,7 +253,7 @@ describe('FOLLOWER: handlePrepare refuses to adopt/co-sign an over-cap leader bo
     }
 
     function leaderPrepareEnvelope(e, body) {
-        let canonical = e.engine._buildCanonical(RID, PROVIDER, body, 'ok', META, LEGACY_BLK).toString('utf8');
+        let canonical = e.engine.buildCanonical(RID, PROVIDER, body, 'ok', META, LEGACY_BLK).toString('utf8');
         return {
             type: 'ATTEST_PREPARE',
             data: {

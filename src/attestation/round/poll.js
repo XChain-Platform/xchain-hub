@@ -106,7 +106,7 @@ module.exports = {
             if(Number(req.block_index) + this.confirmationsFor(req.block_index) > latestBlock) continue;
 
             this.seen.set(rid, Date.now());
-            this._startRound(req, latestBlock).catch(e =>
+            this.startRound(req, latestBlock).catch(e =>
                 logger.error('AttestationRound: start failed for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e))
             );
         }

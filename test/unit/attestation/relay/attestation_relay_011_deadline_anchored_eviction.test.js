@@ -234,9 +234,9 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 response_hash: 'a'.repeat(64), response_payload_b64: 'eA==', status: 'ok', meta: '200',
             };
             const withDeadline = { ...base, origin_deadline_block: DEADLINE };
-            expect(relay._relayResponseCanonical(withDeadline)).to.equal(relay._relayResponseCanonical(base));
-            expect(relay._buildResponseWire(withDeadline, [{ pubkey: PUBKEY_A, sig: SIG_A }]))
-                .to.equal(relay._buildResponseWire(base, [{ pubkey: PUBKEY_A, sig: SIG_A }]));
+            expect(relay.relayResponseCanonical(withDeadline)).to.equal(relay.relayResponseCanonical(base));
+            expect(relay.buildResponseWire(withDeadline, [{ pubkey: PUBKEY_A, sig: SIG_A }]))
+                .to.equal(relay.buildResponseWire(base, [{ pubkey: PUBKEY_A, sig: SIG_A }]));
         }); }); });
 
 // ── 8. Deadline-anchored eviction and WAL compaction ──────────

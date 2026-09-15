@@ -117,7 +117,7 @@ const hookAt16564 = function () {
         };
 
 // ── responsible-set cross-service conformance ────────────────────────────
-    // CONSENSUS-CRITICAL: _computeResponsibleSet is implemented independently
+    // CONSENSUS-CRITICAL: computeResponsibleSet is implemented independently
     // here and in xchain-indexer (actions/attest/index.js). They must produce
     // identical ordered output or attestation quorum evaluation forks. This
     // guard runs the canonical vectors from xchain-documentation against the
@@ -128,14 +128,14 @@ const hookAt16564 = function () {
     // (XCHAIN_REQUIRE_SIBLINGS=1, set by bin/ci-all.sh) an unresolvable vector path
     // is a hard failure, so a mis-resolved path cannot turn this consensus guard
     // into a permanent green-by-skip (item 2435).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet() canonical-vector conformance @regression', function () { try {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet() canonical-vector conformance @regression', function () { try {
             vec = require(VEC_PATH);
         } catch (e) { vecErr = e; } before(hookAt16564); (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
             it(c.name, function () {
                 let hub = makeHub();
                 let ar  = new AttestationRound(hub, makeProviderRegistry());
                 let got = ar
-                    ._computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted, c.minStake)
+                    .computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted, c.minStake)
                     .map(v => v.pubkey);
                 expect(got).to.deep.equal(c.expected);
             });

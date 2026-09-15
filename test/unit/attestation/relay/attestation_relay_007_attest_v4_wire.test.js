@@ -161,7 +161,7 @@ const hookAt6849 = function () {
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('ATTEST v4 wire', function () { it('emits the field order the origin indexer parses positionally', function () {
             const relay = new AttestationRelay(makeHub());
             const b64   = Buffer.from(RESPONSE_BODY, 'utf8').toString('base64');
-            const wire  = relay._buildResponseWire({
+            const wire  = relay.buildResponseWire({
                 request_id: REQ_ID, home_response_action_index: 9002, response_payload_b64: b64,
                 status: 'ok', meta: '200', snapshot_block: 963000,
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
@@ -187,7 +187,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('ATTEST v4 wire', function () { it('carries an empty body and an empty meta as empty fields, not as gaps', function () {
             const relay = new AttestationRelay(makeHub());
-            const wire  = relay._buildResponseWire({
+            const wire  = relay.buildResponseWire({
                 request_id: REQ_ID, home_response_action_index: 1, response_payload_b64: '',
                 status: 'expired', meta: null, snapshot_block: 1,
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
@@ -199,7 +199,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('ATTEST v4 wire', function () { it('refuses a v4 wire over the encoder payload ceiling', function () {
             const relay = new AttestationRelay(makeHub());
-            expect(relay._wireFault({
+            expect(relay.wireFault({
                 phase: 'response', request_id: REQ_ID, home_response_action_index: 1,
                 response_payload_b64: 'x'.repeat(9000), status: 'ok', meta: '', snapshot_block: 1,
             }, 1)).to.match(/ATTEST v4 wire is .* over the encoder limit/);

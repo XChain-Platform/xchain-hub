@@ -168,7 +168,7 @@ const ME = 'aa'.repeat(32);
                 })
             });
             let ar = new AttestationRound(hub, reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns(
+            sinon.stub(ar, 'computeResponsibleSet').returns(
                 [ME, BB, CC, DD, EE].map((pubkey, i) => ({ pubkey, hash: String(i) })));
             let consensus = makeConsensus();
             ar.setConsensus(consensus);
@@ -187,19 +187,19 @@ const ME = 'aa'.repeat(32);
         // Serviceable from block 103 (the request's own block, served at the tip),
         // rotation window 2 blocks: tip 104 is step 0, tip 110 is step 3 (the
         // capped, frozen slot).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('moves the leader past a slot that held a full window without proposing', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('moves the leader past a slot that held a full window without proposing', async function () {
             let { ar, consensus } = setup();
 
-            await ar._startRound(makeRequest(), 104);
+            await ar.startRound(makeRequest(), 104);
             expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 0 leads at slot 0').to.equal(ME);
 
             // Step 3: the bare ladder's terminal slot. DD holds it from here.
-            await ar._startRound(makeRequest(), 110);
+            await ar.startRound(makeRequest(), 110);
             expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
 
             // A full rotation window later DD still has not proposed, so the slot
             // is proven silent and the round steps over it instead of freezing.
-            await ar._startRound(makeRequest(), 112);
+            await ar.startRound(makeRequest(), 112);
             expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
             expect(ar.leaderSilence.get('rid0060').silent.has(DD)).to.be.true;
         }); }); });
@@ -210,14 +210,14 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('never re-elects a live leader from an earlier slot', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('never re-elects a live leader from an earlier slot', async function () {
             let { ar, consensus } = setup();
-            await ar._startRound(makeRequest(), 104);   // ME leads and proposes
-            await ar._startRound(makeRequest(), 110);   // DD seated
-            await ar._startRound(makeRequest(), 112);   // DD proven silent -> EE
+            await ar.startRound(makeRequest(), 104);   // ME leads and proposes
+            await ar.startRound(makeRequest(), 110);   // DD seated
+            await ar.startRound(makeRequest(), 112);   // DD proven silent -> EE
             consensus.proposers.get('rid0060').add(EE);  // EE answers, so it stays live
-            await ar._startRound(makeRequest(), 118);
-            await ar._startRound(makeRequest(), 124);
+            await ar.startRound(makeRequest(), 118);
+            await ar.startRound(makeRequest(), 124);
 
             for(let call of consensus.propose.getCalls().slice(2)){
                 expect(call.args[1].leaderPubkey, 'rotation went backwards').to.equal(EE);
@@ -233,11 +233,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('does not skip a leader that proposed inside its window', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('does not skip a leader that proposed inside its window', async function () {
             let { ar, consensus } = setup();
-            await ar._startRound(makeRequest(), 110);   // DD seated at step 3
+            await ar.startRound(makeRequest(), 110);   // DD seated at step 3
             consensus.proposers.get('rid0060').add(DD);  // DD answers
-            await ar._startRound(makeRequest(), 112);
+            await ar.startRound(makeRequest(), 112);
             expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
             expect(ar.leaderSilence.get('rid0060').silent.size).to.equal(0);
         }); }); });
@@ -248,11 +248,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('prints the EFFECTIVE slot in the round opening line', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('prints the EFFECTIVE slot in the round opening line', async function () {
             let { ar } = setup();
-            await ar._startRound(makeRequest(), 110);
+            await ar.startRound(makeRequest(), 110);
             let log = sinon.spy(console, 'log');
-            await ar._startRound(makeRequest(), 112);
+            await ar.startRound(makeRequest(), 112);
             let line = log.getCalls().map(c => String(c.args[0])).find(s => s.indexOf('leaderSlot=') !== -1);
             expect(line).to.be.a('string');
             expect(line).to.contain('leaderSlot=4');
@@ -264,11 +264,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('logs one line naming the request, the skipped key and the slot', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('logs one line naming the request, the skipped key and the slot', async function () {
             let { ar } = setup();
-            await ar._startRound(makeRequest(), 110);
+            await ar.startRound(makeRequest(), 110);
             let warn = sinon.spy(console, 'warn');
-            await ar._startRound(makeRequest(), 112);
+            await ar.startRound(makeRequest(), 112);
             let lines = warn.getCalls().map(c => String(c.args[0]))
                 .filter(s => s.indexOf('leader slot 3 skipped') !== -1);
             expect(lines).to.have.lengthOf(1);
@@ -283,12 +283,12 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('holds the last live slot, logging once, when nothing live remains ahead', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('holds the last live slot, logging once, when nothing live remains ahead', async function () {
             let { ar, consensus } = setup();
-            await ar._startRound(makeRequest(), 110);   // DD seated
-            await ar._startRound(makeRequest(), 112);   // DD silent -> EE seated
+            await ar.startRound(makeRequest(), 110);   // DD seated
+            await ar.startRound(makeRequest(), 112);   // DD silent -> EE seated
             let warn = sinon.spy(console, 'warn');
-            await ar._startRound(makeRequest(), 114);   // EE silent -> nothing ahead
+            await ar.startRound(makeRequest(), 114);   // EE silent -> nothing ahead
             // Slot 2 (CC) is the last live slot the walk reached; the round still
             // names a leader rather than running off the end of the set.
             expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(CC);
@@ -296,7 +296,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
 
             // CC then goes silent too and the ladder degrades one more slot, but
             // the "out of live slots" line is a once-per-request explanation.
-            await ar._startRound(makeRequest(), 116);
+            await ar.startRound(makeRequest(), 116);
             expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(BB);
             let held = warn.getCalls().map(c => String(c.args[0]))
                 .filter(s => s.indexOf('no live leader slot remains') !== -1);
@@ -309,7 +309,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // so a request at block R froze at slot 3 from R+9 onward. With a mute member
     // in that slot no PROPOSE ever established the round's canonical stamp and
     // every retry timed out (testnet4 request 233, 28 consecutive rounds).
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { it('evicts the silence record on the rounds TTL', function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { it('evicts the silence record on the rounds TTL', function () {
             let { ar } = setup();
             ar.leaderSilence.set('old', { silent: new Set(), updatedAt: Date.now() - ar.roundsTtlMs - 1 });
             ar.leaderSilence.set('new', { silent: new Set(), updatedAt: Date.now() });

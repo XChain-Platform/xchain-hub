@@ -35,7 +35,7 @@ function mkIdentity() {
 }
 function pub(id) { return id.getPubkeyHex().toLowerCase(); }
 
-// Mirror of AttestationConsensus._buildCanonical so peers can sign the exact
+// Mirror of AttestationConsensus.buildCanonical so peers can sign the exact
 // bytes the consensus engine will verify against.
 function buildCanonical(rid, providerId, body, status, meta) {
     let hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
@@ -187,7 +187,7 @@ describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', f
     // Every signature in the map must verify over the round's FINAL canonical.
 describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('emits no signature that fails over the round canonical', async function () {
             let pending = await raceRound();
-            let canonical = c._buildCanonical(RID, pending.providerId, pending.winner.body,
+            let canonical = c.buildCanonical(RID, pending.providerId, pending.winner.body,
                 pending.status, pending.winner.meta,
                 Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
             let bad = [...pending.signatures].filter(

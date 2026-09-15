@@ -205,7 +205,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 
         // #4204. The relay legs sign these integers VERBATIM (String(r.field) inside
-        // _relayRequestCanonical) and put the same spelling on the v3 wire, but the
+        // relayRequestCanonical) and put the same spelling on the v3 wire, but the
         // indexer re-parses that wire with parseInt() before rebuilding the canonical it
         // verifies against. '4242' and '04242' therefore pass the Number()-based field
         // checks below identically, while only one produces a canonical the origin chain

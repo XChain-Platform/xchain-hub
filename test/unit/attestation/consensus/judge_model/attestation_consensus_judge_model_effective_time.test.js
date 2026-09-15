@@ -85,7 +85,7 @@ function flushWire() {
 }
 function proposalFrom(node, author) {
     let stamp = T0 + author.proposedAt + FORWARD_S;
-    let canonical = node.consensus._buildCanonical(RID, 'llm', BODY, 'ok', META, BLOCK, stamp).toString('utf8');
+    let canonical = node.consensus.buildCanonical(RID, 'llm', BODY, 'ok', META, BLOCK, stamp).toString('utf8');
     return { body: BODY, meta: META, status: 'ok', effectiveTime: stamp, sig: author.identity.sign(canonical) };
 }
 function makeRound(node) {
@@ -127,7 +127,7 @@ function makeNode(identity, agreeImpl, proposedAt) {
     });
     // Mirror era for the whole round; the activation height itself is covered
     // by attest_response_activation's own suite.
-    node.consensus._isMirrorEra = () => true;
+    node.consensus.isMirrorEra = () => true;
     node.consensus._nowSeconds  = () => node.clock;
     return node;
 }
@@ -229,7 +229,7 @@ it('carries a stamp every follower accepts, and every follower adopts exactly th
         // ONE canonical, built from the round's single settled stamp, and every
         // collected signature has to verify over it. This is the property the
         // indexer re-derives before it will apply the response.
-        let canonical = L.consensus._buildCanonical(
+        let canonical = L.consensus.buildCanonical(
             RID, 'llm', pending.winner.body, pending.status, pending.winner.meta, BLOCK, pending.effectiveTime
         ).toString('utf8');
         for (let [pubkey, sig] of pending.signatures)

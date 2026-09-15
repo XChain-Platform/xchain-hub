@@ -35,7 +35,7 @@ function mkIdentity() {
 }
 function pub(id) { return id.getPubkeyHex().toLowerCase(); }
 
-// Mirror of AttestationConsensus._buildCanonical so peers can sign the exact
+// Mirror of AttestationConsensus.buildCanonical so peers can sign the exact
 // bytes the consensus engine will verify against.
 function buildCanonical(rid, providerId, body, status, meta) {
     let hash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');

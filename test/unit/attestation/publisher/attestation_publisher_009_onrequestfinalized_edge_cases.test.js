@@ -16,7 +16,7 @@
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
  * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * _computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -83,7 +83,7 @@ function readQueue(file) {
 
 // ---------- _myRank ---------------------------------------------------------
 
-// ---------- _computeResponsible ---------------------------------------------
+// ---------- computeResponsible ---------------------------------------------
 
 // ---------- _resolveBtcIndexerUrl -------------------------------------------
 
@@ -251,7 +251,7 @@ describe('AttestationPublisher: onRequestFinalized edge cases', function () { af
 
 describe('AttestationPublisher: onRequestFinalized edge cases', function () { afterEach(hookAt42857); it('uses null leaderPubkey when responsible is null and event has no leaderPubkey', async function () {
         // Line 191: `responsible && responsible.length ? responsible[0] : null`
-        // When no leaderPubkey and _computeResponsible returns null (no block_index) → leaderPubkey=null
+        // When no leaderPubkey and computeResponsible returns null (no block_index) → leaderPubkey=null
         const pub = makePublisher(MY_PUB);
         pub.queuePath = path.join(os.tmpdir(), 'attest-noLeader-' + process.pid + '.jsonl');
         fs.writeFileSync(pub.queuePath, '');
@@ -286,7 +286,7 @@ describe('AttestationPublisher: onRequestFinalized edge cases', function () { af
         fs.writeFileSync(pub.queuePath, '');
         const bcast = sinon.stub().resolves({ txid: 'tx1' });
         pub.setBroadcastHook(bcast);
-        const computeStub = sinon.stub(pub, '_computeResponsible').resolves([MY_PUB]);
+        const computeStub = sinon.stub(pub, 'computeResponsible').resolves([MY_PUB]);
 
         await pub.onRequestFinalized({
             requestId:    '66'.repeat(32),

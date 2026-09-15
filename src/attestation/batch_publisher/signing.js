@@ -61,7 +61,7 @@ module.exports = {
         let mySig = this.identity.sign(canonical);
         let signatures = new Map([[me, mySig]]);
 
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(set.length <= 1 || !pm || typeof pm.broadcast !== 'function'){
             // Genuine single-member set (membership proven above): this hub's signature
             // IS the quorum, matching the single-node bypass every other rail carries.
@@ -148,7 +148,7 @@ module.exports = {
     async handleSignReq(envelope){
         let d = envelope.data;
         if(!this.identity || !this._db()) return;
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(!pm || typeof pm.broadcast !== 'function') return;
 
         let sender = String(envelope.sig_pubkey || '').toLowerCase();
@@ -164,7 +164,7 @@ module.exports = {
         // reach forward past a set it can predict) and no further back than a day of
         // blocks (so it cannot reach back to a set it once controlled).
         let anchor = Number(d.btc_block_height);
-        let myTip  = await this._resolveAnchor();
+        let myTip  = await this.resolveAnchor();
         if(!Number.isInteger(anchor) || anchor <= 0 || myTip === null ||
            anchor > myTip || anchor < myTip - ANCHOR_MAX_LAG_BLOCKS){
             this.refuse(windowStart, 'proposed anchor ' + anchor + ' is outside this hub\'s bounds (tip ' +
@@ -188,7 +188,7 @@ module.exports = {
 
         let mine;
         try {
-            mine = await this._selectWindowRows(windowStart, windowEnd);
+            mine = await this.selectWindowRows(windowStart, windowEnd);
         } catch(e){
             this.refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
             return;

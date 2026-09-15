@@ -124,7 +124,7 @@ module.exports = {
         //
         // Floor it above the consensus round timeout. The seen window
         // must never nest inside a LIVE consensus round: if it evicts first, the
-        // next poll re-`_startRound`s a request whose round is still pending and
+        // next poll re-`startRound`s a request whose round is still pending and
         // issues another paid provider fetch that consensus.propose() then discards
         // on its `pending.has(rid)` guard. At stock defaults 5*3s=15s is far shorter
         // than the 120s round timeout, so it is the Math.max floor below that binds
@@ -134,7 +134,7 @@ module.exports = {
         // windows coupled on both paths; a re-spelled literal here coupled them only
         // while the two copies happened to be equal, so raising the consensus default
         // one-sidedly re-nested the window on any hub with no explicit key. The paid
-        // fetch is also short-circuited directly in _startRound via
+        // fetch is also short-circuited directly in startRound via
         // consensus.isRoundActive(), but flooring closes the nesting at its root.
         // The floor is only as strong as the weaker of the two parses: a negative
         // ATTESTATION_ROUND_TIMEOUT_MS survived `||` here and in the consensus copy,

@@ -70,7 +70,7 @@ function makeRound(responsibleIdentities) {
 }
 
 function proposeFrom(identity) {
-    let canonical = consensus._buildCanonical(RID, 'llm', BODY, 'ok', '', 0, null).toString('utf8');
+    let canonical = consensus.buildCanonical(RID, 'llm', BODY, 'ok', '', 0, null).toString('utf8');
     return {
         type: 'ATTEST_PROPOSE',
         data: {

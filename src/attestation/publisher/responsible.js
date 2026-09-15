@@ -63,16 +63,16 @@ module.exports = {
     //
     // STAKE_WEIGHTED_QUORUM: when active at blockIndex, resolve the SOURCE-keyed
     // weight snapshot and dedupe by staking source so a source's delegated keys
-    // cannot occupy multiple responsible slots (mirrors AttestationRound._computeResponsibleSet).
+    // cannot occupy multiple responsible slots (mirrors AttestationRound.computeResponsibleSet).
     // CONSENSUS-CRITICAL: this is the THIRD copy of the responsible-set rule;
     // it must stay byte-for-byte in sync with
-    // AttestationRound._computeResponsibleSet and the indexer's attest/index.js,
+    // AttestationRound.computeResponsibleSet and the indexer's attest/index.js,
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
     //
     // PROVIDER STAKE FLOOR (weighted only): sources below the request
     // provider's block-anchored min_stake_xchain are dropped before the ranking, the
-    // same filter AttestationRound._computeResponsibleSet applies. This ordering only
+    // same filter AttestationRound.computeResponsibleSet applies. This ordering only
     // drives failover step-in timing, but ranking against a set the other copies do
     // not agree with means followers step in early or the true rank-1 steps in late,
     // so it tracks them exactly. An unresolvable floor returns null (rank unknown),
@@ -81,7 +81,7 @@ module.exports = {
     // the failover rank must be computed over the SAME set the round authorized, or a
     // widened member never learns it is allowed to step in and publish. 0 below the
     // flag-day, where this is byte-for-byte its pre-widening self.
-    async _computeResponsible(rid, blockIndex, redundancy, providerId, widen){
+    async computeResponsible(rid, blockIndex, redundancy, providerId, widen){
         try {
             if (!this.hub.capabilitySnapshot) return null;
             let weighted = swq.isStakeWeightedQuorumActive(blockIndex, this.hub.network);
@@ -95,7 +95,7 @@ module.exports = {
                 let floor = (registry && providerId != null)
                     ? registry.getMinStake(String(providerId), blockIndex) : null;
                 if (floor === null) return null;
-                validators = validators.filter(v => this._meetsProviderFloor(v && v.weight, floor));
+                validators = validators.filter(v => this.meetsProviderFloor(v && v.weight, floor));
                 if (validators.length === 0) return null;
             }
             let withHash = validators.map(v => {
@@ -121,12 +121,12 @@ module.exports = {
         }
     },
 
-    // Byte-mirror of AttestationRound._meetsProviderFloor (and of the indexer's
+    // Byte-mirror of AttestationRound.meetsProviderFloor (and of the indexer's
     // providerMinStakeHistory.meetsProviderFloor). Strict decimal-string acceptance
     // plus decimal.js `.gte()`; an unusable weight or floor excludes the row. Kept as
     // its own method rather than imported so all copies of the responsible-set rule
     // read alike side by side in their own file.
-    _meetsProviderFloor(weight, minStake){
+    meetsProviderFloor(weight, minStake){
         const usable = (v) => {
             if (v === null || v === undefined || typeof v === 'boolean') return null;
             let s = String(v).trim();

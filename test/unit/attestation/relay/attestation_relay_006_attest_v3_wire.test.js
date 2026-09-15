@@ -161,7 +161,7 @@ const hookAt6849 = function () {
 // ── 5. Wire assembly ────────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('ATTEST v3 wire', function () { it('emits the field order the indexer parses positionally', function () {
             const relay = new AttestationRelay(makeHub());
-            const wire = relay._buildRequestWire({
+            const wire = relay.buildRequestWire({
                 request_id: REQ_ID, origin_chain: 'LTC', origin_action_index: 4242,
                 provider_id: 'http_get', request_payload: 'https://example.com/score',
                 redundancy: 3, deadline_blocks: 10, snapshot_block: 963000,
@@ -191,7 +191,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 // ── 5. Wire assembly ────────────────────────────────────────────────────
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('ATTEST v3 wire', function () { it('lowercases the signature tail as the indexer does before verifying', function () {
             const relay = new AttestationRelay(makeHub());
-            const wire = relay._buildRequestWire({
+            const wire = relay.buildRequestWire({
                 request_id: REQ_ID.toUpperCase(), origin_chain: 'LTC', origin_action_index: 1,
                 provider_id: 'p', request_payload: '', redundancy: 1, deadline_blocks: 1, snapshot_block: 1,
             }, [{ pubkey: PUBKEY_A.toUpperCase(), sig: SIG_A.toUpperCase() }]);
@@ -206,6 +206,6 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                 request_id: REQ_ID, origin_chain: 'LTC', origin_action_index: 1, provider_id: 'p',
                 request_payload: 'x'.repeat(9000), redundancy: 1, deadline_blocks: 1, snapshot_block: 1,
             };
-            expect(relay._wireFault(row, 1)).to.match(/over the encoder limit/);
+            expect(relay.wireFault(row, 1)).to.match(/over the encoder limit/);
         }); }); });
 }

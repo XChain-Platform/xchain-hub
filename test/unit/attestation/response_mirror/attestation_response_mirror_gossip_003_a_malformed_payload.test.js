@@ -62,7 +62,7 @@ const IDENTITIES = ['01', '02', '03', '04'].map(b => new ValidatorIdentity(b.rep
 // ---------------------------------------------------------------------------
 // Canonical + row construction, derived from the protocol modules rather than
 // from the engine. On regtest the EQUIV header is armed at 0, so the wrapper is
-// applied here exactly as AttestationConsensus._buildCanonical applies it.
+// applied here exactly as AttestationConsensus.buildCanonical applies it.
 // ---------------------------------------------------------------------------
 function canonicalFor(overrides){
     let o = Object.assign({

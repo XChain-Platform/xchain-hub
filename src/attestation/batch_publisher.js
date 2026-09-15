@@ -175,7 +175,7 @@ class AttestationBatchPublisher {
                           '(publishing is deferred until they read): ' + (e && e.message));
         }
 
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(pm && typeof pm.on === 'function'){
             this._peerHandler = (envelope) => this._handleMessage(envelope);
             pm.on('message', this._peerHandler);
@@ -192,7 +192,7 @@ class AttestationBatchPublisher {
     stop(){
         this._running = false;
         if(this._windowTimer){ clearTimeout(this._windowTimer); this._windowTimer = null; }
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(pm && this._peerHandler && typeof pm.removeListener === 'function')
             pm.removeListener('message', this._peerHandler);
         this._peerHandler = null;
@@ -207,7 +207,7 @@ class AttestationBatchPublisher {
     }
 
     _db(){ return (this.hub && this.hub.db) || this.db; }
-    _peerManager(){ return this.hub && this.hub.peerManager; }
+    hubPeerManager(){ return this.hub && this.hub.peerManager; }
     _nowSeconds(){ return Math.floor(Date.now() / 1000); }
 
     // ------------------------------------------------------------ window math

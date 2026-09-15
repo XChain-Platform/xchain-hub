@@ -132,7 +132,7 @@ async function fireAndClassify(consensus, pub, mirror, rid, blockIndex) {
     consensus.emit('request:finalized', finalizedEvent(rid, blockIndex));
     // The mirror's listener is synchronous through the insertAndBroadcast call
     // itself, so mirrorSpy.called is already settled here. The publisher's
-    // listener awaits _computeResponsible before it reaches _enqueue, so wait
+    // listener awaits computeResponsible before it reaches _enqueue, so wait
     // on the exact promise the internal handler is chaining on.
     await finalizedSpy.returnValues[0];
 

@@ -99,14 +99,14 @@ const hookAt3913 = function () {
         sinon.restore();
     };
 
-// ── _computeResponsibleSet ───────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet()', function () { it('returns a deterministic ordered list of the correct size', function () {
+// ── computeResponsibleSet ───────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet()', function () { it('returns a deterministic ordered list of the correct size', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let validators = [
                 { pubkey: 'pub1' }, { pubkey: 'pub2' }, { pubkey: 'pub3' }
             ];
-            let result = ar._computeResponsibleSet(validators, 'requestid123', 2);
+            let result = ar.computeResponsibleSet(validators, 'requestid123', 2);
             expect(result).to.have.length(2);
             // Each entry has pubkey and hash
             for (let v of result) {
@@ -115,41 +115,41 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             }
         }); }); });
 
-// ── _computeResponsibleSet ───────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet()', function () { it('returns only 1 entry when redundancy=1', function () {
+// ── computeResponsibleSet ───────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet()', function () { it('returns only 1 entry when redundancy=1', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let validators = [{ pubkey: 'pub1' }, { pubkey: 'pub2' }, { pubkey: 'pub3' }];
-            let result = ar._computeResponsibleSet(validators, 'rid', 1);
+            let result = ar.computeResponsibleSet(validators, 'rid', 1);
             expect(result).to.have.length(1);
         }); }); });
 
-// ── _computeResponsibleSet ───────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet()', function () { it('returns all when redundancy >= validators.length', function () {
+// ── computeResponsibleSet ───────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet()', function () { it('returns all when redundancy >= validators.length', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let validators = [{ pubkey: 'pub1' }, { pubkey: 'pub2' }];
-            let result = ar._computeResponsibleSet(validators, 'rid', 10);
+            let result = ar.computeResponsibleSet(validators, 'rid', 10);
             expect(result).to.have.length(2);
         }); }); });
 
-// ── _computeResponsibleSet ───────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet()', function () { it('produces consistent ordering across calls (deterministic)', function () {
+// ── computeResponsibleSet ───────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet()', function () { it('produces consistent ordering across calls (deterministic)', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             let validators = [
                 { pubkey: 'aaa' }, { pubkey: 'bbb' }, { pubkey: 'ccc' }
             ];
-            let r1 = ar._computeResponsibleSet(validators, 'fixedrid', 3);
-            let r2 = ar._computeResponsibleSet(validators, 'fixedrid', 3);
+            let r1 = ar.computeResponsibleSet(validators, 'fixedrid', 3);
+            let r2 = ar.computeResponsibleSet(validators, 'fixedrid', 3);
             expect(r1.map(v => v.pubkey)).to.deep.equal(r2.map(v => v.pubkey));
         }); }); });
 
-// ── _computeResponsibleSet ───────────────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet()', function () { it('normalises pubkeys to lowercase', function () {
+// ── computeResponsibleSet ───────────────────────────────────────────────
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet()', function () { it('normalises pubkeys to lowercase', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            let result = ar._computeResponsibleSet([{ pubkey: 'AABBCC' }], 'rid', 1);
+            let result = ar.computeResponsibleSet([{ pubkey: 'AABBCC' }], 'rid', 1);
             expect(result[0].pubkey).to.equal('aabbcc');
         }); }); });
 }

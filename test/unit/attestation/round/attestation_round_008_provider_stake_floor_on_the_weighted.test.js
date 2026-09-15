@@ -119,12 +119,12 @@ function makeRequest(overrides) {
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('drops below-floor sources and keeps the boundary source', function () {
             let ar = new AttestationRound(makeHub(), makeProviderRegistry());
-            let got = ar._computeResponsibleSet(weightedValidators(), 'rid-floor', 5, true, '10000')
+            let got = ar.computeResponsibleSet(weightedValidators(), 'rid-floor', 5, true, '10000')
                         .map(v => v.pubkey);
             expect(got).to.have.members(['aa'.repeat(32), 'cc'.repeat(32)]);
             expect(got).to.not.include('bb'.repeat(32));
@@ -134,14 +134,14 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('ignores the floor entirely below the STAKE_WEIGHTED_QUORUM gate', function () {
             // Unweighted rows carry no weight at all, so applying the floor there would
             // empty every pre-gate round. Replay of pre-anchor history must be unchanged.
             let ar = new AttestationRound(makeHub(), makeProviderRegistry());
-            let got = ar._computeResponsibleSet(
+            let got = ar.computeResponsibleSet(
                 [{ pubkey: 'aa'.repeat(32) }, { pubkey: 'bb'.repeat(32) }],
                 'rid-floor', 2, false, '25000').map(v => v.pubkey);
             expect(got).to.have.lengthOf(2);
@@ -151,24 +151,24 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('fails closed (empty set) when the floor is unresolvable', function () {
             let ar = new AttestationRound(makeHub(), makeProviderRegistry());
-            expect(ar._computeResponsibleSet(weightedValidators(), 'rid-floor', 3, true, null)).to.deep.equal([]);
+            expect(ar.computeResponsibleSet(weightedValidators(), 'rid-floor', 3, true, null)).to.deep.equal([]);
         }); }); });
 
 // ── provider stake floor ───────────────────────────────────────
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
 describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('excludes a row whose weight is missing or unparseable rather than reading it as 0', function () {
             let ar = new AttestationRound(makeHub(), makeProviderRegistry());
-            let got = ar._computeResponsibleSet([
+            let got = ar.computeResponsibleSet([
                 { pubkey: 'aa'.repeat(32), source: 's1' },                    // no weight at all
                 { pubkey: 'bb'.repeat(32), source: 's2', weight: 'lots' },    // unparseable
                 { pubkey: 'cc'.repeat(32), source: 's3', weight: '50000' }
@@ -180,17 +180,17 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('_startRound resolves the floor from the registry at the REQUEST block', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('startRound resolves the floor from the registry at the REQUEST block', async function () {
             let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
             let hub   = makeHub({ capabilitySnapshot: capSS });
             hub.network = 'regtest';                       // SWQ armed at genesis here
             hub.getIdentity = () => makeIdentity('aa'.repeat(32));
             let reg = makeProviderRegistry({ getMinStake: sinon.stub().returns('10000') });
             let ar  = new AttestationRound(hub, reg);
-            await ar._startRound(makeRequest({ block_index: 4242 }), 4242);
+            await ar.startRound(makeRequest({ block_index: 4242 }), 4242);
             expect(reg.getMinStake.calledWith('http_get', 4242)).to.be.true;
         }); }); });
 
@@ -198,10 +198,10 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('_startRound skips the round, and the paid fetch, when the floor is unresolvable', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('startRound skips the round, and the paid fetch, when the floor is unresolvable', async function () {
             let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
             let hub   = makeHub({ capabilitySnapshot: capSS });
             hub.network = 'regtest';
@@ -212,7 +212,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 getModule:   sinon.stub().returns({ fetch: fetchStub })
             });
             let ar = new AttestationRound(hub, reg);
-            await ar._startRound(makeRequest(), 100);
+            await ar.startRound(makeRequest(), 100);
             expect(ar.rounds.size).to.equal(0);
             expect(fetchStub.called, 'a floorless provider must not trigger a paid fetch').to.be.false;
         }); }); });
@@ -221,10 +221,10 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('_startRound skips when the floor leaves fewer slots than REDUNDANCY', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('startRound skips when the floor leaves fewer slots than REDUNDANCY', async function () {
             // Two of the three sources clear a 10000 floor, so redundancy 3 is
             // unfinalizable and the existing guard must catch the shrink the floor caused.
             let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
@@ -237,7 +237,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 getModule:   sinon.stub().returns({ fetch: fetchStub })
             });
             let ar = new AttestationRound(hub, reg);
-            await ar._startRound(makeRequest({ redundancy: 3 }), 100);
+            await ar.startRound(makeRequest({ redundancy: 3 }), 100);
             expect(ar.rounds.size).to.equal(0);
             expect(fetchStub.called).to.be.false;
         }); }); });
@@ -246,17 +246,17 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
-    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('_startRound proceeds normally when every responsible slot clears the floor', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('provider stake floor on the weighted path', function () { it('startRound proceeds normally when every responsible slot clears the floor', async function () {
             let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
             let hub   = makeHub({ capabilitySnapshot: capSS });
             hub.network = 'regtest';
             hub.getIdentity = () => makeIdentity('aa'.repeat(32));
             let reg = makeProviderRegistry({ getMinStake: sinon.stub().returns('10000') });
             let ar  = new AttestationRound(hub, reg);
-            await ar._startRound(makeRequest({ redundancy: 2 }), 100);
+            await ar.startRound(makeRequest({ redundancy: 2 }), 100);
             expect(ar.rounds.size).to.equal(1);
         }); }); });
 }

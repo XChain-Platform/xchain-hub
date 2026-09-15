@@ -41,7 +41,7 @@ module.exports = {
     async validateProposedMatch(row){
         if(!row) return false;
         // Canonical integer spellings. These fields are signed verbatim into
-        // _relayRequestCanonical / _relayResponseCanonical and ride the v3/v4 wire, but
+        // relayRequestCanonical / relayResponseCanonical and ride the v3/v4 wire, but
         // the indexer re-parses them with parseInt() before rebuilding the canonical it
         // verifies against. A leader-supplied '041' therefore passes the Number()-based
         // field checks below, collects an honest quorum, and lands an action the origin

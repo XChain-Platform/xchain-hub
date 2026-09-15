@@ -162,7 +162,7 @@ const hookAt6849 = function () {
 describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('relay canonicals', function () { it('pins the request canonical byte-for-byte', function () {
             sinon.stub(eq, 'isEquivHeaderActive').returns(false);
             const relay = new AttestationRelay(makeHub());
-            const canonical = relay._relayRequestCanonical({
+            const canonical = relay.relayRequestCanonical({
                 request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet',
                 origin_chain: 'LTC', origin_action_index: 4242, provider_id: 'http_get',
                 request_payload: 'https://example.com/score', redundancy: 3, deadline_blocks: 10,
@@ -177,7 +177,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             sinon.stub(eq, 'isEquivHeaderActive').returns(false);
             const relay = new AttestationRelay(makeHub());
             const bodyHash = sha256('body');
-            const canonical = relay._relayResponseCanonical({
+            const canonical = relay.relayResponseCanonical({
                 request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet',
                 origin_chain: 'DOGE', home_response_action_index: 777, provider_id: 'http_get',
                 response_hash: bodyHash, status: 'ok', meta: '200',
@@ -192,8 +192,8 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             sinon.stub(eq, 'isEquivHeaderActive').returns(true);
             const relay = new AttestationRelay(makeHub());
             const base = { request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet', origin_chain: 'LTC', provider_id: 'http_get' };
-            const req = relay._relayRequestCanonical({ ...base, origin_action_index: 1, request_payload: '', redundancy: 1, deadline_blocks: 10 });
-            const res = relay._relayResponseCanonical({ ...base, home_response_action_index: 1, response_hash: 'f'.repeat(64), status: 'ok', meta: '' });
+            const req = relay.relayRequestCanonical({ ...base, origin_action_index: 1, request_payload: '', redundancy: 1, deadline_blocks: 10 });
+            const res = relay.relayResponseCanonical({ ...base, home_response_action_index: 1, response_hash: 'f'.repeat(64), status: 'ok', meta: '' });
             expect(req).to.include('XATTEST');
             expect(req).to.not.equal(res);
         }); }); });
@@ -241,7 +241,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             for (const network of ['mainnet', 'regtest']) {
                 for (const snapshotBlock of [0, 962999, 963000, 4000000]) {
                     for (const payload of ['', 'https://example.com/score', 'ünïcødé']) {
-                        expect(relay._relayRequestCanonical({
+                        expect(relay.relayRequestCanonical({
                             request_id: REQ_ID, snapshot_block: snapshotBlock, network,
                             origin_chain: 'LTC', origin_action_index: 4242, provider_id: 'http_get',
                             request_payload: payload, redundancy: 3, deadline_blocks: 10,
@@ -251,7 +251,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                             requestPayload: payload, redundancy: 3, deadlineBlocks: 10,
                         }), `request canonical drift at ${network}/${snapshotBlock}`);
 
-                        expect(relay._relayResponseCanonical({
+                        expect(relay.relayResponseCanonical({
                             request_id: REQ_ID, snapshot_block: snapshotBlock, network,
                             origin_chain: 'DOGE', home_response_action_index: 777, provider_id: 'http_get',
                             response_hash: sha256(payload), status: 'ok', meta: '200',
@@ -313,7 +313,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
                                     expect(wireHash, 'the hub signed a hash of bytes it did not send')
                                         .to.equal(fields.responseHash);
 
-                                    expect(relay._relayResponseCanonical({
+                                    expect(relay.relayResponseCanonical({
                                         request_id: REQ_ID, snapshot_block: snapshotBlock, network,
                                         origin_chain: originChain,
                                         home_response_action_index: fields.homeResponseActionIndex,

@@ -55,7 +55,7 @@ module.exports = {
             return;
         }
 
-        let fault = this._wireFault(row, sigs.length);
+        let fault = this.wireFault(row, sigs.length);
         if(fault){
             logger.error('AttestationRelay: dropping finalized ' + rid.substring(0, 16) + '... : ' + fault);
             return;
@@ -65,7 +65,7 @@ module.exports = {
         // The request leg lands on BTC; the response leg lands back on the chain the
         // request came from.
         let coin = response ? String(row.origin_chain) : HOME_CHAIN;
-        let wire = response ? this._buildResponseWire(row, sigs) : this._buildRequestWire(row, sigs);
+        let wire = response ? this.buildResponseWire(row, sigs) : this.buildRequestWire(row, sigs);
         let rank = this._myRank(rid, ev);
         this.legState(phase).wire.set(rid, {
             rid: rid, wire: wire, coin: coin, phase: phase, finalizedAt: Date.now(), rank: rank

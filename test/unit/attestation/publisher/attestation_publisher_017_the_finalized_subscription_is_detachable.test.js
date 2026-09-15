@@ -16,7 +16,7 @@
  *
  * Covers: constructor defaults, start/stop lifecycle, buildAttestationResponseWire,
  * _enqueue/readQueue/rewriteQueue/removeFromQueue, getBroadcaster, _myRank,
- * _computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
+ * computeResponsible, fetchPendingRequestIds, _resolveBtcIndexerUrl,
  * defaultBroadcast, onRequestFinalized edge cases (no-sigs, oversized payload).
  *
  ********************************************************************/
@@ -83,7 +83,7 @@ function readQueue(file) {
 
 // ---------- _myRank ---------------------------------------------------------
 
-// ---------- _computeResponsible ---------------------------------------------
+// ---------- computeResponsible ---------------------------------------------
 
 // ---------- _resolveBtcIndexerUrl -------------------------------------------
 

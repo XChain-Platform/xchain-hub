@@ -138,7 +138,7 @@ module.exports = {
             // relayed-request row carries no deadline of its own (the v3 put a RELATIVE
             // block count on BTC), so the origin's absolute deadline_block travels on the
             // round row, paired with the origin_chain it is a height on. It is BOOKKEEPING,
-            // NOT CONSENSUS: it is deliberately absent from _relayResponseCanonical, which
+            // NOT CONSENSUS: it is deliberately absent from relayResponseCanonical, which
             // must byte-match the indexer's, and every follower re-derives it from its own
             // origin indexer instead of trusting the leader's copy.
             origin_deadline_block:      this.absoluteOriginDeadline(originReq),
@@ -150,7 +150,7 @@ module.exports = {
             meta:                       fields.meta
         };
 
-        let wireFault = this._wireFault(row, 1);
+        let wireFault = this.wireFault(row, 1);
         if(wireFault){
             logger.error('AttestationRelay: cannot relay the response for ' + rid.substring(0, 16) + '... : ' + wireFault);
             return null;
@@ -285,7 +285,7 @@ module.exports = {
 
         // Reject here rather than after finalization: the wire is assembled from the
         // signed fields, so an oversized or unsplittable payload dooms the round.
-        let wireFault = this._wireFault(row, 1);
+        let wireFault = this.wireFault(row, 1);
         if(wireFault){
             logger.error('AttestationRelay: cannot materialize ' + rid.substring(0, 16) + '... : ' + wireFault);
             return null;

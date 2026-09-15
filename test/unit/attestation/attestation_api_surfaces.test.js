@@ -18,7 +18,7 @@
 //   2. No hub method answered "who is responsible for this request", so
 //      xchain-e2e-test re-derived the ranking rule in test code instead of
 //      asking the hub. getattestationresponsibleset closes that: read-only,
-//      resolved through the hub's own AttestationRound._computeResponsibleSet.
+//      resolved through the hub's own AttestationRound.computeResponsibleSet.
 
 const sinon         = require('sinon');
 const { expect }    = require('chai');
@@ -139,7 +139,7 @@ it('pages past a full first page to find a request further back in the queue', a
 }
 
 function registerResponsibleSetResolutionTests() {
-it('returns the same set AttestationRound._computeResponsibleSet computes for a seeded request', async function () {
+it('returns the same set AttestationRound.computeResponsibleSet computes for a seeded request', async function () {
         const validators = [
             { pubkey: 'pkAAAA' }, { pubkey: 'pkBBBB' }, { pubkey: 'pkCCCC' }, { pubkey: 'pkDDDD' }
         ];
@@ -150,7 +150,7 @@ it('returns the same set AttestationRound._computeResponsibleSet computes for a 
             deadline_block: declaredBlock + 1000, provider_id: 'http_get'
         };
         const round = new AttestationRound({ getPeerManager: () => null, db: null, p2pConfig: {} }, null);
-        const expected = round._computeResponsibleSet(validators, RID, redundancy, false, null, 0)
+        const expected = round.computeResponsibleSet(validators, RID, redundancy, false, null, 0)
             .map((v) => v.pubkey);
 
         const { methods } = await bootApi({

@@ -45,7 +45,7 @@ module.exports = {
     // number spelling to drift between two hubs' copies of one logical row, and the
     // on-chain batch (§6.1) puts those columns on chain verbatim.
     gossipRow(row){
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(!pm || typeof pm.broadcast !== 'function') return;
         let data = {};
         for(let c of GOSSIP_COLUMNS) data[c] = row[c];
@@ -245,7 +245,7 @@ module.exports = {
     // on-chain v1; a mirror row for one would be a second delivery under a
     // canonical its signatures do not cover.
     mirrorEraRequest(declaredBlock, short){
-        if(this._isMirrorEra(declaredBlock)) return true;
+        if(this.isMirrorEra(declaredBlock)) return true;
         this.stats.rejected++;
         logger.warn('AttestationResponseMirror: dropping gossiped row ' + short +
                      '; its local request at block ' + declaredBlock + ' is legacy-era');

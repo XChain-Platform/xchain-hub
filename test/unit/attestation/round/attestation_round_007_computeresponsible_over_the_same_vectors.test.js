@@ -121,7 +121,7 @@ const AttestationPublisher = require('../../../../src/attestation/publisher.js')
 const os   = require('os');
 
 // ── responsible-set cross-service conformance ────────────────────────────
-    // CONSENSUS-CRITICAL: _computeResponsibleSet is implemented independently
+    // CONSENSUS-CRITICAL: computeResponsibleSet is implemented independently
     // here and in xchain-indexer (actions/attest/index.js). They must produce
     // identical ordered output or attestation quorum evaluation forks. This
     // guard runs the canonical vectors from xchain-documentation against the
@@ -134,15 +134,15 @@ const os   = require('os');
     // into a permanent green-by-skip (item 2435).
 
 
-        // AttestationPublisher._computeResponsible is the SECOND hub-side copy of the
+        // AttestationPublisher.computeResponsible is the SECOND hub-side copy of the
         // same rule (it derives failover rank from it). Running the same vectors through
         // it closes the gap this describe's header once named: until now no test fed
         // one input through more than one copy, so the two could drift in a direction
         // both suites called green. It returns null rather than [] where the rule
         // selects nobody, which is the caller's "rank unknown" signal.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_computeResponsibleSet() canonical-vector conformance @regression', function () { try {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('computeResponsibleSet() canonical-vector conformance @regression', function () { try {
             vec = require(VEC_PATH);
-        } catch (e) { vecErr = e; } before(hookAt16564); describe('AttestationPublisher._computeResponsible over the same vectors', function () { (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
+        } catch (e) { vecErr = e; } before(hookAt16564); describe('AttestationPublisher.computeResponsible over the same vectors', function () { (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
                 it(c.name, async function () {
                     const fresh = () => c.validators.map(v => Object.assign({}, v));
                     const pub = new AttestationPublisher({
@@ -159,7 +159,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                         'attest-vec-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
                     // Block 100: below the mainnet SWQ anchor (961000) and above the
                     // regtest one (0), so the vector's `weighted` flag alone picks the branch.
-                    let got = await pub._computeResponsible(c.requestId, 100, c.redundancy, 'http_get');
+                    let got = await pub.computeResponsible(c.requestId, 100, c.redundancy, 'http_get');
                     expect(got).to.deep.equal(c.expected.length ? c.expected : null);
                 });
             }); }); }); });

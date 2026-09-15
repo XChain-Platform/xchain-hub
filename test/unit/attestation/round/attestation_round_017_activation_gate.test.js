@@ -168,7 +168,7 @@ const ME = 'aa'.repeat(32);
                 })
             });
             let ar = new AttestationRound(hub, reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns(
+            sinon.stub(ar, 'computeResponsibleSet').returns(
                 [ME, BB, CC, DD, EE].map((pubkey, i) => ({ pubkey, hash: String(i) })));
             let consensus = makeConsensus();
             ar.setConsensus(consensus);
@@ -209,15 +209,15 @@ const ARMED = lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.testnet;
         // Both cases run on testnet with zero-conf already active at the request
         // block, so the effective confirmation count is 0 on both sides of the
         // height and the two ladders differ only in the skip.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('holds the frozen slot for a request admitted below the height', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('holds the frozen slot for a request admitted below the height', async function () {
                 let { ar, consensus } = setup('testnet');
                 let below = ARMED - 1;
                 let warn  = sinon.spy(console, 'warn');
 
-                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 7);
+                await ar.startRound(gateRequest(below, 'ridgatelo'), below + 7);
                 expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
 
-                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 9);
+                await ar.startRound(gateRequest(below, 'ridgatelo'), below + 9);
                 expect(consensus.propose.lastCall.args[1].leaderPubkey,
                     'the pre-skip ladder freezes on the mute slot').to.equal(DD);
 
@@ -250,13 +250,13 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         // Both cases run on testnet with zero-conf already active at the request
         // block, so the effective confirmation count is 0 on both sides of the
         // height and the two ladders differ only in the skip.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('skips to the next live slot for a request admitted at the height', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('skips to the next live slot for a request admitted at the height', async function () {
                 let { ar, consensus } = setup('testnet');
 
-                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 7);
+                await ar.startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 7);
                 expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
 
-                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 9);
+                await ar.startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 9);
                 expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
                 expect(ar.leaderSilence.get('ridgatehi').silent.has(DD)).to.be.true;
             }); }); }); });
@@ -282,7 +282,7 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         // Both cases run on testnet with zero-conf already active at the request
         // block, so the effective confirmation count is 0 on both sides of the
         // height and the two ladders differ only in the skip.
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('reads the per-network table the fleet flips on', function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() silent-slot leader skip (P60)', function () { describe('activation gate', function () { it('reads the per-network table the fleet flips on', function () {
                 expect(lssMod.isLeaderSilenceSkipActive(ARMED - 1, 'testnet')).to.be.false;
                 expect(lssMod.isLeaderSilenceSkipActive(ARMED, 'testnet')).to.be.true;
                 expect(lssMod.isLeaderSilenceSkipActive(ARMED + 1, 'testnet')).to.be.true;

@@ -68,7 +68,7 @@ module.exports = {
         let widen = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
             ? wid.widenSlots(Number(latestBlock), snapshotBlk, Number(request.deadline_block), this.hub.network)
             : 0;
-        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted, providerFloor, widen);
+        let responsible = this.computeResponsibleSet(snapshot.validators, rid, redundancy, weighted, providerFloor, widen);
         // Unservable-redundancy guard (Pkg 7 / 87441a53): when the snapshot (or
         // its weighted source-dedupe) yields fewer responsible slots than
         // REDUNDANCY, the round can never finalize; the indexer requires
@@ -98,9 +98,9 @@ module.exports = {
     //
     // CONSENSUS-CRITICAL: this rule exists in THREE copies that must apply it
     // identically or validation forks:
-    //   1. here (AttestationRound._computeResponsibleSet)
+    //   1. here (AttestationRound.computeResponsibleSet)
     //   2. the indexer, xchain-indexer/src/actions/attest/index.js
-    //   3. AttestationPublisher._computeResponsible (failover-rank derivation)
+    //   3. AttestationPublisher.computeResponsible (failover-rank derivation)
     // All three are behaviorally identical (hash-order sort, source===null keep
     // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)
     // normalization). A FOURTH copy exists for the reorg recompute of missed_count:
@@ -123,9 +123,9 @@ module.exports = {
     // `widen` is the liveness ladder's extra slot count for the current chain height
     // (attest_responsible_widening_activation.js), 0 below its flag-day and on an unratified
     // network, where this routine is byte-for-byte its pre-widening self.
-    _computeResponsibleSet(validators, requestId, redundancy, weighted, minStake, widen){
+    computeResponsibleSet(validators, requestId, redundancy, weighted, minStake, widen){
         if(weighted)
-            validators = validators.filter(v => this._meetsProviderFloor(v && v.weight, minStake));
+            validators = validators.filter(v => this.meetsProviderFloor(v && v.weight, minStake));
         let withHash = validators.map(v => {
             let pk = String(v.pubkey).toLowerCase();
             let h  = crypto.createHash('sha256').update(requestId, 'utf8').update(pk, 'utf8').digest('hex');
@@ -160,7 +160,7 @@ module.exports = {
     // down to the strict decimal-string acceptance and the decimal.js `.gte()`
     // comparison (bcmath.js bcgte), which is exact where mathjs's largerEq applies a
     // ~1e-12 epsilon; a consensus predicate that rounds is a fork surface.
-    _meetsProviderFloor(weight, minStake){
+    meetsProviderFloor(weight, minStake){
         const usable = (v) => {
             if(v === null || v === undefined || typeof v === 'boolean') return null;
             let s = String(v).trim();

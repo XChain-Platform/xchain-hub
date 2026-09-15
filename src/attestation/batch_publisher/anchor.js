@@ -51,7 +51,7 @@ module.exports = {
     // is the fallback: the same height source the round's own leader ladder and
     // widening step already trust. The pushed row keeps precedence where it exists so
     // the one hub that has it behaves exactly as before.
-    async _resolveAnchor(){
+    async resolveAnchor(){
         let db = this._db();
         if(!db){
             this._anchorFailure = 'this hub has no database handle';

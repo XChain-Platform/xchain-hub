@@ -121,7 +121,7 @@ module.exports = {
         let parsed = this.parseBatchPush(sourceChain, batchData, rowCount);
         if(parsed.refused) return parsed.refused;
 
-        let quorum = await this._verifyBatchQuorum(batchData, parsed.anchor, parsed.sigs);
+        let quorum = await this.verifyBatchQuorum(batchData, parsed.anchor, parsed.sigs);
         if(!quorum.ok) return this.refuseBatch(sourceChain, rowCount, quorum.error);
 
         let tally = await this.absorbBatchRows(batchData, parsed.actionIndex);
@@ -223,7 +223,7 @@ module.exports = {
     // anchor. Same signer-set rule the DOGE indexer applies to the wire and the PRICE
     // batch applies to its own: stake-weighted at and above the flag day, count-keyed
     // below, and a pubkey counts only after its signature verifies.
-    async _verifyBatchQuorum(batchData, anchor, sigs){
+    async verifyBatchQuorum(batchData, anchor, sigs){
         let network  = this.hub && this.hub.network;
         let weighted = swq.isStakeWeightedQuorumActive(anchor, network);
         let cs = this.hub && this.hub.capabilitySnapshot;

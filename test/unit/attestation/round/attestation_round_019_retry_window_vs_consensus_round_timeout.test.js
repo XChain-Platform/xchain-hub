@@ -129,9 +129,9 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 getDef:    sinon.stub().returns({ max_response_bytes: 32768 })
             });
             let ar = new AttestationRound(hub, reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
             ar.setConsensus({ isRoundActive: sinon.stub().returns(true) });
-            await ar._startRound({
+            await ar.startRound({
                 request_id: 'rid0001', provider_id: 'http_get', redundancy: 1,
                 block_index: 100, action_index: 1, payload: 'https://example.com/'
             });

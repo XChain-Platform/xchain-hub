@@ -118,7 +118,7 @@ class AttestationResponseMirror {
     // broadcaster later must not leave this engine holding a dead handle.
     _db(){ return this.hub && this.hub.db; }
     broadcaster(){ return this.hub && this.hub.hubDbBroadcaster; }
-    _peerManager(){ return this.hub && this.hub.peerManager; }
+    hubPeerManager(){ return this.hub && this.hub.peerManager; }
 
     // Seam for tests; every wall-clock read on this path goes through it.
     _nowSeconds(){
@@ -132,7 +132,7 @@ class AttestationResponseMirror {
     // both and never neither. Keyed on the REQUEST's own BTC block_index, never the
     // response's and never the chain tip, so the rule for a request is fixed the
     // moment it is admitted.
-    _isMirrorEra(requestBlock){
+    isMirrorEra(requestBlock){
         return isResponseMirrorActive(requestBlock, this.hub && this.hub.network);
     }
 
@@ -153,7 +153,7 @@ class AttestationResponseMirror {
         // verifier below reaches into AttestationConsensus for the canonical: a hub
         // with no consensus engine cannot judge a gossiped row and must not accept
         // one either.
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(pm && typeof pm.on === 'function'){
             this._peerHandler = (envelope) => this._handleMessage(envelope);
             pm.on('message', this._peerHandler);
@@ -173,7 +173,7 @@ class AttestationResponseMirror {
         let consensus = this.hub && this.hub.attestationConsensus;
         if(consensus && this._messageHandler && typeof consensus.removeListener === 'function')
             consensus.removeListener('request:finalized', this._messageHandler);
-        let pm = this._peerManager();
+        let pm = this.hubPeerManager();
         if(pm && this._peerHandler && typeof pm.removeListener === 'function')
             pm.removeListener('message', this._peerHandler);
         if(this._retryTimer){

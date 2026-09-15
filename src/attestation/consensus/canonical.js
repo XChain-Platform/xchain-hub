@@ -73,11 +73,11 @@ module.exports = {
     // the canonical from a stored row has no round and passes the row's own map
     // explicitly. Its era gate is inside admissionCanonicalField and refuses in both
     // directions exactly as the effective_time gate above does.
-    _buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
+    buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
         let et = (effectiveTime === undefined) ? null : effectiveTime;
         if(effectiveTime !== undefined){
-            let mirrorEra = this._isMirrorEra(requestBlock);
+            let mirrorEra = this.isMirrorEra(requestBlock);
             if(mirrorEra && et === null)
                 throw new Error('AttestationConsensus: mirror-era request ' + String(requestId).substring(0,16) +
                     '... (block ' + String(requestBlock) + ') has no effective_time; refusing to build a legacy canonical');
@@ -98,7 +98,7 @@ module.exports = {
         // twin stays a pure function of the response fields and this file owns the one
         // field the indexer rebuilds from the mirrored row's own columns.
         raw += ah.admissionCanonicalField('AttestationConsensus', this.hub && this.hub.network, requestBlock,
-            (admitBlocks === undefined) ? this._roundAdmitBlocks(requestId) : admitBlocks);
+            (admitBlocks === undefined) ? this.roundAdmitBlocks(requestId) : admitBlocks);
         if(eq.isEquivHeaderActive(requestBlock, this.hub && this.hub.network))
             raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, requestId, 0, raw);
         return Buffer.from(raw, 'utf8');
@@ -106,16 +106,16 @@ module.exports = {
 
     // Sign the canonical bytes with this validator's identity. Returns
     // 128-hex-char sig or null when no identity is available. Forwards the
-    // era-aware / era-unaware distinction of _buildCanonical by arity, so a
+    // era-aware / era-unaware distinction of buildCanonical by arity, so a
     // six-argument caller keeps signing exactly the bytes it signed before.
     signCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
         if(!this.identity) return null;
         try {
             let canonical = (arguments.length >= 8)
-                ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks)
+                ? this.buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks)
                 : (arguments.length >= 7)
-                    ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime)
-                    : this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
+                    ? this.buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime)
+                    : this.buildCanonical(requestId, providerId, body, status, meta, requestBlock);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
             logger.warn(nodeUtil.format('AttestationConsensus: sign failed:', e));
@@ -127,7 +127,7 @@ module.exports = {
     // for it. Null is the LEGACY value, which is correct at every height below the
     // activation and fails closed above it: admissionCanonicalField refuses to build
     // admission-era bytes without a map rather than inventing one.
-    _roundAdmitBlocks(requestId){
+    roundAdmitBlocks(requestId){
         let p = this.pending && this.pending.get(String(requestId).toLowerCase());
         return (p && p.admitBlocks !== undefined) ? p.admitBlocks : null;
     },

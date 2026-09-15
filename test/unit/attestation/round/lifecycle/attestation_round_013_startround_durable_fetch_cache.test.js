@@ -131,17 +131,17 @@ function makeRound(fetchStub, row) {
             hub.db = { ...DB_METHODS, doQuery: makeCacheDb(row) };
             let reg = makeProviderRegistry({ getModule: sinon.stub().returns({ fetch: fetchStub }) });
             let ar  = new AttestationRound(hub, reg);
-            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
             ar.setConsensus({ propose: sinon.stub().resolves() });
             return { ar, hub };
         }
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('records the completed fetch so a restart has something to reuse', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('records the completed fetch so a restart has something to reuse', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let { ar, hub } = makeRound(fetchStub, null);
 
-            await ar._startRound(makeRequest());
+            await ar.startRound(makeRequest());
 
             expect(fetchStub.calledOnce, 'a cache miss still fetches').to.be.true;
             let insert = hub.db.doQuery.getCalls()
@@ -157,11 +157,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         }); }); });
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('reuses a recorded fetch instead of paying the provider again', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('reuses a recorded fetch instead of paying the provider again', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('fresh'), meta: '200' });
             let { ar } = makeRound(fetchStub, { status: 'ok', body: Buffer.from('recorded'), meta: '200' });
 
-            await ar._startRound(makeRequest());
+            await ar.startRound(makeRequest());
 
             expect(fetchStub.called, 'the billed provider must not be called again').to.be.false;
             let state = ar.rounds.get('rid0001');
@@ -173,11 +173,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         }); }); });
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('reuses a recorded provider_error rather than re-deciding the round', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('reuses a recorded provider_error rather than re-deciding the round', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('fresh'), meta: '200' });
             let { ar } = makeRound(fetchStub, { status: 'provider_error', body: null, meta: null });
 
-            await ar._startRound(makeRequest());
+            await ar.startRound(makeRequest());
 
             expect(fetchStub.called).to.be.false;
             let state = ar.rounds.get('rid0001');
@@ -186,12 +186,12 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         }); }); });
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('reads only inside the retry window, so a lapsed round re-fetches', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('reads only inside the retry window, so a lapsed round re-fetches', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let { ar, hub } = makeRound(fetchStub, null);
 
             let before = Math.floor((Date.now() - ar.retryAfterMs) / 1000);
-            await ar._startRound(makeRequest());
+            await ar.startRound(makeRequest());
 
             let select = hub.db.doQuery.getCalls()
                 .find(c => /SELECT status, body, meta FROM attestation_fetch_cache/.test(c.args[0]));
@@ -200,19 +200,19 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
         }); }); });
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('fails OPEN: an unreachable cache re-fetches rather than dropping the round', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('fails OPEN: an unreachable cache re-fetches rather than dropping the round', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let { ar, hub } = makeRound(fetchStub, null);
             hub.db.doQuery = sinon.stub().rejects(new Error('db down'));
 
-            await ar._startRound(makeRequest());
+            await ar.startRound(makeRequest());
 
             expect(fetchStub.calledOnce).to.be.true;
             expect(ar.rounds.size).to.equal(1);
         }); }); });
 
 // ── durable fetch cache ──────────────────────────────────────
-describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('_startRound() durable fetch cache', function () { it('evicts lapsed rows on the seen-window schedule', async function () {
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('startRound() durable fetch cache', function () { it('evicts lapsed rows on the seen-window schedule', async function () {
             let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
             let { ar, hub } = makeRound(fetchStub, null);
             hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://idx/rpc');
