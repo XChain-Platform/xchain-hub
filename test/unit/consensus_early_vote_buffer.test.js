@@ -73,39 +73,9 @@ function voteEnvelope(type, validator, digest, seq) {
     };
 }
 
-describe('Consensus: early-arrival vote buffer (config-change PBFT)', function () {
+let hub, consensus, digest;
 
-    let hub, consensus, digest;
-
-    beforeEach(function () {
-        const identity = {
-            getPubkeyHex: sinon.stub().returns(SELF.pubkey),
-            sign:         sinon.stub().returns('bb'.repeat(64)),
-            signEnvelope: sinon.stub().returns('cc'.repeat(64))
-        };
-        const validatorPubkeys = new Map(WEIGHTED_VALIDATORS_4.map((v) => [v.addr, v.pubkey]));
-
-        hub = createMockHub({ validatorAddr: SELF.addr, identity, validatorPubkeys });
-        hub.network = 'regtest';                 // STAKE_WEIGHTED_QUORUM active from height 0
-        hub.capabilitySnapshot = {
-            getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, BLOCK)),
-            getActiveValidatorSnapshot: sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, BLOCK)),
-            getQuorum:                  sinon.stub().returns(3)
-        };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
-
-        consensus = new Consensus(hub);
-        consensus.setValidatorSet(WEIGHTED_VALIDATORS_4);
-        digest = consensus._digest(CONFIG);
-    });
-
-    afterEach(function () {
-        for (let [, prop] of consensus.pendingProposals) {
-            if (prop && prop.timer) clearTimeout(prop.timer);
-        }
-        sinon.restore();
-    });
-
+function registerEarlyVoteHoldingTests() {
     describe('holding a vote for a round that is not open yet', function () {
 
         it('buffers a COMMIT instead of dropping it', function () {
@@ -135,7 +105,9 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;
         });
     });
+}
 
+function registerEarlyVoteBoundTests() {
     describe('bounds (the sender picks seq, so both dimensions are capped)', function () {
 
         it('caps the votes held per seq', function () {
@@ -170,7 +142,9 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
             expect(consensus.earlyVoteTtl.size).to.equal(0);
         });
     });
+}
 
+function registerEarlyVoteReplayTests() {
     describe('replay once the round opens', function () {
 
         it('applies the config from a whale COMMIT that beat the PRE_PREPARE', async function () {
@@ -216,4 +190,39 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;
         });
     });
+}
+
+describe('Consensus: early-arrival vote buffer (config-change PBFT)', function () {
+    beforeEach(function () {
+        const identity = {
+            getPubkeyHex: sinon.stub().returns(SELF.pubkey),
+            sign:         sinon.stub().returns('bb'.repeat(64)),
+            signEnvelope: sinon.stub().returns('cc'.repeat(64))
+        };
+        const validatorPubkeys = new Map(WEIGHTED_VALIDATORS_4.map((v) => [v.addr, v.pubkey]));
+
+        hub = createMockHub({ validatorAddr: SELF.addr, identity, validatorPubkeys });
+        hub.network = 'regtest';                 // STAKE_WEIGHTED_QUORUM active from height 0
+        hub.capabilitySnapshot = {
+            getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, BLOCK)),
+            getActiveValidatorSnapshot: sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, BLOCK)),
+            getQuorum:                  sinon.stub().returns(3)
+        };
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(BLOCK);
+
+        consensus = new Consensus(hub);
+        consensus.setValidatorSet(WEIGHTED_VALIDATORS_4);
+        digest = consensus._digest(CONFIG);
+    });
+
+    afterEach(function () {
+        for (let [, prop] of consensus.pendingProposals) {
+            if (prop && prop.timer) clearTimeout(prop.timer);
+        }
+        sinon.restore();
+    });
+
+    registerEarlyVoteHoldingTests();
+    registerEarlyVoteBoundTests();
+    registerEarlyVoteReplayTests();
 });
