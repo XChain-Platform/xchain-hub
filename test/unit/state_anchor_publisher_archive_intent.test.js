@@ -147,6 +147,14 @@ const live    = (extra) => Object.assign({ network: 'regtest', batch_seq: 3, txi
 
 describe('StateAnchorPublisher: durable at-most-once archive intent', function () {
 
+    registerArchiveMarkerTests();
+    registerArchiveStartTests();
+    registerArchivePublishTests();
+    registerArchiveCrashTests();
+});
+
+function registerArchiveMarkerTests() {
+
     describe('marker statements', function () {
         it('arms intent with a window-refreshing upsert that clears the prior outcome', async function () {
             const db = mkDb();
@@ -195,6 +203,9 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
             expect(threw).to.equal(true);
         });
     });
+}
+
+function registerArchiveStartTests() {
 
     describe('_startArchiveRound', function () {
         // flush() hands over whatever hub._resolveBtcLatestBlock() returned, and that is
@@ -223,7 +234,13 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
             });
         }
 
-        it('still elects and draws a seq on a finite tip (the guard is not a blanket stop)', async function () {
+        registerArchiveStartOutcomeTests();
+    });
+}
+
+function registerArchiveStartOutcomeTests() {
+
+    it('still elects and draws a seq on a finite tip (the guard is not a blanket stop)', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS });
             const { pub, identity } = mkPub(db);
             let elections = 0;
@@ -269,8 +286,9 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
             const out = await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
             expect(out).to.not.equal('intent_held');
         });
-    });
+}
 
+function registerArchivePublishTests() {
     describe('_publishArchive', function () {
         it('arms intent BEFORE the v1 send, confirms it after, and settles once the back-fill lands', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS });
@@ -329,6 +347,9 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
             expect(sqlHits(db, 'UPDATE cross_chain_matches SET batch_seq')).to.have.length(0);
         });
     });
+}
+
+function registerArchiveCrashTests() {
 
     // The accepted-but-unacked window end to end: the process dies
     // before backfillBatch, and the next flush must NOT rebuild and re-pay.
@@ -352,4 +373,4 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
             expect(broadcasts, 'no second archive was paid for').to.equal(1);
         });
     });
-});
+}
