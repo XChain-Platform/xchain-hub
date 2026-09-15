@@ -124,7 +124,7 @@ class EncoderClient {
         this._rpcId     = 0;
     }
 
-    async _call(method, params) {
+    async call(method, params) {
         if (!this.encoderUrl) throw new Error('EncoderClient: encoderUrl not configured');
         let body = {
             jsonrpc: '2.0',
@@ -151,7 +151,7 @@ class EncoderClient {
     // into create_tx, which requires a bare array. Tolerates an already-bare
     // array (test stubs / older encoders).
     async getUtxos(address) {
-        let result = await this._call('get_utxos', { address: address });
+        let result = await this.call('get_utxos', { address: address });
         if (result && Array.isArray(result.utxos)) return result.utxos;
         return result;
     }
@@ -159,11 +159,11 @@ class EncoderClient {
     // Create an unsigned PSBT transaction with embedded data payload
     // params: { utxos, pubkey, data, change, encoding, fee, ... }
     async createTx(params) {
-        return this._call('create_tx', params);
+        return this.call('create_tx', params);
     }
 
     async broadcastTx(txHex) {
-        return this._call('broadcast_tx', { tx_hex: txHex });
+        return this.call('broadcast_tx', { tx_hex: txHex });
     }
 
     // Hand a build's input claims back to the encoder. create_tx RESERVES the inputs it
@@ -175,7 +175,7 @@ class EncoderClient {
     // and the encoder answers rather than errors for an unknown, expired or
     // already-released id. Callers go through lib/encoder_reservation.abandonBuild.
     async releaseInputs(reservationId) {
-        return this._call('release_inputs', { reservationId: reservationId });
+        return this.call('release_inputs', { reservationId: reservationId });
     }
 }
 

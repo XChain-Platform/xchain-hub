@@ -77,12 +77,12 @@ function registerConstructorTests() {
     });
 }
 
-// ── _call ───────────────────────────────────────────────────────────────
+// ── call ───────────────────────────────────────────────────────────────
 function registerCallRequestTests() {
         it('throws when encoderUrl is empty', async function () {
             let c = new EncoderClient('', '');
             let threw = false;
-            try { await c._call('get_utxos', {}); } catch (e) {
+            try { await c.call('get_utxos', {}); } catch (e) {
                 threw = true;
                 expect(e.message).to.include('encoderUrl not configured');
             }
@@ -92,15 +92,15 @@ function registerCallRequestTests() {
         it('increments _rpcId with each call', async function () {
             axiosStub.post.resolves(okResponse());
             let c = new EncoderClient('http://enc/rpc', '');
-            await c._call('get_utxos', {});
-            await c._call('get_utxos', {});
+            await c.call('get_utxos', {});
+            await c.call('get_utxos', {});
             expect(c._rpcId).to.equal(2);
         });
 
         it('sends correct JSON-RPC 2.0 body', async function () {
             axiosStub.post.resolves(okResponse({ utxos: [] }));
             let c = new EncoderClient('http://enc/rpc', '');
-            await c._call('get_utxos', { address: 'D123' });
+            await c.call('get_utxos', { address: 'D123' });
             let body = axiosStub.post.firstCall.args[1];
             expect(body.jsonrpc).to.equal('2.0');
             expect(body.method).to.equal('get_utxos');
@@ -111,7 +111,7 @@ function registerCallRequestTests() {
         it('sets x-api-key header when apiKey is present', async function () {
             axiosStub.post.resolves(okResponse());
             let c = new EncoderClient('http://enc/rpc', 'mykey');
-            await c._call('broadcast_tx', { tx_hex: 'ab' });
+            await c.call('broadcast_tx', { tx_hex: 'ab' });
             let opts = axiosStub.post.firstCall.args[2];
             expect(opts.headers['x-api-key']).to.equal('mykey');
         });
@@ -119,7 +119,7 @@ function registerCallRequestTests() {
         it('does not set x-api-key when apiKey is empty', async function () {
             axiosStub.post.resolves(okResponse());
             let c = new EncoderClient('http://enc/rpc', '');
-            await c._call('get_utxos', {});
+            await c.call('get_utxos', {});
             let opts = axiosStub.post.firstCall.args[2];
             expect(opts.headers).to.not.have.property('x-api-key');
         });
@@ -129,7 +129,7 @@ function registerCallResultTests() {
         it('returns the result field on success', async function () {
             axiosStub.post.resolves({ data: { result: { utxos: [{ txid: 'abc', vout: 0 }] } } });
             let c = new EncoderClient('http://enc/rpc', '');
-            let result = await c._call('get_utxos', {});
+            let result = await c.call('get_utxos', {});
             expect(result).to.deep.equal({ utxos: [{ txid: 'abc', vout: 0 }] });
         });
 
@@ -137,7 +137,7 @@ function registerCallResultTests() {
             axiosStub.post.resolves({ data: { error: { message: 'bad request', code: -32600 } } });
             let c = new EncoderClient('http://enc/rpc', '');
             let threw = false;
-            try { await c._call('bad_method', {}); } catch (e) {
+            try { await c.call('bad_method', {}); } catch (e) {
                 threw = true;
                 expect(e.message).to.include('Encoder RPC error');
                 expect(e.message).to.include('bad request');
@@ -148,7 +148,7 @@ function registerCallResultTests() {
         it('returns null when response has no data', async function () {
             axiosStub.post.resolves({ data: null });
             let c = new EncoderClient('http://enc/rpc', '');
-            let result = await c._call('get_utxos', {});
+            let result = await c.call('get_utxos', {});
             expect(result).to.be.null;
         });
 
@@ -156,7 +156,7 @@ function registerCallResultTests() {
             axiosStub.post.rejects(new Error('network timeout'));
             let c = new EncoderClient('http://enc/rpc', '');
             let threw = false;
-            try { await c._call('get_utxos', {}); } catch (e) {
+            try { await c.call('get_utxos', {}); } catch (e) {
                 threw = true;
                 expect(e.message).to.include('network timeout');
             }
@@ -186,7 +186,7 @@ function registerHttpErrorTests() {
                 axiosStub.post.rejects(httpError(status, body));
                 let c = new EncoderClient('http://enc/rpc', '');
                 let caught = null;
-                try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+                try { await c.call('create_tx', {}); } catch (e) { caught = e; }
                 expect(caught, 'status ' + status).to.exist;
                 expect(caught.message).to.include('Encoder RPC error');
                 expect(caught.message).to.include(reason);
@@ -205,7 +205,7 @@ function registerHttpErrorTests() {
             }));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
-            try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
+            try { await c.call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 503');
             expect(caught.message).to.not.include('Encoder RPC error');
             expect(isAmbiguousSendError(caught)).to.equal(true);
@@ -215,7 +215,7 @@ function registerHttpErrorTests() {
             axiosStub.post.rejects(httpError(404, '<html>not found</html>'));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
-            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            try { await c.call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 404');
         });
 }
@@ -232,7 +232,7 @@ function registerStructuredErrorTests() {
             } } });
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
-            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            try { await c.call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.message).to.include('Encoder RPC error');
             expect(caught.rpcCode).to.equal(-32010);
             expect(caught.rpcData.reason).to.equal('INSUFFICIENT_FUNDS');
@@ -252,7 +252,7 @@ function registerStructuredErrorTests() {
             } }));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
-            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            try { await c.call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.rpcCode).to.equal(-32010);
             expect(caught.rpcData.reason).to.equal('CHANGE_ADDRESS_REQUIRED');
             // Same object still, so the retry classifier and the dead-letter record
@@ -279,7 +279,7 @@ function registerAmbiguousErrorTest() {
             } }));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
-            try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
+            try { await c.call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 503');
             expect(caught.rpcData.reason).to.equal('UTXO_TRACKER_STALE');
             expect(isAmbiguousSendError(caught)).to.equal(true);
@@ -287,7 +287,7 @@ function registerAmbiguousErrorTest() {
 }
 
 function registerCallTests() {
-    describe('_call()', function () {
+    describe('call()', function () {
         registerCallRequestTests();
         registerCallResultTests();
         registerHttpErrorTests();
@@ -299,7 +299,7 @@ function registerCallTests() {
 // ── getUtxos ─────────────────────────────────────────────────────────────
 function registerGetUtxoTests() {
     describe('getUtxos()', function () {
-        it('delegates to _call with get_utxos and address param', async function () {
+        it('delegates to call with get_utxos and address param', async function () {
             axiosStub.post.resolves(okResponse({ utxos: [] }));
             let c = new EncoderClient('http://enc/rpc', '');
             await c.getUtxos('Daddress123');
@@ -336,7 +336,7 @@ function registerGetUtxoTests() {
 // ── createTx ─────────────────────────────────────────────────────────────
 function registerCreateTxTests() {
     describe('createTx()', function () {
-        it('delegates to _call with create_tx', async function () {
+        it('delegates to call with create_tx', async function () {
             axiosStub.post.resolves(okResponse({ psbt: 'cHNidP8B...' }));
             let c = new EncoderClient('http://enc/rpc', '');
             let params = { utxos: [], pubkey: 'ab', data: 'XCH|DATA' };
@@ -351,7 +351,7 @@ function registerCreateTxTests() {
 // ── broadcastTx ───────────────────────────────────────────────────────────
 function registerBroadcastTxTests() {
     describe('broadcastTx()', function () {
-        it('delegates to _call with broadcast_tx and tx_hex param', async function () {
+        it('delegates to call with broadcast_tx and tx_hex param', async function () {
             axiosStub.post.resolves(okResponse({ txid: 'deadbeef' }));
             let c = new EncoderClient('http://enc/rpc', '');
             await c.broadcastTx('aabbcc');

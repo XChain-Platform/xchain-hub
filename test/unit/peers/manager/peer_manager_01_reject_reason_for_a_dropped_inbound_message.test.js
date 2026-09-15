@@ -231,12 +231,12 @@ function registerFeature10broadcastSendToPeerOverPeersPart1() {
     expect(rootSuitePm.sendToPeer('a', 'T', {})).to.be.true;
     expect(ws.send.calledOnce).to.be.true;
   });
-  it('_send reports a send error via the callback', function () {
+  it('send reports a send error via the callback', function () {
     let ws = {
       readyState: 1,
       send: (data, cb) => cb(new Error('boom'))
     };
-    expect(() => rootSuitePm._send(ws, '{}')).to.not.throw();
+    expect(() => rootSuitePm.send(ws, '{}')).to.not.throw();
   });
 }
 function registerFeature10broadcastSendToPeerOverPeers() {

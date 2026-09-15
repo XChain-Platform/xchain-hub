@@ -156,7 +156,7 @@ class HubDbBroadcaster {
         let message = JSON.stringify({ type: 'watermark', ts: ts, heights: this.admissionHeights(nowMs) });
         let delivered = 0;
         for (let ws of this.subscribers) {
-            if (this._send(ws, message)) delivered++;
+            if (this.send(ws, message)) delivered++;
         }
         stats.sent++;
         stats.lastWatermarkTs = ts;
@@ -230,7 +230,7 @@ class HubDbBroadcaster {
             return;
         }
         for (let ws of this.subscribers) {
-            this._send(ws, message);
+            this.send(ws, message);
         }
     }
 
@@ -271,14 +271,14 @@ class HubDbBroadcaster {
             return;
         }
         for (let ws of this.subscribers) {
-            this._send(ws, message);
+            this.send(ws, message);
         }
     }
 
     // Returns true only when the message was handed to an open socket, so the
     // watermark heartbeat can report how many subscribers it actually reached
     // rather than how many are merely registered.
-    _send(ws, message) {
+    send(ws, message) {
         if (ws.readyState !== WebSocket.OPEN) return false;
         if (ws.bufferedAmount > 0) {
             ws._hubBuffered = (ws._hubBuffered || 0) + 1;

@@ -186,7 +186,7 @@ class PeerInbound {
         for (let [addr, peer] of this.peers) {
             if (addr === envelope.sender) continue;
             if (peer.ws && peer.ws !== sourceWs && peer.ws.readyState === WebSocket.OPEN) {
-                this._send(peer.ws, serialized);
+                this.send(peer.ws, serialized);
             }
         }
     }

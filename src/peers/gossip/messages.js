@@ -143,7 +143,7 @@ class PeerMessages {
 
         for (let [addr, peer] of this.peers) {
             if (peer.ws && peer.ws.readyState === WebSocket.OPEN) {
-                this._send(peer.ws, serialized);
+                this.send(peer.ws, serialized);
             }
         }
 
@@ -160,7 +160,7 @@ class PeerMessages {
         let envelope = this.buildEnvelope(type, data);
 
         this.addToDedup(envelope.id);
-        this._send(peer.ws, JSON.stringify(envelope));
+        this.send(peer.ws, JSON.stringify(envelope));
         return true;
     }
 
@@ -261,7 +261,7 @@ class PeerMessages {
         return false;
     }
 
-    _send(ws, serialized) {
+    send(ws, serialized) {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(serialized, (err) => {
                 if (err) logger.error(nodeUtil.format('WS send error:', err.message));
