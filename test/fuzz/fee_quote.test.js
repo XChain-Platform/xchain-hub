@@ -17,38 +17,39 @@ const proxyquire = require('proxyquire');
 const gen        = require('./helpers/generators');
 const coins      = require('../../src/coins');
 
-describe('Fuzz: XChainHub.getFeeQuote()', function () {
 
-    let XChainHub, hub, dbStub;
 
-    // Known actions = the canonical GAS_SCHEDULE keys, sourced from the coin
-    // registry (getFeeQuote now serves the schedule from the same bundle). Deriving
-    // this here rather than hardcoding keeps the known/unknown split in step with a
-    // schedule repin, so a new metered action can't silently pass the "unknown
-    // action" filter below (this list previously drifted, omitting VM_XCALL_REQUEST /
-    // VM_XCALL_CALLBACK / VM_GUARD_GAS_CEILING).
-    const KNOWN_ACTIONS = Object.keys(coins.getCoinConfig('BTC', 'mainnet').GAS_SCHEDULE);
+let XChainHub, hub, dbStub;
 
-    // getFeeQuote is fail-closed on the XCHAIN/USD oracle (deepdive L-5): with no
-    // finalized round it throws rather than quoting off a missing price. The
-    // arithmetic properties below therefore have to hand it a live oracle; they
-    // used to resolve every query to [], which made every "known action" run throw
-    // before it reached a single assertion. Fail-closed is covered explicitly by
-    // its own property at the bottom of this file.
-    function priceStub (prices) {
-        return sinon.stub().callsFake(function (query, params) {
-            if (query.includes('coin_pair = ?')) {
-                let pair = (params || [])[0];
-                if (Object.prototype.hasOwnProperty.call(prices, pair)) {
-                    // No block_timestamp: getPriceStatus treats an unstamped row as
-                    // fresh, keeping these properties about arithmetic, not clocks.
-                    return Promise.resolve([{ price: String(prices[pair]), status: 'finalized' }]);
-                }
-                return Promise.resolve([]);
+// Known actions = the canonical GAS_SCHEDULE keys, sourced from the coin
+// registry (getFeeQuote now serves the schedule from the same bundle). Deriving
+// this here rather than hardcoding keeps the known/unknown split in step with a
+// schedule repin, so a new metered action can't silently pass the "unknown
+// action" filter below (this list once drifted, omitting VM_XCALL_REQUEST /
+// VM_XCALL_CALLBACK / VM_GUARD_GAS_CEILING).
+const KNOWN_ACTIONS = Object.keys(coins.getCoinConfig('BTC', 'mainnet').GAS_SCHEDULE);
+
+// getFeeQuote is fail-closed on the XCHAIN/USD oracle (deepdive L-5): with no
+// finalized round it throws rather than quoting off a missing price. The
+// arithmetic properties below therefore have to hand it a live oracle; they
+// once resolved every query to [], which made every "known action" run throw
+// before it reached a single assertion. Fail-closed is covered explicitly by
+// its own property at the bottom of this file.
+function priceStub (prices) {
+    return sinon.stub().callsFake(function (query, params) {
+        if (query.includes('coin_pair = ?')) {
+            let pair = (params || [])[0];
+            if (Object.prototype.hasOwnProperty.call(prices, pair)) {
+                // No block_timestamp: getPriceStatus treats an unstamped row as
+                // fresh, keeping these properties about arithmetic, not clocks.
+                return Promise.resolve([{ price: String(prices[pair]), status: 'finalized' }]);
             }
             return Promise.resolve([]);
-        });
-    }
+        }
+        return Promise.resolve([]);
+    });
+}
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         // Stub the Database class to avoid real MariaDB connections
@@ -67,16 +68,16 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
         hub = new XChainHub('localhost', '3306', 'testdb', 'user', 'pass');
         hub.db = dbStub;
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
 
-    // -----------------------------------------------------------------
-    // Arithmetic properties
-    // -----------------------------------------------------------------
-
-    describe('arithmetic properties', function () {
+function registerArithmeticPropertiesTestCases1() {
 
         it('known action returns positive gasCost, valid xchainAmount format', function () {
             return fc.assert(fc.asyncProperty(
@@ -110,6 +111,9 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                 }
             ), { numRuns: 50 });
         });
+}
+
+function registerArithmeticPropertiesTestCases2() {
 
         it('nativeCoinAmount is never zero, NaN, or Infinity when coinUsd is positive', function () {
             return fc.assert(fc.asyncProperty(
@@ -138,6 +142,9 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                 }
             ), { numRuns: 100 });
         });
+}
+
+function registerArithmeticPropertiesTestCases3() {
 
         it('round-trip: nativeCoinAmount * coinUsd ≈ feeUsd', function () {
             return fc.assert(fc.asyncProperty(
@@ -173,7 +180,23 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                 }
             ), { numRuns: 100 });
         });
+
+}
+
+function registerArithmeticPropertiesTests() {
+
+    // -----------------------------------------------------------------
+    // Arithmetic properties
+    // -----------------------------------------------------------------
+
+    describe('arithmetic properties', function () {
+        registerArithmeticPropertiesTestCases1();
+        registerArithmeticPropertiesTestCases2();
+        registerArithmeticPropertiesTestCases3();
     });
+}
+
+function registerOracleFailClosedTests() {
 
     // -----------------------------------------------------------------
     // Oracle fail-closed (deepdive L-5)
@@ -210,6 +233,9 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
             ), { numRuns: 4 });
         });
     });
+}
+
+function registerUnknownActionHandlingTests() {
 
     // -----------------------------------------------------------------
     // Unknown action handling
@@ -241,4 +267,11 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
             ), { numRuns: 10 });
         });
     });
+}
+describe('Fuzz: XChainHub.getFeeQuote()', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerArithmeticPropertiesTests();
+    registerOracleFailClosedTests();
+    registerUnknownActionHandlingTests();
 });
