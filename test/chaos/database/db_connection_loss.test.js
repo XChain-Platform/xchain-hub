@@ -16,10 +16,10 @@ const Database   = require('../../../src/db');
 const { runExperiment }      = require('../helpers/chaosRunner');
 const { expectCircuitState } = require('../helpers/steadyStateChecker');
 
-describe('Chaos: DB Connection Loss (DB-1)', function () {
-    this.timeout(30000);
 
-    let db, poolStub;
+
+let db, poolStub;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         db = Object.create(Database.prototype);
@@ -39,10 +39,16 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerCircuitBreakerOpensAfterThresholdConsecutiveTest() {
 
     it('circuit breaker opens after threshold consecutive failures', async function () {
         await runExperiment({
@@ -65,6 +71,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
             }
         });
     });
+}
+
+function registerCircuitBreakerRejectsImmediatelyWhileOpenTest() {
 
     it('circuit breaker rejects immediately while open', async function () {
         db.circuitState     = 'open';
@@ -80,6 +89,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         expect(err).to.exist;
         expect(err.message).to.include('Circuit breaker open');
     });
+}
+
+function registerCircuitBreakerTransitionsToHalfOpenTest() {
 
     it('circuit breaker transitions to half-open after cooldown expires', async function () {
         db.circuitState     = 'open';
@@ -93,6 +105,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         expectCircuitState(db, 'closed');
         expect(db.circuitFailures).to.equal(0);
     });
+}
+
+function registerHalfOpenFailureReOpensTheTest() {
 
     it('half-open failure re-opens the circuit breaker', async function () {
         db.circuitState     = 'open';
@@ -110,6 +125,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         expect(db.circuitState).to.equal('open');
         expect(db.circuitOpenUntil).to.be.gt(Date.now() - 1);
     });
+}
+
+function registerFullLifecycleClosedOpenHalfOpenTest() {
 
     it('full lifecycle: closed → open → half-open → closed', async function () {
         let mockConn = { release: sinon.stub() };
@@ -144,6 +162,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
             }
         });
     });
+}
+
+function registerDoQueryRetriesThroughConnectionFailuresUntilTest() {
 
     it('doQuery retries through connection failures until circuit opens', async function () {
         let err;
@@ -156,6 +177,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         expect(err).to.exist;
         expect(poolStub.getConnection.callCount).to.be.gte(db.circuitThreshold);
     });
+}
+
+function registerExponentialBackoffDelaysIncreaseCorrectlyTest() {
 
     it('exponential backoff delays increase correctly', async function () {
         let mockConn = { release: sinon.stub(), query: sinon.stub().resolves([]) };
@@ -176,6 +200,9 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
             expect(delays[i]).to.be.gt(0);
         }
     });
+}
+
+function registerFailureCountResetsOnSuccessfulConnectionTest() {
 
     it('failure count resets on successful connection', async function () {
         let mockConn = { release: sinon.stub(), query: sinon.stub().resolves([]) };
@@ -191,4 +218,17 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         expect(db.circuitFailures).to.equal(0);
         expectCircuitState(db, 'closed');
     });
+}
+describe('Chaos: DB Connection Loss (DB-1)', function () {
+    this.timeout(30000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerCircuitBreakerOpensAfterThresholdConsecutiveTest();
+    registerCircuitBreakerRejectsImmediatelyWhileOpenTest();
+    registerCircuitBreakerTransitionsToHalfOpenTest();
+    registerHalfOpenFailureReOpensTheTest();
+    registerFullLifecycleClosedOpenHalfOpenTest();
+    registerDoQueryRetriesThroughConnectionFailuresUntilTest();
+    registerExponentialBackoffDelaysIncreaseCorrectlyTest();
+    registerFailureCountResetsOnSuccessfulConnectionTest();
 });
