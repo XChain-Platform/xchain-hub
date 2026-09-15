@@ -122,9 +122,208 @@ function remimedFixture(){
     return rows;
 }
 
-describe('lib/capability_snapshot_prune (stale snapshot prune)', () => {
+function registerPruneStaleEdgeTests() {
+it('refuses an invalid batch size before issuing any DELETE', async () => {
+        let db = new FakeDb(deadChainFixture());
+        let before = db.rows.length;
+        for(let bad of [0, -1, 2.5, 'x']){
+            let threw = false;
+            try { await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, batchSize: bad }); }
+            catch(e){ threw = /batchSize must be a positive integer/.test(e.message); }
+            expect(threw, 'batchSize=' + bad).to.equal(true);
+        }
+        expect(db.rows.length).to.equal(before);
+    });
 
-    describe('normalizeRange', () => {
+    it('spares live rows at re-mined heights when fenced by write time', async () => {
+        let db  = new FakeDb(remimedFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, createdBefore: '2026-07-01' });
+
+        expect(res.deleted).to.equal(358);       // only the dead-incarnation rows
+        expect(res.remaining).to.equal(0);
+
+        let survivors = db.rows.filter(r => r.snapshot_block >= 131 && r.snapshot_block <= 487);
+        expect(survivors).to.have.lengthOf(21);  // the re-mined 140-160 live rows
+        expect(survivors.every(r => r.created_at === LIVE_WRITE)).to.equal(true);
+    });
+
+    it('without the fence it would also take the re-mined live rows', async () => {
+        let db  = new FakeDb(remimedFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
+        expect(res.deleted).to.equal(379);       // 358 dead + 21 live: why the fence exists
+    });
+
+    it('refuses to run without an explicit range', async () => {
+        let db = new FakeDb(deadChainFixture());
+        let threw = false;
+        try { await prune.pruneStale(db, {}); } catch(e){ threw = /fromBlock is required/.test(e.message); }
+        expect(threw).to.equal(true);
+        expect(db.queries).to.have.lengthOf(0);
+    });
+}
+
+function registerPruneStaleCoreTests() {
+it('clears the dead range and leaves live-chain rows alone', async () => {
+        let db  = new FakeDb(deadChainFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
+
+        expect(res.deleted).to.equal(358);
+        expect(res.remaining).to.equal(0);
+        expect(db.rows.map(r => r.snapshot_block).sort((a, b) => a - b)).to.deep.equal([12, 130]);
+    });
+
+    it('leaves other capabilities in the range untouched when scoped', async () => {
+        let db  = new FakeDb(deadChainFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
+
+        expect(res.deleted).to.equal(357);
+        expect(res.remaining).to.equal(0);
+        expect(db.rows.filter(r => r.capability === 'oracle_publish')).to.have.lengthOf(1);
+    });
+
+    it('deletes in bounded batches and stops on the first short batch', async () => {
+        let db  = new FakeDb(deadChainFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, batchSize: 100 });
+
+        expect(res.deleted).to.equal(358);
+        expect(res.batches).to.equal(4);          // 100 + 100 + 100 + 58
+        let deletes = db.queries.filter(q => q.sql.startsWith('DELETE'));
+        expect(deletes).to.have.lengthOf(4);
+        expect(deletes[0].sql).to.include('LIMIT ?');
+        expect(deletes[0].args[deletes[0].args.length - 1]).to.equal(100);
+    });
+
+    it('is idempotent: a second run deletes nothing', async () => {
+        let db = new FakeDb(deadChainFixture());
+        await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
+        let again = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
+        expect(again.deleted).to.equal(0);
+        expect(again.remaining).to.equal(0);
+    });
+
+    it('clears an open-ended range above a reset chain tip', async () => {
+        let db  = new FakeDb(deadChainFixture());
+        let res = await prune.pruneStale(db, { fromBlock: 146 });   // everything past the live tip
+        expect(res.deleted).to.equal(343);                          // 342 cross_chain (146-487) + 1 oracle_publish
+        expect(db.rows.map(r => r.snapshot_block).every(b => b <= 145)).to.equal(true);
+    });
+}
+
+function registerPruneStaleSuite() {
+describe('pruneStale', () => {
+        registerPruneStaleCoreTests();
+
+        registerPruneStaleEdgeTests();
+    });
+}
+
+function registerPruneBlockSuite() {
+describe('listStaleBlocks', () => {
+        it('reports per-block groups with their write times', async () => {
+            let db   = new FakeDb(remimedFixture());
+            let list = await prune.listStaleBlocks(db, { fromBlock: 131, toBlock: 135 });
+            expect(list.map(b => b.snapshotBlock)).to.deep.equal([131, 132, 133, 134, 135]);
+            expect(list.every(b => b.capability === 'cross_chain' && b.rows === 1)).to.equal(true);
+            expect(list[0].minCreated).to.equal(DEAD_WRITE);
+        });
+
+        it('caps the result at the requested limit', async () => {
+            let db   = new FakeDb(remimedFixture());
+            let list = await prune.listStaleBlocks(db, { fromBlock: 131, toBlock: 487 }, 5);
+            expect(list).to.have.lengthOf(5);
+        });
+
+        it('rejects a non-positive limit', async () => {
+            let db = new FakeDb(remimedFixture());
+            let threw = false;
+            try { await prune.listStaleBlocks(db, { fromBlock: 131 }, 0); }
+            catch(e){ threw = /limit must be a positive integer/.test(e.message); }
+            expect(threw).to.equal(true);
+        });
+    });
+}
+
+function registerPruneAllowlistSuite() {
+describe('createdBefore fence', () => {
+        it('rejects anything that is not a DATE or DATETIME literal', () => {
+            for(let bad of ['2026/07/01', 'yesterday', "2026-07-01' OR 1=1", '2026-07-01T00:00:00', 20260701]){
+                expect(() => prune.normalizeRange({ fromBlock: 1, createdBefore: bad }), String(bad)).to.throw(/Invalid createdBefore/);
+            }
+        });
+
+        it('rejects a well-formed but impossible date', () => {
+            expect(() => prune.normalizeRange({ fromBlock: 1, createdBefore: '2026-13-40' })).to.throw(/not a real date/);
+        });
+
+        it('binds the cutoff rather than interpolating it', () => {
+            let w = prune.buildWhere(prune.normalizeRange({ fromBlock: 131, toBlock: 487, createdBefore: '2026-06-18' }));
+            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ? AND created_at < ?');
+            expect(w.args).to.deep.equal([131, 487, '2026-06-18']);
+        });
+
+        it('narrows a summary to the pre-reset writes only', async () => {
+            let db   = new FakeDb(remimedFixture());
+            let all  = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487 });
+            let dead = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487, createdBefore: '2026-07-01' });
+            expect(all.total).to.equal(379);
+            expect(dead.total).to.equal(358);
+        });
+    });
+}
+
+function registerPruneClauseSuite() {
+describe('summarizeStale', () => {
+        it('reports the dead range without touching any row', async () => {
+            let db = new FakeDb(deadChainFixture());
+            let before = db.rows.length;
+            let s = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487 });
+
+            expect(s.total).to.equal(358);            // 357 cross_chain + 1 oracle_publish
+            expect(s.blocks).to.equal(357);           // block 200 is shared by both capabilities
+            expect(s.minBlock).to.equal(131);
+            expect(s.maxBlock).to.equal(487);
+            expect(s.byCapability.map(c => c.capability)).to.deep.equal(['cross_chain', 'oracle_publish']);
+            expect(db.rows.length).to.equal(before);
+            expect(db.queries.every(q => q.sql.startsWith('SELECT'))).to.equal(true);
+        });
+
+        it('scopes to one capability when asked', async () => {
+            let db = new FakeDb(deadChainFixture());
+            let s = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
+            expect(s.total).to.equal(357);
+            expect(s.byCapability).to.have.lengthOf(1);
+        });
+
+        it('returns zeroes and nulls on an empty range', async () => {
+            let db = new FakeDb(deadChainFixture());
+            let s = await prune.summarizeStale(db, { fromBlock: 1000, toBlock: 2000 });
+            expect(s.total).to.equal(0);
+            expect(s.blocks).to.equal(0);
+            expect(s.minBlock).to.equal(null);
+            expect(s.maxBlock).to.equal(null);
+        });
+    });
+}
+
+function registerPruneChunkSuite() {
+describe('buildWhere', () => {
+        it('binds every value rather than interpolating it', () => {
+            let w = prune.buildWhere({ fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
+            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ? AND capability = ?');
+            expect(w.args).to.deep.equal([131, 487, 'cross_chain']);
+            expect(w.clause).to.not.include('cross_chain');
+        });
+
+        it('omits the capability predicate when unscoped', () => {
+            let w = prune.buildWhere({ fromBlock: 0, toBlock: 9, capability: null });
+            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ?');
+            expect(w.args).to.deep.equal([0, 9]);
+        });
+    });
+}
+
+function registerPruneQuoteSuite() {
+describe('normalizeRange', () => {
         it('requires fromBlock so a typo cannot become a full-table wipe', () => {
             expect(() => prune.normalizeRange({})).to.throw(/fromBlock is required/);
             expect(() => prune.normalizeRange({ toBlock: 487 })).to.throw(/fromBlock is required/);
@@ -161,186 +360,19 @@ describe('lib/capability_snapshot_prune (stale snapshot prune)', () => {
             }
         });
     });
+}
 
-    describe('buildWhere', () => {
-        it('binds every value rather than interpolating it', () => {
-            let w = prune.buildWhere({ fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
-            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ? AND capability = ?');
-            expect(w.args).to.deep.equal([131, 487, 'cross_chain']);
-            expect(w.clause).to.not.include('cross_chain');
-        });
+describe('lib/capability_snapshot_prune (stale snapshot prune)', () => {
 
-        it('omits the capability predicate when unscoped', () => {
-            let w = prune.buildWhere({ fromBlock: 0, toBlock: 9, capability: null });
-            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ?');
-            expect(w.args).to.deep.equal([0, 9]);
-        });
-    });
+    registerPruneQuoteSuite();
 
-    describe('summarizeStale', () => {
-        it('reports the dead range without touching any row', async () => {
-            let db = new FakeDb(deadChainFixture());
-            let before = db.rows.length;
-            let s = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487 });
+    registerPruneChunkSuite();
 
-            expect(s.total).to.equal(358);            // 357 cross_chain + 1 oracle_publish
-            expect(s.blocks).to.equal(357);           // block 200 is shared by both capabilities
-            expect(s.minBlock).to.equal(131);
-            expect(s.maxBlock).to.equal(487);
-            expect(s.byCapability.map(c => c.capability)).to.deep.equal(['cross_chain', 'oracle_publish']);
-            expect(db.rows.length).to.equal(before);
-            expect(db.queries.every(q => q.sql.startsWith('SELECT'))).to.equal(true);
-        });
+    registerPruneClauseSuite();
 
-        it('scopes to one capability when asked', async () => {
-            let db = new FakeDb(deadChainFixture());
-            let s = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
-            expect(s.total).to.equal(357);
-            expect(s.byCapability).to.have.lengthOf(1);
-        });
+    registerPruneAllowlistSuite();
 
-        it('returns zeroes and nulls on an empty range', async () => {
-            let db = new FakeDb(deadChainFixture());
-            let s = await prune.summarizeStale(db, { fromBlock: 1000, toBlock: 2000 });
-            expect(s.total).to.equal(0);
-            expect(s.blocks).to.equal(0);
-            expect(s.minBlock).to.equal(null);
-            expect(s.maxBlock).to.equal(null);
-        });
-    });
+    registerPruneBlockSuite();
 
-    describe('createdBefore fence', () => {
-        it('rejects anything that is not a DATE or DATETIME literal', () => {
-            for(let bad of ['2026/07/01', 'yesterday', "2026-07-01' OR 1=1", '2026-07-01T00:00:00', 20260701]){
-                expect(() => prune.normalizeRange({ fromBlock: 1, createdBefore: bad }), String(bad)).to.throw(/Invalid createdBefore/);
-            }
-        });
-
-        it('rejects a well-formed but impossible date', () => {
-            expect(() => prune.normalizeRange({ fromBlock: 1, createdBefore: '2026-13-40' })).to.throw(/not a real date/);
-        });
-
-        it('binds the cutoff rather than interpolating it', () => {
-            let w = prune.buildWhere(prune.normalizeRange({ fromBlock: 131, toBlock: 487, createdBefore: '2026-06-18' }));
-            expect(w.clause).to.equal('snapshot_block BETWEEN ? AND ? AND created_at < ?');
-            expect(w.args).to.deep.equal([131, 487, '2026-06-18']);
-        });
-
-        it('narrows a summary to the pre-reset writes only', async () => {
-            let db   = new FakeDb(remimedFixture());
-            let all  = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487 });
-            let dead = await prune.summarizeStale(db, { fromBlock: 131, toBlock: 487, createdBefore: '2026-07-01' });
-            expect(all.total).to.equal(379);
-            expect(dead.total).to.equal(358);
-        });
-    });
-
-    describe('listStaleBlocks', () => {
-        it('reports per-block groups with their write times', async () => {
-            let db   = new FakeDb(remimedFixture());
-            let list = await prune.listStaleBlocks(db, { fromBlock: 131, toBlock: 135 });
-            expect(list.map(b => b.snapshotBlock)).to.deep.equal([131, 132, 133, 134, 135]);
-            expect(list.every(b => b.capability === 'cross_chain' && b.rows === 1)).to.equal(true);
-            expect(list[0].minCreated).to.equal(DEAD_WRITE);
-        });
-
-        it('caps the result at the requested limit', async () => {
-            let db   = new FakeDb(remimedFixture());
-            let list = await prune.listStaleBlocks(db, { fromBlock: 131, toBlock: 487 }, 5);
-            expect(list).to.have.lengthOf(5);
-        });
-
-        it('rejects a non-positive limit', async () => {
-            let db = new FakeDb(remimedFixture());
-            let threw = false;
-            try { await prune.listStaleBlocks(db, { fromBlock: 131 }, 0); }
-            catch(e){ threw = /limit must be a positive integer/.test(e.message); }
-            expect(threw).to.equal(true);
-        });
-    });
-
-    describe('pruneStale', () => {
-        it('clears the dead range and leaves live-chain rows alone', async () => {
-            let db  = new FakeDb(deadChainFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
-
-            expect(res.deleted).to.equal(358);
-            expect(res.remaining).to.equal(0);
-            expect(db.rows.map(r => r.snapshot_block).sort((a, b) => a - b)).to.deep.equal([12, 130]);
-        });
-
-        it('leaves other capabilities in the range untouched when scoped', async () => {
-            let db  = new FakeDb(deadChainFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, capability: 'cross_chain' });
-
-            expect(res.deleted).to.equal(357);
-            expect(res.remaining).to.equal(0);
-            expect(db.rows.filter(r => r.capability === 'oracle_publish')).to.have.lengthOf(1);
-        });
-
-        it('deletes in bounded batches and stops on the first short batch', async () => {
-            let db  = new FakeDb(deadChainFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, batchSize: 100 });
-
-            expect(res.deleted).to.equal(358);
-            expect(res.batches).to.equal(4);          // 100 + 100 + 100 + 58
-            let deletes = db.queries.filter(q => q.sql.startsWith('DELETE'));
-            expect(deletes).to.have.lengthOf(4);
-            expect(deletes[0].sql).to.include('LIMIT ?');
-            expect(deletes[0].args[deletes[0].args.length - 1]).to.equal(100);
-        });
-
-        it('is idempotent: a second run deletes nothing', async () => {
-            let db = new FakeDb(deadChainFixture());
-            await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
-            let again = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
-            expect(again.deleted).to.equal(0);
-            expect(again.remaining).to.equal(0);
-        });
-
-        it('clears an open-ended range above a reset chain tip', async () => {
-            let db  = new FakeDb(deadChainFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 146 });   // everything past the live tip
-            expect(res.deleted).to.equal(343);                          // 342 cross_chain (146-487) + 1 oracle_publish
-            expect(db.rows.map(r => r.snapshot_block).every(b => b <= 145)).to.equal(true);
-        });
-
-        it('refuses an invalid batch size before issuing any DELETE', async () => {
-            let db = new FakeDb(deadChainFixture());
-            let before = db.rows.length;
-            for(let bad of [0, -1, 2.5, 'x']){
-                let threw = false;
-                try { await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, batchSize: bad }); }
-                catch(e){ threw = /batchSize must be a positive integer/.test(e.message); }
-                expect(threw, 'batchSize=' + bad).to.equal(true);
-            }
-            expect(db.rows.length).to.equal(before);
-        });
-
-        it('spares live rows at re-mined heights when fenced by write time', async () => {
-            let db  = new FakeDb(remimedFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487, createdBefore: '2026-07-01' });
-
-            expect(res.deleted).to.equal(358);       // only the dead-incarnation rows
-            expect(res.remaining).to.equal(0);
-
-            let survivors = db.rows.filter(r => r.snapshot_block >= 131 && r.snapshot_block <= 487);
-            expect(survivors).to.have.lengthOf(21);  // the re-mined 140-160 live rows
-            expect(survivors.every(r => r.created_at === LIVE_WRITE)).to.equal(true);
-        });
-
-        it('without the fence it would also take the re-mined live rows', async () => {
-            let db  = new FakeDb(remimedFixture());
-            let res = await prune.pruneStale(db, { fromBlock: 131, toBlock: 487 });
-            expect(res.deleted).to.equal(379);       // 358 dead + 21 live: why the fence exists
-        });
-
-        it('refuses to run without an explicit range', async () => {
-            let db = new FakeDb(deadChainFixture());
-            let threw = false;
-            try { await prune.pruneStale(db, {}); } catch(e){ threw = /fromBlock is required/.test(e.message); }
-            expect(threw).to.equal(true);
-            expect(db.queries).to.have.lengthOf(0);
-        });
-    });
+    registerPruneStaleSuite();
 });
