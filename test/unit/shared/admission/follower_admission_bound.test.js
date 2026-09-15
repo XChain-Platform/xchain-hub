@@ -38,7 +38,7 @@
 const { expect }        = require('chai');
 const sinon             = require('sinon');
 const crypto            = require('crypto');
-const ValidatorIdentity = require('../../src/validators/identity.js');
+const ValidatorIdentity = require('../../../../src/validators/identity.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
@@ -54,10 +54,10 @@ const OWN_DOGE = 5000000;
 const CALL_ID = 'c'.repeat(64);
 
 const ARMED_MODULES = [
-    '../../src/mirror_admission_activation.js',
-    '../../src/lib/admission_height.js',
-    '../../src/cross_chain/dex_consensus.js',
-    '../../src/cross_chain/call_engine.js'
+    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/lib/admission_height.js',
+    '../../../../src/cross_chain/dex_consensus.js',
+    '../../../../src/cross_chain/call_engine.js'
 ];
 
 // Purge, arm, re-require, and hand back a restore() that puts the process back byte-exact.
@@ -70,8 +70,8 @@ function armAdmission() {
     for (const p of paths) delete require.cache[p];
     process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
 
-    const ah                   = require('../../src/lib/admission_height.js');
-    const CrossChainCallEngine = require('../../src/cross_chain/call_engine.js');
+    const ah                   = require('../../../../src/lib/admission_height.js');
+    const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
 
     function restore() {
         for (const [p, mod] of saved) {

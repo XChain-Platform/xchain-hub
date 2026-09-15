@@ -22,8 +22,8 @@ const http        = require('http');
 const sinon       = require('sinon');
 const { expect }  = require('chai');
 const proxyquire  = require('proxyquire');
-const { waitUntil } = require('../helpers/waitUntil');
-const { DB_METHODS } = require('../helpers/mockHub');
+const { waitUntil } = require('../../../helpers/waitUntil');
+const { DB_METHODS } = require('../../../helpers/mockHub');
 
 // Every /hub-db/snapshot/* page the mirror reads, in the order api.js declares them.
 const PAGES = [
@@ -140,7 +140,7 @@ async function bootApi(heightsMode) {
 
     const restoreEnv = setWatermarkRestEnv();
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': realExpress,
             'helmet': sinon.stub().callsFake(passthrough),

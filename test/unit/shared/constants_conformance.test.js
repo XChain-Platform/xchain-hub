@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const constants  = require('../../src/constants');
+const constants  = require('../../../src/constants');
 
 // #1299: PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are federation-uniform oracle
 // band constants that must have a single source of truth (constants.js). This is
@@ -158,7 +158,7 @@ describe('oracle round-interval shared constants (#2653)', () => {
     });
 
     it('no consumer re-declares the interval/window defaults as bare fallback literals', () => {
-        for (const file of ['../../src/api.js', '../../src/oracle/round.js', '../../src/XChainHub.js']) {
+        for (const file of ['../../../src/api.js', '../../../src/oracle/round.js', '../../../src/XChainHub.js']) {
             const src = fs.readFileSync(path.join(__dirname, file), 'utf8');
             // The drift vector is a fallback expression like
             // `ORACLE_ROUND_INTERVAL || 600000` on an oracle-cadence line; the
@@ -174,10 +174,10 @@ describe('oracle round-interval shared constants (#2653)', () => {
 
     it('OracleRound built with an empty p2pConfig lands on the shared defaults', () => {
         const proxyquire = require('proxyquire');
-        const { createMockHub } = require('../helpers/mockHub');
+        const { createMockHub } = require('../../helpers/mockHub');
         const PriceFetcherStub = function () { return {}; };
         PriceFetcherStub.getCoinPairs = () => ['BTC/USD'];
-        const OracleRound = proxyquire('../../src/oracle/round', {
+        const OracleRound = proxyquire('../../../src/oracle/round', {
             './price_fetcher.js': PriceFetcherStub
         });
         const or = new OracleRound(createMockHub({ p2pConfig: {} }));
@@ -201,8 +201,8 @@ describe('oracle round-interval shared constants (#2653)', () => {
 describe('PRICE v0 and v1 lanes accept the same coin/fiat universe (#7215)', function () {
     const fs   = require('fs');
     const path = require('path');
-    const coins        = require('../../src/coins');
-    const PriceFetcher = require('../../src/oracle/price_fetcher');
+    const coins        = require('../../../src/coins');
+    const PriceFetcher = require('../../../src/oracle/price_fetcher');
 
     // Split the v0 product back into its two axes. Bound through getCoinPairs()
     // (the surface OracleRound actually consumes) rather than a new export, so the

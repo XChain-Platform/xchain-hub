@@ -30,7 +30,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { assertSingleTxEncoding } = require('../../src/lib/two_phase_guard.js');
+const { assertSingleTxEncoding } = require('../../../../src/lib/two_phase_guard.js');
 
 // Every pipeline that builds a PSBT itself and hands it to the wallet hook.
 const CALL_SITES = [
@@ -106,7 +106,7 @@ function registerAcceptedEncodingTests() {
         // The drift guard. Each pipeline builds its own PSBT, so a new one that signs
         // without the check re-opens the stranded-funds path on that rail alone.
         for (const rel of CALL_SITES) {
-            const src = fs.readFileSync(path.resolve(__dirname, '../../', rel), 'utf8');
+            const src = fs.readFileSync(path.resolve(__dirname, '../../../../', rel), 'utf8');
             // A pipeline inside a feature directory reaches the guard through '../lib/'.
             assert.ok(/require\(['"]\.\.?\/lib\/two_phase_guard\.js['"]\)/.test(src),
                 rel + ' does not require the shared two-phase guard');

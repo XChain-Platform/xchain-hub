@@ -19,10 +19,10 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
-const SpendGuard = require('../../src/lib/spend_guard.js');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
 
 function loadOraclePublisher(fsMock) {
-    return proxyquire('../../src/oracle/publisher', {
+    return proxyquire('../../../../src/oracle/publisher', {
         fs: fsMock,
         '../peers/encoder_client': function () { return null; }
     });

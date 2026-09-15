@@ -21,7 +21,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const { loadSignerHooks, applySignerHooks, buildSignerHooks } = require('../../src/lib/signer_loader.js');
+const { loadSignerHooks, applySignerHooks, buildSignerHooks } = require('../../../src/lib/signer_loader.js');
 
 // Capture console.warn for the chain-refusal assertions: the warn line IS the
 // contract (an operator's only signal that a publisher is deliberately idle), so

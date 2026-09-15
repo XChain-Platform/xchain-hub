@@ -36,7 +36,7 @@ const fs         = require('fs');
 const os         = require('os');
 const path       = require('path');
 
-const SpendGuard = require('../../src/lib/spend_guard.js');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
 
 // Build a guard with a small, obvious cap so "consumed" is unambiguous.
 const CAP_CENTS = 1000;

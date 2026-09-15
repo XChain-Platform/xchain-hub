@@ -18,7 +18,7 @@ const { expect } = require('chai');
 const fs         = require('fs');
 const os         = require('os');
 const path       = require('path');
-const SpendGuard = require('../../src/lib/spend_guard.js');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
 
 const PFX = 'SGTEST';
 let dir, statePath;

@@ -15,7 +15,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const SpendGuard = require('../../src/lib/spend_guard.js');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
 
 const PFX = 'SGTEST';
 

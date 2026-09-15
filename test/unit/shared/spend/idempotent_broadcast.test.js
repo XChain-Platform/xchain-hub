@@ -21,8 +21,8 @@ const {
   isAmbiguousSendError,
   AtMostOnce,
   broadcastOnce
-} = require('../../src/lib/idempotent_broadcast.js');
-const SpendGuard = require('../../src/lib/spend_guard.js');
+} = require('../../../../src/lib/idempotent_broadcast.js');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
 function registerIsAmbiguousSendErrorSuite1Part1() {
   it('treats a node/encoder RPC rejection as DEFINITIVE (safe to retry)', function () {
     expect(isAmbiguousSendError(new Error('Encoder RPC error: bad-txns-inputs-missingorspent'))).to.equal(false);

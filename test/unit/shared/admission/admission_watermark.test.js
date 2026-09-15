@@ -23,11 +23,11 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
+const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
-const StateAnchorPublisher = require('../../src/anchor/publisher.js');
-const Database             = require('../../src/db');
-const { admitMarginBlocks } = require('../../src/mirror_admission_activation.js');
+const StateAnchorPublisher = require('../../../../src/anchor/publisher.js');
+const Database             = require('../../../../src/db');
+const { admitMarginBlocks } = require('../../../../src/mirror_admission_activation.js');
 
 // Short, distinct windows per rail so "which rail settled" is observable without
 // waiting out a production timeout. The xdex window is the longest in production too

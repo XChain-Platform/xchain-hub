@@ -3,14 +3,14 @@
 const { expect } = require('chai');
 
 const ERA_MODULES = [
-    '../../src/mirror_admission_activation.js',
-    '../../src/lib/admission_height.js',
-    '../../src/cross_chain/dex_engine.js',
-    '../../src/cross_chain/bridge_engine.js'
+    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/lib/admission_height.js',
+    '../../../../src/cross_chain/dex_engine.js',
+    '../../../../src/cross_chain/bridge_engine.js'
 ];
 const ERA_AT = 1000;
 const http = require('http');
-const XChainHub = require('../../src/XChainHub.js');
+const XChainHub = require('../../../../src/XChainHub.js');
 
 let server, url, reply;
 
@@ -55,10 +55,10 @@ function withAdmissionActivation(height){
     else process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(height);
 
     const out = {
-        ah:     require('../../src/lib/admission_height.js'),
-        act:    require('../../src/mirror_admission_activation.js'),
-        DEX:    require('../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
-        BRIDGE: require('../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
+        ah:     require('../../../../src/lib/admission_height.js'),
+        act:    require('../../../../src/mirror_admission_activation.js'),
+        DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
+        BRIDGE: require('../../../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
         restore(){
             for(const [p, mod] of saved){
                 if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;

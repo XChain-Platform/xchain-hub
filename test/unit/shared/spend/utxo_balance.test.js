@@ -20,7 +20,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { sumUtxosCoins, sumUtxosSatoshis, utxoToCoins, utxoToSatoshis, SATOSHI_PER_COIN } = require('../../src/lib/utxo_balance.js');
+const { sumUtxosCoins, sumUtxosSatoshis, utxoToCoins, utxoToSatoshis, SATOSHI_PER_COIN } = require('../../../../src/lib/utxo_balance.js');
 
 // A list of `n` identical outputs, for the accumulator-drift cases below.
 const repeat = (n, value) => Array.from({ length: n }, () => ({ value }));

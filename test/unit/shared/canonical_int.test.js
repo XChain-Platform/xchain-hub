@@ -18,7 +18,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { isCanonicalInt, allCanonicalInts } = require('../../src/lib/canonical_int.js');
+const { isCanonicalInt, allCanonicalInts } = require('../../../src/lib/canonical_int.js');
 
 describe('canonical_int', function () {
 

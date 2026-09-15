@@ -39,9 +39,9 @@ const fs         = require('fs');
 const os         = require('os');
 const path       = require('path');
 
-const SpendGuard       = require('../../src/lib/spend_guard.js');
-const AttestationRelay = require('../../src/attestation/relay.js');
-const { DB_METHODS } = require('../helpers/mockHub.js');
+const SpendGuard       = require('../../../../src/lib/spend_guard.js');
+const AttestationRelay = require('../../../../src/attestation/relay.js');
+const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
 // A promise plus the handle that settles it, so a test can park a broadcast
 // mid-flight and start a second pass while the first is still awaiting.
@@ -82,7 +82,7 @@ function registerOracleOverlapTest() {
     it('OraclePublisher: two overlapping publish passes spend one window slot, not two', async function () {
         const entry  = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
+        const OraclePublisher = proxyquire('../../../../src/oracle/publisher', {
             fs: fsMock,
             '../peers/encoder_client': function () { return null; }
         });
@@ -121,7 +121,7 @@ function registerOracleDeclineTest() {
     it('OraclePublisher: a declined round leaves no publish-intent row behind', async function () {
         const entry  = { round: 9, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
         const fsMock = makeFsMock(JSON.stringify(entry) + '\n');
-        const OraclePublisher = proxyquire('../../src/oracle/publisher', {
+        const OraclePublisher = proxyquire('../../../../src/oracle/publisher', {
             fs: fsMock,
             '../peers/encoder_client': function () { return null; }
         });

@@ -5,7 +5,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = require('../../src/secret_env');
+const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = require('../../../src/secret_env');
 
 {
 
@@ -149,7 +149,7 @@ const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = requi
 
     {
 
-        const api = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8');
+        const api = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'api.js'), 'utf8');
 
         function doesNotReadAnyAliasedSecretTest25() {
             for (const legacy of Object.keys(SECRET_ENV_ALIASES)) {
@@ -181,7 +181,7 @@ const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = requi
     {
 
         function envExampleUsesTheRedactionSafeTest29() {
-            const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+            const example = fs.readFileSync(path.join(__dirname, '..', '..', '..', '.env.example'), 'utf8');
             for (const [legacy, preferred] of Object.entries(SECRET_ENV_ALIASES)) {
                 assert.ok(!new RegExp('^\\s*#?\\s*' + legacy + '=', 'm').test(example),
                     '.env.example still assigns ' + legacy + '; operators copy this file verbatim');

@@ -26,7 +26,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../src/lib/encoder_utxo_forward.js');
+const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../../../src/lib/encoder_utxo_forward.js');
 
 // Every default-broadcast pipeline that fetches UTXOs and forwards them.
 const CALL_SITES = [
@@ -95,7 +95,7 @@ function registerForwardingShapeTests() {
         // The drift guard. Each publisher fetches its own UTXO set, so a new one that
         // forwards the raw array re-introduces the cap failure on that path alone.
         for (const rel of CALL_SITES) {
-            const src = fs.readFileSync(path.resolve(__dirname, '../../', rel), 'utf8');
+            const src = fs.readFileSync(path.resolve(__dirname, '../../../../', rel), 'utf8');
             // A publisher inside a feature directory reaches the helper through '../lib/'.
             assert.ok(/require\(['"]\.\.?\/lib\/encoder_utxo_forward\.js['"]\)/.test(src),
                 rel + ' does not require the shared UTXO-forward helper');

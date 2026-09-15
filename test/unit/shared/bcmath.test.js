@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const bcmath     = require('../../src/bcmath.js');
+const bcmath     = require('../../../src/bcmath.js');
 
 describe('bcmath string formatting contract', function () {
 

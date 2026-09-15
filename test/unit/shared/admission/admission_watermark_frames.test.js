@@ -4,9 +4,9 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const HubDbBroadcaster = proxyquire('../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
+const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
-const { admitMarginBlocks } = require('../../src/mirror_admission_activation.js');
+const { admitMarginBlocks } = require('../../../../src/mirror_admission_activation.js');
 
 const WINDOWS = {
     XDEX_ROUND_MAX_LIFETIME_MS:           400000,

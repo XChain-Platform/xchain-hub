@@ -18,8 +18,8 @@
 
 const { expect } = require('chai');
 
-const ah  = require('../../src/lib/admission_height.js');
-const act = require('../../src/mirror_admission_activation.js');
+const ah  = require('../../../../src/lib/admission_height.js');
+const act = require('../../../../src/mirror_admission_activation.js');
 
 // ─── arming, because a DEFAULT run must drive BOTH eras ──────────────────────
 //
@@ -37,10 +37,10 @@ const act = require('../../src/mirror_admission_activation.js');
 // asks for it, never to the process, so the rest of this file and the rest of the run still
 // see the tree they were written against.
 const ERA_MODULES = [
-    '../../src/mirror_admission_activation.js',
-    '../../src/lib/admission_height.js',
-    '../../src/cross_chain/dex_engine.js',
-    '../../src/cross_chain/bridge_engine.js'
+    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/lib/admission_height.js',
+    '../../../../src/cross_chain/dex_engine.js',
+    '../../../../src/cross_chain/bridge_engine.js'
 ];
 
 // The regtest producer activation the armed describes below use. A row at this height is an
@@ -60,12 +60,12 @@ function withAdmissionActivation(height){
     else process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(height);
 
     const out = {
-        ah:     require('../../src/lib/admission_height.js'),
-        act:    require('../../src/mirror_admission_activation.js'),
+        ah:     require('../../../../src/lib/admission_height.js'),
+        act:    require('../../../../src/mirror_admission_activation.js'),
         // _canonicalMatch reads nothing off `this`, so it is driven off the prototype rather
         // than through a constructed engine with a hub, a db and a consensus behind it.
-        DEX:    require('../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
-        BRIDGE: require('../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
+        DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype._canonicalMatch,
+        BRIDGE: require('../../../../src/cross_chain/bridge_engine.js').prototype._canonicalMatch,
         restore(){
             for(const [p, mod] of saved){
                 if(mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
