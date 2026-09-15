@@ -120,195 +120,128 @@ function makeOrderPair() {
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
-function registerFeature1constructorPart1() {
-  it('initialises the committed ledger as an empty Map', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    expect(eng.committed).to.be.instanceOf(Map);
-    expect(eng.committed.size).to.equal(0);
-    expect(eng._inflight).to.be.instanceOf(Set);
-  });
-  it('reads per-coin indexer URLs from config', function () {
-    let eng = new CrossChainDexEngine(makeDexHub({
-      p2pConfig: {
-        BTC_INDEXER_URL: 'http://btc/rpc'
-      }
-    }));
-    expect(eng.indexers.BTC.url).to.equal('http://btc/rpc');
-  });
-  it('falls back to DEFAULT_POLL_MS when config is absent', function () {
-    expect(new CrossChainDexEngine(makeDexHub()).pollMs).to.equal(15000);
-  });
-  it('reads XDEX_POLL_MS from env', function () {
-    process.env.XDEX_POLL_MS = '3000';
-    expect(new CrossChainDexEngine(makeDexHub()).pollMs).to.equal(3000);
-  });
-}
-function registerFeature1constructor() {
-  describe('constructor', function () {
-    registerFeature1constructorPart1();
-  });
-}
-function registerFeature2rebuildCommittedPart1() {
-  it('sums finalized-match fills into both legs', async function () {
+function registerFeature14persistCapabilitySnapshotPart1() {
+  it('inserts rows from capability snapshot validators', async function () {
     let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().resolves([{
-      a_chain: 'DOGE',
-      a_action_index: 7,
-      a_amount: '20',
-      b_chain: 'LTC',
-      b_action_index: 1,
-      b_amount: '40'
-    }]);
+    hub.db.doQuery = sinon.stub().resolves([]);
     let eng = new CrossChainDexEngine(hub);
-    await eng.rebuildCommitted();
-    // DOGE:7 gave 20 / received 40 ; LTC:1 gave 40 / received 20
-    expect(eng.committed.get('DOGE:7')).to.deep.equal({
-      give: '20',
-      get: '40'
-    });
-    expect(eng.committed.get('LTC:1')).to.deep.equal({
-      give: '40',
-      get: '20'
-    });
-  });
-
-  // A missing table is the ONE benign rebuild failure: the schema has not been
-  // created, so an empty ledger is genuinely correct and the hub may match.
-  it('treats a missing table as an empty ledger and stays ready', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error("Table 'xchain.cross_chain_matches' doesn't exist"), {
-      errno: 1146,
-      code: 'ER_NO_SUCH_TABLE'
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    expect(await eng.rebuildCommitted()).to.equal(true);
-    expect(eng.committed.size).to.equal(0);
-    expect(eng._committedReady).to.equal(true);
-  });
-
-  // Every other failure must NOT resolve with ZERO reservations: start() would then
-  // match against an empty ledger and re-offer escrow that finalized matches hold.
-}
-function registerFeature2rebuildCommittedPart2() {
-  // Every other failure must NOT resolve with ZERO reservations: start() would then
-  // match against an empty ledger and re-offer escrow that finalized matches hold.
-  it('keeps the previous ledger and goes NOT ready on any other DB failure', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('Lock wait timeout exceeded'), {
-      errno: 1205,
-      code: 'ER_LOCK_WAIT_TIMEOUT'
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    eng.committed.set('LTC:1', {
-      give: '40',
-      get: '20'
-    });
-    expect(await eng.rebuildCommitted()).to.equal(false);
-    expect(eng._committedReady, 'a failed rebuild must not leave the hub matching').to.equal(false);
-    expect(eng.committed.get('LTC:1'), 'the prior reservations must survive').to.deep.equal({
-      give: '40',
-      get: '20'
-    });
-  });
-  it('proposes nothing and refuses to co-sign while the ledger is not ready', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('gone'), {
-      errno: 1205
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    eng.indexers.BTC.url = 'http://btc'; // without this the fetch is unreachable anyway
-    let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({
-      network: 'regtest',
-      orders: []
-    });
-    await eng.rebuildCommitted();
-    await eng._discoverAndMatch();
-    expect(fetch.called, 'a not-ready tick must not even read the books').to.equal(false);
-    expect(await eng.validateProposedMatch({
-      a_chain: 'LTC',
-      b_chain: 'DOGE'
-    })).to.equal(false);
-  });
-}
-function registerFeature2rebuildCommittedPart3() {
-  it('resumes matching once a later rebuild succeeds', async function () {
-    let hub = makeDexHub();
-    let q = sinon.stub();
-    q.onFirstCall().rejects(Object.assign(new Error('gone'), {
-      errno: 1205
-    }));
-    q.resolves([{
-      a_chain: 'DOGE',
-      a_action_index: 7,
-      a_amount: '20',
-      b_chain: 'LTC',
-      b_action_index: 1,
-      b_amount: '40'
-    }]);
-    hub.db.doQuery = q;
-    let eng = new CrossChainDexEngine(hub);
-    eng.indexers.BTC.url = 'http://btc'; // same reachability guard as above
-    let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({
-      network: 'regtest',
-      orders: []
-    });
-    await eng.rebuildCommitted();
-    expect(eng._committedReady).to.equal(false);
-    await eng._discoverAndMatch(); // retries the rebuild on the poll tick
-    expect(eng._committedReady).to.equal(true);
-    expect(eng.committed.get('DOGE:7')).to.deep.equal({
-      give: '20',
-      get: '40'
-    });
-    expect(fetch.called, 'the recovered tick goes on to read the books').to.equal(true);
-  });
-}
-function registerFeature2rebuildCommitted() {
-  describe('rebuildCommitted()', function () {
-    registerFeature2rebuildCommittedPart1();
-    registerFeature2rebuildCommittedPart2();
-    registerFeature2rebuildCommittedPart3();
-  });
-}
-function registerFeature3effectiveRemainingPart1() {
-  it('returns full amounts when nothing is committed', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    let {
-      a
-    } = makeOrderPair();
-    let r = eng.effectiveRemaining(a);
-    expect(r.give).to.equal('100');
-    expect(r.get).to.equal('50');
-  });
-  it('subtracts committed fills and never goes below zero', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    let {
-      a
-    } = makeOrderPair();
-    eng.committed.set('LTC:1', {
-      give: '40',
-      get: '20'
-    });
-    let r = eng.effectiveRemaining(a);
-    expect(r.give).to.equal('60');
-    expect(r.get).to.equal('30');
-  });
-  it('treats an ownership side as a unit (amount 1)', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    let off = {
-      home_coin: 'LTC',
-      action_index: 9,
-      give_ownership: 1,
-      give_amount: '1',
-      get_amount: '5',
-      get_ownership: 0
+    eng.capSnapshot = {
+      getSnapshot: sinon.stub().resolves({
+        validators: [{
+          pubkey: 'pub1',
+          amount: '50000'
+        }]
+      })
     };
-    expect(eng.effectiveRemaining(off).give).to.equal('1');
+    await eng._persistCapabilitySnapshot('cross_chain', 100);
+    expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
   });
 }
-function registerFeature3effectiveRemaining() {
-  describe('effectiveRemaining()', function () {
-    registerFeature3effectiveRemainingPart1();
+function registerFeature14persistCapabilitySnapshotPart2() {
+  it('writeFinalizedMatch persists the snapshot on EVERY hub, not just the leader', async function () {
+    // Bug-C analog: indexers verify match signatures against
+    // capability_snapshots in whichever hub DB they mirror, and a
+    // follower's DB may be the only one they read (leader-only
+    // persistence (quorum-0 inline + broadcastPropose) left follower
+    // DBs without it.
+    let hub = makeDexHub();
+    hub.db.doQuery = sinon.stub().resolves({
+      affectedRows: 1
+    });
+    let eng = new CrossChainDexEngine(hub);
+    let persist = sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
+    let row = {
+      match_id: 'm'.repeat(64),
+      snapshot_block: 150,
+      network: 'regtest',
+      a_chain: 'LTC',
+      a_action_index: 1,
+      a_kind: 'swap',
+      a_tick: 'XCH',
+      a_amount: '100',
+      a_filled_before: '0',
+      a_ownership: 0,
+      a_payout_addr: 'La',
+      b_chain: 'DOGE',
+      b_action_index: 2,
+      b_kind: 'swap',
+      b_tick: 'XCH',
+      b_amount: '500',
+      b_filled_before: '0',
+      b_ownership: 0,
+      b_payout_addr: 'Db',
+      effective_time: 1700000000
+    };
+    await eng.writeFinalizedMatch({
+      row,
+      signatures: [{
+        pubkey: 'a'.repeat(64),
+        sig: '1'.repeat(128)
+      }]
+    });
+    expect(persist.calledWith('cross_chain', 150)).to.be.true;
+  });
+}
+function registerFeature14persistCapabilitySnapshotPart3() {
+  it('does nothing when no validators and _seedLocalValidator=false', async function () {
+    let hub = makeDexHub();
+    hub.db.doQuery = sinon.stub().resolves([]);
+    let eng = new CrossChainDexEngine(hub);
+    eng._seedLocalValidator = false;
+    eng.capSnapshot = {
+      getSnapshot: sinon.stub().resolves({
+        validators: []
+      })
+    };
+    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    expect(hub.db.doQuery.called).to.be.false;
+    expect(n).to.equal(0);
+  });
+
+  // SWQ-TRUNC-MIRROR. The .truncated marker is a JS array property and
+  // capability_snapshots has no column for it, so mirroring a capped set hands the
+  // off-BTC verifiers a partial stake denominator they read back as COMPLETE and
+  // finalize against, while this hub's own meetsStakeThreshold rejects it. Persist
+  // must fail closed instead: no rows, no mirror stream, and the 0 return that the
+  // writeFinalizedMatch caller already treats as "defer this match".
+  it('refuses to persist or mirror a TRUNCATED set', async function () {
+    let hub = makeDexHub();
+    hub.db.doQuery = sinon.stub().resolves([]);
+    let eng = new CrossChainDexEngine(hub);
+    let capped = [{
+      pubkey: 'pub1',
+      source: 'srcA',
+      weight: '50000',
+      amount: '50000'
+    }];
+    capped.truncated = true;
+    sinon.stub(eng, 'resolveCapabilityValidators').resolves(capped);
+    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    expect(n, 'zero rows is the caller\'s fail-closed signal').to.equal(0);
+    expect(hub.db.doQuery.called, 'no capability_snapshots row may be written').to.be.false;
+  });
+  it('still persists an untruncated set (the guard is not a blanket refusal)', async function () {
+    let hub = makeDexHub();
+    hub.db.doQuery = sinon.stub().resolves([]);
+    let eng = new CrossChainDexEngine(hub);
+    let full = [{
+      pubkey: 'pub1',
+      source: 'srcA',
+      weight: '50000',
+      amount: '50000'
+    }];
+    full.truncated = false;
+    sinon.stub(eng, 'resolveCapabilityValidators').resolves(full);
+    let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+    expect(n).to.equal(1);
+    expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
+  });
+}
+function registerFeature14persistCapabilitySnapshot() {
+  describe('_persistCapabilitySnapshot()', function () {
+    registerFeature14persistCapabilitySnapshotPart1();
+    registerFeature14persistCapabilitySnapshotPart2();
+    registerFeature14persistCapabilitySnapshotPart3();
   });
 }
 describe('CrossChainDexEngine', function () {
@@ -323,7 +256,5 @@ describe('CrossChainDexEngine', function () {
   });
 
   // ── Constructor ─────────────────────────────────────────────────────────
-  registerFeature1constructor();
-  registerFeature2rebuildCommitted();
-  registerFeature3effectiveRemaining();
+  registerFeature14persistCapabilitySnapshot();
 });

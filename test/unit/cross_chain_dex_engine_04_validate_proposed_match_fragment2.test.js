@@ -120,195 +120,143 @@ function makeOrderPair() {
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
 
-function registerFeature1constructorPart1() {
-  it('initialises the committed ledger as an empty Map', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    expect(eng.committed).to.be.instanceOf(Map);
-    expect(eng.committed.size).to.equal(0);
-    expect(eng._inflight).to.be.instanceOf(Set);
-  });
-  it('reads per-coin indexer URLs from config', function () {
-    let eng = new CrossChainDexEngine(makeDexHub({
-      p2pConfig: {
-        BTC_INDEXER_URL: 'http://btc/rpc'
-      }
-    }));
-    expect(eng.indexers.BTC.url).to.equal('http://btc/rpc');
-  });
-  it('falls back to DEFAULT_POLL_MS when config is absent', function () {
-    expect(new CrossChainDexEngine(makeDexHub()).pollMs).to.equal(15000);
-  });
-  it('reads XDEX_POLL_MS from env', function () {
-    process.env.XDEX_POLL_MS = '3000';
-    expect(new CrossChainDexEngine(makeDexHub()).pollMs).to.equal(3000);
-  });
+// Build the row finalizeMatch would produce for an ORDER pair.
+function feature10validateProposedMatchFragment2OrderRow(eng, a, b, block) {
+  let d = eng.tryMatch(a, b);
+  return {
+    match_id: eng._deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
+    snapshot_block: block,
+    network: d.network,
+    a_chain: d.lo.home_coin,
+    a_action_index: d.lo.action_index,
+    a_kind: d.loKind,
+    a_tick: d.lo.give_tick,
+    a_amount: d.loFill,
+    a_filled_before: d.loFilledBefore,
+    a_ownership: d.lo.give_ownership,
+    a_payout_addr: d.lo.get_address,
+    a_payout_legs: d.lo.payout_legs || null,
+    b_chain: d.hi.home_coin,
+    b_action_index: d.hi.action_index,
+    b_kind: d.hiKind,
+    b_tick: d.hi.give_tick,
+    b_amount: d.hiFill,
+    b_filled_before: d.hiFilledBefore,
+    b_ownership: d.hi.give_ownership,
+    b_payout_addr: d.hi.get_address,
+    b_payout_legs: d.hi.payout_legs || null,
+    // Honest leaders stamp _nowSeconds() plus a forward propagation margin sized to
+    // the slower leg; validateProposedMatch bounds it ASYMMETRICALLY against the
+    // follower's clock. A far-future stamp would lock both escrows, and a stamp at
+    // or behind now would make the match settleable before it had reached both
+    // chains' indexers (#4202). So: the engine's own clock plus a margin, never a
+    // fixed timestamp.
+    effective_time: eng._nowSeconds() + 600
+  };
 }
-function registerFeature1constructor() {
-  describe('constructor', function () {
-    registerFeature1constructorPart1();
-  });
-}
-function registerFeature2rebuildCommittedPart1() {
-  it('sums finalized-match fills into both legs', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().resolves([{
-      a_chain: 'DOGE',
-      a_action_index: 7,
-      a_amount: '20',
-      b_chain: 'LTC',
-      b_action_index: 1,
-      b_amount: '40'
-    }]);
-    let eng = new CrossChainDexEngine(hub);
-    await eng.rebuildCommitted();
-    // DOGE:7 gave 20 / received 40 ; LTC:1 gave 40 / received 20
-    expect(eng.committed.get('DOGE:7')).to.deep.equal({
-      give: '20',
-      get: '40'
-    });
-    expect(eng.committed.get('LTC:1')).to.deep.equal({
-      give: '40',
-      get: '20'
-    });
-  });
-
-  // A missing table is the ONE benign rebuild failure: the schema has not been
-  // created, so an empty ledger is genuinely correct and the hub may match.
-  it('treats a missing table as an empty ledger and stays ready', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error("Table 'xchain.cross_chain_matches' doesn't exist"), {
-      errno: 1146,
-      code: 'ER_NO_SUCH_TABLE'
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    expect(await eng.rebuildCommitted()).to.equal(true);
-    expect(eng.committed.size).to.equal(0);
-    expect(eng._committedReady).to.equal(true);
-  });
-
-  // Every other failure must NOT resolve with ZERO reservations: start() would then
-  // match against an empty ledger and re-offer escrow that finalized matches hold.
-}
-function registerFeature2rebuildCommittedPart2() {
-  // Every other failure must NOT resolve with ZERO reservations: start() would then
-  // match against an empty ledger and re-offer escrow that finalized matches hold.
-  it('keeps the previous ledger and goes NOT ready on any other DB failure', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('Lock wait timeout exceeded'), {
-      errno: 1205,
-      code: 'ER_LOCK_WAIT_TIMEOUT'
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    eng.committed.set('LTC:1', {
-      give: '40',
-      get: '20'
-    });
-    expect(await eng.rebuildCommitted()).to.equal(false);
-    expect(eng._committedReady, 'a failed rebuild must not leave the hub matching').to.equal(false);
-    expect(eng.committed.get('LTC:1'), 'the prior reservations must survive').to.deep.equal({
-      give: '40',
-      get: '20'
-    });
-  });
-  it('proposes nothing and refuses to co-sign while the ledger is not ready', async function () {
-    let hub = makeDexHub();
-    hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('gone'), {
-      errno: 1205
-    }));
-    let eng = new CrossChainDexEngine(hub);
-    eng.indexers.BTC.url = 'http://btc'; // without this the fetch is unreachable anyway
-    let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({
-      network: 'regtest',
-      orders: []
-    });
-    await eng.rebuildCommitted();
-    await eng._discoverAndMatch();
-    expect(fetch.called, 'a not-ready tick must not even read the books').to.equal(false);
-    expect(await eng.validateProposedMatch({
-      a_chain: 'LTC',
-      b_chain: 'DOGE'
-    })).to.equal(false);
-  });
-}
-function registerFeature2rebuildCommittedPart3() {
-  it('resumes matching once a later rebuild succeeds', async function () {
-    let hub = makeDexHub();
-    let q = sinon.stub();
-    q.onFirstCall().rejects(Object.assign(new Error('gone'), {
-      errno: 1205
-    }));
-    q.resolves([{
-      a_chain: 'DOGE',
-      a_action_index: 7,
-      a_amount: '20',
-      b_chain: 'LTC',
-      b_action_index: 1,
-      b_amount: '40'
-    }]);
-    hub.db.doQuery = q;
-    let eng = new CrossChainDexEngine(hub);
-    eng.indexers.BTC.url = 'http://btc'; // same reachability guard as above
-    let fetch = sinon.stub(eng, 'fetchOpenOffers').resolves({
-      network: 'regtest',
-      orders: []
-    });
-    await eng.rebuildCommitted();
-    expect(eng._committedReady).to.equal(false);
-    await eng._discoverAndMatch(); // retries the rebuild on the poll tick
-    expect(eng._committedReady).to.equal(true);
-    expect(eng.committed.get('DOGE:7')).to.deep.equal({
-      give: '20',
-      get: '40'
-    });
-    expect(fetch.called, 'the recovered tick goes on to read the books').to.equal(true);
-  });
-}
-function registerFeature2rebuildCommitted() {
-  describe('rebuildCommitted()', function () {
-    registerFeature2rebuildCommittedPart1();
-    registerFeature2rebuildCommittedPart2();
-    registerFeature2rebuildCommittedPart3();
-  });
-}
-function registerFeature3effectiveRemainingPart1() {
-  it('returns full amounts when nothing is committed', function () {
+// Cross-chain royalty legs: the canonical is built from the PROPOSED row, so the
+// follower must confirm the row's legs against its own indexer's view of each order.
+const feature10validateProposedMatchFragment2LEGS = JSON.stringify([{
+  to: 'mjrCrhL4qjKo1oGYJb78Lp8GoBiF6yFTZM',
+  bps: 500
+}]);
+function registerFeature10validateProposedMatchFragment2Part1() {
+  // #4204. The indexer's settlement pass rebuilds the signed canonical from the
+  // mirrored BIGINT row, so a leader-supplied '041' for an action index passes
+  // every Number()-based re-derivation here yet finalizes a match no settling
+  // indexer can verify - leaving both escrows locked with nothing to retry.
+  it('returns false for a noncanonical integer spelling on a signed field', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
     let {
-      a
+      a,
+      b
     } = makeOrderPair();
-    let r = eng.effectiveRemaining(a);
-    expect(r.give).to.equal('100');
-    expect(r.get).to.equal('50');
+    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+
+    // The canonical spelling of the same value, as a number or a string, passes.
+    let ok = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+    ok.a_action_index = String(Number(ok.a_action_index));
+    expect(await eng.validateProposedMatch(ok)).to.be.true;
+    for (const field of ['a_action_index', 'b_action_index', 'snapshot_block', 'effective_time']) {
+      let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+      row[field] = '0' + String(Number(row[field]));
+      expect(await eng.validateProposedMatch(row), 'signed a match with a leading-zero ' + field).to.be.false;
+    }
+    let nulled = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+    nulled.a_ownership = null; // signs the literal 'null', persists as 0
+    expect(await eng.validateProposedMatch(nulled)).to.be.false;
   });
-  it('subtracts committed fills and never goes below zero', function () {
+
+  // ── XDEX-GEN-FORGE-1: the per-leg source-reorg fence (a_/b_push_generation) is not
+  // in the signed canonical or match_id, so a follower must re-derive it from its own
+  // offer view or a Byzantine leader can stamp an inflated generation no honest
+  // retraction can ever fence (a match on a rolled-back order that is never retracted).
+  // ── XDEX-GEN-FORGE-1: the per-leg source-reorg fence (a_/b_push_generation) is not
+  // in the signed canonical or match_id, so a follower must re-derive it from its own
+  // offer view or a Byzantine leader can stamp an inflated generation no honest
+  // retraction can ever fence (a match on a rolled-back order that is never retracted).
+  it('returns true when the proposed push_generation matches our own offer view', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
     let {
-      a
+      a,
+      b
     } = makeOrderPair();
-    eng.committed.set('LTC:1', {
-      give: '40',
-      get: '20'
-    });
-    let r = eng.effectiveRemaining(a);
-    expect(r.give).to.equal('60');
-    expect(r.get).to.equal('30');
-  });
-  it('treats an ownership side as a unit (amount 1)', function () {
-    let eng = new CrossChainDexEngine(makeDexHub());
-    let off = {
-      home_coin: 'LTC',
-      action_index: 9,
-      give_ownership: 1,
-      give_amount: '1',
-      get_amount: '5',
-      get_ownership: 0
-    };
-    expect(eng.effectiveRemaining(off).give).to.equal('1');
+    // a=LTC (row b-leg / desc.hi), b=DOGE (row a-leg / desc.lo) since 'DOGE' < 'LTC'.
+    b.push_generation = 3;
+    a.push_generation = 5;
+    let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+    row.a_push_generation = 3;
+    row.b_push_generation = 5;
+    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    expect(await eng.validateProposedMatch(row)).to.be.true;
   });
 }
-function registerFeature3effectiveRemaining() {
-  describe('effectiveRemaining()', function () {
-    registerFeature3effectiveRemainingPart1();
+function registerFeature10validateProposedMatchFragment2Part2() {
+  it('returns false when the leader inflates a_push_generation (forged reorg fence)', async function () {
+    let eng = new CrossChainDexEngine(makeDexHub());
+    let {
+      a,
+      b
+    } = makeOrderPair();
+    b.push_generation = 3;
+    a.push_generation = 5;
+    let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+    // Everything re-derives identically; only the fence is inflated to a value no
+    // honest retraction_generation can reach, escaping retraction forever.
+    row.a_push_generation = 9007199254740992; // 2^53
+    row.b_push_generation = 5;
+    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    expect(await eng.validateProposedMatch(row)).to.be.false;
+  });
+  it('returns false when the leader inflates b_push_generation', async function () {
+    let eng = new CrossChainDexEngine(makeDexHub());
+    let {
+      a,
+      b
+    } = makeOrderPair();
+    b.push_generation = 3;
+    a.push_generation = 5;
+    let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
+    row.a_push_generation = 3;
+    row.b_push_generation = 42; // does not match a.push_generation (5)
+    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    expect(await eng.validateProposedMatch(row)).to.be.false;
+  });
+  it('treats absent generations as 0 on both sides (legacy indexer parity)', async function () {
+    let eng = new CrossChainDexEngine(makeDexHub());
+    let {
+      a,
+      b
+    } = makeOrderPair();
+    let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100); // no push_generation set anywhere → 0 === 0
+    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    expect(await eng.validateProposedMatch(row)).to.be.true;
+  });
+}
+function registerFeature10validateProposedMatchFragment2() {
+  describe('validateProposedMatch()', function () {
+    registerFeature10validateProposedMatchFragment2Part1();
+    registerFeature10validateProposedMatchFragment2Part2();
   });
 }
 describe('CrossChainDexEngine', function () {
@@ -323,7 +271,5 @@ describe('CrossChainDexEngine', function () {
   });
 
   // ── Constructor ─────────────────────────────────────────────────────────
-  registerFeature1constructor();
-  registerFeature2rebuildCommitted();
-  registerFeature3effectiveRemaining();
+  registerFeature10validateProposedMatchFragment2();
 });
