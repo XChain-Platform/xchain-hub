@@ -16,10 +16,10 @@ const Database   = require('../../../src/db');
 const { runExperiment }      = require('../helpers/chaosRunner');
 const { expectCircuitState } = require('../helpers/steadyStateChecker');
 
-describe('Chaos: DB Flapping Connection (DB-5)', function () {
-    this.timeout(30000);
 
-    let db, poolStub, mockConn;
+
+let db, poolStub, mockConn;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         db = Object.create(Database.prototype);
@@ -44,10 +44,16 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerBriefOutageThresholdDoesNotOpenTest() {
 
     it('brief outage (< threshold) does not open circuit breaker', async function () {
         // Fail 5 times (below threshold of 10) then succeed
@@ -62,6 +68,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expectCircuitState(db, 'closed');
         expect(db.circuitFailures).to.equal(0);
     });
+}
+
+function registerSustainedOutageThresholdOpensCircuitBreakerTest() {
 
     it('sustained outage (>= threshold) opens circuit breaker', async function () {
         // All calls reject
@@ -78,6 +87,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expectCircuitState(db, 'open');
         expect(db.circuitFailures).to.be.gte(db.circuitThreshold);
     });
+}
+
+function registerSuccessfulQueryResetsFailureCountToTest() {
 
     it('successful query resets failure count to zero', async function () {
         // Fail a few times then succeed
@@ -90,6 +102,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expect(db.circuitFailures).to.equal(0);
         expectCircuitState(db, 'closed');
     });
+}
+
+function registerMultipleQueriesEachResetFailureCountTest() {
 
     it('multiple queries each reset failure count independently', async function () {
         // Query 1: 3 failures then success
@@ -108,6 +123,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expect(db.circuitFailures).to.equal(0);
         expectCircuitState(db, 'closed');
     });
+}
+
+function registerFlappingAfterCircuitOpenRecoveryThroughTest() {
 
     it('flapping after circuit open: recovery through half-open', async function () {
         // Force circuit open with expired cooldown
@@ -122,6 +140,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expectCircuitState(db, 'closed');
         expect(db.circuitFailures).to.equal(0);
     });
+}
+
+function registerFlappingAfterCircuitOpenHalfOpenTest() {
 
     it('flapping after circuit open: half-open fails, re-opens', async function () {
         db.circuitState     = 'open';
@@ -141,6 +162,9 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expectCircuitState(db, 'open');
         expect(db.circuitOpenUntil).to.be.gt(Date.now() - 100);
     });
+}
+
+function registerCircuitBreakerDoesNotLeakFailuresTest() {
 
     it('circuit breaker does not leak failures across successful queries', async function () {
         // Use a counter-based stub to avoid onCall issues
@@ -170,4 +194,16 @@ describe('Chaos: DB Flapping Connection (DB-5)', function () {
         expect(db.circuitFailures).to.equal(0);
         expectCircuitState(db, 'closed');
     });
+}
+describe('Chaos: DB Flapping Connection (DB-5)', function () {
+    this.timeout(30000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerBriefOutageThresholdDoesNotOpenTest();
+    registerSustainedOutageThresholdOpensCircuitBreakerTest();
+    registerSuccessfulQueryResetsFailureCountToTest();
+    registerMultipleQueriesEachResetFailureCountTest();
+    registerFlappingAfterCircuitOpenRecoveryThroughTest();
+    registerFlappingAfterCircuitOpenHalfOpenTest();
+    registerCircuitBreakerDoesNotLeakFailuresTest();
 });
