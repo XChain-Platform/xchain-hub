@@ -143,46 +143,10 @@ async function fireAndClassify(consensus, pub, mirror, rid, blockIndex) {
     return result;
 }
 
-describe('ATTEST response era partition: publisher XOR mirror, never both, never neither', function () {
+let originalRegtestHeight;
 
-    let originalRegtestHeight;
-
-    // Regtest ships armed at genesis (height 0), which leaves no room to drive
-    // a genuine below-the-height case. The activation map is a plain object,
-    // not frozen, so a local, restored-after height gives the sweep a real
-    // boundary to cross without touching the frozen protocol constant itself.
-    before(function () {
-        originalRegtestHeight = activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest;
-        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = 100;
-    });
-
-    after(function () {
-        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = originalRegtestHeight;
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
-    it('below the activation height: the publisher queues, the mirror stays silent', async function () {
-        let { consensus, pub, mirror } = buildEngines();
-        await pub.start(); await mirror.start();
-        let { queued, mirrored } = await fireAndClassify(consensus, pub, mirror, '11'.repeat(32), 50);
-        expect(queued).to.equal(true);
-        expect(mirrored).to.equal(false);
-        fs.unlinkSync(pub.queuePath);
-    });
-
-    it('at the activation height: the mirror writes, the publisher stays silent', async function () {
-        let { consensus, pub, mirror } = buildEngines();
-        await pub.start(); await mirror.start();
-        let { queued, mirrored } = await fireAndClassify(consensus, pub, mirror, '22'.repeat(32), 100);
-        expect(queued).to.equal(false);
-        expect(mirrored).to.equal(true);
-        fs.unlinkSync(pub.queuePath);
-    });
-
-    it('above the activation height: the mirror writes, the publisher stays silent', async function () {
+function registerResponseEraSweepTests() {
+it('above the activation height: the mirror writes, the publisher stays silent', async function () {
         let { consensus, pub, mirror } = buildEngines();
         await pub.start(); await mirror.start();
         let { queued, mirrored } = await fireAndClassify(consensus, pub, mirror, '33'.repeat(32), 250);
@@ -204,4 +168,49 @@ describe('ATTEST response era partition: publisher XOR mirror, never both, never
         }
         fs.unlinkSync(pub.queuePath);
     });
+}
+
+function registerResponseEraBoundaryTests() {
+it('below the activation height: the publisher queues, the mirror stays silent', async function () {
+        let { consensus, pub, mirror } = buildEngines();
+        await pub.start(); await mirror.start();
+        let { queued, mirrored } = await fireAndClassify(consensus, pub, mirror, '11'.repeat(32), 50);
+        expect(queued).to.equal(true);
+        expect(mirrored).to.equal(false);
+        fs.unlinkSync(pub.queuePath);
+    });
+
+    it('at the activation height: the mirror writes, the publisher stays silent', async function () {
+        let { consensus, pub, mirror } = buildEngines();
+        await pub.start(); await mirror.start();
+        let { queued, mirrored } = await fireAndClassify(consensus, pub, mirror, '22'.repeat(32), 100);
+        expect(queued).to.equal(false);
+        expect(mirrored).to.equal(true);
+        fs.unlinkSync(pub.queuePath);
+    });
+}
+
+describe('ATTEST response era partition: publisher XOR mirror, never both, never neither', function () {
+
+
+    // Regtest ships armed at genesis (height 0), which leaves no room to drive
+    // a genuine below-the-height case. The activation map is a plain object,
+    // not frozen, so a local, restored-after height gives the sweep a real
+    // boundary to cross without touching the frozen protocol constant itself.
+    before(function () {
+        originalRegtestHeight = activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest;
+        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = 100;
+    });
+
+    after(function () {
+        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = originalRegtestHeight;
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    registerResponseEraBoundaryTests();
+
+    registerResponseEraSweepTests();
 });
