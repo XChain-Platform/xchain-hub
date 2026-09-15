@@ -17,9 +17,9 @@ const SwapTracker    = require('../../src/cross_chain/swap_tracker');
 const { createMockHub }     = require('../helpers/mockHub');
 const { waitUntil }         = require('../helpers/waitUntil');
 
-describe('SwapTracker', function () {
+let hub, st, crossChainEngine;
 
-    let hub, st, crossChainEngine;
+describe('SwapTracker', function () {
 
     beforeEach(function () {
         hub = createMockHub();
@@ -31,6 +31,16 @@ describe('SwapTracker', function () {
         st.stop(crossChainEngine);
         sinon.restore();
     });
+
+    registerSwapLifecycleTests();
+    registerSwapCreationTests();
+    registerSwapReadTests();
+    registerSwapListTests();
+    registerSwapFinalizationTests();
+    registerSwapAutoProgressTests();
+});
+
+function registerSwapLifecycleTests() {
 
     // -----------------------------------------------------------------
     // start() / stop()
@@ -52,6 +62,9 @@ describe('SwapTracker', function () {
             expect(() => st.start(null)).to.not.throw();
         });
     });
+}
+
+function registerSwapCreationTests() {
 
     // -----------------------------------------------------------------
     // initiateSwap()
@@ -74,6 +87,9 @@ describe('SwapTracker', function () {
             expect(args[1][3]).to.be.null;
         });
     });
+}
+
+function registerSwapReadTests() {
 
     // -----------------------------------------------------------------
     // getSwap()
@@ -92,6 +108,9 @@ describe('SwapTracker', function () {
             expect(result).to.be.null;
         });
     });
+}
+
+function registerSwapListTests() {
 
     // -----------------------------------------------------------------
     // getSwaps()
@@ -112,6 +131,9 @@ describe('SwapTracker', function () {
             expect(hub.db.doQuery.getCall(0).args[0]).to.not.include("status = ?");
         });
     });
+}
+
+function registerSwapFinalizationTests() {
 
     // -----------------------------------------------------------------
     // onAttestationFinalized()
@@ -169,6 +191,9 @@ describe('SwapTracker', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
     });
+}
+
+function registerSwapAutoProgressTests() {
 
     // -----------------------------------------------------------------
     // Event-driven auto-progress
@@ -194,4 +219,4 @@ describe('SwapTracker', function () {
             expect(hub.db.doQuery.callCount).to.equal(2);
         });
     });
-});
+}
