@@ -39,17 +39,19 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
+let meshes = [];
+
 describe('StateCheckpointEngine cadence latch', function () {
-
-    let meshes = [];
-
     afterEach(async function () {
         for (let bus of meshes) { for (let nd of bus.nodes) await nd.engine.stop(); }
         meshes = [];
     });
 
+    registerCadenceLatchTests();
+});
+
     // Minimal in-memory state_checkpoints + capability_snapshots store.
-    function memDb() {
+function memDb() {
         let checkpoints = [], snapshots = [];
         return { ...DB_METHODS,
             checkpoints, snapshots,
@@ -98,7 +100,7 @@ describe('StateCheckpointEngine cadence latch', function () {
     }
 
     // n engines over one in-process gossip bus; bus.btcBlock drives the election.
-    function buildMesh(n) {
+function buildMesh(n) {
         let bus = { nodes: [], btcBlock: 100 };
         let identities = [];
         for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)));
@@ -137,6 +139,7 @@ describe('StateCheckpointEngine cadence latch', function () {
         return bus;
     }
 
+function registerCadenceLatchTests() {
     it('N=3: the federation checkpoints once per CHECKPOINT_INTERVAL_BLOCKS, not once per leader rotation', async function () {
         let bus = buildMesh(3);
         for (let nd of bus.nodes) await nd.engine.start();
@@ -191,4 +194,4 @@ describe('StateCheckpointEngine cadence latch', function () {
         await nd.engine.acceptFinalized(older, [], 1, false);
         expect(nd.engine._lastCheckpointBtcBlock, 'latch is monotonic').to.equal(200);
     });
-});
+}
