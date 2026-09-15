@@ -24,6 +24,12 @@ describe('SpendCeiling (item 2676)', function () {
         delete process.env.TESTPFX_SPEND_WINDOW_MS;
     });
 
+    registerSpendCeilingLimitTests();
+    registerSpendCeilingWindowTests();
+});
+
+function registerSpendCeilingLimitTests() {
+
     it('is disabled by default (no cap configured) and always allows', function () {
         const sc = new SpendCeiling('TESTPFX', {});
         expect(sc.disabled).to.equal(true);
@@ -43,6 +49,9 @@ describe('SpendCeiling (item 2676)', function () {
         const sc = new SpendCeiling('TESTPFX', { TESTPFX_MAX_PUBLISHES_PER_WINDOW: '2' });
         expect(sc.maxPerWindow).to.equal(2);
     });
+}
+
+function registerSpendCeilingWindowTests() {
 
     it('allows up to the cap then blocks within the window', function () {
         const sc = new SpendCeiling('TESTPFX', { TESTPFX_MAX_PUBLISHES_PER_WINDOW: '2', TESTPFX_SPEND_WINDOW_MS: '100000' });
@@ -80,4 +89,4 @@ describe('SpendCeiling (item 2676)', function () {
         expect(new SpendCeiling('TESTPFX', { TESTPFX_MAX_PUBLISHES_PER_WINDOW: '-5' }).disabled).to.equal(true);
         expect(new SpendCeiling('TESTPFX', { TESTPFX_MAX_PUBLISHES_PER_WINDOW: 'abc' }).disabled).to.equal(true);
     });
-});
+}
