@@ -19,42 +19,120 @@ const { waitUntil }     = require('../helpers/waitUntil');
 const { waitForAttestation, waitForSwapStatus } = require('./helpers/waitFor');
 const { assertAttestationStored, assertSwapStatus } = require('./helpers/dbAssertions');
 
-describe('E2E: Cross-Chain Attestation Pipeline', function () {
+let cluster;
 
-    let cluster;
+function swapQueriesSuite() {
 
-    before(async function () {
-        this.timeout(15000);
-        try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable: skipping E2E attestation tests');
-            return;
-        }
-        priceMocks.setup();
-    });
+        it('getswaps returns swaps filtered by status', async function () {
+            this.timeout(15000);
 
-    after(async function () {
-        this.timeout(10000);
-        priceMocks.teardown();
-        await testDb.teardown();
-    });
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
 
-    beforeEach(async function () {
-        this.timeout(15000);
-        if (!testDb.isAvailable()) return this.skip();
-        await testDb.truncateAll();
-        priceMocks.reset();
-    });
+            // Create 2 swaps
+            await callRpc(port, 'initiateswap', { source_chain: 'BTC', source_action_index: 100, dest_chain: 'LTC' });
+            await callRpc(port, 'initiateswap', { source_chain: 'BTC', source_action_index: 200, dest_chain: 'DOGE' });
 
-    afterEach(async function () {
-        this.timeout(10000);
-        if (cluster) {
-            await cluster.stop();
-            cluster = null;
-        }
-    });
+            // Attest the first and manually progress the swap
+            await callRpc(port, 'requestattestation', { source_chain: 'BTC', source_action_index: 100, dest_chain: 'LTC' });
+            let hub = cluster.getHub(0);
+            await hub.swapTracker.updateSwapStatus('BTC', 100, 'attested', 'BTC:100:LTC');
 
-    // E2E-ATTEST-001: Request attestation → single-node finalization → retrieve
-    describe('E2E-ATTEST-001: Single-node attestation lifecycle', function () {
+            let initiated = await callRpc(port, 'getswaps', { status: 'initiated' });
+            expect(initiated.result).to.be.an('array');
+            expect(initiated.result.some(s => s.source_action_index === 200)).to.be.true;
+
+            let attested = await callRpc(port, 'getswaps', { status: 'attested' });
+            expect(attested.result).to.be.an('array');
+            expect(attested.result.some(s => s.source_action_index === 100)).to.be.true;
+        });
+    }
+
+function swapLifecycleSuiteTests1() {
+it('swap initiates and attestation creates matching records', async function () {
+            this.timeout(15000);
+
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
+
+            // Step 1: Initiate a swap
+            let swapRes = await callRpc(port, 'initiateswap', {
+                source_chain: 'BTC',
+                source_action_index: 5000,
+                dest_chain: 'LTC',
+                dest_action_index: 6000
+            });
+            expect(swapRes.result.status).to.equal('success');
+
+            // Verify swap is in 'initiated' state
+            let swap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 5000 });
+            expect(swap.result.status).to.equal('initiated');
+            expect(swap.result.source_chain).to.equal('BTC');
+            expect(swap.result.dest_chain).to.equal('LTC');
+
+            // Step 2: Request attestation for the same source action
+            let attRes = await callRpc(port, 'requestattestation', {
+                source_chain: 'BTC',
+                source_action_index: 5000,
+                dest_chain: 'LTC'
+            });
+            expect(attRes.result.status).to.equal('attested');
+            expect(attRes.result.attestationId).to.equal('BTC:5000:LTC');
+
+            // Step 3: Manually progress the swap. Single-node mode doesn't emit
+            // attestation:finalized in the fallback path (this is a known limitation)
+            let hub = cluster.getHub(0);
+            await hub.swapTracker.updateSwapStatus('BTC', 5000, 'attested', 'BTC:5000:LTC');
+
+            let updatedSwap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 5000 });
+            expect(updatedSwap.result.status).to.equal('attested');
+            expect(updatedSwap.result.attestation_id).to.equal('BTC:5000:LTC');
+        });
+}
+
+function swapLifecycleSuiteTests2() {
+it('swap without matching attestation stays in initiated state', async function () {
+            this.timeout(15000);
+
+            cluster = createCluster(1);
+            await cluster.start();
+            let port = cluster.getPort(0);
+
+            // Initiate a swap
+            await callRpc(port, 'initiateswap', {
+                source_chain: 'BTC', source_action_index: 7000, dest_chain: 'LTC'
+            });
+
+            // Attest a DIFFERENT source action
+            await callRpc(port, 'requestattestation', {
+                source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
+            });
+
+            // The unrelated attestation is stored before it could touch any swap, so its
+            // own row is the point after which "the other swap is untouched" is decided.
+            await waitUntil(async () => {
+                let att = await callRpc(port, 'getattestation', {
+                    source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
+                });
+                return att.result && att.result.attestation_id;
+            }, { timeoutMs: 8000, label: 'the unrelated attestation to be stored' });
+
+            // Swap should still be initiated
+            let swap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 7000 });
+            expect(swap.result.status).to.equal('initiated');
+        });
+}
+
+function swapLifecycleSuite() {
+
+        swapLifecycleSuiteTests1();
+
+        swapLifecycleSuiteTests2();
+    }
+
+function attestationLifecycleSuite() {
 
         it('creates and finalizes an attestation in single-node mode', async function () {
             this.timeout(15000);
@@ -103,110 +181,50 @@ describe('E2E: Cross-Chain Attestation Pipeline', function () {
             expect(all.result).to.be.an('array');
             expect(all.result.length).to.equal(3);
         });
+    }
+
+function attestationPipelineSuite() {
+
+
+
+    before(async function () {
+        this.timeout(15000);
+        try { await testDb.setup(); } catch (e) {
+            console.warn('MariaDB unavailable: skipping E2E attestation tests');
+            return;
+        }
+        priceMocks.setup();
     });
+
+    after(async function () {
+        this.timeout(10000);
+        priceMocks.teardown();
+        await testDb.teardown();
+    });
+
+    beforeEach(async function () {
+        this.timeout(15000);
+        if (!testDb.isAvailable()) return this.skip();
+        await testDb.truncateAll();
+        priceMocks.reset();
+    });
+
+    afterEach(async function () {
+        this.timeout(10000);
+        if (cluster) {
+            await cluster.stop();
+            cluster = null;
+        }
+    });
+
+    // E2E-ATTEST-001: Request attestation → single-node finalization → retrieve
+    describe('E2E-ATTEST-001: Single-node attestation lifecycle', attestationLifecycleSuite);
 
     // E2E-ATTEST-003: SWAP lifecycle (initiation through attestation phase)
-    describe('E2E-ATTEST-003: SWAP lifecycle', function () {
-
-        it('swap initiates and attestation creates matching records', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-
-            // Step 1: Initiate a swap
-            let swapRes = await callRpc(port, 'initiateswap', {
-                source_chain: 'BTC',
-                source_action_index: 5000,
-                dest_chain: 'LTC',
-                dest_action_index: 6000
-            });
-            expect(swapRes.result.status).to.equal('success');
-
-            // Verify swap is in 'initiated' state
-            let swap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 5000 });
-            expect(swap.result.status).to.equal('initiated');
-            expect(swap.result.source_chain).to.equal('BTC');
-            expect(swap.result.dest_chain).to.equal('LTC');
-
-            // Step 2: Request attestation for the same source action
-            let attRes = await callRpc(port, 'requestattestation', {
-                source_chain: 'BTC',
-                source_action_index: 5000,
-                dest_chain: 'LTC'
-            });
-            expect(attRes.result.status).to.equal('attested');
-            expect(attRes.result.attestationId).to.equal('BTC:5000:LTC');
-
-            // Step 3: Manually progress the swap. Single-node mode doesn't emit
-            // attestation:finalized in the fallback path (this is a known limitation)
-            let hub = cluster.getHub(0);
-            await hub.swapTracker.updateSwapStatus('BTC', 5000, 'attested', 'BTC:5000:LTC');
-
-            let updatedSwap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 5000 });
-            expect(updatedSwap.result.status).to.equal('attested');
-            expect(updatedSwap.result.attestation_id).to.equal('BTC:5000:LTC');
-        });
-
-        it('swap without matching attestation stays in initiated state', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-
-            // Initiate a swap
-            await callRpc(port, 'initiateswap', {
-                source_chain: 'BTC', source_action_index: 7000, dest_chain: 'LTC'
-            });
-
-            // Attest a DIFFERENT source action
-            await callRpc(port, 'requestattestation', {
-                source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
-            });
-
-            // The unrelated attestation is stored before it could touch any swap, so its
-            // own row is the point after which "the other swap is untouched" is decided.
-            await waitUntil(async () => {
-                let att = await callRpc(port, 'getattestation', {
-                    source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
-                });
-                return att.result && att.result.attestation_id;
-            }, { timeoutMs: 8000, label: 'the unrelated attestation to be stored' });
-
-            // Swap should still be initiated
-            let swap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 7000 });
-            expect(swap.result.status).to.equal('initiated');
-        });
-    });
+    describe('E2E-ATTEST-003: SWAP lifecycle', swapLifecycleSuite);
 
     // E2E-ATTEST: getswaps filtered by status
-    describe('E2E-ATTEST: Swap queries', function () {
+    describe('E2E-ATTEST: Swap queries', swapQueriesSuite);
+}
 
-        it('getswaps returns swaps filtered by status', async function () {
-            this.timeout(15000);
-
-            cluster = createCluster(1);
-            await cluster.start();
-            let port = cluster.getPort(0);
-
-            // Create 2 swaps
-            await callRpc(port, 'initiateswap', { source_chain: 'BTC', source_action_index: 100, dest_chain: 'LTC' });
-            await callRpc(port, 'initiateswap', { source_chain: 'BTC', source_action_index: 200, dest_chain: 'DOGE' });
-
-            // Attest the first and manually progress the swap
-            await callRpc(port, 'requestattestation', { source_chain: 'BTC', source_action_index: 100, dest_chain: 'LTC' });
-            let hub = cluster.getHub(0);
-            await hub.swapTracker.updateSwapStatus('BTC', 100, 'attested', 'BTC:100:LTC');
-
-            let initiated = await callRpc(port, 'getswaps', { status: 'initiated' });
-            expect(initiated.result).to.be.an('array');
-            expect(initiated.result.some(s => s.source_action_index === 200)).to.be.true;
-
-            let attested = await callRpc(port, 'getswaps', { status: 'attested' });
-            expect(attested.result).to.be.an('array');
-            expect(attested.result.some(s => s.source_action_index === 100)).to.be.true;
-        });
-    });
-});
+describe('E2E: Cross-Chain Attestation Pipeline', attestationPipelineSuite);
