@@ -42,7 +42,7 @@ function registerBundleWireCases() {
     it('v0 bundle payload matches the ANCHOR spec field order', function () {
         let bus = buildMesh(1);
         let row = Object.assign({}, CP_ROW, { validator_signatures: '[{"pubkey":"pk1","sig":"sg1"}]' });
-        let payload = bus.nodes[0].pub._buildV7Payload([row], 'pub1', [{ pubkey: 'ap1', sig: 'as1' }]);
+        let payload = bus.nodes[0].pub.buildV7Payload([row], 'pub1', [{ pubkey: 'ap1', sig: 'as1' }]);
         expect(payload).to.equal(['ANCHOR', '0', 'regtest', '100', '1',
             'BTC', '494', CP_ROW.block_hash, CP_ROW.ledger_hash, CP_ROW.actions_hash, CP_ROW.contract_hash,
             '7', '100', CP_ROW.state_root, '1', CP_ROW.block_merkle_root, '1',
@@ -98,18 +98,18 @@ function registerBundleWireCases() {
 // asserts the OTHER half of (xchain-indexer test/unit/actions/anchor_golden_vectors.test.js,
 // same anchor_canonical_vectors.json). A field reorder in either repo breaks its own
 // side against the shared frozen string. The builder is invoked via the prototype
-// with a _parseSigs stub so this needs no mesh/DB.
+// with a parseSigs stub so this needs no mesh/DB.
 // See protocol/test-vectors/anchor_canonical.json.
 function registerFrozenWireVectors() {
     describe('frozen ANCHOR canonical wire vectors (hub producer side)', function () {
         const GOLDEN = require('../../../fixtures/anchor_canonical_vectors.json');
-        const stub = { _parseSigs: StateAnchorPublisher.prototype._parseSigs };
+        const stub = { parseSigs: StateAnchorPublisher.prototype.parseSigs };
         // The builder reads validator_signatures as a JSON string off each row.
         const sections = GOLDEN.fixture.bundle.sections.map(sec =>
             Object.assign({}, sec, { validator_signatures: JSON.stringify(sec.validator_signatures) }));
         const pub = GOLDEN.fixture.bundle.publisher;
         const att = GOLDEN.fixture.bundle.attest_sigs;
-        const build = (secs) => StateAnchorPublisher.prototype._buildV7Payload.call(stub, secs, pub, att);
+        const build = (secs) => StateAnchorPublisher.prototype.buildV7Payload.call(stub, secs, pub, att);
 
         it('v0 builder reproduces the frozen vector byte-for-byte', function () {
             expect(build(sections)).to.equal(GOLDEN.vectors.v0);

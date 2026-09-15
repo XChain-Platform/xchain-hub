@@ -25,7 +25,7 @@ const { CP_ROW, parseV7Sections, parseV7Tail, buildMesh, v0Order, mkBundleDone, 
         registerMeshHooks } = require('../../../helpers/anchor_mesh.js');
 
 // Independent reimplementation of the indexer's Anchor._rewardCanonical for the
-// bundle family: the hub's _attestationCanonical MUST be byte-identical to this,
+// bundle family: the hub's attestationCanonical MUST be byte-identical to this,
 // or the derived reward forks. SIX positional fields, with round_reference and
 // snapshot_block both the bundle block (D22), so slash.js still reads
 // snapshot_block at index 3.
@@ -68,7 +68,7 @@ function registerBundleAttestationRound() {
 
 // The reward canonical and the self-attested single-node bundle.
 function registerAttestationCanonicalCases() {
-    it('_attestationCanonical is byte-identical to the indexer reward canonical (EQUIV-wrapped)', function () {
+    it('attestationCanonical is byte-identical to the indexer reward canonical (EQUIV-wrapped)', function () {
         let bus = buildMesh(1);
         let pub = bus.nodes[0].pub;
         let b   = { network: CP_ROW.network, snapshot_block: CP_ROW.snapshot_block };
@@ -78,10 +78,10 @@ function registerAttestationCanonicalCases() {
         expect(expected).to.equal(
             'EQUIV|XCHECKPOINT|XANCPUB|bundle|regtest|100|0||XANCPUB|anchor_bundle|100|100|' +
             publisher + '|10.00000000');
-        expect(pub._attestationCanonical(b, publisher)).to.equal(expected);
+        expect(pub.attestationCanonical(b, publisher)).to.equal(expected);
         // Disjoint from the archive family, so the two can never equivocation-collide.
         expect(expected).to.not.equal(
-            pub._archiveAttestationCanonical({ network: b.network, snapshot_block: b.snapshot_block }, 0, publisher));
+            pub.archiveAttestationCanonical({ network: b.network, snapshot_block: b.snapshot_block }, 0, publisher));
     });
 
     it('single-node: flush emits ANCHOR v0 with a self-attestation the indexer can verify', async function () {
@@ -122,8 +122,8 @@ function registerBudgetAndBalanceCases() {
         // Only the final build carries a non-empty attestation tail (v7Bytes always
         // measures with an empty one), so inflating on that condition leaves the
         // splitter's estimate untouched: exactly the low-estimate shape.
-        let realBuild = nd.pub._buildV7Payload.bind(nd.pub);
-        nd.pub._buildV7Payload = function (secs, publisher, attestSigs) {
+        let realBuild = nd.pub.buildV7Payload.bind(nd.pub);
+        nd.pub.buildV7Payload = function (secs, publisher, attestSigs) {
             let p = realBuild(secs, publisher, attestSigs);
             return (attestSigs && attestSigs.length > 0) ? p + 'x'.repeat(9000) : p;
         };
@@ -300,7 +300,7 @@ function registerImpostorCase() {
         let order   = v0Order(bus);
         let impostor = order[order.length - 1];                        // highest rank, never unlocked at since=0
         let cp = impostor.pub.cpFromRow(impostor.db.checkpoints[0]);
-        let canonical = impostor.pub._attestationCanonical(cp, impostor.pubkey);
+        let canonical = impostor.pub.attestationCanonical(cp, impostor.pubkey);
 
         let collected = 0;
         let origBroadcast = impostor.pub.peerManager.broadcast;

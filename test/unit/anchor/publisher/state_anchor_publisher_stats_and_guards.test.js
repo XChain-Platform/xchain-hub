@@ -82,7 +82,7 @@ describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stabl
         return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
     }
     function capSnaps(pub, set) {
-        pub._resolveCapabilitySet = async () => set.map(r => Object.assign({}, r));
+        pub.resolveCapabilitySet = async () => set.map(r => Object.assign({}, r));
         return pub.buildArchive('regtest', 1, [], 100, [], [])
             .then(a => JSON.parse(a.json).capability_snapshots
                 .map(s => s.signing_pubkey + '|' + s.source));
@@ -116,7 +116,7 @@ describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stabl
 
 // stop() must settle the archive-attestation round's awaited promise, mirroring
 // the v4/v5 _attestRound teardown (#2360). Without it a stop() mid-round leaves
-// _publishArchive hung on a promise only an unref'd timer could ever settle.
+// publishArchive hung on a promise only an unref'd timer could ever settle.
 describe('StateAnchorPublisher stop() archive-attestation teardown (#2360)', function () {
     function barePub() {
         return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
@@ -129,7 +129,7 @@ describe('StateAnchorPublisher stop() archive-attestation teardown (#2360)', fun
         if (timer.unref) timer.unref();
         pub._archiveAttestRound = { done: false, timer: timer, resolve: (v) => { settled = v; } };
         await pub.stop();
-        expect(settled, 'awaiting _publishArchive is unblocked on shutdown').to.deep.equal({ met: false, sigs: [] });
+        expect(settled, 'awaiting publishArchive is unblocked on shutdown').to.deep.equal({ met: false, sigs: [] });
         expect(pub._archiveAttestRound, 'field nulled').to.equal(null);
     });
 

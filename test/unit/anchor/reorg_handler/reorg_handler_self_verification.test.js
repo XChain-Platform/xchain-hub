@@ -188,7 +188,7 @@ function registerRoundBlockTimeCases() {
 
         let ts = blockTime - rh.timestampSkewToleranceMs - 60000;
         let reorgId = 'BTC:500:' + ts;
-        let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
         await rh.handlePrepare({
             sender: VALIDATORS_4[1].addr,
             data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
@@ -278,7 +278,7 @@ function registerInboundPrepareGuardCases() {
         let verify = stubVerified(true);
         let ts = Date.now();
         let reorgId = 'FORGED:' + ts;
-        let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
         await rh.handlePrepare({
             sender: VALIDATORS_4[1].addr,
             data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
@@ -315,7 +315,7 @@ function registerInboundPrepareGuardCases() {
 
         let ts = Date.now();
         let reorgId = 'LTC:300:' + ts;
-        let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
         await rh.handlePrepare({
             sender: VALIDATORS_4[1].addr,
             data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
@@ -336,7 +336,7 @@ function registerDigestAndUnverifiedRoundCases() {
         let ts = Date.now();
         let reorgId = 'LTC:300:' + ts;
         // Digest computed over a DIFFERENT newHash than the wire fields carry.
-        let poisoned = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, 'c'.repeat(64));
+        let poisoned = rh.digest(reorgId, 'LTC', 300, ts, OLD_HASH, 'c'.repeat(64));
         await rh.handlePrepare({
             sender: VALIDATORS_4[1].addr,
             data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
@@ -352,7 +352,7 @@ function registerDigestAndUnverifiedRoundCases() {
         pm.validatorAddr = VALIDATORS_3[0].addr;
 
         let reorgId = 'BTC:500:123';
-        let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
         rh.pendingReorgs.set(reorgId, {
             reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
             affectedChains: ['LTC', 'DOGE'], digest, oldHash: OLD_HASH, newHash: NEW_HASH,

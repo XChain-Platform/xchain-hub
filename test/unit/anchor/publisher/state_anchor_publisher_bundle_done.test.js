@@ -51,7 +51,7 @@ function registerBundleDoneStampCase() {
     it('handleBundleDone: stamps anchor_txid keyed on checkpoint_seq', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
-        nd.pub._getActiveOraclePublishPubkeys = async () => [nd.pubkey];
+        nd.pub.getActiveOraclePublishPubkeys = async () => [nd.pubkey];
         nd.pub.recordReward = () => {};                     // isolate the UPDATE assertion
         nd.pub.verifyAnchorOnChain = async () => 'verified';  // isolate from the on-chain gate (covered separately)
         let calls = [];
@@ -134,7 +134,7 @@ function registerConfirmedAnchorCases() {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ab'.repeat(32));
         // Honest indexer: the announced txid is the tx the anchor landed in.
-        receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+        receiver.pub.indexerCall = async (coin, method, params) => Object.assign(
             { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
               confirmations: 60, txid: params.txid }, matching);
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
@@ -145,7 +145,7 @@ function registerConfirmedAnchorCases() {
     it('ABSTAINS (no stamp/reward) when the anchor is ABSENT on-chain (phantom txid)', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ac'.repeat(32));
-        receiver.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });
+        receiver.pub.indexerCall = async () => ({ exists: false, confirmations: 0 });
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(receiver.db.checkpoints[0].anchor_txid, 'phantom anchor must not stamp (suppression blocked)').to.equal(null);
         expect(receiver.rewards.length, 'phantom anchor must not mirror a reward').to.equal(0);
@@ -163,7 +163,7 @@ function registerTxidBindingCases() {
         let { publisher, receiver, d } = electedBundleDone(bus, 'ff'.repeat(32));
         // Checkpoint is genuinely anchored, but by a DIFFERENT transaction: the
         // filtered lookup misses, and checkpoint_anchored marks it a positive forge.
-        receiver.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
+        receiver.pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(receiver.db.checkpoints[0].anchor_txid, 'forged txid must not stamp').to.equal(null);
         expect(receiver.rewards.length, 'forged txid must not mirror a reward').to.equal(0);
@@ -173,7 +173,7 @@ function registerTxidBindingCases() {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ab'.repeat(32));
         // An indexer that ignored the filter and returned the newest anchor instead.
-        receiver.pub._indexerCall = async () => Object.assign(
+        receiver.pub.indexerCall = async () => Object.assign(
             { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
               confirmations: 60, txid: 'cd'.repeat(32) }, matching);
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
@@ -184,7 +184,7 @@ function registerTxidBindingCases() {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ab'.repeat(32));
         // Pre-filter indexer: ignores the txid param, response carries no txid.
-        receiver.pub._indexerCall = async () => Object.assign(
+        receiver.pub.indexerCall = async () => Object.assign(
             { exists: true, status: 'valid', version: 0, confirmations: 60 }, matching);
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(receiver.db.checkpoints[0].anchor_txid, 'unbindable anchor must not stamp').to.equal(null);
@@ -198,7 +198,7 @@ function registerDepthAndStatusCases() {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ab'.repeat(32));
         let seen = null;
-        receiver.pub._indexerCall = async (coin, method, params) => {
+        receiver.pub.indexerCall = async (coin, method, params) => {
             seen = params;
             return Object.assign({ exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
                                    confirmations: 60, txid: params.txid }, matching);
@@ -210,7 +210,7 @@ function registerDepthAndStatusCases() {
     it('ABSTAINS when the anchor is SHALLOWER than XCHAIN_CONFIRMATIONS_DOGE', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ad'.repeat(32));
-        receiver.pub._indexerCall = async () => Object.assign(
+        receiver.pub.indexerCall = async () => Object.assign(
             { exists: true, status: 'valid', version: 0, confirmations: 59 }, matching);
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(receiver.db.checkpoints[0].anchor_txid, '0..59-conf anchor must not stamp').to.equal(null);
@@ -220,7 +220,7 @@ function registerDepthAndStatusCases() {
     it('REJECTS when the DECODED anchor status is invalid', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ae'.repeat(32));
-        receiver.pub._indexerCall = async () => Object.assign(
+        receiver.pub.indexerCall = async () => Object.assign(
             { exists: true, status: 'invalid: ledger_hash mismatch', version: 0, confirmations: 60 }, matching);
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(receiver.db.checkpoints[0].anchor_txid, 'decoded-invalid anchor must not stamp').to.equal(null);
@@ -241,7 +241,7 @@ function registerPayloadMatchCases() {
     it('REJECTS a v0 whose light-client ROOTS diverge, though the core hashes match', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ba'.repeat(32));
-        receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+        receiver.pub.indexerCall = async (coin, method, params) => Object.assign(
             {}, matching,
             { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
               confirmations: 60, txid: params.txid,
@@ -254,7 +254,7 @@ function registerPayloadMatchCases() {
     it('REJECTS a v0 whose BLOCK_MERKLE root diverges (both roots are bound, not just the first)', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'bb'.repeat(32));
-        receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+        receiver.pub.indexerCall = async (coin, method, params) => Object.assign(
             {}, matching,
             { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
               confirmations: 60, txid: params.txid,
@@ -266,7 +266,7 @@ function registerPayloadMatchCases() {
     it('REJECTS when the on-chain payload hashes do NOT byte-match our checkpoint', async function () {
         let bus = buildMesh(3);
         let { publisher, receiver, d } = electedBundleDone(bus, 'af'.repeat(32));
-        receiver.pub._indexerCall = async () => ({
+        receiver.pub.indexerCall = async () => ({
             exists: true, status: 'valid', version: 0, confirmations: 60,
             block_hash: 'ff'.repeat(32),                         // diverges from CP_ROW.block_hash
             ledger_hash: CP_ROW.ledger_hash, actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
@@ -280,7 +280,7 @@ function registerPayloadMatchCases() {
         let bus = buildMesh(3, { cfg: { DOGE_INDEXER_URL: '' } });   // hub opts out of on-chain verification
         let { publisher, receiver, d } = electedBundleDone(bus, 'ba'.repeat(32));
         let called = 0;
-        receiver.pub._indexerCall = async () => { called++; return { exists: true, status: 'valid', confirmations: 60 }; };
+        receiver.pub.indexerCall = async () => { called++; return { exists: true, status: 'valid', confirmations: 60 }; };
         await receiver.pub.handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
         expect(called, 'no-indexer short-circuits before any RPC').to.equal(0);
         expect(receiver.db.checkpoints[0].anchor_txid, 'unverifiable anchor must not stamp').to.equal(null);
@@ -308,7 +308,7 @@ function registerSizeOneCases() {
         let receiver = bus.nodes[0];             // holds the checkpoint and processes the done
         // Current membership (null arg) admits BOTH nodes so the attacker clears the
         // membership gate; the snapshot_block election set is exactly [elected].
-        receiver.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        receiver.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (blk == null ? bus.nodes.map(nd => nd.pubkey) : [elected.pubkey]);
 
         let d = mkBundleDone(bus, attacker, 'aa'.repeat(32));
@@ -323,7 +323,7 @@ function registerSizeOneCases() {
         let bus = buildMesh(2);
         let elected  = bus.nodes[0];             // the SOLE elected publisher (rank 0, always unlocked)
         let receiver = bus.nodes[1];             // a peer that holds the checkpoint
-        receiver.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        receiver.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (blk == null ? bus.nodes.map(nd => nd.pubkey) : [elected.pubkey]);
 
         let d = mkBundleDone(bus, elected, 'bb'.repeat(32));

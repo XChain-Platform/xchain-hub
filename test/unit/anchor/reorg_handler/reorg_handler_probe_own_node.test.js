@@ -55,7 +55,7 @@ describe('ReorgHandler', function () {
 function stubIndexer(tip, at, hist) {
     if (hist === undefined)
         hist = { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH }] }], count: 1, matched: true };
-    return sinon.stub(rh, '_indexerCall').callsFake(async (coin, method, params) => {
+    return sinon.stub(rh, 'indexerCall').callsFake(async (coin, method, params) => {
         if (method === 'getreorghistory') return hist;
         if (params && params.block_index != null) return at;
         return tip;
@@ -238,7 +238,7 @@ function registerProbeFailureCases() {
 
         // RPC rejection (e.g. an indexer predating getreorghistory).
         sinon.restore();
-        sinon.stub(rh, '_indexerCall').callsFake(async (coin, method) => {
+        sinon.stub(rh, 'indexerCall').callsFake(async (coin, method) => {
             if (method === 'getreorghistory') throw new Error('indexer RPC error: method not found');
             return { block_index: 500, block_hash: NEW_HASH, network: 'regtest' };
         });
@@ -253,7 +253,7 @@ function registerProbeFailureCases() {
     });
 
     it('verifyReorgAgainstOwnNode maps an RPC error to abstain (false), never a throw', async function () {
-        sinon.stub(rh, '_indexerCall').rejects(new Error('ECONNREFUSED'));
+        sinon.stub(rh, 'indexerCall').rejects(new Error('ECONNREFUSED'));
         expect(await rh.verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
     });
 

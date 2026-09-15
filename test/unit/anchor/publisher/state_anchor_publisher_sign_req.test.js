@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 //
 // StateAnchorPublisher: the archive SIGN_REQ path: the observed-leader
-// binding, the stale-tip bail, _resolveCapabilitySet under SWQ, and the
+// binding, the stale-tip bail, resolveCapabilitySet under SWQ, and the
 // follower refusals for a non-member, an unsigned request and an unresolved
 // election set.
 // The mesh harness lives in test/helpers/anchor_mesh.js.
@@ -62,7 +62,7 @@ function registerLeaderBindingCases() {
 
         // Spy on the first post-guard step: reached only if the stale-tip guard passes.
         let lookups = [];
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) => { lookups.push(blk); return []; };
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) => { lookups.push(blk); return []; };
 
         let mkReq = (electionBlock) => ({ data: {
             checkpoint: Object.assign({}, CP_ROW), election_block: electionBlock, batch_seq: 0,
@@ -80,9 +80,9 @@ function registerLeaderBindingCases() {
     });
 }
 
-// _resolveCapabilitySet takes the WEIGHTED snapshot once SWQ is active.
+// resolveCapabilitySet takes the WEIGHTED snapshot once SWQ is active.
 function registerCapabilitySetCases() {
-    it('_resolveCapabilitySet uses the WEIGHTED snapshot (weight→amount, source kept) once SWQ is active', async function () {
+    it('resolveCapabilitySet uses the WEIGHTED snapshot (weight→amount, source kept) once SWQ is active', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         let weighted = false, plain = false;
@@ -93,7 +93,7 @@ function registerCapabilitySetCases() {
 
         // SWQ activates at block >= 0 on regtest → weighted path, source-keyed.
         nd.pub.network = 'regtest';
-        let set = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        let set = await nd.pub.resolveCapabilitySet('oracle_publish', 100);
         expect(weighted, 'weighted snapshot used').to.be.true;
         expect(plain, 'plain snapshot not used').to.be.false;
         expect(set).to.deep.equal([{ pubkey: 'pka', amount: '7', source: 'srcA' }]);
@@ -101,13 +101,13 @@ function registerCapabilitySetCases() {
         // mainnet activation is far in the future (999999999) → SWQ off → plain path, source ''.
         weighted = false; plain = false;
         nd.pub.network = 'mainnet';
-        let set2 = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        let set2 = await nd.pub.resolveCapabilitySet('oracle_publish', 100);
         expect(plain, 'plain snapshot used when SWQ off').to.be.true;
         expect(weighted, 'weighted snapshot not used when SWQ off').to.be.false;
         expect(set2).to.deep.equal([{ pubkey: 'pka', amount: '1', source: '' }]);
     });
 
-    it('_resolveCapabilitySet carries the truncated flag from a weighted snapshot (XHUB-TRUNC-2)', async function () {
+    it('resolveCapabilitySet carries the truncated flag from a weighted snapshot (XHUB-TRUNC-2)', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         nd.pub.network = 'regtest';                          // SWQ active -> weighted path
@@ -115,7 +115,7 @@ function registerCapabilitySetCases() {
             getWeightSnapshot: async () => ({ validators: [{ pubkey: 'PKA', weight: '7', source: 'srcA' }], truncated: true }),
             getSnapshot:       async () => ({ validators: [] })
         };
-        let set = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        let set = await nd.pub.resolveCapabilitySet('oracle_publish', 100);
         // Without the flag surviving the map, the archive quorum path would not fail closed.
         expect(set.truncated).to.equal(true);
     });
@@ -156,7 +156,7 @@ function registerNonMemberFollowerCase() {
         // snapshot_block set differs between the two cases.
         // (1) EXCLUDED: snapshot_block set omits the follower → bail at the membership
         // gate, never reads its own checkpoint row and never co-signs.
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [leader.pubkey];
         await follower.pub.handleSignReq(mkReq());
         expect(selects, 'excluded follower stops before the local checkpoint read').to.equal(0);
@@ -164,7 +164,7 @@ function registerNonMemberFollowerCase() {
         // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds past the gate to the
         // local checkpoint read (then stops harmlessly on the absent archive body).
         // Proves the membership gate is what stops case (1).
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [leader.pubkey];
         await follower.pub.handleSignReq(mkReq());
         expect(selects, 'included follower reads its own checkpoint row').to.equal(1);
@@ -187,7 +187,7 @@ function registerUnsignedRequestCase() {
         let leader   = bus.nodes[1];
         let cp = Object.assign({}, CP_ROW);
         const SEQ = 42;
-        follower.pub._getActiveOraclePublishPubkeys = async () => [leader.pubkey];   // leader ranks 0
+        follower.pub.getActiveOraclePublishPubkeys = async () => [leader.pubkey];   // leader ranks 0
 
         let mkReq = (sig) => ({ data: {
             checkpoint: cp, election_block: 500, batch_seq: SEQ, match_count: 1, batch_crc32: '0',
@@ -234,14 +234,14 @@ function registerUnresolvedSetCase() {
 
         // (1) Election set UNRESOLVED while this follower IS in the snapshot_block signing
         // set - the exact combination the old fall-through admitted.
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [];
         await follower.pub.handleSignReq(mkReq());
         expect(canonCalls, 'an unresolved election set may not reach the co-sign path').to.equal(0);
 
         // (2) CONTROL - the SAME request with a resolved election set naming the sender
         // (rank 0) proceeds to the canonical, proving the empty-set gate stopped (1).
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [outsider];
         await follower.pub.handleSignReq(mkReq());
         expect(canonCalls, 'a resolved election set naming the sender still co-signs').to.equal(1);

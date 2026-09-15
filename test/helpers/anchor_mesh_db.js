@@ -44,7 +44,7 @@ function matchRow(id, status) {
     };
 }
 
-// XMATCH canonical (mirror of the publisher's _matchCanonical) - fixtures sign
+// XMATCH canonical (mirror of the publisher's matchCanonical) - fixtures sign
 // real Ed25519 sigs over it so the follower's cryptographic verification passes.
 function matchCanonical(m) {
     let raw = ['XMATCH', m.match_id, String(m.snapshot_block),

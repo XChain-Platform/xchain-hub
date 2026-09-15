@@ -101,8 +101,8 @@ function registerQueueGateCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries, broadcast } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'confirmed anchor writes the attestation').to.equal(1);
         expect(broadcast.length, 'and streams it to this hub\'s indexer subscribers').to.equal(1);
         expect(pub._deferredRewardAttest.size, 'entry cleared').to.equal(0);
@@ -115,8 +115,8 @@ function registerConfirmationCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain({ confirmations: 3 });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ confirmations: 3 });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'no reward for an unburied anchor').to.equal(0);
         expect(pub._deferredRewardAttest.size, 'entry retained for retry').to.equal(1);
     });
@@ -125,8 +125,8 @@ function registerConfirmationCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false, confirmations: 0 });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: false, confirmations: 0 });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'evicted anchor mints nothing').to.equal(0);
     });
 
@@ -134,8 +134,8 @@ function registerConfirmationCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain({ txid: 'cc'.repeat(32) });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ txid: 'cc'.repeat(32) });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length).to.equal(0);
     });
 
@@ -143,8 +143,8 @@ function registerConfirmationCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain({ version: 1 });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ version: 1 });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'an archive head cannot prove a bundle reward').to.equal(0);
         expect(pub._deferredRewardAttest.size, 'terminal verdict clears the entry').to.equal(0);
     });
@@ -161,14 +161,14 @@ function registerRejectionCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain({ status: 'invalid: CHECKPOINT_SEQ (stale; replay of an older checkpoint)' });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ status: 'invalid: CHECKPOINT_SEQ (stale; replay of an older checkpoint)' });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'no reward while the status verdict stands').to.equal(0);
         expect(pub._deferredRewardAttest.size, 'entry survives a rejected:status verdict').to.equal(1);
 
         // The chain resettles: the same txid now decodes valid and is buried deep enough.
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the attestation is written once it verifies').to.equal(1);
         expect(pub._deferredRewardAttest.size, 'entry cleared on verification').to.equal(0);
     });
@@ -179,8 +179,8 @@ function registerRejectionCases() {
         pub.deferRewardAttestation(entry());
         pub._deferredRewardAttest.get([...pub._deferredRewardAttest.keys()][0]).at =
             Date.now() - (pub.announceRetryTtlMs + 1);
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'an expired entry must not write').to.equal(0);
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
@@ -193,12 +193,12 @@ function registerBoundsCases() {
         const { pub, queries } = makeRewardPub();
         const archive = () => entry({ anchorVersion: 1, rewardType: 'anchor_archive', roundReference: 42 });
         pub.deferRewardAttestation(archive());
-        pub._indexerCall = async () => onChain({ version: 0 });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ version: 0 });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'a v0 checkpoint bundle cannot prove an archive reward').to.equal(0);
         pub.deferRewardAttestation(archive());
-        pub._indexerCall = async () => onChain({ version: 1 });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain({ version: 1 });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the v1 archive head does').to.equal(1);
     });
 

@@ -84,14 +84,14 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
     let hub = {
         db,
         // DOGE_INDEXER_URL wired so verifyAnchorOnChain runs its real gate;
-        // the _indexerCall stub below (installed per node) answers
+        // the indexerCall stub below (installed per node) answers
         // getanchoraction from the node's OWN checkpoint rows, i.e. the
         // honest case (the on-chain anchor byte-matches the local checkpoint
         // at full depth). Adversarial receiver-path tests override the stub.
         p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000', DOGE_INDEXER_URL: 'http://doge-indexer.test' }, opts.cfg || {}),
         capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
         // Populated oracle_publish registry: the V0_DONE/FINALIZED handlers resolve
-        // the membership set via _getActiveOraclePublishPubkeys(null), which now falls
+        // the membership set via getActiveOraclePublishPubkeys(null), which now falls
         // through to the registry. Mirrors a live hub (registry populated post-startup);
         // the empty-set case is the fail-closed startup window, exercised separately.
         capabilityRegistry: { getActiveValidators: async () => validators.slice(0, n).map(v => v.pubkey) },
@@ -107,7 +107,7 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
                 ? opts.sourceResolver(self, pubkey, blk)
                 : 'src_' + String(pubkey).toLowerCase().substring(0, 12))
         },
-        _resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
+        resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
     };
     return hub;
 }
@@ -183,7 +183,7 @@ function miningBroadcastHook(self, bus) {
 // network activates at or above the SWQ height (mainnet 961000/963000, regtest 0),
 // so a round that emits them ALWAYS runs on the weighted quorum path - there is no
 // count-path snapshot_block for them. Scope each hub to the record network so
-// _resolveCapabilitySet (which keys on this.network) resolves the WEIGHTED,
+// resolveCapabilitySet (which keys on this.network) resolves the WEIGHTED,
 // source-keyed snapshot the round's stake tally needs, and back it with one
 // distinct source per validator at equal weight: the 2/3-stake bar then coincides
 // exactly with the 2f+1 count these tests assert (3-of-4), so the quorum-size
@@ -244,7 +244,7 @@ function buildMesh(n, opts) {
         // this file once an hour of runs adds up to the window budget.
         self.pub.spendGuard.statePath = path.join(
             os.tmpdir(), 'anchor-spend-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.json');
-        self.pub._indexerCall = honestAnchorOracle(self, db, bus);
+        self.pub.indexerCall = honestAnchorOracle(self, db, bus);
         self.pub.setBroadcastHook(miningBroadcastHook(self, bus));
         bus.nodes.push(self);
     }
@@ -279,7 +279,7 @@ function archiveOrder(bus, batchSeq) {
     // record network) and nothing else. Read from the publisher rather than
     // re-spelled here, so this helper cannot drift from the shipped key the way the
     // hardcoded copy did when the hub-local batch seq left the key.
-    let key = bus.nodes[0].pub._archiveElectionKey(
+    let key = bus.nodes[0].pub.archiveElectionKey(
         { chain: CP_ROW.chain, network: bus.network, checkpoint_seq: CP_ROW.checkpoint_seq }, batchSeq || 0);
     let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
     return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));

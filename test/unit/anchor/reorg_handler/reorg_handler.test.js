@@ -121,24 +121,24 @@ function registerGetQuorum() {
 }
 
 // -----------------------------------------------------------------
-// _digest()
+// digest()
 // -----------------------------------------------------------------
 
 function registerDigest() {
-    describe('_digest()', function () {
+    describe('digest()', function () {
         it('returns 64-char hex hash', function () {
-            expect(rh._digest('BTC:100:123', 'BTC', 100, 123, OLD_HASH, NEW_HASH)).to.match(/^[0-9a-f]{64}$/);
+            expect(rh.digest('BTC:100:123', 'BTC', 100, 123, OLD_HASH, NEW_HASH)).to.match(/^[0-9a-f]{64}$/);
         });
 
         it('is deterministic', function () {
-            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
-            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let a = rh.digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh.digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
             expect(a).to.equal(b);
         });
 
         it('binds the observed hashes (a swapped newHash changes the digest)', function () {
-            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
-            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, 'c'.repeat(64));
+            let a = rh.digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh.digest('id', 'BTC', 100, 999, OLD_HASH, 'c'.repeat(64));
             expect(a).to.not.equal(b);
         });
     });
@@ -219,15 +219,15 @@ function registerStartStop() {
 }
 
 function registerMessageDispatch() {
-    describe('_handleMessage dispatch', function () {
+    describe('handleMessage dispatch', function () {
         it('routes alert / prepare / commit and ignores unknown types', async function () {
             let a = sinon.spy(rh, 'handleAlert');
             let p = sinon.spy(rh, 'handlePrepare');
-            let c = sinon.spy(rh, '_handleCommit');
-            await rh._handleMessage({ type: 'REORG_ALERT', data: {} });
-            await rh._handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });
-            await rh._handleMessage({ type: 'XCHAIN_REORG_COMMIT', data: {} });
-            await rh._handleMessage({ type: 'NOPE', data: {} });
+            let c = sinon.spy(rh, 'handleCommit');
+            await rh.handleMessage({ type: 'REORG_ALERT', data: {} });
+            await rh.handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });
+            await rh.handleMessage({ type: 'XCHAIN_REORG_COMMIT', data: {} });
+            await rh.handleMessage({ type: 'NOPE', data: {} });
             expect(a.calledOnce).to.be.true;
             expect(p.calledOnce).to.be.true;
             expect(c.calledOnce).to.be.true;
@@ -235,7 +235,7 @@ function registerMessageDispatch() {
 
         it('the start() listener surfaces (does not crash on) handler rejections', async function () {
             await rh.start();
-            sinon.stub(rh, '_handleMessage').rejects(new Error('boom'));
+            sinon.stub(rh, 'handleMessage').rejects(new Error('boom'));
             // The listener's own catch logs the rejection, so that log line is the
             // proof it was surfaced rather than left to crash the process.
             let errStub = sinon.stub(console, 'error');

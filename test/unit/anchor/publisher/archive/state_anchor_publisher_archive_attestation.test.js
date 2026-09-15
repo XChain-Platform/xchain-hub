@@ -13,7 +13,7 @@
 // StateAnchorPublisher: the archive publisher-attestation round behind the
 // ANCHOR v1 publisher tail (canonical, single-node self-attestation, the 2f+1
 // quorum, the degraded count-0 tail and the pre-flag-day tail) and the
-// stake-weighted archive quorum rule quorumVerified and _checkArchiveQuorum apply.
+// stake-weighted archive quorum rule quorumVerified and checkArchiveQuorum apply.
 // The mesh harness lives in test/helpers/anchor_mesh.js.
 
 const { expect }            = require('chai');
@@ -26,7 +26,7 @@ const { DB_METHODS }        = require('../../../../helpers/mockHub.js');
 const { CP_ROW, buildMesh, startAll, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
 
 // Independent reimplementation of the indexer's Anchor._rewardCanonical (FORMAT 1):
-// the hub's _archiveAttestationCanonical MUST be byte-identical to this.
+// the hub's archiveAttestationCanonical MUST be byte-identical to this.
 function archiveRewardCanonical(cp, batchSeq, publisher) {
     let base = ['XANCPUB', 'anchor_archive', String(batchSeq),
                 String(cp.snapshot_block), String(publisher).toLowerCase(),
@@ -84,7 +84,7 @@ function registerArchiveAttestationRound() {
 
 // The archive reward canonical and the self-attested single-node archive.
 function registerArchiveCanonicalCases() {
-    it('_archiveAttestationCanonical is byte-identical to the indexer archive reward canonical (EQUIV-wrapped)', function () {
+    it('archiveAttestationCanonical is byte-identical to the indexer archive reward canonical (EQUIV-wrapped)', function () {
         let bus = buildMesh(1);
         let pub = bus.nodes[0].pub;
         let cp  = pub.cpFromRow(Object.assign({}, CP_ROW));
@@ -95,7 +95,7 @@ function registerArchiveCanonicalCases() {
         expect(expected).to.equal(
             'EQUIV|XCHECKPOINT|XANCPUB|archive|regtest|0|100|0||XANCPUB|anchor_archive|0|100|' +
             publisher + '|10.00000000');
-        expect(pub._archiveAttestationCanonical(cp, 0, publisher)).to.equal(expected);
+        expect(pub.archiveAttestationCanonical(cp, 0, publisher)).to.equal(expected);
     });
 
     it('single-node: flush emits ANCHOR v1 with a self-attestation the indexer can verify', async function () {
@@ -308,26 +308,26 @@ function registerQuorumVerifiedCases() {
     });
 }
 
-// _checkArchiveQuorum publishes on the regime, not the signature count.
+// checkArchiveQuorum publishes on the regime, not the signature count.
 function registerCheckArchiveQuorumCase() {
-    it('_checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
+    it('checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
         let pub = weightedPub();
         let { ids, set } = stakeSet();
         let published = false;
-        pub._publishArchive = async () => { published = true; };  // observe the dequeue decision
+        pub.publishArchive = async () => { published = true; };  // observe the dequeue decision
         pub._archiveRound = {
             done: false, weighted: true, quorum: 3, validators: set,
             signatures: new Map(sigsFrom(ids.slice(1)).map(s => [s.pubkey, s.sig])),   // 3×10%
             timer: null
         };
-        await pub._checkArchiveQuorum();
+        await pub.checkArchiveQuorum();
         expect(published, 'sub-stake archive must not publish').to.equal(false);
         expect(pub._archiveRound, 'round stays open for more sigs').to.not.equal(null);
 
         // The SAME 3 sigs WOULD fire under legacy count - proving the regime, not
         // the signature count, is what now gates the dequeue.
         pub._archiveRound.weighted = false;
-        await pub._checkArchiveQuorum();
+        await pub.checkArchiveQuorum();
         expect(published, 'count regime fires on 3 ≥ quorum').to.equal(true);
     });
 }

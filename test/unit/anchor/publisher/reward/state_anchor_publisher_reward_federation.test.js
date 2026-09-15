@@ -47,7 +47,7 @@ function makeReceiver(members) {
     pub.dogeConfirmations = 60;
     pub.network = CP_ROW.network;
     const set = (members || []).concat([pub.identity.getPubkeyHex().toLowerCase()]);
-    pub._resolveCapabilitySet = async () => set.map(pk => ({ pubkey: pk, source: pk, amount: '1' }));
+    pub.resolveCapabilitySet = async () => set.map(pk => ({ pubkey: pk, source: pk, amount: '1' }));
     return { pub, queries, broadcast, sent, set };
 }
 
@@ -65,8 +65,8 @@ function payloadFrom(pub, sender, signers, over) {
         block_index: CP_ROW.block_index, checkpoint_seq: CP_ROW.checkpoint_seq
     }, over || {});
     const canonical = (d.reward_type === 'anchor_archive')
-        ? pub._archiveAttestationCanonical({ network: d.network, snapshot_block: d.snapshot_block }, d.round_reference, d.publisher)
-        : pub._attestationCanonical({ network: d.network, snapshot_block: d.snapshot_block }, d.publisher);
+        ? pub.archiveAttestationCanonical({ network: d.network, snapshot_block: d.snapshot_block }, d.round_reference, d.publisher)
+        : pub.attestationCanonical({ network: d.network, snapshot_block: d.snapshot_block }, d.publisher);
     d.attest_sigs = (over && over.attest_sigs) || signers.map(s => ({
         pubkey: s.getPubkeyHex().toLowerCase(), sig: s.sign(canonical)
     }));
@@ -120,8 +120,8 @@ function registerPublisherFederationCases() {
         });
         expect(sent.filter(m => m.type === XANCREWARD).length, 'nothing federated while unconfirmed').to.equal(0);
 
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the row is written locally first').to.equal(1);
         const msg = sent.find(m => m.type === XANCREWARD);
         expect(msg, 'the confirmed row is federated').to.exist;
@@ -141,8 +141,8 @@ function registerPublisherFederationCases() {
             snapshotBlock: CP_ROW.snapshot_block, publisher: me,
             attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }]
         });
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         const ins = inserts(queries)[0];
         expect(ins.sql).to.contain('doge_anchor_txid');
         expect(ins.params[8]).to.equal(TXID);
@@ -160,8 +160,8 @@ function registerReceiverProofCases() {
         expect(pub._deferredRewardAttest.size, 'queued behind its own mined-anchor proof').to.equal(1);
         expect(inserts(queries).length, 'nothing written on receipt alone').to.equal(0);
 
-        pub._indexerCall = async () => onChain();
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => onChain();
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'written once this hub proved the anchor itself').to.equal(1);
         expect(sent.filter(m => m.type === XANCREWARD).length, 'a receiver never re-broadcasts').to.equal(0);
     });
@@ -172,8 +172,8 @@ function registerReceiverProofCases() {
         const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
         expect(pub._deferredRewardAttest.size, 'the quorum was valid, so it queued').to.equal(1);
-        pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
-        await pub._drainDeferredRewardAttest();
+        pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
+        await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length).to.equal(0);
     });
 
@@ -246,7 +246,7 @@ function registerReceiverPairingCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
-        pub._resolveCapabilitySet = async () => [];
+        pub.resolveCapabilitySet = async () => [];
         await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });

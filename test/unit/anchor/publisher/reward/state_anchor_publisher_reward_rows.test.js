@@ -114,7 +114,7 @@ function registerRewardRederivationCases() {
         // assertions below are unchanged.
         let verify = async (ar) => {
             let pub   = bus.nodes[1].pub;
-            let set   = await pub._resolveCapabilitySet('oracle_publish', Number(ar.block_index), pub.network);
+            let set   = await pub.resolveCapabilitySet('oracle_publish', Number(ar.block_index), pub.network);
             let snaps = set.map(v => ({ snapshot_block: Number(ar.block_index), capability: 'oracle_publish',
                                         signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
             return pub.verifyArchiveAgainstLocal(
@@ -145,9 +145,9 @@ function registerRewardRederivationCases() {
 
 // The next batch seq spans reward rows, and mirror ids are bookkeeping only.
 function registerRewardBookkeepingCases() {
-    it('_getNextBatchSeq spans validator_rewards too', async function () {
+    it('getNextBatchSeq spans validator_rewards too', async function () {
         let bus = buildMesh(1, { rewards: [rewardRow(pkOf(0), { batch_seq: 5 })] });
-        expect(await bus.nodes[0].pub._getNextBatchSeq()).to.equal(6);  // matches/calls hold no seq ≥ 5
+        expect(await bus.nodes[0].pub.getNextBatchSeq()).to.equal(6);  // matches/calls hold no seq ≥ 5
     });
 
     it('followers tolerate per-hub mirror ids in archived rows (id is bookkeeping, not consensus)', async function () {

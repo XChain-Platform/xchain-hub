@@ -41,7 +41,7 @@ function registerTxidBindingCases() {
         let leader   = bus.nodes[1];
         follower.pub.recordObservedArchiveLeader(11, leader.pubkey, CP_ROW);
         let seen = null;
-        follower.pub._indexerCall = async (coin, method, params) => {
+        follower.pub.indexerCall = async (coin, method, params) => {
             seen = params;
             return { exists: true, checkpoint_anchored: true, status: 'valid', version: Number(params.version),
                      confirmations: follower.pub.dogeConfirmations, txid: params.txid,
@@ -66,7 +66,7 @@ function registerTxidBindingCases() {
         follower.pub.recordObservedArchiveLeader(12, leader.pubkey, CP_ROW);
         // The checkpoint IS anchored, but no v1 archive with the announced txid exists:
         // the elected leader is referencing someone else's anchor.
-        follower.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
+        follower.pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
         let fMatches = [matchRow('m1', 'finalized')];
         await follower.pub.handleFinalized({ data: {
             batch_seq: 12, txid: 'ff'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
@@ -140,8 +140,8 @@ function registerRewardListGateCases() {
         follower.pub.recordObservedArchiveLeader(6, leader.pubkey);
         // d.snapshot_block is unsigned: resolve an EMPTY oracle_publish set at the
         // announced block (membership everywhere else stays intact).
-        let orig = follower.pub._getActiveOraclePublishPubkeys.bind(follower.pub);
-        follower.pub._getActiveOraclePublishPubkeys = async (blk) => (blk === 999999 ? [] : orig(blk));
+        let orig = follower.pub.getActiveOraclePublishPubkeys.bind(follower.pub);
+        follower.pub.getActiveOraclePublishPubkeys = async (blk) => (blk === 999999 ? [] : orig(blk));
         let fMatches = [matchRow('m1', 'finalized')];
         await follower.pub.handleFinalized({ data: {
             batch_seq: 6, txid: 'dogetx_snap', snapshot_block: 999999, matches: fMatches, calls: [], rewards: [],

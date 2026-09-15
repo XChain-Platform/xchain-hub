@@ -179,7 +179,7 @@ function registerMirrorGateCases() {
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
         follower.pub.recordObservedArchiveLeader(9, leader.pubkey, CP_ROW);        // observed + checkpoint identity stashed
-        follower.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });  // the checkpoint was never anchored
+        follower.pub.indexerCall = async () => ({ exists: false, confirmations: 0 });  // the checkpoint was never anchored
         let fMatches = [matchRow('m1', 'finalized')];
         await follower.pub.handleFinalized({ data: {
             batch_seq: 9, txid: 'dogetx_phantom', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],

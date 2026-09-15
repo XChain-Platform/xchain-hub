@@ -218,14 +218,14 @@ function registerSnapshotSetCase() {
     });
 }
 
-// _publishArchive keeps rows pending without on-chain quorum.
+// publishArchive keeps rows pending without on-chain quorum.
 function registerArchiveQuorumFailureCase() {
     // ── back-fill is gated on confirmed on-chain validity ───────────────────────
     // Even after a successful DOGE broadcast, the source rows must NOT be marked
     // archived unless the broadcast v1 will reach quorum over oracle_publish @
     // snapshot_block (the indexer's own check). Otherwise settled cross-chain
     // state is dequeued behind an `invalid` on-chain copy and lost forever.
-    it('_publishArchive keeps rows pending when the broadcast v1 cannot reach on-chain quorum', async function () {
+    it('publishArchive keeps rows pending when the broadcast v1 cannot reach on-chain quorum', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         let cp = nd.pub.cpFromRow(nd.db.checkpoints[0]);                  // snapshot_block 100
@@ -245,7 +245,7 @@ function registerArchiveQuorumFailureCase() {
             signatures: new Map([[nd.pubkey, nd.identity.sign(canonical)]]),
             done: true, timer: null
         };
-        await nd.pub._publishArchive(round);
+        await nd.pub.publishArchive(round);
         await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the v1 archive broadcast' });
 
         // The v1 broadcast happened (a txid was produced) …

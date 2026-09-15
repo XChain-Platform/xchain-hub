@@ -77,7 +77,7 @@ function registerPreparePathCases() {
     it('PREPARE from peer is recorded', async function () {
         let ts = Date.now();
         let reorgId = 'BTC:500:' + ts;
-        let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
         rh.pendingReorgs.set(reorgId, {
             reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
@@ -116,7 +116,7 @@ function registerPreparePathCases() {
             sender: VALIDATORS_3[1].addr,
             data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                     affectedChains: ['LTC', 'DOGE'],
-                    digest: rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH),
+                    digest: rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH),
                     oldHash: OLD_HASH, newHash: NEW_HASH }
         });
         expect(rh.pendingReorgs.has(reorgId), 'a follower does not create a round for a stale reorg').to.be.false;
@@ -128,7 +128,7 @@ function registerCommitPathCases() {
     it('PREPARE with wrong digest is rejected', async function () {
         let ts = Date.now();
         let reorgId = 'BTC:500:' + ts;
-        let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
         rh.pendingReorgs.set(reorgId, {
             reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
@@ -149,7 +149,7 @@ function registerCommitPathCases() {
 
     it('COMMIT quorum executes rollback', async function () {
         let reorgId = 'BTC:500:123';
-        let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
 
         rh.pendingReorgs.set(reorgId, {
             reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
@@ -163,7 +163,7 @@ function registerCommitPathCases() {
         let emitted = null;
         rh.on('reorg:confirmed', (d) => { emitted = d; });
 
-        rh._handleCommit({
+        rh.handleCommit({
             sender: VALIDATORS_3[1].addr,
             data: { reorgId, digest }
         });
@@ -242,7 +242,7 @@ function registerFollowerTimeoutCase() {
         stubVerified(true);
 
         let reorgId = 'LTC:300:1700000000000';
-        let digest = rh._digest(reorgId, 'LTC', 300, 1700000000000, OLD_HASH, NEW_HASH);
+        let digest = rh.digest(reorgId, 'LTC', 300, 1700000000000, OLD_HASH, NEW_HASH);
 
         let emitted = null;
         rh.on('reorg:timeout', (d) => { emitted = d; });

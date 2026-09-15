@@ -130,7 +130,7 @@ function registerFailoverAdoptionCase() {
     it('a failover publisher ADOPTS an already-mined bundle by per-section lookup, with no second spend', async function () {
         // AT5 in unit form. The rank-0 hub publishes; the rank-1 hub then flushes with
         // its ladder unlocked and its rows still un-stamped (the announcement never
-        // reached it). _findExistingBundle resolves every section to the SAME mined
+        // reached it). findExistingBundle resolves every section to the SAME mined
         // transaction, so the backup adopts that txid rather than paying again.
         let bus = buildMesh(2, { btcBlock: 200 });    // 100 blocks past snapshot_block: rank 1 unlocked
         let order  = v0Order(bus);
