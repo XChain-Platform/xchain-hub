@@ -45,9 +45,43 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'attest_relay_reject_slot_activation.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'attest_relay_reject_slot_activation.js');
 
-describe('ATTEST relay reject-slot flag-day: hub copy @regression', function () {
+function registerRejectSlotGateSuite() {
+describe('the arming state this hub reads', function () {
+        it('is armed at genesis on every network', function () {
+            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.mainnet).to.equal(0);
+            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.testnet).to.equal(0);
+            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.regtest).to.equal(0);
+        });
 
-    describe('byte-identity with the xchain-indexer twin', function () {
+        it('is live at the threshold and inert one second below it', function () {
+            // Driven against a threshold rather than the armed maps, so the boundary is
+            // pinned independently of where the networks happen to be armed today.
+            const map = local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION;
+            const saved = map.mainnet;
+            try {
+                map.mainnet = 1786060800;
+                expect(local.isAttestRelayRejectSlotActive(1786060799, 'mainnet')).to.equal(false);
+                expect(local.isAttestRelayRejectSlotActive(1786060800, 'mainnet')).to.equal(true);
+                expect(local.isAttestRelayRejectSlotActive(1786060801, 'mainnet')).to.equal(true);
+            } finally {
+                map.mainnet = saved;
+            }
+        });
+
+        // Off is the pre-arm behaviour, and the pre-arm behaviour never spends a fee on
+        // a v3 the fleet drops. An un-evaluatable plane must therefore land OFF.
+        it('fails closed on anything it cannot evaluate', function () {
+            expect(local.isAttestRelayRejectSlotActive(1786060800, 'bogusnet')).to.equal(false);
+            expect(local.isAttestRelayRejectSlotActive('not-a-number', 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayRejectSlotActive(null, 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayRejectSlotActive(undefined, 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayRejectSlotActive(NaN, 'mainnet')).to.equal(false);
+        });
+    });
+}
+
+function registerRejectSlotTwinSuite() {
+describe('byte-identity with the xchain-indexer twin', function () {
         before(function () {
             if (!fs.existsSync(TWIN_PATH)) {
                 if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
@@ -80,37 +114,11 @@ describe('ATTEST relay reject-slot flag-day: hub copy @regression', function () 
             }
         });
     });
+}
 
-    describe('the arming state this hub reads', function () {
-        it('is armed at genesis on every network', function () {
-            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.mainnet).to.equal(0);
-            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.testnet).to.equal(0);
-            expect(local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION.regtest).to.equal(0);
-        });
+describe('ATTEST relay reject-slot flag-day: hub copy @regression', function () {
 
-        it('is live at the threshold and inert one second below it', function () {
-            // Driven against a threshold rather than the armed maps, so the boundary is
-            // pinned independently of where the networks happen to be armed today.
-            const map = local.ATTEST_RELAY_REJECT_SLOT_ACTIVATION;
-            const saved = map.mainnet;
-            try {
-                map.mainnet = 1786060800;
-                expect(local.isAttestRelayRejectSlotActive(1786060799, 'mainnet')).to.equal(false);
-                expect(local.isAttestRelayRejectSlotActive(1786060800, 'mainnet')).to.equal(true);
-                expect(local.isAttestRelayRejectSlotActive(1786060801, 'mainnet')).to.equal(true);
-            } finally {
-                map.mainnet = saved;
-            }
-        });
+    registerRejectSlotTwinSuite();
 
-        // Off is the pre-arm behaviour, and the pre-arm behaviour never spends a fee on
-        // a v3 the fleet drops. An un-evaluatable plane must therefore land OFF.
-        it('fails closed on anything it cannot evaluate', function () {
-            expect(local.isAttestRelayRejectSlotActive(1786060800, 'bogusnet')).to.equal(false);
-            expect(local.isAttestRelayRejectSlotActive('not-a-number', 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayRejectSlotActive(null, 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayRejectSlotActive(undefined, 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayRejectSlotActive(NaN, 'mainnet')).to.equal(false);
-        });
-    });
+    registerRejectSlotGateSuite();
 });
