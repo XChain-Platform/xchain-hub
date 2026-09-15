@@ -91,9 +91,10 @@ function captureLog(fn) {
     return Promise.resolve().then(fn).finally(() => { console.log = orig; }).then(() => lines);
 }
 
+let saved;
+
 describe('StateAnchorPublisher: startup catch-up flush', function () {
 
-    let saved;
     before(function () {
         saved = {};
         for (const k of ENV_KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
@@ -105,6 +106,13 @@ describe('StateAnchorPublisher: startup catch-up flush', function () {
         }
     });
     afterEach(function () { delete process.env.ANCHOR_STARTUP_FLUSH_MS; });
+
+    registerStartupFlushKnobTests();
+    registerStartupFlushTimerTests();
+    registerStartupFlushSkipTests();
+});
+
+function registerStartupFlushKnobTests() {
 
     describe('the knob', function () {
         it('defaults to one minute, well inside the interval it exists to cover for', function () {
@@ -125,6 +133,9 @@ describe('StateAnchorPublisher: startup catch-up flush', function () {
             expect(buildPub().pub.startupFlushMs).to.equal(60000);
         });
     });
+}
+
+function registerStartupFlushTimerTests() {
 
     describe('start() runs one NORMAL flush after the delay', function () {
         it('the flush fires once, not in failover-only mode', async function () {
@@ -163,6 +174,9 @@ describe('StateAnchorPublisher: startup catch-up flush', function () {
             expect(calls, 'no flush after stop').to.equal(0);
         });
     });
+}
+
+function registerStartupFlushSkipTests() {
 
     describe('the two silent stand-downs are now counted and, on a leader flush, said once', function () {
         it('a WAKE flush that skips a led row counts it as skippedLeaderOnWake and stays quiet', async function () {
@@ -192,4 +206,4 @@ describe('StateAnchorPublisher: startup catch-up flush', function () {
             expect(stats).to.include({ skippedNotOurElection: 0, skippedLeaderOnWake: 0, startupFlushMs: 60000 });
         });
     });
-});
+}
