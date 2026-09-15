@@ -57,10 +57,14 @@ async function insertRow(db, source) {
     await db.doQuery('INSERT INTO `' + TABLE + '` ' + cols + ' VALUES (' + marks + ')', vals);
 }
 
+let db;
+
 describe('Integration: _widenUniqueKey on a real MariaDB', function () {
+    registerWidenHooks();
+    registerWidenTests();
+});
 
-    let db;
-
+function registerWidenHooks() {
     before(async function () {
         try {
             await testDb.setup();
@@ -89,60 +93,67 @@ describe('Integration: _widenUniqueKey on a real MariaDB', function () {
         if (testDb.isAvailable()) await db.doQuery('DROP TABLE IF EXISTS `' + TABLE + '`').catch(() => {});
         await testDb.teardown();
     });
+}
 
-    // The production incident, reproduced: the widen column is genuinely absent, so
-    // the server really does answer errno 1072. The old sequence left this table with
-    // zero indexes and accepted the duplicate below.
-    it('leaves a working unique key when the widen column is missing from the table', async function () {
-        await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+function registerWidenTests() {
+    it('leaves a working unique key when the widen column is missing from the table', testMissingColumn);
+    it('widens the key once the column exists, and retires the temporary index', testWidenedKey);
+    it('is a no-op on a second run, and never re-drops the key', testSecondRun);
+    it('completes an interrupted widen left behind by an earlier run', testInterruptedWiden);
+}
 
-        expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
-            ['snapshot_block', 'capability', 'signing_pubkey']);
-        expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
+// The production incident, reproduced: the widen column is genuinely absent, so
+// the server really does answer errno 1072. The old sequence left this table with
+// zero indexes and accepted the duplicate below.
+async function testMissingColumn() {
+    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
-        await insertRow(db, null);
-        let dup = null;
-        try { await insertRow(db, null); } catch (e) { dup = e; }
-        expect(dup, 'the table accepted a duplicate, so the key is gone').to.be.an('error');
-        expect(dup.errno).to.equal(1062);
-    });
+    expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
+        ['snapshot_block', 'capability', 'signing_pubkey']);
+    expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
 
-    it('widens the key once the column exists, and retires the temporary index', async function () {
-        await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-        await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await insertRow(db, null);
+    let dup = null;
+    try { await insertRow(db, null); } catch (e) { dup = e; }
+    expect(dup, 'the table accepted a duplicate, so the key is gone').to.be.an('error');
+    expect(dup.errno).to.equal(1062);
+}
 
-        expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
-            ['snapshot_block', 'capability', 'signing_pubkey', 'source']);
-        expect(await uniqueIndexNames(db, TABLE), 'a temporary index was left behind').to.deep.equal([KEY]);
+async function testWidenedKey() {
+    await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
+    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
-        // The widened key is what the snapshot mirror needs: two staking sources
-        // delegating one signing key are two rows, not one absorbed duplicate.
-        await insertRow(db, 'source-a');
-        await insertRow(db, 'source-b');
-        const rows = await db.doQuery('SELECT COUNT(*) AS c FROM `' + TABLE + '`');
-        expect(Number(rows[0].c)).to.equal(2);
-    });
+    expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
+        ['snapshot_block', 'capability', 'signing_pubkey', 'source']);
+    expect(await uniqueIndexNames(db, TABLE), 'a temporary index was left behind').to.deep.equal([KEY]);
 
-    it('is a no-op on a second run, and never re-drops the key', async function () {
-        await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-        await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
-        await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    // The widened key is what the snapshot mirror needs: two staking sources
+    // delegating one signing key are two rows, not one absorbed duplicate.
+    await insertRow(db, 'source-a');
+    await insertRow(db, 'source-b');
+    const rows = await db.doQuery('SELECT COUNT(*) AS c FROM `' + TABLE + '`');
+    expect(Number(rows[0].c)).to.equal(2);
+}
 
-        expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
-        expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
-    });
+async function testSecondRun() {
+    await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
+    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
 
-    // A run interrupted between the temporary ADD and the rename leaves the wider
-    // key under the temporary name. The next run must finish it, never restart it
-    // from a state with no key.
-    it('completes an interrupted widen left behind by an earlier run', async function () {
-        await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-        await db.doQuery('ALTER TABLE `' + TABLE + '` ADD UNIQUE KEY `' + KEY + '_widening` ' + WIDE);
-        await db.doQuery('ALTER TABLE `' + TABLE + '` DROP INDEX `' + KEY + '`');
+    expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
+    expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
+}
 
-        await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+// A run interrupted between the temporary ADD and the rename leaves the wider
+// key under the temporary name. The next run must finish it, never restart it
+// from a state with no key.
+async function testInterruptedWiden() {
+    await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
+    await db.doQuery('ALTER TABLE `' + TABLE + '` ADD UNIQUE KEY `' + KEY + '_widening` ' + WIDE);
+    await db.doQuery('ALTER TABLE `' + TABLE + '` DROP INDEX `' + KEY + '`');
 
-        expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
-        expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
-    });
-});
+    await db._widenUniqueKey(TABLE, KEY, 'source', WIDE);
+
+    expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
+    expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
+}
