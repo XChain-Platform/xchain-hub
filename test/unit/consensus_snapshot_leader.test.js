@@ -45,31 +45,19 @@ function memberSetOf(validators) {
     return new Set(validators.map(v => v.pubkey.toLowerCase()));
 }
 
-describe('Consensus: snapshot-pinned leader election', function () {
+let hub, pm, consensus, snapshot;
+let config, digest;
 
-    let hub, pm, consensus, snapshot;
-
-    beforeEach(function () {
-        hub = createMockHub();
-        pm  = hub._peerManager;
-        consensus = new Consensus(hub);
-        snapshot = makeFederationSnapshot(SNAPSHOT_SET, 800000);
-        hub.capabilitySnapshot = {
-            getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
-            getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
-            getQuorum:                  sinon.stub().returns(3)
-        };
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-        consensus.setValidatorSet(DRIFTED_LIVE_SET);
-    });
-
-    afterEach(function () {
-        for (let [, prop] of consensus.pendingProposals) {
-            if (prop && prop.timer) clearTimeout(prop.timer);
-        }
-        sinon.restore();
-    });
-
+function prePrepare(sender, extra) {
+    return consensus._handlePrePrepare(Object.assign({
+        sender: sender,
+        // Envelopes carry the proven signing key; admission and leader
+        // identity both resolve through it now, not through the addr.
+        sig_pubkey: fixturePubkeyForAddr(sender),
+        data: { seq: SEQ, view: 0, configDigest: digest, config: config, btcBlockHeight: 800000 }
+    }, extra || {}));
+}
+function registerLeaderPrimitiveTests() {
     // -----------------------------------------------------------------
     // The election primitive
     // -----------------------------------------------------------------
@@ -107,7 +95,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(consensus._getLeader(SEQ, null)).to.equal(null);
         });
     });
-
+}
+function registerMemberSetTests() {
     describe('memberPubkeySet()', function () {
         it('lowercases the snapshot pubkeys', function () {
             let set = consensus.memberPubkeySet({ validators: [{ pubkey: 'AB'.repeat(32) }] });
@@ -121,7 +110,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(consensus.memberPubkeySet({ validators: [{ amount: '1' }] })).to.equal(null);
         });
     });
-
+}
+function registerLeaderIdentityTests() {
     // blocker (2): a snapshot member whose addr binding differs between
     // hubs must still be recognized as leader, or the fix reintroduces the very
     // divergence it removes.
@@ -142,7 +132,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(consensus.isLeaderIdentity(null, 'ws://binding-a:10001', 'ab'.repeat(32))).to.be.false;
         });
     });
-
+}
+function registerProposeTests() {
     // -----------------------------------------------------------------
     // propose(): the leader side
     // -----------------------------------------------------------------
@@ -197,32 +188,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(hub.applyConfig.calledOnce).to.be.true;
         });
     });
-
-    // -----------------------------------------------------------------
-    // _handlePrePrepare(): the follower side
-    // -----------------------------------------------------------------
-
-    describe('_handlePrePrepare()', function () {
-
-        let config, digest;
-
-        beforeEach(function () {
-            // A third validator, following the round.
-            pm.validatorAddr = VALIDATORS_4[2].addr;
-            config = { cfg: 1 };
-            digest = consensus._digest(config);
-        });
-
-        function prePrepare(sender, extra) {
-            return consensus._handlePrePrepare(Object.assign({
-                sender: sender,
-                // Envelopes carry the proven signing key; admission and leader
-                // identity both resolve through it now, not through the addr.
-                sig_pubkey: fixturePubkeyForAddr(sender),
-                data: { seq: SEQ, view: 0, configDigest: digest, config: config, btcBlockHeight: 800000 }
-            }, extra || {}));
-        }
-
+}
+function registerPrePrepareLeaderTests() {
         it('accepts the SNAPSHOT-elected leader that the drifted live set would have rejected', async function () {
             await prePrepare(SNAPSHOT_LEADER.addr);
 
@@ -253,7 +220,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
 
             expect(consensus.pendingProposals.get(SEQ), 'a differing addr binding must not unseat the leader').to.exist;
         });
-
+}
+function registerPrePrepareFilterTests() {
         it('re-runs the guard on a repeat PRE_PREPARE without a second snapshot lock', async function () {
             await prePrepare(SNAPSHOT_LEADER.addr);
             let locksAfterFirst = hub.capabilitySnapshot.getActiveValidatorSnapshot.callCount;
@@ -283,8 +251,23 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
             expect(consensus.pendingProposals.size).to.equal(0);
         });
+}
+function registerPrePrepareTests() {
+    // -----------------------------------------------------------------
+    // _handlePrePrepare(): the follower side
+    // -----------------------------------------------------------------
+    describe('_handlePrePrepare()', function () {
+        beforeEach(function () {
+            // A third validator, following the round.
+            pm.validatorAddr = VALIDATORS_4[2].addr;
+            config = { cfg: 1 };
+            digest = consensus._digest(config);
+        });
+        registerPrePrepareLeaderTests();
+        registerPrePrepareFilterTests();
     });
-
+}
+function registerViewChangeTests() {
     // -----------------------------------------------------------------
     // View change: the new leader comes from the same pinned population
     // -----------------------------------------------------------------
@@ -335,7 +318,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(consensus.memberPubkeysForSeq(SEQ)).to.deep.equal(members);
         });
     });
-
+}
+function registerNewViewTests() {
     // -----------------------------------------------------------------
     // handleNewView(): the deliberately PARTIAL half (operator-accepted)
     // -----------------------------------------------------------------
@@ -383,4 +367,34 @@ describe('Consensus: snapshot-pinned leader election', function () {
             expect(consensus.view, 'unpinned: the live-set leader still is').to.equal(1);
         });
     });
+}
+describe('Consensus: snapshot-pinned leader election', function () {
+    beforeEach(function () {
+        hub = createMockHub();
+        pm  = hub._peerManager;
+        consensus = new Consensus(hub);
+        snapshot = makeFederationSnapshot(SNAPSHOT_SET, 800000);
+        hub.capabilitySnapshot = {
+            getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
+            getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
+            getQuorum:                  sinon.stub().returns(3)
+        };
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+        consensus.setValidatorSet(DRIFTED_LIVE_SET);
+    });
+
+    afterEach(function () {
+        for (let [, prop] of consensus.pendingProposals) {
+            if (prop && prop.timer) clearTimeout(prop.timer);
+        }
+        sinon.restore();
+    });
+
+    registerLeaderPrimitiveTests();
+    registerMemberSetTests();
+    registerLeaderIdentityTests();
+    registerProposeTests();
+    registerPrePrepareTests();
+    registerViewChangeTests();
+    registerNewViewTests();
 });
