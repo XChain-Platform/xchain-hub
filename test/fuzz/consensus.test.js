@@ -196,10 +196,10 @@ function registerDigestTests() {
 function registerHandlePrePrepareMessageValidationTests() {
 
     // -----------------------------------------------------------------
-    // _handlePrePrepare() message validation
+    // handlePrePrepare() message validation
     // -----------------------------------------------------------------
 
-    describe('_handlePrePrepare() message validation', function () {
+    describe('handlePrePrepare() message validation', function () {
 
         it('arbitrary envelope data never crashes', function () {
             fc.assert(fc.property(
@@ -222,7 +222,7 @@ function registerHandlePrePrepareMessageValidationTests() {
                 function (data) {
                     consensus.setValidatorSet([makeValidator(1)]);
                     let envelope = { data: data, sender: 'ws://peer:10001' };
-                    expect(function () { consensus._handlePrePrepare(envelope); }).to.not.throw();
+                    expect(function () { consensus.handlePrePrepare(envelope); }).to.not.throw();
                 }
             ), { numRuns: 200 });
         });
@@ -246,7 +246,7 @@ function registerHandlePrePrepareMessageValidationTests() {
                         data:   { seq: invalidSeq, configDigest: 'abc', config: {} },
                         sender: 'ws://peer:10001'
                     };
-                    consensus._handlePrePrepare(envelope);
+                    consensus.handlePrePrepare(envelope);
                     expect(consensus.pendingProposals.size).to.equal(proposalsBefore);
                 }
             ), { numRuns: 50 });

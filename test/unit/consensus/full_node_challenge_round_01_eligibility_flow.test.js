@@ -127,7 +127,7 @@ it('does not alarm when the indexer does not mark the set truncated', async func
             wireRpc({ verifiers: [{ pubkey: V2 }] });
             const logged = sinon.stub(console, 'error');
             const eng = new FullNodeChallengeRound(makeHub());
-            await eng._eligibleVerifiers(288);
+            await eng.eligibleVerifiers(288);
             expect(logged.calledWithMatch('TRUNCATED')).to.equal(false);
         });
 it('runEpoch abstains (creates no round, emits no verdict) when the verifier set is unresolved', async function () {

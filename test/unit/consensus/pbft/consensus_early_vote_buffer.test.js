@@ -15,7 +15,7 @@
 // opened the round it votes on used to be dropped with nothing left to
 // re-deliver it.
 //
-// _handlePrePrepare is async - it locks the validator snapshot at the leader's
+// handlePrePrepare is async - it locks the validator snapshot at the leader's
 // block boundary - while the vote handlers are synchronous, and the whole PBFT
 // burst completes inside that window. It bites hardest under
 // STAKE_WEIGHTED_QUORUM: a leader holding more than two thirds of the stake
@@ -153,7 +153,7 @@ function registerEarlyVoteReplayTests() {
             consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.earlyVotes.get(SEQ)).to.have.length(1);
 
-            await consensus._handlePrePrepare(prePrepareEnvelope(consensus));
+            await consensus.handlePrePrepare(prePrepareEnvelope(consensus));
             await new Promise((r) => setImmediate(r));   // the apply is async
 
             expect(consensus.earlyVotes.has(SEQ), 'buffer must drain').to.be.false;
@@ -164,7 +164,7 @@ function registerEarlyVoteReplayTests() {
         it('counts a replayed PREPARE toward this hub sending its own COMMIT', async function () {
             consensus.handlePrepare(voteEnvelope('PBFT_PREPARE', PEER, digest));
 
-            await consensus._handlePrePrepare(prePrepareEnvelope(consensus));
+            await consensus.handlePrePrepare(prePrepareEnvelope(consensus));
 
             const proposal = consensus.pendingProposals.get(SEQ);
             expect(proposal, 'the round must be open').to.exist;
@@ -174,7 +174,7 @@ function registerEarlyVoteReplayTests() {
         it('ignores a replayed vote whose digest does not match the round', async function () {
             consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, 'ff'.repeat(32)));
 
-            await consensus._handlePrePrepare(prePrepareEnvelope(consensus));
+            await consensus.handlePrePrepare(prePrepareEnvelope(consensus));
             await new Promise((r) => setImmediate(r));
 
             const proposal = consensus.pendingProposals.get(SEQ);

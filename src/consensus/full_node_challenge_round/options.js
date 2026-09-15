@@ -193,7 +193,7 @@ function initRoundState(self){
     self._committedEpochs = new Set();
     self._timer   = null;
     self._ticking = false;      // in-flight guard, see _tick()
-    self._truncWarnAt = 0;      // throttle for the truncated-set alarm, see _eligibleVerifiers()
+    self._truncWarnAt = 0;      // throttle for the truncated-set alarm, see eligibleVerifiers()
     self._handler = (env) => self._handleMessage(env);
 }
 

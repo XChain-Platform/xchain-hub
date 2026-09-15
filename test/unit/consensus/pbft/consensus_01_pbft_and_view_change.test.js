@@ -68,7 +68,7 @@ function wire(tip) {
 async function send(height) {
                 let config = { x: 1 };
                 let digest = consensus._digest(config);
-                await consensus._handlePrePrepare({
+                await consensus.handlePrePrepare({
                     sender: VALIDATORS_4[1].addr,                   // leader for (seq 5, view 0)
                     sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: height }
@@ -103,7 +103,7 @@ it('federated follower PREPAREs a PRE_PREPARE carrying a valid btcBlockHeight', 
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800004);
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
@@ -127,7 +127,7 @@ it('second PRE_PREPARE for an already-pending seq with a conflicting digest is d
             wireFederationSnapshot(3, 800000);
             let configA = { x: 1 };
             let digestA = consensus._digest(configA);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digestA, config: configA, btcBlockHeight: 800000 }
@@ -146,7 +146,7 @@ it('second PRE_PREPARE for an already-pending seq with a conflicting digest is d
             // A competing leader from view 1: (5+1)%4 = 2, so VALIDATORS_4[2] is the
             // legitimate proposer at view 1. This passes the identity guard and
             // is dropped only by the digest-conflict rule (two leaders, one seq).
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, view: 1, configDigest: digestB, config: configB, btcBlockHeight: 800000 }

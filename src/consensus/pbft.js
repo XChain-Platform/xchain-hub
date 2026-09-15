@@ -168,7 +168,7 @@ class Consensus {
     // means each hub would otherwise fall back to its own LOCAL validatorSet,
     // and two hubs with different local sets could finalize the same round over
     // different N: a federation split. Used by both the leader (propose) and
-    // follower (_handlePrePrepare) paths so they refuse in lockstep.
+    // follower (handlePrePrepare) paths so they refuse in lockstep.
     hasDeterministicSnapshot(snapshot) {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }
@@ -225,7 +225,7 @@ class Consensus {
     }
 
     // Acquire the federation validator-set snapshot at the current BTC tip.
-    // Used by both the leader (in propose) and followers (in _handlePrePrepare).
+    // Used by both the leader (in propose) and followers (in handlePrePrepare).
     // The leader stamps its tip into the PRE_PREPARE envelope so followers
     // call this with the matching blockIndex.
     // Returns { snapshot, weighted, requestedBlockIndex }. STAKE_WEIGHTED_QUORUM:
@@ -275,11 +275,11 @@ class Consensus {
     _handleMessage(envelope) {
         switch (envelope.type) {
             case PBFT_PRE_PREPARE:
-                // _handlePrePrepare is async because it locks the validator-set
+                // handlePrePrepare is async because it locks the validator-set
                 // snapshot at the leader-stamped block boundary via an indexer
                 // call. Errors are caught and logged; they never bubble up to
                 // the gossip layer.
-                this._handlePrePrepare(envelope).catch(err =>
+                this.handlePrePrepare(envelope).catch(err =>
                     logger.error(nodeUtil.format('Consensus: PRE_PREPARE handler error for seq %s:',
                         (envelope && envelope.data && envelope.data.seq),
                         err && err.message ? err.message : err)));
@@ -338,7 +338,7 @@ class Consensus {
         } catch (e) {
             // Fail CLOSED, mirroring saveSeq: a swallowed read fault left
             // this.seq/lastAppliedSeq at their constructor 0, so the stale-seq
-            // replay guard in _handlePrePrepare (`seq <= this.lastAppliedSeq`)
+            // replay guard in handlePrePrepare (`seq <= this.lastAppliedSeq`)
             // no longer rejected an already-applied seq and the node could not
             // tell a genuine fresh install from an unreadable persisted seq.
             // Rethrow so start() aborts rather than participate with the guard

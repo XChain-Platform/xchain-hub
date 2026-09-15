@@ -63,7 +63,7 @@ function registerSuitePart4() {
             // (seq 5, view 0) → leader is VALIDATORS_4[1]; a PRE_PREPARE from any
             // other validator must not create a proposal; the identity guard stops
             // an authenticated non-leader from driving an uncontested seq to commit.
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[3].addr,
                 sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -79,7 +79,7 @@ function registerSuitePart4() {
 
             let config = { x: 1 };
 
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: 'bad-digest', config }
@@ -92,7 +92,7 @@ function registerSuitePart4() {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: null, configDigest: null, config: null }

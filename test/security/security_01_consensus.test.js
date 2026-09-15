@@ -53,7 +53,7 @@ function sequenceMonotonicitySuite() {
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 3, view: 2, configDigest: digest, config: config }
             };
-            consensus._handlePrePrepare(envelope);
+            consensus.handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.false;
             expect(warnStub.calledWith(sinon.match(/stale seq/))).to.be.true;
         });
@@ -78,7 +78,7 @@ function sequenceMonotonicitySuite() {
                 sig_pubkey: VALIDATORS_4[0].pubkey,
                 data: { seq: 3, view: 1, configDigest: digest, config: config, btcBlockHeight: 800000 }
             };
-            await consensus._handlePrePrepare(envelope);
+            await consensus.handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.true;
             let p = consensus.pendingProposals.get(3);
             if (p.timer) clearTimeout(p.timer);

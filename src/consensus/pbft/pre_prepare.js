@@ -254,7 +254,7 @@ function castPrepare(self, envelope, seq, configDigest) {
 
 module.exports = {
 
-    async _handlePrePrepare(envelope) {
+    async handlePrePrepare(envelope) {
         let { seq, view, configDigest, config, btcBlockHeight } = envelope.data;
 
         if (!prePrepareAdmissible(this, envelope, seq, view, config, configDigest)) return;

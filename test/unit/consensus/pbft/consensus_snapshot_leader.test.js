@@ -49,7 +49,7 @@ let hub, pm, consensus, snapshot;
 let config, digest;
 
 function prePrepare(sender, extra) {
-    return consensus._handlePrePrepare(Object.assign({
+    return consensus.handlePrePrepare(Object.assign({
         sender: sender,
         // Envelopes carry the proven signing key; admission and leader
         // identity both resolve through it now, not through the addr.
@@ -236,7 +236,7 @@ function registerPrePrepareFilterTests() {
         });
 
         it('drops a viewless envelope before any snapshot work (anti-DoS pre-filter)', async function () {
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: SNAPSHOT_LEADER.addr,
                 sig_pubkey: SNAPSHOT_LEADER.pubkey,
                 data: { seq: SEQ, configDigest: digest, config: config, btcBlockHeight: 800000 }
@@ -254,9 +254,9 @@ function registerPrePrepareFilterTests() {
 }
 function registerPrePrepareTests() {
     // -----------------------------------------------------------------
-    // _handlePrePrepare(): the follower side
+    // handlePrePrepare(): the follower side
     // -----------------------------------------------------------------
-    describe('_handlePrePrepare()', function () {
+    describe('handlePrePrepare()', function () {
         beforeEach(function () {
             // A third validator, following the round.
             pm.validatorAddr = VALIDATORS_4[2].addr;

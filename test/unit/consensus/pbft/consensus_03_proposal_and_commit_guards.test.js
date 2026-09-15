@@ -119,7 +119,7 @@ it('a follower on a multi-member set declines to PREPARE without a snapshot', as
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let config = { x: 1 };
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,            // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: consensus._digest(config), config, btcBlockHeight: 800000 }
@@ -161,7 +161,7 @@ it('rejects a PRE_PREPARE whose seq is at/below the last applied seq', async fun
             consensus.lastAppliedSeq = 10;
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -174,7 +174,7 @@ it('expires a follower proposal on its (doubled) timeout', async function () {
             consensus.timeout = 1000;
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
@@ -306,14 +306,14 @@ describe('Consensus (PBFT)', function () {
 describe('guard branches', function () {
     installSuiteHooks7();
 it('rejects a PRE_PREPARE with a non-positive seq', async function () {
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: -1, configDigest: 'd', config: { x: 1 } }
             });
             expect(consensus.pendingProposals.size).to.equal(0);
         });
-it('_handlePrePrepare uses the snapshot quorum when a snapshot is available', async function () {
+it('handlePrePrepare uses the snapshot quorum when a snapshot is available', async function () {
             hub.capabilitySnapshot = {
                 getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 900000)),
                 getQuorum: sinon.stub().returns(3)
@@ -321,7 +321,7 @@ it('_handlePrePrepare uses the snapshot quorum when a snapshot is available', as
             hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 900000 }

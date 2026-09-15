@@ -345,19 +345,19 @@ it('throws on an empty target block', async function () {
 describe('FullNodeChallengeRound', function () {
     installSuiteHooks1();
 describe('eligibility', function () {
-it('_eligibleVerifiers = genesis ∪ indexer-verified', async function () {
+it('eligibleVerifiers = genesis ∪ indexer-verified', async function () {
             wireRpc({ verifiers: [{ pubkey: V2 }] });
             const eng = new FullNodeChallengeRound(makeHub());      // genesis = [V1]
-            const set = await eng._eligibleVerifiers(288);
+            const set = await eng.eligibleVerifiers(288);
             expect([...set].sort()).to.deep.equal([V1, V2].sort());
         });
 it('ABSTAINS (returns null) rather than degrading to genesis-only when the verifiers RPC is unavailable', async function () {
             // Consensus-critical: a per-hub, reachability-dependent fallback to the
             // genesis-only subset would split leader election and the quorum
-            // denominator across honest hubs. Fail CLOSED instead (see _eligibleVerifiers).
+            // denominator across honest hubs. Fail CLOSED instead (see eligibleVerifiers).
             axiosStub.post.rejects(new Error('no rpc'));
             const eng = new FullNodeChallengeRound(makeHub());
-            const set = await eng._eligibleVerifiers(288);
+            const set = await eng.eligibleVerifiers(288);
             expect(set).to.equal(null);
         });
 it('ABSTAINS (returns null) on an in-band indexer result.error (200 with error body)', async function () {
@@ -366,7 +366,7 @@ it('ABSTAINS (returns null) on an in-band indexer result.error (200 with error b
             // abstain, not a silently narrowed (genesis-only) verifier set.
             axiosStub.post.callsFake(async () => ({ data: { result: { error: 'indexer unavailable' } } }));
             const eng = new FullNodeChallengeRound(makeHub());
-            const set = await eng._eligibleVerifiers(288);
+            const set = await eng.eligibleVerifiers(288);
             expect(set).to.equal(null);
         });
 it('a genuinely genesis-only federation still resolves (empty indexer list is NOT an error)', async function () {
@@ -374,7 +374,7 @@ it('a genuinely genesis-only federation still resolves (empty indexer list is NO
             // returns no verified full nodes yields the configured genesis set, not an abstain.
             wireRpc({ verifiers: [] });
             const eng = new FullNodeChallengeRound(makeHub());       // genesis = [V1]
-            const set = await eng._eligibleVerifiers(288);
+            const set = await eng.eligibleVerifiers(288);
             expect([...set]).to.deep.equal([V1]);
         });
 it('ALARMS (and still proceeds) when the indexer marks the verifier set truncated', async function () {
@@ -392,7 +392,7 @@ it('ALARMS (and still proceeds) when the indexer marks the verifier set truncate
             });
             const logged = sinon.stub(console, 'error');
             const eng = new FullNodeChallengeRound(makeHub());
-            const set = await eng._eligibleVerifiers(288);
+            const set = await eng.eligibleVerifiers(288);
             expect([...set].sort(), 'the capped set is still consumed').to.deep.equal([V1, V2].sort());
             expect(logged.calledWithMatch('TRUNCATED'), 'no truncation alarm was raised').to.equal(true);
         });

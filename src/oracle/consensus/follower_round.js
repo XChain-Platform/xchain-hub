@@ -111,7 +111,7 @@ function prepareOnPropose(envelope, proposal, proposedAdmit) {
     let { round, prices, digest, sig_pubkey, sig } = proposal;
     let pending = this.pendingRounds.get(round);
     // Guard against a second PROPOSE for the same round with a different
-    // digest (mirrors the Consensus._handlePrePrepare fix in b8f5143).
+    // digest (mirrors the Consensus.handlePrePrepare fix in b8f5143).
     // Adding the sender to pending.prepares and broadcasting ORACLE_PREPARE
     // with the incoming digest would inflate the A-round prepare tally and
     // emit an orphaned PREPARE for digest B, the same protocol-noise pattern

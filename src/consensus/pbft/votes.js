@@ -34,7 +34,7 @@ const logger = getLogger();
 // Early-arrival buffer bounds (the config-change twin of the OracleConsensus /
 // AttestationConsensus buffers, finding F7).
 //
-// _handlePrePrepare is ASYNC (it locks the validator snapshot at the leader's
+// handlePrePrepare is ASYNC (it locks the validator snapshot at the leader's
 // block boundary, an out-of-process call) while handlePrepare/_handleCommit are
 // synchronous and, before this buffer, dropped any vote for a seq this hub had
 // not opened yet. A leader whose own stake already meets the round's threshold

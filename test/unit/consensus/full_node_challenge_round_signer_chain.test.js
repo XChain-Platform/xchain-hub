@@ -330,7 +330,7 @@ describe('FullNodeChallengeRound runEpoch opens its round after the pinned micro
     eng._indexerCall = () => Promise.resolve({
       ledger_hash: 'ab'.repeat(32)
     });
-    eng._eligibleVerifiers = () => Promise.resolve(new Set([ME]));
+    eng.eligibleVerifiers = () => Promise.resolve(new Set([ME]));
     eng.claimantSet = () => Promise.resolve(new Set(claimants));
     eng.computeAnswer = () => Promise.resolve('answer');
     return eng;

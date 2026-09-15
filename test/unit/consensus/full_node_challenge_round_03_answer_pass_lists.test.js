@@ -154,7 +154,7 @@ it('a verifier refuses to sign a PASS list that includes a copier', async functi
             const honest = eng.answerDigest(st.challengeId, P1, ANSWER);
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
             eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
-            const leader = eng._electedLeader(st);
+            const leader = eng.electedLeader(st);
             await eng.onSignReq({ epoch: 288, challengeId: st.challengeId, sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
             const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
             expect(signed, 'must not co-sign a pass list containing a copier').to.not.exist;
@@ -189,7 +189,7 @@ it('refuses to sign a PASS list that omits a claimant it confirmed correct', asy
             const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = new FullNodeChallengeRound(hub);
             const st  = seedRound(eng);
-            const leader = eng._electedLeader(st);
+            const leader = eng.electedLeader(st);
             // Leader's list drops P2 (which this node independently confirmed).
             await eng.onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1], sig: 'x' });
             expect(st.sigs.has(V2)).to.equal(false);
@@ -201,7 +201,7 @@ it('signs a complete PASS list', async function () {
             const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = new FullNodeChallengeRound(hub);
             const st  = seedRound(eng);
-            const leader = eng._electedLeader(st);
+            const leader = eng.electedLeader(st);
             await eng.onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
             const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
             expect(signed, 'signs when the pass list is complete').to.exist;

@@ -168,7 +168,7 @@ function registerPREPREPAREValidation() {
     it('accepts valid PRE_PREPARE with correct digest', testAcceptsValidPREPREPAREWithCorrectDigest);
 }
 function testRejectsSeq0() {
-    consensus._handlePrePrepare({
+    consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 0, configDigest: 'abc', config: { x: 1 } }
@@ -176,7 +176,7 @@ function testRejectsSeq0() {
     expect(consensus.pendingProposals.size).to.equal(0);
 }
 function testRejectsNegativeSeq() {
-    consensus._handlePrePrepare({
+    consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: -1, configDigest: 'abc', config: { x: 1 } }
@@ -184,7 +184,7 @@ function testRejectsNegativeSeq() {
     expect(consensus.pendingProposals.size).to.equal(0);
 }
 function testRejectsNonNumberSeq() {
-    consensus._handlePrePrepare({
+    consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 'abc', configDigest: 'abc', config: { x: 1 } }
@@ -192,7 +192,7 @@ function testRejectsNonNumberSeq() {
     expect(consensus.pendingProposals.size).to.equal(0);
 }
 function testRejectsNullConfig() {
-    consensus._handlePrePrepare({
+    consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 1, configDigest: 'abc', config: null }
@@ -200,7 +200,7 @@ function testRejectsNullConfig() {
     expect(consensus.pendingProposals.size).to.equal(0);
 }
 function testRejectsMismatchedDigest() {
-    consensus._handlePrePrepare({
+    consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,                       // leader for (seq 1, view 0)
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 1, view: 0, configDigest: 'wrong', config: { x: 1 } }
@@ -218,7 +218,7 @@ async function testAcceptsValidPREPREPAREWithCorrectDigest() {
         getQuorum: sinon.stub().returns(3)
     };
     hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-    await consensus._handlePrePrepare({
+    await consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }

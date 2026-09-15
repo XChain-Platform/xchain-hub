@@ -78,7 +78,7 @@ const finalizePart  = require('./full_node_challenge_round/finalize.js');
 const PASS_CMP = (a, b) => Buffer.compare(Buffer.from(String(a), 'utf8'),
                                           Buffer.from(String(b), 'utf8'));
 
-// Throttle for the truncated-verifier-set alarm. _eligibleVerifiers runs once per
+// Throttle for the truncated-verifier-set alarm. eligibleVerifiers runs once per
 // poll tick (30s by default), so an unthrottled warning would emit thousands of
 // times a day for one standing condition; an hour is loud enough to be seen and
 // quiet enough to stay readable. Same idiom as CapabilitySnapshot.getQuorum.
@@ -246,7 +246,7 @@ class FullNodeChallengeRound {
         // could lock in a censoring pass list before the elected leader's proposal
         // arrives. Buffer non-leader messages by ignoring them here; the true
         // leader's SIGN_REQ will arrive and be accepted normally.
-        let electedLeader = this._electedLeader(state);
+        let electedLeader = this.electedLeader(state);
         if(leader !== electedLeader) return;
 
         let pass = Array.isArray(d.passList) ? d.passList.map(p => String(p).toLowerCase()) : [];

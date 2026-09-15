@@ -102,7 +102,7 @@ function registerSuitePart5() {
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
 
             // Only 1 prepare (from PRE_PREPARE sender) + self = 2, need 3
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
@@ -219,7 +219,7 @@ function registerSuitePart9() {
             // Attempt with seq 5 (below lastAppliedSeq)
             // (sender is the legit (seq 5, view 0) leader, so the stale-seq guard,
             // not the identity guard, is what rejects it)
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -298,9 +298,9 @@ function configureFederationSnapshot() {
 async function createPendingProposal(config, digest) {
     // Step 1: PRE_PREPARE from leader creates proposal
     // (seq 5, view 0 → (5+0)%4 = 1 → VALIDATORS_4[1] is the rotation leader)
-    // _handlePrePrepare is async (locks the federation snapshot before
+    // handlePrePrepare is async (locks the federation snapshot before
     // broadcasting PREPARE), so the flow must be awaited.
-    await consensus._handlePrePrepare({
+    await consensus.handlePrePrepare({
         sender: VALIDATORS_4[1].addr,
         sig_pubkey: VALIDATORS_4[1].pubkey,
         data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }

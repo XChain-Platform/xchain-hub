@@ -140,7 +140,7 @@ module.exports = {
             .update(String(this.network) + ':' + epoch + ':' + seed + ':' + target).digest('hex');
 
         // Set<pubkey>: who may SIGN / who may be verified
-        let eligible  = await this._eligibleVerifiers(epoch);
+        let eligible  = await this.eligibleVerifiers(epoch);
         // Unresolved eligible set (indexer RPC failure): ABSTAIN for this epoch
         // rather than run on a per-hub-divergent member list. No round state is
         // created, so this hub neither elects/claims leadership, signs, nor

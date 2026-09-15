@@ -29,7 +29,7 @@ const crypto            = require('crypto');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-// Throttle for the truncated-verifier-set alarm. _eligibleVerifiers runs once per
+// Throttle for the truncated-verifier-set alarm. eligibleVerifiers runs once per
 // poll tick (30s by default), so an unthrottled warning would emit thousands of
 // times a day for one standing condition; an hour is loud enough to be seen and
 // quiet enough to stay readable. Same idiom as CapabilitySnapshot.getQuorum.
@@ -75,7 +75,7 @@ module.exports = {
     // verifier at the unlocked rank in the SHA256(challenge_id || pubkey) ordering.
     // Used by onSignReq to reject SIGN_REQ messages from non-leaders before
     // locking the passList.
-    _electedLeader(state){
+    electedLeader(state){
         if(!state.eligible || state.eligible.size === 0) return null;
         let ranked = Array.from(state.eligible).map(pk => ({
             pk, h: crypto.createHash('sha256').update(state.challengeId).update(pk).digest('hex')
@@ -106,7 +106,7 @@ module.exports = {
     // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
     //
     // CONSENSUS-CRITICAL: the returned set is the domain of leader election
-    // (_electedLeader / isLeader) and the 2/3+1 quorum denominator (maybeFinalize).
+    // (electedLeader / isLeader) and the 2/3+1 quorum denominator (maybeFinalize).
     // On an UNRESOLVED set (any indexer RPC failure: 401 / timeout / transport) this
     // returns null so the caller ABSTAINS (skips the epoch), rather than degrading to
     // the genesis-only subset. A per-hub, reachability-dependent fallback would split
@@ -117,7 +117,7 @@ module.exports = {
     // The legitimate genesis-only path (a genuinely genesis-only federation) is on the
     // SUCCESS branch, where the indexer returns an empty validators list; only the
     // error-degradation path changes.
-    async _eligibleVerifiers(epoch){
+    async eligibleVerifiers(epoch){
         let set = new Set(this.genesis);
         try {
             let verified = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
@@ -134,7 +134,7 @@ module.exports = {
                 let now = Date.now();
                 if (now - this._truncWarnAt > TRUNC_WARN_THROTTLE_MS){
                     this._truncWarnAt = now;
-                    logger.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
+                    logger.error('FullNodeChallengeRound: eligibleVerifiers: the indexer returned a TRUNCATED ' +
                         'verified-full-node set at epoch ' + epoch + ' (' +
                         ((verified.validators && verified.validators.length) || 0) + ' verifier(s) returned): it hit ' +
                         'VALIDATOR_QUERY_LIMIT, so the eligible set is CAPPED below the true verifier universe and the ' +
@@ -151,9 +151,9 @@ module.exports = {
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                logger.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+                logger.warn('FullNodeChallengeRound: eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
             else
-                logger.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+                logger.warn('FullNodeChallengeRound: eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
             return null;
         }
         return set;
@@ -162,7 +162,7 @@ module.exports = {
     // Claimant universe = validators holding the full_node capability at the
     // epoch block (the block-boundary snapshot every hub locks identically).
     //
-    // CONSENSUS-CRITICAL: mirrors _eligibleVerifiers. capabilitySnapshot.getSnapshot
+    // CONSENSUS-CRITICAL: mirrors eligibleVerifiers. capabilitySnapshot.getSnapshot
     // signals every UNRESOLVED state (transport error, 401/403, malformed shape,
     // block-echo mismatch, unconfigured MIN_STAKE against a live registry) by
     // returning null, never by throwing, so the catch below is a backstop, not the

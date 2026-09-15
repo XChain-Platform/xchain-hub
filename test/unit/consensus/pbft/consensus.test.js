@@ -310,7 +310,7 @@ it('PRE_PREPARE creates follower proposal and broadcasts PREPARE', async functio
             let digest = consensus._digest(config);
 
             // seq 5, view 0: (5+0)%4 = 1, VALIDATORS_4[1] is the rotation leader.
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
@@ -334,7 +334,7 @@ it('PRE_PREPARE from a non-leader for the claimed view is rejected (no proposal,
             // own config. (Without the identity guard this would have been accepted.)
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,                       // not the leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -347,7 +347,7 @@ it('PRE_PREPARE with no view field is rejected', async function () {
             // leader; a viewless envelope cannot be identity-checked and is dropped.
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, configDigest: digest, config }
@@ -363,7 +363,7 @@ describe('Consensus (PBFT)', function () {
 describe('PBFT message flow', function () {
     installSuiteHooks2();
 it('PRE_PREPARE with wrong digest is rejected', function () {
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: 'bad-digest', config: { x: 1 } }
@@ -371,7 +371,7 @@ it('PRE_PREPARE with wrong digest is rejected', function () {
             expect(consensus.pendingProposals.has(5)).to.be.false;
         });
 it('PRE_PREPARE with missing fields is ignored', function () {
-            consensus._handlePrePrepare({
+            consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: null, configDigest: null, config: null }
@@ -386,7 +386,7 @@ it('federated follower declines to PREPARE when btcBlockHeight is omitted (fail 
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            await consensus._handlePrePrepare({
+            await consensus.handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }  // no btcBlockHeight
