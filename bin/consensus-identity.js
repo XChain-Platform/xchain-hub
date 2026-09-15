@@ -28,6 +28,10 @@
  *                             (coin, network) PAIR, not one number per network.
  *   hub_schema_version        the mirror-row schema every reader checks for
  *                             strict equality before applying a hub row.
+ *   carrier_logic_digest      sha256 over the sorted id=hash lines of
+ *                             bin/pins/carrier-logic.json, the token-stream pin
+ *                             of every gate carrier's LOGIC. Read from the pin,
+ *                             not the tree: the pin's own guard measures the tree.
  *
  * WHY THE GATES MAP IS PINNED AND NOT JUST THE DIGEST, and this is the whole
  * reason this script exists rather than a one-line hash. consensus_rules_digest
@@ -140,6 +144,7 @@ function coinConsensusPins() {
 function codeIdentity() {
     const rulesModule = loadFromRepo('src/consensus_rules_digest.js');
     const { HUB_SCHEMA_VERSION } = loadFromRepo('src/hub_schema_version.js');
+    const logicPin = loadFromRepo('bin/lib/carrier_logic_pin.js');
 
     const rules = rulesModule.computeConsensusRulesDigest();
     // The GATES field verbatim, because the hash alone cannot be checked by hand
@@ -163,6 +168,7 @@ function codeIdentity() {
         coin_pin_armed_networks: coinPins.pinnedNetworks,
         coin_pin_skipped_networks: coinPins.unpinnedNetworks,
         hub_schema_version: HUB_SCHEMA_VERSION,
+        carrier_logic_digest: logicPin.digest(logicPin.readPin(REPO_ROOT)),
     };
 }
 
@@ -179,7 +185,7 @@ function compare(pin, fresh) {
     const differences = [];
     const scalars = [
         'consensus_rules_digest', 'gates_field', 'gates_field_hash',
-        'coin_consensus_pin_hash', 'hub_schema_version', 'gate_key_count',
+        'coin_consensus_pin_hash', 'hub_schema_version', 'gate_key_count', 'carrier_logic_digest',
     ];
     for (const key of scalars) {
         if (pin[key] !== fresh[key]) {
@@ -263,6 +269,7 @@ function main() {
         console.log(`coin pins armed on:       ${identity.coin_pin_armed_networks.join(', ') || 'none'}`);
         console.log(`coin pins skipped on:     ${identity.coin_pin_skipped_networks.join(', ') || 'none'}`);
         console.log(`hub_schema_version:       ${identity.hub_schema_version}`);
+        console.log(`carrier_logic_digest:     ${identity.carrier_logic_digest}`);
         if (opts.out) console.log(`\nwritten to ${opts.out}`);
     }
 

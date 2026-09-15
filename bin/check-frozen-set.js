@@ -36,7 +36,7 @@
  * number. A restructure cannot be trusted to remember that; it can be made to
  * run this.
  *
- * THE THREE HALVES OF THE ANSWER, because no single one of them is enough:
+ * THE FOUR HALVES OF THE ANSWER, because no single one of them is enough:
  *
  *   derived   every SHARED_GATES basename must resolve at src/<name>.js. The
  *             list is READ FROM THE MODULE, never restated here: a restated copy
@@ -51,6 +51,12 @@
  *             rename, because a glob over the tree always agrees with the tree.
  *             The manifest is the only half that does, and it is regenerated
  *             only by an explicit --write.
+ *   pinned    every gate carrier's LOGIC still hashes to bin/pins/carrier-logic.json
+ *             (bin/lib/carrier_logic_pin.js, a token-stream hash that ignores
+ *             comments, whitespace and require paths). The three halves above
+ *             see a file move; this one sees a function body change. --write
+ *             here never touches that pin: only the pin module's own --write
+ *             --reason may, so a re-pin always carries its record.
  *
  * USAGE
  *   node bin/check-frozen-set.js                  check this checkout
@@ -66,6 +72,8 @@
 
 const fs   = require('fs');
 const path = require('path');
+
+const logicPin = require('./lib/carrier_logic_pin');
 
 // The checkout under test. A binding rather than a constant so `--root` can aim
 // it at another tree, which is what the falsification run does.
@@ -192,6 +200,27 @@ function bridgeGateModules() {
     return Array.from(new Set(Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g)).map((m) => m[1])));
 }
 
+/**
+ * Pinned: every carrier-logic entry against the tree. A missing pin is a
+ * violation, not a skip, for the same reason a missing manifest is.
+ * @returns {object[]} violations
+ */
+function pinnedViolations() {
+    if (!fs.existsSync(path.join(REPO_ROOT, logicPin.PIN_REL))) {
+        return [{ kind: 'carrier_logic_pin_missing', file: logicPin.PIN_REL,
+            detail: 'nothing to compare carrier logic against; run bin/lib/carrier_logic_pin.js --init --reason "<why>"' }];
+    }
+    const measured = logicPin.measure(REPO_ROOT, logicPin.readPin(REPO_ROOT));
+    return Object.keys(measured).filter((id) => !measured[id].ok).map((id) => ({
+        kind: 'carrier_logic_moved',
+        file: measured[id].path,
+        id,
+        detail: measured[id].actual === null
+            ? 'pinned carrier logic and the file is gone'
+            : `the carrier's logic no longer hashes to its pin (${measured[id].expected.slice(0, 8)} pinned, ${measured[id].actual.slice(0, 8)} measured)`,
+    }));
+}
+
 /** The frozen set as the tree spells it right now, glob by glob. */
 function measure() {
     const byGlob = {};
@@ -266,7 +295,7 @@ function check() {
         });
     }
 
-    return { violations, measured, manifest };
+    return { violations: violations.concat(pinnedViolations()), measured, manifest };
 }
 
 function parseArgs(argv) {
@@ -291,6 +320,8 @@ function main(argv) {
     if (opts.root) setRepoRoot(opts.root);
 
     if (opts.write) {
+        // The manifest only. The carrier-logic pin has its own --write with a
+        // mandatory --reason, and regenerating it here would bypass that record.
         const measured = measure();
         const out = {
             recordedBy: 'bin/check-frozen-set.js --write',
@@ -341,6 +372,7 @@ module.exports = {
     filesUnder,
     sharedGateModules,
     bridgeGateModules,
+    pinnedViolations,
     setRepoRoot,
     repoRoot: () => REPO_ROOT,
     FROZEN_GLOBS,

@@ -18,6 +18,8 @@
  * one catches a break the other two cannot: a carrier moved into a subdirectory,
  * an activation module written below the top level, and a frozen file renamed
  * away from every glob.
+ * The fourth half, pinned, is driven the same way: a carrier whose logic changed
+ * in place, which none of the three path halves can see.
  *
  *   npx mocha --no-config --timeout 60000 bin/test/check_frozen_set.test.js
  *
@@ -31,13 +33,14 @@ const os     = require('os');
 const path   = require('path');
 
 const frozen = require('../check-frozen-set.js');
+const logicPin = require('../lib/carrier_logic_pin.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 /**
  * A minimal tree with the shape the check cares about: a rules-digest module
  * declaring two carriers, the carriers themselves, a bridge engine loading a
- * third, and a manifest recording all of it.
+ * third, a manifest recording all of it, and a carrier-logic pin over the three.
  */
 function buildTree() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frozen-'));
@@ -62,7 +65,18 @@ function buildTree() {
     for (const name of ['rollcall_activation.js', 'equivocation_header.js', 'xchain_bridge_activation.js']) {
         fs.writeFileSync(path.join(root, 'src', name), "module.exports = {};\n");
     }
+    writeLogicPin(root);
     return root;
+}
+
+/** Pin the tree's three carriers by token hash, the way --init would. */
+function writeLogicPin(root) {
+    const entries = {};
+    for (const name of ['rollcall_activation', 'equivocation_header', 'xchain_bridge_activation']) {
+        const rel = `src/${name}.js`;
+        entries[name] = { path: rel, hash: logicPin.tokenHash(fs.readFileSync(path.join(root, rel), 'utf8')), twins: [] };
+    }
+    logicPin.writePin(root, { version: 1, entries, repins: [] });
 }
 
 function run(root) {
@@ -208,6 +222,52 @@ describe('bin/check-frozen-set.js', function () {
     describe('--root', () => {
         it('checks the checkout it is given, not the one it lives in', () => {
             assert.strictEqual(frozen.repoRoot(), REPO_ROOT);
+        });
+    });
+});
+
+describe('bin/check-frozen-set.js', function () {
+    this.timeout(60000);
+
+    describe('a carrier whose logic changed in place', () => {
+        let root;
+        before(() => { root = buildTree(); writeManifest(root); });
+        after(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+        it('is caught by the pinned half alone, because no path moved', () => {
+            fs.writeFileSync(path.join(root, 'src', 'equivocation_header.js'), 'module.exports = { changed: true };\n');
+
+            const violations = run(root).violations;
+            assert.deepStrictEqual(violations.map((v) => v.kind), ['carrier_logic_moved'],
+                'the three path halves must stay silent: nothing moved, the logic did');
+            assert.strictEqual(violations[0].file, 'src/equivocation_header.js');
+            assert.strictEqual(violations[0].id, 'equivocation_header');
+        });
+
+        it('is not repaired by --write, which regenerates the manifest only', () => {
+            const before = fs.readFileSync(path.join(root, logicPin.PIN_REL));
+            assert.strictEqual(frozen.main(['--root', root, '--write']), 0);
+            frozen.setRepoRoot(REPO_ROOT);
+            assert.ok(before.equals(fs.readFileSync(path.join(root, logicPin.PIN_REL))),
+                'only bin/lib/carrier_logic_pin.js --write --reason may move the pin');
+            assert.ok(run(root).violations.some((v) => v.kind === 'carrier_logic_moved'));
+        });
+
+        it('is clean again once the pin module records the re-pin', () => {
+            assert.strictEqual(logicPin.main(['--root', root, '--write', '--id', 'equivocation_header', '--reason', 'test']), 0);
+            assert.deepStrictEqual(run(root).violations, []);
+            assert.strictEqual(logicPin.readPin(root).repins.length, 1, 'the re-pin carries its record');
+        });
+    });
+
+    describe('a tree with no carrier-logic pin', () => {
+        let root;
+        before(() => { root = buildTree(); writeManifest(root); fs.rmSync(path.join(root, logicPin.PIN_REL)); });
+        after(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+        it('refuses rather than passing on an absent comparand', () => {
+            assert.ok(run(root).violations.some((v) => v.kind === 'carrier_logic_pin_missing'),
+                'a missing pin read as clean is how the fourth half would quietly stop gating');
         });
     });
 });
