@@ -44,10 +44,15 @@ const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
-
-const REORG_ALERT          = 'REORG_ALERT';
-const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
-const XCHAIN_REORG_COMMIT  = 'XCHAIN_REORG_COMMIT';
+const { installParts } = require('./install_parts.js');
+const { REORG_ALERT, XCHAIN_REORG_PREPARE, XCHAIN_REORG_COMMIT } = require('./reorg_handler/message_types.js');
+// One method group per behaviour, installed on the prototype below. The message
+// subscription stays in this file: PeerManager.MESSAGE_SUBSCRIBERS names this
+// subscriber ReorgHandler, and the listener-ceiling check reads that name off the
+// class exported by the file that registers it.
+const reportMethods    = require('./reorg_handler/report.js');
+const consensusMethods = require('./reorg_handler/consensus.js');
+const probeMethods     = require('./reorg_handler/probe.js');
 
 const DEFAULT_REORG_TIMEOUT = 60000; // 60 seconds
 
@@ -77,26 +82,7 @@ class ReorgHandler extends EventEmitter {
 
         this.timeout = parseInt(hubConfig.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
 
-        // Blast-radius bound. executeRollback DELETEs attestations and disputes price
-        // snapshots relative to the reorg `timestamp`, which is caller-supplied and only
-        // sanity-checked for >= 0. A timestamp near 0 makes the rollback wipe essentially
-        // ALL attestations for the chain and dispute every finalized price snapshot. A
-        // real reorg can only invalidate RECENT state, so refuse a reorg whose timestamp
-        // is older than this window (or too far in the future) before it can drive a
-        // rollback. Self-node verification (below) covers validity; this bounds the
-        // timestamp dimension independently.
-        this.maxLookbackMs = parseInt(hubConfig.REORG_MAX_LOOKBACK_MS) || 86400000; // 24h
-
-        // Height-dimension blast-radius bound: refuse a reorgHeight deeper than this
-        // many blocks below our own indexer's tip (DOGE's 1-minute blocks are ~1440
-        // per 24h, so the default clears every chain's 24h window with margin).
-        this.maxReorgDepth = parseInt(hubConfig.REORG_MAX_DEPTH) || 2000;
-
-        // How far a reported reorg `timestamp` may PREDATE our own node's block_time
-        // for reorgHeight before we refuse to act on it (see
-        // timestampConsistentWithBlockTime). Default 3h: covers the ~2h future
-        // miner-timestamp skew consensus rules allow, plus clock-skew margin.
-        this.timestampSkewToleranceMs = parseInt(hubConfig.REORG_TIMESTAMP_SKEW_MS) || 10800000;
+        this.initBlastRadiusBounds();
 
         // Federation network (mainnet|testnet|regtest). When set, a getblockhashes
         // response naming a different network is refused (mirrors
@@ -126,6 +112,31 @@ class ReorgHandler extends EventEmitter {
         // every peer per entry (REORG-INBOUND-UNBOUNDED-ROUNDS-1). Rounds self-expire on
         // the timeout, so this only bounds a burst; a real reorg needs one round per chain.
         this.maxPendingReorgs = parseInt(hubConfig.REORG_MAX_PENDING) || 64;
+    }
+
+    // The two blast-radius bounds and the timestamp skew tolerance, read in the order
+    // the constructor has always set them.
+    initBlastRadiusBounds() {
+        // Blast-radius bound. executeRollback DELETEs attestations and disputes price
+        // snapshots relative to the reorg `timestamp`, which is caller-supplied and only
+        // sanity-checked for >= 0. A timestamp near 0 makes the rollback wipe essentially
+        // ALL attestations for the chain and dispute every finalized price snapshot. A
+        // real reorg can only invalidate RECENT state, so refuse a reorg whose timestamp
+        // is older than this window (or too far in the future) before it can drive a
+        // rollback. Self-node verification (below) covers validity; this bounds the
+        // timestamp dimension independently.
+        this.maxLookbackMs = parseInt(hubConfig.REORG_MAX_LOOKBACK_MS) || 86400000; // 24h
+
+        // Height-dimension blast-radius bound: refuse a reorgHeight deeper than this
+        // many blocks below our own indexer's tip (DOGE's 1-minute blocks are ~1440
+        // per 24h, so the default clears every chain's 24h window with margin).
+        this.maxReorgDepth = parseInt(hubConfig.REORG_MAX_DEPTH) || 2000;
+
+        // How far a reported reorg `timestamp` may PREDATE our own node's block_time
+        // for reorgHeight before we refuse to act on it (see
+        // timestampConsistentWithBlockTime). Default 3h: covers the ~2h future
+        // miner-timestamp skew consensus rules allow, plus clock-skew margin.
+        this.timestampSkewToleranceMs = parseInt(hubConfig.REORG_TIMESTAMP_SKEW_MS) || 10800000;
     }
 
     // The canonical reorgId for an observation. Honest reporters build it from these exact
@@ -217,100 +228,6 @@ class ReorgHandler extends EventEmitter {
         this.pendingReorgs.clear();
     }
 
-    // Report a reorg (called via JSON-RPC or internally). The reporter supplies the
-    // block hash it observed BEFORE the reorg at reorgHeight (oldHash) and the hash
-    // its node serves NOW (newHash); this hub re-verifies both against its own
-    // indexer before broadcasting, so a compromised reporter credential alone can
-    // not start a rollback round for a reorg that never happened.
-    async reportReorg(chain, reorgHeight, timestamp, oldHash, newHash) {
-        // Validate chain
-        let allowedChains = coins.ALLOWED_COINS;
-        if (!allowedChains.includes(chain))
-            throw new Error('Invalid chain: ' + chain + ' (allowed: ' + allowedChains.join(', ') + ')');
-
-        // Validate reorgHeight
-        let h = parseInt(reorgHeight);
-        if (!Number.isInteger(h) || h < 0)
-            throw new Error('reorgHeight must be a non-negative integer');
-
-        // Validate timestamp
-        let t = parseInt(timestamp);
-        if (!Number.isFinite(t) || t < 0)
-            throw new Error('timestamp must be a non-negative number');
-        let now = Date.now();
-        if (t > now + 300000)
-            throw new Error('timestamp is too far in the future');
-        if (t < now - this.maxLookbackMs)
-            throw new Error('timestamp is too far in the past (reorg blast-radius bound: ' +
-                this.maxLookbackMs + 'ms); a reorg can only invalidate recent state');
-
-        // Validate the observed hash pair
-        oldHash = String(oldHash || '').toLowerCase();
-        newHash = String(newHash || '').toLowerCase();
-        if (!this.hashesWellFormed(oldHash, newHash))
-            throw new Error('oldHash and newHash must be distinct 64-hex block hashes ' +
-                '(the hash observed at reorgHeight before the reorg, and the one served now)');
-
-        let reorgId = this.canonicalReorgId(chain, reorgHeight, timestamp);
-
-        // Already handled: this call is a no-op, so answer it BEFORE the rate limiter.
-        // Re-reporting a reorg we have already rolled back is idempotent by design and
-        // costs nothing here (no DB, no broadcast, no verification), but sitting behind
-        // the limiter it threw 'Rate limit ...' instead - so the ordinary retry a
-        // monitor or a peer makes after a confirmed reorg surfaced as an error rather
-        // than the intended silent ignore.
-        if (this.processed.has(reorgId)) return;
-
-        // Rate limit: 1 report per chain per 60 seconds. CHECK the budget here, but do
-        // NOT consume it until the report actually passes self-verification and will be
-        // acted on (below). Consuming it up-front let a report that fails verification
-        // (typically a momentarily-lagging local node during a real reorg, or a duplicate
-        // early-return) burn the 60s window, so the operator's retry after the node
-        // re-syncs was rejected exactly when the genuine ALERT needed to go out
-        // (REORG-RATELIMIT-BEFORE-VERIFY-1).
-        let lastReport = this.reorgRateTracker.get(chain) || 0;
-        if (now - lastReport < 60000)
-            throw new Error('Rate limit: only one reorg report per chain per 60 seconds');
-
-        // Never report (or locally execute) a rollback our own node does not confirm.
-        let verified = await this.verifyReorgAgainstOwnNode(chain, h, oldHash, newHash);
-        if (!verified)
-            throw new Error('own indexer does not confirm this reorg ' +
-                '(node must serve newHash at reorgHeight, within depth bounds, on the federation network)');
-        let observedBlockTimeMs = (verified && Number.isFinite(verified.blockTimeMs)) ? verified.blockTimeMs : null;
-        if (!this.timestampConsistentWithBlockTime(t, observedBlockTimeMs))
-            throw new Error('timestamp predates the reorged block\'s own block_time at reorgHeight ' +
-                '(a reorg cannot be observed before the block existed)');
-
-        // Verified and about to act: now consume the per-chain rate budget (covers both
-        // the single-node local-execute path and the broadcast+consensus path below).
-        this.reorgRateTracker.set(chain, now);
-
-        // Single-node fallback
-        let quorum = this.getQuorum();
-        if (quorum === 0) {
-            await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, '[]', observedBlockTimeMs);
-            return;
-        }
-
-        // Broadcast REORG_ALERT
-        this.peerManager.broadcast(REORG_ALERT, {
-            chain, reorgHeight, timestamp, reorgId, oldHash, newHash
-        });
-
-        // Determine affected chains (any chain that had cross-chain interactions with the source)
-        let affectedChains = this.getAffectedChains(chain);
-
-        // Start consensus
-        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
-    }
-
-    async getReorgHistory(limit) {
-        // The 500-row server-side page cap travels with the statement, in
-        // db/reorg_attestations.js, so the caller's limit is passed through raw.
-        return await this.db.findReorgAttestations(limit);
-    }
-
     // Defense-in-depth: only tally votes from senders that are registered
     // validators. PeerManager already drops any message whose signature doesn't
     // match a registered pubkey, but counting raw envelope.sender values means a
@@ -343,437 +260,6 @@ class ReorgHandler extends EventEmitter {
             case XCHAIN_REORG_PREPARE: await this.handlePrepare(envelope); break;
             case XCHAIN_REORG_COMMIT:  this._handleCommit(envelope);        break;
         }
-    }
-
-    async handleAlert(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
-            noteDrop({ reason: 'unknown_sender', phase: 'reorg_alert', sender: envelope.sender, envelope });
-            return;
-        }
-        let { chain, reorgHeight, timestamp, reorgId, oldHash, newHash } = envelope.data;
-        if (!chain || !reorgHeight || !timestamp || !reorgId) return;
-        // Bind reorgId to its canonical (chain:reorgHeight:timestamp) form so one valid
-        // observation cannot spawn unlimited distinct rounds (REORG-INBOUND-UNBOUNDED-ROUNDS-1):
-        // the self-verify in-flight key excludes reorgId/timestamp, so without this a Byzantine
-        // validator could re-broadcast the same real (height,newHash) under endless reorgId
-        // strings, each creating a fresh round + PREPARE fan-out. Honest reporters always send
-        // this exact form (reportReorg), so legitimate ALERTs are unaffected.
-        if (reorgId !== this.canonicalReorgId(chain, reorgHeight, timestamp)) return;
-        if (this.processed.has(reorgId)) return;
-        if (this.pendingReorgs.has(reorgId)) return;
-        // Abstain when already at the concurrent-round cap (a later ALERT retries).
-        if (this.pendingReorgs.size >= this.maxPendingReorgs) return;
-
-        // Refuse to even start consensus on an out-of-window reorg. An honest majority
-        // applying this bound denies a Byzantine reporter the quorum to drive a rollback
-        // that reaches back arbitrarily far (blast-radius bound).
-        if (!this.timestampInBounds(timestamp)) return;
-
-        oldHash = String(oldHash || '').toLowerCase();
-        newHash = String(newHash || '').toLowerCase();
-        if (!this.hashesWellFormed(oldHash, newHash)) return;
-
-        // Independent observation: co-sign only what our own indexer confirms.
-        let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
-        if (!verified) return;
-        let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
-        // Abstain from a round whose timestamp predates the reorged block itself
-        // (over-rollback attempt); an honest majority abstaining denies it quorum.
-        if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
-
-        // Reentrancy (the await above yields): another ALERT/PREPARE for the same
-        // reorg may have created the round meanwhile.
-        if (this.processed.has(reorgId) || this.pendingReorgs.has(reorgId)) return;
-
-        let affectedChains = this.getAffectedChains(chain);
-        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
-    }
-
-    initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs) {
-        if (this.pendingReorgs.has(reorgId)) return;
-
-        let digest = this._digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
-
-        let pending = {
-            reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
-            oldHash, newHash,
-            // OUR OWN node's block_time (ms) for reorgHeight, captured during
-            // self-verification: the rollback bound (executeRollback) anchors to
-            // it instead of the reporter-supplied timestamp. Null when the indexer
-            // reported no block_time (legacy timestamp bound applies).
-            observedBlockTimeMs: Number.isFinite(observedBlockTimeMs) ? observedBlockTimeMs : null,
-            // Every creation path verified this reorg against our own node first;
-            // the commit gates re-check this flag (belt-and-braces).
-            selfVerified: true,
-            // Lock quorum at round start so the threshold can't shift between
-            // PREPARE and COMMIT (validator set / peer count may change during
-            // the 60s window), keeping every hub in lockstep across the round.
-            quorum:   this.getQuorum(),
-            prepares: new Set(),
-            commits:  new Set(),
-            finalized: false,
-            timer:    null
-        };
-
-        pending.prepares.add(this.peerManager.validatorAddr);
-        this.pendingReorgs.set(reorgId, pending);
-
-        pending.timer = setTimeout(() => {
-            if (!pending.finalized) {
-                logger.warn('Reorg: Consensus timeout for ' + reorgId);
-                // Surface the discarded rollback before dropping it, so operators
-                // (and downstream consumers) can alert or retry. Without this, a
-                // stalled round silently leaves attestations un-deleted and price
-                // snapshots un-disputed after a reorg, leaving dirty cross-chain state
-                // with no signal beyond a log line.
-                this.emit('reorg:timeout', {
-                    reorgId,
-                    sourceChain:    pending.chain,
-                    reorgHeight:    pending.reorgHeight,
-                    timestamp:      pending.timestamp,
-                    affectedChains: pending.affectedChains,
-                    prepares:       pending.prepares.size,
-                    commits:        pending.commits.size,
-                    quorum:         pending.quorum
-                });
-                this.pendingReorgs.delete(reorgId);
-            }
-        }, this.timeout);
-
-        this.peerManager.broadcast(XCHAIN_REORG_PREPARE, {
-            reorgId, chain, reorgHeight, timestamp,
-            affectedChains, digest, oldHash, newHash
-        });
-
-        this.checkPrepareQuorum(reorgId);
-    }
-
-    async handlePrepare(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
-            noteDrop({ reason: 'unknown_sender', phase: 'reorg_prepare', sender: envelope.sender, envelope });
-            return;
-        }
-        let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash } = envelope.data;
-        if (!reorgId || !digest) return;
-        // Same canonical-reorgId binding as handleAlert: reject a PREPARE whose reorgId is
-        // not the canonical form of its own (chain,reorgHeight,timestamp), so the round-
-        // creation path here cannot be driven with attacker-minted reorgId strings
-        // (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
-        if (!chain || !reorgHeight || !timestamp) return;
-        if (reorgId !== this.canonicalReorgId(chain, reorgHeight, timestamp)) return;
-
-        // A follower must not co-sign a reorg it would not itself accept: apply the same
-        // blast-radius bound as handleAlert so a Byzantine leader can't gather quorum
-        // from followers that skipped the ALERT. PREPARE carries the timestamp.
-        if (!this.timestampInBounds(timestamp)) return;
-
-        oldHash = String(oldHash || '').toLowerCase();
-        newHash = String(newHash || '').toLowerCase();
-        if (!this.hashesWellFormed(oldHash, newHash)) return;
-
-        // The digest is fully derivable from the PREPARE's own fields, so never
-        // trust the wire value: a mismatch is either corruption or an attempt to
-        // fragment the round with per-follower digests.
-        if (digest !== this._digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash)) return;
-
-        if (!this.pendingReorgs.has(reorgId)) {
-            if (this.processed.has(reorgId)) return;
-            // Abstain when already at the concurrent-round cap, BEFORE the indexer probe,
-            // so a burst of distinct rounds can neither grow pendingReorgs without bound
-            // nor amplify self-verification RPCs (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
-            if (this.pendingReorgs.size >= this.maxPendingReorgs) return;
-
-            // Leader-bypass path (we never saw the ALERT): verify against our own
-            // node BEFORE creating the round. On failure we abstain entirely; a
-            // later PREPARE retries, so a hub whose node re-syncs mid-round can
-            // still join.
-            let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
-            if (!verified) return;
-            let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
-            // Same over-rollback abstain as handleAlert: never co-sign a round
-            // whose timestamp predates the reorged block's own block_time.
-            if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
-            if (this.pendingReorgs.has(reorgId)) {
-                // Round appeared while we were verifying; fall through to record.
-            } else {
-                // Create pending from the received (now verified) data
-                let pending = {
-                    reorgId, chain, reorgHeight, timestamp,
-                    affectedChains: affectedChains || [],
-                    digest,
-                    oldHash, newHash,
-                    observedBlockTimeMs,
-                    selfVerified: true,
-                    // Lock quorum at round start (see initiateReorgConsensus).
-                    quorum:   this.getQuorum(),
-                    prepares: new Set(),
-                    commits:  new Set(),
-                    finalized: false,
-                    timer: null
-                };
-                pending.timer = setTimeout(() => {
-                    if (!pending.finalized) {
-                        // Same silent-discard fix as initiateReorgConsensus: emit the
-                        // dropped rollback so it isn't lost without a signal.
-                        logger.warn('Reorg: Consensus timeout for ' + reorgId);
-                        this.emit('reorg:timeout', {
-                            reorgId,
-                            sourceChain:    pending.chain,
-                            reorgHeight:    pending.reorgHeight,
-                            timestamp:      pending.timestamp,
-                            affectedChains: pending.affectedChains,
-                            prepares:       pending.prepares.size,
-                            commits:        pending.commits.size,
-                            quorum:         pending.quorum
-                        });
-                    }
-                    this.pendingReorgs.delete(reorgId);
-                }, this.timeout * 2);
-                this.pendingReorgs.set(reorgId, pending);
-            }
-        }
-
-        let pending = this.pendingReorgs.get(reorgId);
-        if (!pending || pending.digest !== digest) return;
-
-        pending.prepares.add(envelope.sender);
-        this.checkPrepareQuorum(reorgId);
-    }
-
-    _handleCommit(envelope) {
-        if (!this._isKnownSender(envelope.sender)) {
-            noteDrop({ reason: 'unknown_sender', phase: 'reorg_commit', sender: envelope.sender, envelope });
-            return;
-        }
-        let { reorgId, digest } = envelope.data;
-        if (!reorgId || !digest) return;
-
-        let pending = this.pendingReorgs.get(reorgId);
-        if (!pending || pending.digest !== digest) return;
-
-        pending.commits.add(envelope.sender);
-        this.checkCommitQuorum(reorgId);
-    }
-
-    checkPrepareQuorum(reorgId) {
-        let pending = this.pendingReorgs.get(reorgId);
-        if (!pending || pending.finalized) return;
-        // Never move to COMMIT for a reorg our own node did not confirm. Every
-        // creation path sets this after verification; this guard is the invariant.
-        if (pending.selfVerified !== true) return;
-
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
-        if (pending.prepares.size >= quorum && !pending._commitSent) {
-            pending._commitSent = true;
-            pending.commits.add(this.peerManager.validatorAddr);
-
-            this.peerManager.broadcast(XCHAIN_REORG_COMMIT, {
-                reorgId: reorgId,
-                digest:  pending.digest
-            });
-
-            this.checkCommitQuorum(reorgId);
-        }
-    }
-
-    checkCommitQuorum(reorgId) {
-        let pending = this.pendingReorgs.get(reorgId);
-        if (!pending || pending.finalized) return;
-        // Same invariant as checkPrepareQuorum: an unverified round never
-        // executes a rollback on this hub, no matter how many commits arrive.
-        if (pending.selfVerified !== true) return;
-
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
-        if (pending.commits.size >= quorum) {
-            pending.finalized = true;
-            if (pending.timer) clearTimeout(pending.timer);
-
-            let proof = JSON.stringify([...pending.commits]);
-
-            this.executeRollback(
-                pending.chain, pending.reorgHeight, pending.timestamp,
-                reorgId, pending.prepares.size, proof, pending.observedBlockTimeMs
-            ).then(() => {
-                this.pendingReorgs.delete(reorgId);
-            }).catch(err => {
-                logger.error(nodeUtil.format('Reorg: Error executing rollback for %s:', reorgId, err.message));
-                this.pendingReorgs.delete(reorgId);
-            });
-        }
-    }
-
-    async executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
-        logger.info('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
-
-        // Rollback bound: anchor to OUR OWN node's block_time for reorgHeight
-        // (captured during self-verification) rather than the reporter-supplied
-        // timestamp. A reorg invalidates state derived from blocks AT AND ABOVE
-        // reorgHeight, so the reorged block's own time is the correct scope; the
-        // reporter's timestamp is gameable within the 24h window (far-past =
-        // over-rollback griefing, near-now = under-rollback leaving invalidated
-        // attestations live). Every hub reads its own copy of the SAME
-        // quorum-verified block, so the bound stays consensus-uniform. Clamped to
-        // the lookback window so a fabricated deep "reorg" (garbage oldHash at a
-        // depth-bound height) cannot reach further back than the documented
-        // blast-radius bound. Falls back to the reported timestamp when the
-        // indexer served no block_time (legacy behavior). Residual: miner
-        // timestamps may skew ahead of wall-clock, leaving a small under-rollback
-        // edge closable only by per-row block provenance.
-        let bound = Number.isFinite(observedBlockTimeMs) ? observedBlockTimeMs : parseInt(timestamp);
-        let floor = Date.now() - this.maxLookbackMs;
-        if (bound < floor) bound = floor;
-
-        await this.db.deleteAttestation(chain, bound);
-
-        // price_snapshots.block_timestamp is Unix SECONDS (OracleConsensus / PriceAggregator
-        // write Math.floor(Date.now()/1000)), but the reorg bound is MILLISECONDS
-        // (block_time * 1000, or the ms timestamp validated against Date.now()). Divide to
-        // compare in the same unit, matching the attestations DELETE above; without this
-        // the seconds column never exceeds the ms literal and the dispute silently matches
-        // zero rows.
-        await this.db.updatePriceSnapshotByBlockTimestamp(bound);
-
-        let affectedChains = this.getAffectedChains(chain);
-        await this.db.setReorgAttestation(reorgId, chain, reorgHeight, timestamp, JSON.stringify(affectedChains), validatorCount, proof);
-
-        this.processed.add(reorgId);
-
-        logger.info('Reorg: Rollback complete for ' + reorgId +
-            ': attestations and snapshots after ' + bound +
-            (Number.isFinite(observedBlockTimeMs) ? ' (block_time-anchored)' : ' (reported timestamp)') +
-            ' invalidated');
-
-        this.emit('reorg:confirmed', {
-            reorgId, sourceChain: chain, reorgHeight, timestamp, affectedChains
-        });
-    }
-
-    // Verify a claimed reorg against our OWN indexer. Returns a truthy
-    // `{ blockTimeMs }` object only on positive confirmation: the node serves
-    // `newHash` at `reorgHeight`, the height is within [tip - maxReorgDepth, tip],
-    // the response names the federation network, and the node's reorg history
-    // shows `oldHash` was actually orphaned at that height. blockTimeMs is the served
-    // block's block_time in ms (the rollback anchor; null when the indexer carries
-    // no block_time). Anything else (no endpoint, RPC error, lagging node still on
-    // oldHash, network mismatch) returns false, which callers treat as ABSTAIN,
-    // never as proof of absence. Concurrent calls for the same observation share
-    // one in-flight probe.
-    verifyReorgAgainstOwnNode(chain, reorgHeight, oldHash, newHash) {
-        let key = chain + ':' + reorgHeight + ':' + oldHash + ':' + newHash;
-        let inFlight = this._verifying.get(key);
-        if (inFlight) return inFlight;
-
-        let probe = this.probeOwnNode(chain, reorgHeight, oldHash, newHash)
-            .catch(err => {
-                logger.warn(nodeUtil.format('Reorg: self-verification failed for %s:', key, err && err.message));
-                return false;
-            });
-        this._verifying.set(key, probe);
-        probe.finally(() => this._verifying.delete(key));
-        return probe;
-    }
-
-    async probeOwnNode(chain, reorgHeight, oldHash, newHash) {
-        let ix = this.indexers[chain];
-        if (!ix || !ix.url) return false;                    // cannot verify → abstain
-
-        let tip = await this._indexerCall(chain, 'getblockhashes', {});
-        if (!tip || tip.block_index == null) return false;
-        let tipIndex = Number(tip.block_index);
-        if (!Number.isFinite(tipIndex)) return false;
-        if (reorgHeight > tipIndex) return false;            // above our tip
-        if (reorgHeight < tipIndex - this.maxReorgDepth) return false;  // deeper than the bound
-
-        let bh = (reorgHeight === tipIndex)
-            ? tip
-            : await this._indexerCall(chain, 'getblockhashes', { block_index: reorgHeight });
-        if (!bh || !bh.block_hash) return false;
-        // Refuse a network-agnostic or cross-network answer (mirrors
-        // StateCheckpointEngine's checkpoint refusal).
-        if (!bh.network || (this.network && String(bh.network) !== this.network)) return false;
-
-        let served = String(bh.block_hash).toLowerCase();
-        if (served !== newHash || newHash === oldHash) return false;
-
-        // The "before" half (REORG-OLDHASH-UNVERIFIED-1): serving newHash at
-        // reorgHeight is trivially true on the honest chain, so on its own it
-        // lets a single Byzantine reporter pair the real canonical hash with a
-        // fabricated oldHash and reach full honest quorum over a reorg that
-        // never happened. Require our OWN node's reorg evidence (the decoder's
-        // REORG events, surfaced by the indexer's getreorghistory) to confirm
-        // oldHash was the canonical-then-orphaned hash at reorgHeight; abstain
-        // otherwise. Liveness holds: an indexer that serves newHash at that
-        // height necessarily processed the reorg, so its decoder recorded the
-        // orphaned hashes in the same pass.
-        if (!(await this.confirmOldHashOrphaned(chain, reorgHeight, oldHash))) return false;
-
-        // block_time (unix seconds) of OUR OWN node's block at reorgHeight: the
-        // consensus-uniform rollback anchor (every hub reads its own copy of the
-        // same quorum-verified block). Nullable: an indexer predating block_time
-        // yields the legacy reporter-timestamp bound.
-        let blockTimeMs = (Number(bh.block_time) > 0) ? Number(bh.block_time) * 1000 : null;
-        return { blockTimeMs };
-    }
-
-    // Whether our own indexer's reorg history shows `oldHash` was orphaned at
-    // `reorgHeight`. Queries by height only and matches the hash locally, so a
-    // legacy REORG event (recorded before the decoder stored hashes; block_hash
-    // null) at that exact height is accepted as evidence a real reorg orphaned
-    // a block there, while a recorded-but-different hash is refused. Any error
-    // shape (RPC error, indexer predating getreorghistory, malformed response)
-    // is an abstain, never a throw.
-    async confirmOldHashOrphaned(chain, reorgHeight, oldHash) {
-        let hist;
-        try {
-            hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
-        } catch (err) {
-            logger.warn(nodeUtil.format('Reorg: getreorghistory probe failed for %s:%s:',
-                chain, reorgHeight, err && err.message));
-            return false;
-        }
-        if (!hist || hist.error || !Array.isArray(hist.events)) return false;
-        let sawUnrecorded = false;
-        for (let ev of hist.events) {
-            if (!ev || !Array.isArray(ev.blocks)) continue;
-            for (let b of ev.blocks) {
-                if (!b || Number(b.block_index) !== Number(reorgHeight)) continue;
-                // An unrecorded hash is NOT a confirmation. The indexer sets
-                // block_hash null deliberately so a caller can tell "no hash recorded"
-                // apart from "hash did not match" (reorg_history_query.js parseReorgEvent);
-                // treating them alike fails OPEN and accepts ANY claimed oldHash at this
-                // height, which reduces the orphaned-hash check to "some reorg happened here" and
-                // re-opens the divergent-digest mode. Keep scanning: another event
-                // may carry the real hash for the same height.
-                if (b.block_hash === null || b.block_hash === undefined) { sawUnrecorded = true; continue; }
-                if (String(b.block_hash).toLowerCase() === oldHash) return true;
-            }
-        }
-        // Escape hatch, off by default. Restores the earlier fail-open behavior for an
-        // operator who knowingly runs against history with unrecorded hashes and
-        // would rather co-sign than abstain. Measured 2026-07-29: 3 of 171 recorded
-        // orphaned blocks on mainnet carry a null hash (DOGE 6280198 + 6279100,
-        // LTC 3137602), so the abstention cost of leaving this off is those heights.
-        if (sawUnrecorded && String(hubConfig.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
-            logger.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
-                ' because REORG_ALLOW_UNRECORDED_OLDHASH=1 (the orphaned hash is unrecorded, so this ' +
-                'co-signs a claim this node cannot check)');
-            return true;
-        }
-        if (sawUnrecorded)
-            logger.warn('Reorg: abstaining at ' + chain + ':' + reorgHeight +
-                ': a reorg IS recorded at this height but its orphaned hash was never recorded, so the ' +
-                'claimed oldHash cannot be verified)');
-        return false;
-    }
-
-    async _indexerCall(coin, method, params) {
-        let ix = this.indexers[coin];
-        if (!ix || !ix.url) throw new Error('no indexer url for ' + coin);
-        let headers = { 'Content-Type': 'application/json' };
-        if (ix.key) headers['x-api-key'] = ix.key;
-        let resp = await axios.post(ix.url, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
-        if (resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
-        return resp.data ? resp.data.result : null;
     }
 
     // Determine which chains are affected by a reorg on the source chain
@@ -817,5 +303,9 @@ class ReorgHandler extends EventEmitter {
         return crypto.createHash('sha256').update(payload).digest('hex');
     }
 }
+
+// Installed the way class syntax would put them: non-enumerable, and a name already on
+// the prototype throws at load rather than overwriting (install_parts.js).
+installParts(ReorgHandler.prototype, [reportMethods, consensusMethods, probeMethods]);
 
 module.exports = ReorgHandler;
