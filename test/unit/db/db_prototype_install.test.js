@@ -33,9 +33,9 @@ const fs         = require('fs');
 const path       = require('path');
 const sinon      = require('sinon');
 
-const Database = require('../../src/db');
+const Database = require('../../../src/db');
 
-const DB_DIR = path.join(__dirname, '..', '..', 'src', 'db');
+const DB_DIR = path.join(__dirname, '..', '..', '..', 'src', 'db');
 
 // Every mixin family under src/db, as { file, methods: [...] }: each <name>.js
 // beside index.js, and <name>/index.js for a family that grew into a directory.

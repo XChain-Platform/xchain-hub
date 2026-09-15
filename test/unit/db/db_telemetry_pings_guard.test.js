@@ -26,7 +26,7 @@
 
 const { expect } = require('chai');
 
-const Database = require('../../src/db');
+const Database = require('../../../src/db');
 
 // Async functions never throw synchronously: assertTelemetryWindowDays runs
 // before any `await`, so a hostile `days` value rejects the returned promise

@@ -26,7 +26,7 @@
 
 const { expect } = require('chai');
 
-const Database = require('../../src/db');
+const Database = require('../../../src/db');
 
 function recordingDb(answers){
     const db = Object.create(Database.prototype);

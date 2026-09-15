@@ -93,7 +93,7 @@ function makeCatalogue(spec) {
 function makeDb(spec) {
     const mockConn   = { query: sinon.stub().resolves([]), release: sinon.stub().resolves(), end: sinon.stub().resolves() };
     const mockPool   = { getConnection: sinon.stub().resolves(mockConn), end: sinon.stub().resolves() };
-    const Database   = proxyquire('../../src/db', {
+    const Database   = proxyquire('../../../src/db', {
         mariadb: { createPool: sinon.stub().returns(mockPool), createConnection: sinon.stub().resolves(mockConn) },
         fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') }
     });

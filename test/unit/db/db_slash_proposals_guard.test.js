@@ -23,7 +23,7 @@
 
 const { expect } = require('chai');
 
-const Database = require('../../src/db');
+const Database = require('../../../src/db');
 
 // Async functions never throw synchronously: the guard runs before any
 // `await`, so a hostile `limit` rejects the returned promise rather than

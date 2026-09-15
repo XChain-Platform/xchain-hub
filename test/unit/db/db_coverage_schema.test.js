@@ -42,7 +42,7 @@ function makeDb(fsOverrides) {
         readFileSync: sinon.stub().returns('')
     }, fsOverrides || {});
 
-    const Database = proxyquire('../../src/db', {
+    const Database = proxyquire('../../../src/db', {
         mariadb: mockMariadb,
         fs:      fsStub,
         path:    require('path')
