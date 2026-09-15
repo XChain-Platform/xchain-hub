@@ -76,23 +76,9 @@ function wireBus(engines) {
     }
 }
 
-describe('Consensus: a refused propose() advances the rotation (livelock regression)', function () {
+let engines, A, B, C, logStubs;
 
-    let engines, A, B, C, logStubs;
-
-    beforeEach(function () {
-        engines = VALIDATORS_3.map(makeEngine);
-        [A, B, C] = engines;
-        wireBus(engines);
-        // The round chatter is noisy; keep assertions on state, not output.
-        logStubs = [sinon.stub(console, 'log'), sinon.stub(console, 'warn')];
-    });
-
-    afterEach(async function () {
-        for (let e of engines) await e.consensus.stop();
-        sinon.restore();
-    });
-
+function registerRefusedAttemptTest() {
     it('successive refused attempts consume slots until the rotation reaches the hub, and the federation then commits its round', async function () {
         // Hub A (member index 0) leads slots where seq % 3 === 0. From seq 0
         // its first two attempts hit slots led by v2 then v3.
@@ -121,6 +107,23 @@ describe('Consensus: a refused propose() advances the rotation (livelock regress
             expect(e.consensus.lastAppliedSeq, e.v.addr + ' lastAppliedSeq').to.equal(3);
         }
     });
+}
+
+describe('Consensus: a refused propose() advances the rotation (livelock regression)', function () {
+    beforeEach(function () {
+        engines = VALIDATORS_3.map(makeEngine);
+        [A, B, C] = engines;
+        wireBus(engines);
+        // The round chatter is noisy; keep assertions on state, not output.
+        logStubs = [sinon.stub(console, 'log'), sinon.stub(console, 'warn')];
+    });
+
+    afterEach(async function () {
+        for (let e of engines) await e.consensus.stop();
+        sinon.restore();
+    });
+
+    registerRefusedAttemptTest();
 
     it('followers of the committed round can propose next without a wedge (their applied history advances the slot)', async function () {
         // B led seq 1 legitimately; drive that round to commit on all hubs.
