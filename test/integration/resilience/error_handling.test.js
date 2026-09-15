@@ -44,8 +44,14 @@ describe('Integration: Error Handling (SC-10.x)', function () {
     });
     afterEach(function () { sinon.restore(); });
 
-    // SC-10.1: Database circuit breaker activation
-    describe('SC-10.1: Circuit breaker', function () {
+    describe('SC-10.1: Circuit breaker', registerCircuitBreakerTests);
+    describe('SC-10.2: DB failure during finalization', registerFinalizationFailureTests);
+    describe('SC-10.3: Consensus timeout cleanup', registerTimeoutCleanupTests);
+    describe('SC-10.4: Concurrent operations', registerConcurrentOperationTests);
+});
+
+// SC-10.1: Database circuit breaker activation
+function registerCircuitBreakerTests() {
         it('opens after consecutive failures and recovers after cooldown', async function () {
             let db = testDb.getDb();
 
@@ -97,10 +103,10 @@ describe('Integration: Error Handling (SC-10.x)', function () {
             db.circuitThreshold = 10;
             db.circuitCooldown  = 30000;
         });
-    });
+}
 
-    // SC-10.2: DB failure during oracle consensus finalization
-    describe('SC-10.2: DB failure during finalization', function () {
+// SC-10.2: DB failure during oracle consensus finalization
+function registerFinalizationFailureTests() {
         it('handles DB error during snapshot storage without zombie state', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
@@ -149,10 +155,10 @@ describe('Integration: Error Handling (SC-10.x)', function () {
 
             db.doQuery.restore();
         });
-    });
+}
 
-    // SC-10.3: PBFT consensus timeout and cleanup
-    describe('SC-10.3: Consensus timeout cleanup', function () {
+// SC-10.3: PBFT consensus timeout and cleanup
+function registerTimeoutCleanupTests() {
         it('cleans up pending proposals after timeout', async function () {
             let db = testDb.getDb();
             let hub = createTestHub(db, VALIDATORS_4[FIRST_SEQ_LEADER].addr);
@@ -191,10 +197,10 @@ describe('Integration: Error Handling (SC-10.x)', function () {
 
             await consensus.stop();
         });
-    });
+}
 
-    // SC-10.4: Graceful handling of concurrent subsystem operations
-    describe('SC-10.4: Concurrent operations', function () {
+// SC-10.4: Graceful handling of concurrent subsystem operations
+function registerConcurrentOperationTests() {
         it('handles multiple concurrent DB writes without errors', async function () {
             let db = testDb.getDb();
 
@@ -253,5 +259,4 @@ describe('Integration: Error Handling (SC-10.x)', function () {
             config = await db.getConfig('BTC', 'mainnet', 'test');
             expect(config.port).to.equal('8332');
         });
-    });
-});
+}
