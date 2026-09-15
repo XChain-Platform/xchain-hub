@@ -39,20 +39,9 @@ const OracleConsensus = require('../../src/oracle/consensus');
 const { DERIVED_PAIRS } = require('../../src/constants.js');
 const PriceFetcher      = require('../../src/oracle/price_fetcher.js');
 
-describe('DERIVED_PAIRS admission allow-list @regression', function () {
+let hub, or, OracleRound;
 
-    let hub, or, OracleRound;
-
-    beforeEach(function () {
-        OracleRound = proxyquire('../../src/oracle/round', {
-            './price_fetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
-        });
-        hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
-        or  = new OracleRound(hub);
-    });
-
-    afterEach(function () { sinon.restore(); });
-
+function registerDerivedPairConstantTests() {
     describe('the constant', function () {
         it('is exactly the XCHAIN/USD pair', function () {
             expect(DERIVED_PAIRS).to.deep.equal(['XCHAIN/USD']);
@@ -64,7 +53,9 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
             expect(DERIVED_PAIRS[0]).to.equal('XCHAIN/USD');
         });
     });
+}
 
+function registerAdmissionSetTests() {
     describe('admit vs produce', function () {
         it('is NOT in the produced set, so no hub starts submitting it', function () {
             // getCoinPairs() drives fetching and the skipped-row markers. The derived
@@ -99,7 +90,9 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
                 expect(or.canonicalPairs.has(near), near).to.equal(false);
         });
     });
+}
 
+function registerWhitelistTests() {
     describe('the whitelist the PROPOSE gate reads', function () {
         it('is the same Set object OracleConsensus consults', function () {
             // OracleConsensus reads this.oracleRound.canonicalPairs specifically so the
@@ -116,11 +109,12 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
             expect(or.canonicalPairs.size).to.equal(37);
         });
     });
+}
 
-    // The claim the allow-list exists to support, driven through the real gate rather
-    // than asserted about the Set: a follower must stop calling the derived pair
-    // fabricated. The companion case proves the rollout hazard is not hypothetical.
-    describe('through the real PROPOSE co-sign gate', function () {
+// The claim the allow-list exists to support, driven through the real gate rather
+// than asserted about the Set: a follower must stop calling the derived pair
+// fabricated. The companion case proves the rollout hazard is not hypothetical.
+function registerProposeGateTests() {
         const ROUND = 1;
         let oc, leader, pm, gateHub;
 
@@ -179,5 +173,21 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
             expect(rejects.map(e => e.reason)).to.include('non-canonical-pair');
             expect(rejects[rejects.length - 1].coinPair).to.equal('XCHAIN/USD');
         });
+}
+
+describe('DERIVED_PAIRS admission allow-list @regression', function () {
+    beforeEach(function () {
+        OracleRound = proxyquire('../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
+        });
+        hub = createMockHub({ p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' } });
+        or  = new OracleRound(hub);
     });
+
+    afterEach(function () { sinon.restore(); });
+
+    registerDerivedPairConstantTests();
+    registerAdmissionSetTests();
+    registerWhitelistTests();
+    describe('through the real PROPOSE co-sign gate', registerProposeGateTests);
 });
