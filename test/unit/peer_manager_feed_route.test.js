@@ -44,31 +44,11 @@ function request(port, method, path) {
     });
 }
 
-describe('PeerManager: read-only mirror feed on the P2P port', function () {
+{
+
     let pm, dbStub, port;
 
-    beforeEach(async function () {
-        dbStub = { doQuery: sinon.stub().resolves([]) };
-        pm = new PeerManager({
-            P2P_VALIDATOR_ADDR: 'ws://self:10002',
-            P2P_PORT: 0,
-            P2P_HOST: '127.0.0.1',
-            SEED_NODES: [],
-            REQUIRE_SIGNATURES: false,
-            P2P_HEARTBEAT_INTERVAL: 3600000,
-            P2P_WS_PING_INTERVAL: 3600000,
-            P2P_DEDUP_PRUNE_INTERVAL: 3600000
-        }, dbStub);
-        await pm.start();
-        port = pm.httpServer.address().port;
-    });
-
-    afterEach(async function () {
-        await pm.stop();
-        sinon.restore();
-    });
-
-    it('serves a mirror-snapshot GET through the wired handler', async function () {
+    async function servesAMirrorSnapshotGetThroughTest2() {
         let handler = sinon.spy((req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ table: 'capability_snapshots', rows: [] }));
@@ -78,9 +58,9 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         expect(res.status).to.equal(200);
         expect(JSON.parse(res.body).table).to.equal('capability_snapshots');
         expect(handler.calledOnce).to.be.true;
-    });
+    }
 
-    it('404s every other path and never hands it to the feed handler', async function () {
+    async function case404sEveryOtherPathAndNeverTest3() {
         let handler = sinon.spy((req, res) => { res.writeHead(200); res.end('{}'); });
         pm.setFeedHandlers(handler, () => {});
         for (let path of ['/', '/health', '/hub-db', '/hub-db/snapshots', '/hub-db/snapshotx']) {
@@ -88,9 +68,9 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
             expect(res.status, path).to.equal(404);
         }
         expect(handler.called).to.be.false;
-    });
+    }
 
-    it('404s a NON-GET to the snapshot path (the write methods stay off this port)', async function () {
+    async function case404sANonGetToTheTest4() {
         let handler = sinon.spy((req, res) => { res.writeHead(200); res.end('{}'); });
         pm.setFeedHandlers(handler, () => {});
         for (let method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
@@ -98,13 +78,13 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
             expect(res.status, method).to.equal(404);
         }
         expect(handler.called).to.be.false;
-    });
+    }
 
     // The JSON-RPC endpoint is the second feed shape: an indexer reports what
     // landed on its chain. WHICH methods are allowed is enforced in api.js off the
     // stamp asserted here (see feedRpcAllowlist.test.js), because the method name
     // is in a body this layer has not read.
-    it('delegates a POST to the rpc root and stamps it as public-port traffic', async function () {
+    async function delegatesAPostToTheRpcTest5() {
         let seen = null;
         pm.setFeedHandlers((req, res) => {
             seen = { url: req.url, method: req.method, stamped: req.xchainFeedOrigin === true };
@@ -114,9 +94,9 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         let res = await request(port, 'POST', '/');
         expect(res.status).to.equal(200);
         expect(seen).to.deep.equal({ url: '/', method: 'POST', stamped: true });
-    });
+    }
 
-    it('stamps a snapshot GET too, so the allowlist sees every public-port request', async function () {
+    async function stampsASnapshotGetTooSoTest6() {
         let stamped = null;
         pm.setFeedHandlers((req, res) => {
             stamped = req.xchainFeedOrigin === true;
@@ -124,9 +104,9 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         }, () => {});
         await get(port, '/hub-db/snapshot/capability_snapshots');
         expect(stamped).to.be.true;
-    });
+    }
 
-    it('404s a POST to any path other than the rpc root', async function () {
+    async function case404sAPostToAnyPathTest7() {
         let handler = sinon.spy((req, res) => { res.writeHead(200); res.end('{}'); });
         pm.setFeedHandlers(handler, () => {});
         for (let path of ['/admin', '/hub-db', '/health', '/rpc']) {
@@ -134,19 +114,19 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
             expect(res.status, path).to.equal(404);
         }
         expect(handler.called).to.be.false;
-    });
+    }
 
-    it('404s the rpc root when no feed is wired', async function () {
+    async function case404sTheRpcRootWhenNoTest8() {
         let res = await request(port, 'POST', '/');
         expect(res.status).to.equal(404);
-    });
+    }
 
-    it('404s the feed path when no feed is wired (gossip-only hub)', async function () {
+    async function case404sTheFeedPathWhenNoTest9() {
         let res = await get(port, '/hub-db/snapshot/capability_snapshots');
         expect(res.status).to.equal(404);
-    });
+    }
 
-    it('routes a /hub-db/subscribe upgrade to the feed, NOT to the gossip server', async function () {
+    async function routesAHubDbSubscribeUpgradeTest10() {
         let upgraded = null;
         pm.setFeedHandlers((req, res) => { res.writeHead(404); res.end(); }, (req, socket, head) => {
             upgraded = req.url;
@@ -162,9 +142,9 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         expect(upgraded).to.match(/^\/hub-db\/subscribe/);
         expect(gossip.called, 'feed client must never enter the gossip server').to.be.false;
         expect(pm.peers.has('ws://self:10002')).to.be.false;
-    });
+    }
 
-    it('a feed client is never added to the peer map, so it cannot be broadcast or relayed to', async function () {
+    async function aFeedClientIsNeverAddedTest11() {
         let sockets = [];
         pm.setFeedHandlers((req, res) => { res.writeHead(404); res.end(); }, (req, socket, head) => {
             sockets.push(socket);
@@ -179,18 +159,18 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         // broadcast() walks this.peers, so an absent entry is the proof it receives nothing.
         expect(pm.broadcast('HEARTBEAT', { version: '0.0.0' })).to.be.an('object');
         expect(pm.peers.size).to.equal(0);
-    });
+    }
 
-    it('destroys a subscribe upgrade when the feed is not wired, leaving gossip untouched', async function () {
+    async function destroysASubscribeUpgradeWhenTheTest12() {
         let gossip = sinon.spy();
         pm.wss.on('connection', gossip);
         let ws = new WebSocket('ws://127.0.0.1:' + port + '/hub-db/subscribe');
         await new Promise((resolve) => { ws.on('error', resolve); ws.on('close', resolve); ws.on('open', resolve); });
         try { ws.close(); } catch (e) { /* ignore */ }
         expect(gossip.called).to.be.false;
-    });
+    }
 
-    it('still accepts a normal gossip upgrade, and the feed handler never sees it', async function () {
+    async function stillAcceptsANormalGossipUpgradeTest13() {
         let feedUpgrade = sinon.spy();
         pm.setFeedHandlers((req, res) => { res.writeHead(404); res.end(); }, feedUpgrade);
         let connected = new Promise((resolve) => pm.wss.once('connection', () => resolve(true)));
@@ -199,5 +179,42 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         expect(await connected).to.be.true;
         expect(feedUpgrade.called).to.be.false;
         try { ws.close(); } catch (e) { /* ignore */ }
-    });
-});
+    }
+
+    function peermanagerReadOnlyMirrorFeedOnSuite1() {
+        beforeEach(async function () {
+            dbStub = { doQuery: sinon.stub().resolves([]) };
+            pm = new PeerManager({
+                P2P_VALIDATOR_ADDR: 'ws://self:10002',
+                P2P_PORT: 0,
+                P2P_HOST: '127.0.0.1',
+                SEED_NODES: [],
+                REQUIRE_SIGNATURES: false,
+                P2P_HEARTBEAT_INTERVAL: 3600000,
+                P2P_WS_PING_INTERVAL: 3600000,
+                P2P_DEDUP_PRUNE_INTERVAL: 3600000
+            }, dbStub);
+            await pm.start();
+            port = pm.httpServer.address().port;
+        });
+        afterEach(async function () {
+            await pm.stop();
+            sinon.restore();
+        });
+        it('serves a mirror-snapshot GET through the wired handler', servesAMirrorSnapshotGetThroughTest2);
+        it('404s every other path and never hands it to the feed handler', case404sEveryOtherPathAndNeverTest3);
+        it('404s a NON-GET to the snapshot path (the write methods stay off this port)', case404sANonGetToTheTest4);
+        it('delegates a POST to the rpc root and stamps it as public-port traffic', delegatesAPostToTheRpcTest5);
+        it('stamps a snapshot GET too, so the allowlist sees every public-port request', stampsASnapshotGetTooSoTest6);
+        it('404s a POST to any path other than the rpc root', case404sAPostToAnyPathTest7);
+        it('404s the rpc root when no feed is wired', case404sTheRpcRootWhenNoTest8);
+        it('404s the feed path when no feed is wired (gossip-only hub)', case404sTheFeedPathWhenNoTest9);
+        it('routes a /hub-db/subscribe upgrade to the feed, NOT to the gossip server', routesAHubDbSubscribeUpgradeTest10);
+        it('a feed client is never added to the peer map, so it cannot be broadcast or relayed to', aFeedClientIsNeverAddedTest11);
+        it('destroys a subscribe upgrade when the feed is not wired, leaving gossip untouched', destroysASubscribeUpgradeWhenTheTest12);
+        it('still accepts a normal gossip upgrade, and the feed handler never sees it', stillAcceptsANormalGossipUpgradeTest13);
+    }
+
+    describe('PeerManager: read-only mirror feed on the P2P port', peermanagerReadOnlyMirrorFeedOnSuite1);
+
+}
