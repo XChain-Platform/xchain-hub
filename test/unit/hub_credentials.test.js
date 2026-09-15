@@ -21,283 +21,370 @@
 
 'use strict';
 
-const { expect } = require('chai');
-const fs   = require('fs');
-const os   = require('os');
+const {
+  expect
+} = require('chai');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { resolveHubLlmAuth } = require('../../src/lib/hub_credentials');
-
-function _tmpDir(){
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubcred-'));
-    return dir;
+const {
+  resolveHubLlmAuth
+} = require('../../src/lib/hub_credentials');
+function _tmpDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubcred-'));
+  return dir;
 }
 // Shape the CLI writes after `claude login`, with placeholder token strings.
-function _writeCreds(dir, body){
-    fs.writeFileSync(path.join(dir, '.credentials.json'), typeof body === 'string' ? body : JSON.stringify(body));
-    return dir;
+function _writeCreds(dir, body) {
+  fs.writeFileSync(path.join(dir, '.credentials.json'), typeof body === 'string' ? body : JSON.stringify(body));
+  return dir;
 }
-function _populate(dir){
-    return _writeCreds(dir, { claudeAiOauth: { accessToken: 'placeholder-access', refreshToken: 'placeholder-refresh', expiresAt: 1 } });
+function _populate(dir) {
+  return _writeCreds(dir, {
+    claudeAiOauth: {
+      accessToken: 'placeholder-access',
+      refreshToken: 'placeholder-refresh',
+      expiresAt: 1
+    }
+  });
 }
+let resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir;
+// A `.credentials.json` that exists but carries no token is what
+// `claude logout` and a bare `claude` run leave behind. Accepting the
+// file's mere existence lets that husk outrank a working token, so the
+// transport reports READY while every spawn runs unauthenticated.
+const resolveHubLlmAuthCredentialResolutionChainSuite1TokenlessBodies = {
+  'an empty JSON object': {},
+  'an empty claudeAiOauth envelope': {
+    claudeAiOauth: {}
+  },
+  'blank-string tokens': {
+    claudeAiOauth: {
+      accessToken: '',
+      refreshToken: '   '
+    }
+  },
+  'non-token fields only': {
+    claudeAiOauth: {
+      expiresAt: 1,
+      scopes: ['user:inference']
+    }
+  },
+  'a non-object body': '"nope"',
+  'malformed JSON': '{ not json',
+  'an empty file': ''
+};
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part1() {
+  beforeEach(function () {
+    // Empty dir as the "default isolated dir": won't satisfy the
+    // pre-populated fallback (rule 6) unless a test populates it.
+    resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir = _tmpDir();
+  });
+  it('returns ok:false with no_credential_configured when nothing is set', function () {
+    const r = resolveHubLlmAuth({
+      env: {},
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(false);
+    expect(r.reason).to.equal('no_credential_configured');
+  });
+  it('prefers HUB_CLAUDE_CONFIG_DIR when populated', function () {
+    const dir = _populate(_tmpDir());
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir,
+        ANTHROPIC_API_KEY: 'sk-xxx'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.transport).to.equal('claude_spawn');
+    expect(r.source).to.equal('hub_config_dir');
+    expect(r.env.CLAUDE_CONFIG_DIR).to.equal(dir);
+  });
+  it('skips an empty HUB_CLAUDE_CONFIG_DIR and falls through to CLAUDE_CONFIG_DIR', function () {
+    const empty = _tmpDir(); // empty dir: checkConfigDir returns false
+    const populated = _populate(_tmpDir());
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: empty,
+        CLAUDE_CONFIG_DIR: populated
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('cli_config_dir');
+    expect(r.env.CLAUDE_CONFIG_DIR).to.equal(populated);
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part2() {
+  it('uses HUB_CLAUDE_CODE_OAUTH_TOKEN with isolated dir when no CONFIG_DIR is populated', function () {
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-abc'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.transport).to.equal('claude_spawn');
+    expect(r.source).to.equal('hub_token');
+    expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-abc');
+    // Isolated dir must be set so the CLI doesn't pick up host credentials.
+    expect(r.env.CLAUDE_CONFIG_DIR).to.equal(resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir);
+  });
+  it('CLAUDE_CODE_OAUTH_TOKEN (unprefixed) is the next fallback after HUB_*', function () {
+    const r = resolveHubLlmAuth({
+      env: {
+        CLAUDE_CODE_OAUTH_TOKEN: 'tok-xyz'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('cli_token');
+    expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-xyz');
+  });
+  it('ANTHROPIC_API_KEY → anthropic_api transport', function () {
+    const r = resolveHubLlmAuth({
+      env: {
+        ANTHROPIC_API_KEY: 'sk-ant-test'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.transport).to.equal('anthropic_api');
+    expect(r.source).to.equal('api_key');
+    expect(r.apiKey).to.equal('sk-ant-test');
+  });
+  it('CONFIG_DIR wins over API_KEY (deliberate spawn config beats API key)', function () {
+    const dir = _populate(_tmpDir());
+    const r = resolveHubLlmAuth({
+      env: {
+        CLAUDE_CONFIG_DIR: dir,
+        ANTHROPIC_API_KEY: 'sk-xxx'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.transport).to.equal('claude_spawn');
+    expect(r.source).to.equal('cli_config_dir');
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part3() {
+  it('OAUTH_TOKEN wins over API_KEY', function () {
+    const r = resolveHubLlmAuth({
+      env: {
+        CLAUDE_CODE_OAUTH_TOKEN: 'tok',
+        ANTHROPIC_API_KEY: 'sk-xxx'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.transport).to.equal('claude_spawn');
+    expect(r.source).to.equal('cli_token');
+  });
+  it('default isolated dir is the last resort below API_KEY', function () {
+    _populate(resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir);
+    const r = resolveHubLlmAuth({
+      env: {
+        ANTHROPIC_API_KEY: 'sk-yyy'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    // API_KEY (rule 5) outranks default_config_dir (rule 6): deliberate
+    // env-var wins over opportunistic default discovery.
+    expect(r.transport).to.equal('anthropic_api');
+    expect(r.source).to.equal('api_key');
+  });
+  it('default isolated dir resolves when nothing else is set', function () {
+    _populate(resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir);
+    const r = resolveHubLlmAuth({
+      env: {},
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.transport).to.equal('claude_spawn');
+    expect(r.source).to.equal('default_config_dir');
+    expect(r.env.CLAUDE_CONFIG_DIR).to.equal(resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir);
+  });
+  it('trims whitespace from env values', function () {
+    const dir = _populate(_tmpDir());
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: '  ' + dir + '  '
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.env.CLAUDE_CONFIG_DIR).to.equal(dir);
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part4() {
+  it('treats a non-directory path as missing', function () {
+    const filePath = path.join(_tmpDir(), 'not-a-dir.txt');
+    fs.writeFileSync(filePath, 'hi');
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: filePath
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(false);
+  });
 
+  // the gate accepted mere non-emptiness, so a dir holding only
+  // settings/logs/state - or one the operator logged out of - masked the valid
+  // downstream candidate. healthCheck then reported ready while paid calls
+  // spawned an unauthenticated CLI and mapped to provider_error.
+  it('falls through an uncredentialed but NON-EMPTY config dir to the API key', function () {
+    const dir = _tmpDir();
+    fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir,
+        ANTHROPIC_API_KEY: 'sk-ant-test'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.transport).to.equal('anthropic_api');
+    expect(r.source).to.equal('api_key');
+  });
+  it('falls through an uncredentialed CLAUDE_CONFIG_DIR to the OAuth token', function () {
+    const dir = _tmpDir();
+    fs.mkdirSync(path.join(dir, 'logs'));
+    const r = resolveHubLlmAuth({
+      env: {
+        CLAUDE_CONFIG_DIR: dir,
+        CLAUDE_CODE_OAUTH_TOKEN: 'tok-xyz'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('cli_token');
+    expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-xyz');
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part5() {
+  it('reports no credential when an uncredentialed dir is the only candidate', function () {
+    const dir = _tmpDir();
+    fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(false);
+    expect(r.reason).to.equal('no_credential_configured');
+  });
+  Object.keys(resolveHubLlmAuthCredentialResolutionChainSuite1TokenlessBodies).forEach(function (label) {
+    it('falls through a config dir whose credentials.json holds ' + label, function () {
+      const dir = _writeCreds(_tmpDir(), resolveHubLlmAuthCredentialResolutionChainSuite1TokenlessBodies[label]);
+      const r = resolveHubLlmAuth({
+        env: {
+          HUB_CLAUDE_CONFIG_DIR: dir,
+          HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working'
+        },
+        defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+      });
+      expect(r.ok).to.equal(true);
+      expect(r.source).to.equal('hub_token');
+      expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-working');
+    });
+    it('reports no credential when the only candidate holds ' + label, function () {
+      const dir = _writeCreds(_tmpDir(), resolveHubLlmAuthCredentialResolutionChainSuite1TokenlessBodies[label]);
+      const r = resolveHubLlmAuth({
+        env: {
+          HUB_CLAUDE_CONFIG_DIR: dir
+        },
+        defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+      });
+      expect(r.ok).to.equal(false);
+      expect(r.reason).to.equal('no_credential_configured');
+    });
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part6() {
+  it('reports no credential when the default dir is a token-less stub and nothing is set', function () {
+    _writeCreds(resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir, {
+      claudeAiOauth: {}
+    });
+    const r = resolveHubLlmAuth({
+      env: {},
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(false);
+    expect(r.reason).to.equal('no_credential_configured');
+  });
+  it('accepts a refresh token with no access token (the CLI redeems it on spawn)', function () {
+    const dir = _writeCreds(_tmpDir(), {
+      claudeAiOauth: {
+        refreshToken: 'placeholder-refresh'
+      }
+    });
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir,
+        HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('hub_config_dir');
+  });
+  it('accepts top-level accessToken (older / hand-assembled files)', function () {
+    const dir = _writeCreds(_tmpDir(), {
+      accessToken: 'placeholder-access'
+    });
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('hub_config_dir');
+  });
+}
+function registerResolveHubLlmAuthCredentialResolutionChainSuite1Part7() {
+  it('falls through a credentials.json too large to be one', function () {
+    const dir = _writeCreds(_tmpDir(), JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'x'.repeat(300 * 1024)
+      }
+    }));
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir,
+        ANTHROPIC_API_KEY: 'sk-ant-test'
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.ok).to.equal(true);
+    expect(r.source).to.equal('api_key');
+  });
+  it('does not leak token material into the resolved result', function () {
+    const dir = _populate(_tmpDir());
+    const r = resolveHubLlmAuth({
+      env: {
+        HUB_CLAUDE_CONFIG_DIR: dir
+      },
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(JSON.stringify(r)).to.not.match(/placeholder-(access|refresh)/);
+  });
+  it('the no_credential_configured detail states the setup-token TTL correctly', function () {
+    const r = resolveHubLlmAuth({
+      env: {},
+      defaultConfigDir: resolveHubLlmAuthCredentialResolutionChainSuite1HermeticDefaultDir
+    });
+    expect(r.detail).to.contain('one-year TTL');
+    expect(r.detail).to.not.match(/week/i);
+  });
+}
 describe('resolveHubLlmAuth: credential resolution chain', function () {
-
-    let hermeticDefaultDir;
-    beforeEach(function () {
-        // Empty dir as the "default isolated dir": won't satisfy the
-        // pre-populated fallback (rule 6) unless a test populates it.
-        hermeticDefaultDir = _tmpDir();
-    });
-
-    it('returns ok:false with no_credential_configured when nothing is set', function () {
-        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
-        expect(r.ok).to.equal(false);
-        expect(r.reason).to.equal('no_credential_configured');
-    });
-
-    it('prefers HUB_CLAUDE_CONFIG_DIR when populated', function () {
-        const dir = _populate(_tmpDir());
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-xxx' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.transport).to.equal('claude_spawn');
-        expect(r.source).to.equal('hub_config_dir');
-        expect(r.env.CLAUDE_CONFIG_DIR).to.equal(dir);
-    });
-
-    it('skips an empty HUB_CLAUDE_CONFIG_DIR and falls through to CLAUDE_CONFIG_DIR', function () {
-        const empty    = _tmpDir();              // empty dir: checkConfigDir returns false
-        const populated = _populate(_tmpDir());
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: empty, CLAUDE_CONFIG_DIR: populated },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('cli_config_dir');
-        expect(r.env.CLAUDE_CONFIG_DIR).to.equal(populated);
-    });
-
-    it('uses HUB_CLAUDE_CODE_OAUTH_TOKEN with isolated dir when no CONFIG_DIR is populated', function () {
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-abc' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.transport).to.equal('claude_spawn');
-        expect(r.source).to.equal('hub_token');
-        expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-abc');
-        // Isolated dir must be set so the CLI doesn't pick up host credentials.
-        expect(r.env.CLAUDE_CONFIG_DIR).to.equal(hermeticDefaultDir);
-    });
-
-    it('CLAUDE_CODE_OAUTH_TOKEN (unprefixed) is the next fallback after HUB_*', function () {
-        const r = resolveHubLlmAuth({
-            env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok-xyz' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('cli_token');
-        expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-xyz');
-    });
-
-    it('ANTHROPIC_API_KEY → anthropic_api transport', function () {
-        const r = resolveHubLlmAuth({
-            env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.transport).to.equal('anthropic_api');
-        expect(r.source).to.equal('api_key');
-        expect(r.apiKey).to.equal('sk-ant-test');
-    });
-
-    it('CONFIG_DIR wins over API_KEY (deliberate spawn config beats API key)', function () {
-        const dir = _populate(_tmpDir());
-        const r = resolveHubLlmAuth({
-            env: { CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-xxx' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.transport).to.equal('claude_spawn');
-        expect(r.source).to.equal('cli_config_dir');
-    });
-
-    it('OAUTH_TOKEN wins over API_KEY', function () {
-        const r = resolveHubLlmAuth({
-            env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok', ANTHROPIC_API_KEY: 'sk-xxx' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.transport).to.equal('claude_spawn');
-        expect(r.source).to.equal('cli_token');
-    });
-
-    it('default isolated dir is the last resort below API_KEY', function () {
-        _populate(hermeticDefaultDir);
-        const r = resolveHubLlmAuth({
-            env: { ANTHROPIC_API_KEY: 'sk-yyy' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        // API_KEY (rule 5) outranks default_config_dir (rule 6): deliberate
-        // env-var wins over opportunistic default discovery.
-        expect(r.transport).to.equal('anthropic_api');
-        expect(r.source).to.equal('api_key');
-    });
-
-    it('default isolated dir resolves when nothing else is set', function () {
-        _populate(hermeticDefaultDir);
-        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
-        expect(r.transport).to.equal('claude_spawn');
-        expect(r.source).to.equal('default_config_dir');
-        expect(r.env.CLAUDE_CONFIG_DIR).to.equal(hermeticDefaultDir);
-    });
-
-    it('trims whitespace from env values', function () {
-        const dir = _populate(_tmpDir());
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: '  ' + dir + '  ' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.env.CLAUDE_CONFIG_DIR).to.equal(dir);
-    });
-
-    it('treats a non-directory path as missing', function () {
-        const filePath = path.join(_tmpDir(), 'not-a-dir.txt');
-        fs.writeFileSync(filePath, 'hi');
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: filePath },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(false);
-    });
-
-    // the gate accepted mere non-emptiness, so a dir holding only
-    // settings/logs/state - or one the operator logged out of - masked the valid
-    // downstream candidate. healthCheck then reported ready while paid calls
-    // spawned an unauthenticated CLI and mapped to provider_error.
-    it('falls through an uncredentialed but NON-EMPTY config dir to the API key', function () {
-        const dir = _tmpDir();
-        fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-ant-test' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.transport).to.equal('anthropic_api');
-        expect(r.source).to.equal('api_key');
-    });
-
-    it('falls through an uncredentialed CLAUDE_CONFIG_DIR to the OAuth token', function () {
-        const dir = _tmpDir();
-        fs.mkdirSync(path.join(dir, 'logs'));
-        const r = resolveHubLlmAuth({
-            env: { CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_OAUTH_TOKEN: 'tok-xyz' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('cli_token');
-        expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-xyz');
-    });
-
-    it('reports no credential when an uncredentialed dir is the only candidate', function () {
-        const dir = _tmpDir();
-        fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(false);
-        expect(r.reason).to.equal('no_credential_configured');
-    });
-
-    // A `.credentials.json` that exists but carries no token is what
-    // `claude logout` and a bare `claude` run leave behind. Accepting the
-    // file's mere existence lets that husk outrank a working token, so the
-    // transport reports READY while every spawn runs unauthenticated.
-    const tokenlessBodies = {
-        'an empty JSON object':          {},
-        'an empty claudeAiOauth envelope': { claudeAiOauth: {} },
-        'blank-string tokens':           { claudeAiOauth: { accessToken: '', refreshToken: '   ' } },
-        'non-token fields only':         { claudeAiOauth: { expiresAt: 1, scopes: ['user:inference'] } },
-        'a non-object body':             '"nope"',
-        'malformed JSON':                '{ not json',
-        'an empty file':                 ''
-    };
-
-    Object.keys(tokenlessBodies).forEach(function (label) {
-        it('falls through a config dir whose credentials.json holds ' + label, function () {
-            const dir = _writeCreds(_tmpDir(), tokenlessBodies[label]);
-            const r = resolveHubLlmAuth({
-                env: { HUB_CLAUDE_CONFIG_DIR: dir, HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working' },
-                defaultConfigDir: hermeticDefaultDir
-            });
-            expect(r.ok).to.equal(true);
-            expect(r.source).to.equal('hub_token');
-            expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-working');
-        });
-
-        it('reports no credential when the only candidate holds ' + label, function () {
-            const dir = _writeCreds(_tmpDir(), tokenlessBodies[label]);
-            const r = resolveHubLlmAuth({
-                env: { HUB_CLAUDE_CONFIG_DIR: dir },
-                defaultConfigDir: hermeticDefaultDir
-            });
-            expect(r.ok).to.equal(false);
-            expect(r.reason).to.equal('no_credential_configured');
-        });
-    });
-
-    it('reports no credential when the default dir is a token-less stub and nothing is set', function () {
-        _writeCreds(hermeticDefaultDir, { claudeAiOauth: {} });
-        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
-        expect(r.ok).to.equal(false);
-        expect(r.reason).to.equal('no_credential_configured');
-    });
-
-    it('accepts a refresh token with no access token (the CLI redeems it on spawn)', function () {
-        const dir = _writeCreds(_tmpDir(), { claudeAiOauth: { refreshToken: 'placeholder-refresh' } });
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir, HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('hub_config_dir');
-    });
-
-    it('accepts top-level accessToken (older / hand-assembled files)', function () {
-        const dir = _writeCreds(_tmpDir(), { accessToken: 'placeholder-access' });
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('hub_config_dir');
-    });
-
-    it('falls through a credentials.json too large to be one', function () {
-        const dir = _writeCreds(_tmpDir(),
-            JSON.stringify({ claudeAiOauth: { accessToken: 'x'.repeat(300 * 1024) } }));
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-ant-test' },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(r.ok).to.equal(true);
-        expect(r.source).to.equal('api_key');
-    });
-
-    it('does not leak token material into the resolved result', function () {
-        const dir = _populate(_tmpDir());
-        const r = resolveHubLlmAuth({
-            env: { HUB_CLAUDE_CONFIG_DIR: dir },
-            defaultConfigDir: hermeticDefaultDir
-        });
-        expect(JSON.stringify(r)).to.not.match(/placeholder-(access|refresh)/);
-    });
-
-    it('the no_credential_configured detail states the setup-token TTL correctly', function () {
-        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
-        expect(r.detail).to.contain('one-year TTL');
-        expect(r.detail).to.not.match(/week/i);
-    });
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part1.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part2.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part3.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part4.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part5.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part6.call(this);
+  registerResolveHubLlmAuthCredentialResolutionChainSuite1Part7.call(this);
 });
