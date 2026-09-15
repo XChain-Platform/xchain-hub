@@ -31,52 +31,9 @@ const { expect }  = require('chai');
 const PeerManager = require('../../src/peers/manager.js');
 const { DB_METHODS } = require('../helpers/mockHub');
 
-describe('PeerManager: message listener ceiling, observed on a real hub boot', function () {
-    this.timeout(30000);
+{
 
     let XChainHub, mockDb, hub;
-
-    before(function () {
-        // Same swap-only-the-db pattern XChainHub.test.js uses: every other
-        // module in the require tree, PeerManager included, is the real one.
-        XChainHub = proxyquire('../../src/XChainHub', {
-            './db': function () { return mockDb; }
-        });
-    });
-
-    beforeEach(function () {
-        // Every DB call any of the six start*() phases makes below, all answering
-        // with "nothing configured yet" so each phase reaches its real
-        // peerManager.on('message', ...) registration instead of throwing first.
-        mockDb = {
-            // Spread first: loadValidatorPubkeys now calls db.findActiveValidators()
-            // instead of issuing SQL inline, and that (and every other named method
-            // here) calls this.doQuery, which stays the own override declared below.
-            ...DB_METHODS,
-            doQuery:               async () => [],
-            setParam:               async () => {},
-            setParams:               async () => 0,
-            getConfig:               async () => ({}),
-            getAllConfigs:           async () => ({}),
-            createDatabase:          async () => true,
-            verifyTables:            async () => true,
-            runMigrations:           async () => true,
-            close:                   async () => {},
-            getValidators:           async () => [],
-            getConfigRowsByModule:   async () => [],
-            getChainPairValidators:  async () => ({}),
-            getGovernanceHistory:    async () => [],
-            getProviderGovernanceHistory: async () => [],
-            getChainPairValidatorHistory: async () => [],
-        };
-    });
-
-    afterEach(async function () {
-        if (hub && hub.peerManager) {
-            try { await hub.peerManager.close(); } catch (e) { /* best-effort teardown */ }
-        }
-        hub = null;
-    });
 
     // Collect process warnings raised while `fn` runs, including the ones Node
     // defers past the synchronous EventEmitter.on() call that triggers them.
@@ -94,7 +51,7 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
         return seen;
     }
 
-    it('boots every real MESSAGE_SUBSCRIBERS module with no MaxListenersExceededWarning', async function () {
+    async function bootsEveryRealMessageSubscribersModuleTest2() {
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', {
             P2P_PORT:            0,  // ephemeral; this test never dials out or accepts peers
             P2P_HOST:            '127.0.0.1',
@@ -102,7 +59,7 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
             HUB_NETWORK:         'regtest',
             REQUIRE_SIGNATURES:  false,
             SEED_NODES:          [],
-            ORACLE_EPOCH_START:      1704067200000, // 2024-01-01 UTC, same fixed value the e2e cluster fixture uses
+            ORACLE_EPOCH_START:      1704067200000, // fixed UTC epoch value shared with the e2e cluster fixture
             ORACLE_ROUND_INTERVAL:   999999999,      // no auto-round timer during this test
             ORACLE_SUBMISSION_WINDOW: 2000,
         });
@@ -130,5 +87,52 @@ describe('PeerManager: message listener ceiling, observed on a real hub boot', f
         // from this boot's own config and env, never from the unconfigured static list.
         expect(hub.peerManager.listenerCount('message')).to.equal(
             PeerManager.messageSubscribers(hub.p2pConfig, process.env).length);
-    });
-});
+    }
+
+    function peermanagerMessageListenerCeilingObservedOnSuite1() {
+        this.timeout(30000);
+        before(function () {
+            // Same swap-only-the-db pattern XChainHub.test.js uses: every other
+            // module in the require tree, PeerManager included, is the real one.
+            XChainHub = proxyquire('../../src/XChainHub', {
+                './db': function () { return mockDb; }
+            });
+        });
+        beforeEach(function () {
+            // Every DB call any of the six start*() phases makes below, all answering
+            // with "nothing configured yet" so each phase reaches its real
+            // peerManager.on('message', ...) registration instead of throwing first.
+            mockDb = {
+                // Spread first: loadValidatorPubkeys now calls db.findActiveValidators()
+                // instead of issuing SQL inline, and that (and every other named method
+                // here) calls this.doQuery, which stays the own override declared below.
+                ...DB_METHODS,
+                doQuery:               async () => [],
+                setParam:               async () => {},
+                setParams:               async () => 0,
+                getConfig:               async () => ({}),
+                getAllConfigs:           async () => ({}),
+                createDatabase:          async () => true,
+                verifyTables:            async () => true,
+                runMigrations:           async () => true,
+                close:                   async () => {},
+                getValidators:           async () => [],
+                getConfigRowsByModule:   async () => [],
+                getChainPairValidators:  async () => ({}),
+                getGovernanceHistory:    async () => [],
+                getProviderGovernanceHistory: async () => [],
+                getChainPairValidatorHistory: async () => [],
+            };
+        });
+        afterEach(async function () {
+            if (hub && hub.peerManager) {
+                try { await hub.peerManager.close(); } catch (e) { /* best-effort teardown */ }
+            }
+            hub = null;
+        });
+        it('boots every real MESSAGE_SUBSCRIBERS module with no MaxListenersExceededWarning', bootsEveryRealMessageSubscribersModuleTest2);
+    }
+
+    describe('PeerManager: message listener ceiling, observed on a real hub boot', peermanagerMessageListenerCeilingObservedOnSuite1);
+
+}
