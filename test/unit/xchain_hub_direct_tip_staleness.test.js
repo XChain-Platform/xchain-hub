@@ -24,15 +24,30 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
+let XChainHub, axiosStub, mockDb, warnLog, errorLog;
+const ENV_KEYS = ['MAX_TIP_AGE_S', 'MAX_DIRECT_TIP_AGE_S', 'MAX_INDEXER_LAG_BLOCKS',
+                  'INDEXER_COIN_CHECK'];
+let savedEnv;
+const HEIGHT = 900000;
+
+// Seconds-since-epoch for a tip that is `ageS` old right now.
+function tipAged(height, ageS) {
+    return { blockHeight: height, blockTime: Math.floor(Date.now() / 1000) - ageS };
+}
+
+// A hub whose indexer URL resolves without a coin probe, so only the two tip
+// paths under test decide the answer.
+function hubWith(tip, directResult) {
+    const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: 'mainnet' });
+    hub.db = mockDb;
+    mockDb.getChainTip.resolves(tip);
+    hub.resolveBtcNetwork   = async () => 'mainnet';
+    hub._resolveBtcIndexerUrl = async () => 'http://indexer.invalid/api';
+    axiosStub.post.resolves({ data: { result: directResult } });
+    return hub;
+}
+
 describe('XChainHub direct-tip staleness gate', function () {
-
-    let XChainHub, axiosStub, mockDb, warnLog, errorLog;
-
-    const ENV_KEYS = ['MAX_TIP_AGE_S', 'MAX_DIRECT_TIP_AGE_S', 'MAX_INDEXER_LAG_BLOCKS',
-                      'INDEXER_COIN_CHECK'];
-    let savedEnv;
-
-    const HEIGHT = 900000;
 
     before(function () {
         this.timeout(30000);
@@ -64,22 +79,11 @@ describe('XChainHub direct-tip staleness gate', function () {
         }
     });
 
-    // Seconds-since-epoch for a tip that is `ageS` old right now.
-    function tipAged(height, ageS) {
-        return { blockHeight: height, blockTime: Math.floor(Date.now() / 1000) - ageS };
-    }
+    registerDirectTipHealthTests();
+    registerDirectTipBoundTests();
+});
 
-    // A hub whose indexer URL resolves without a coin probe, so only the two tip
-    // paths under test decide the answer.
-    function hubWith(tip, directResult) {
-        const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: 'mainnet' });
-        hub.db = mockDb;
-        mockDb.getChainTip.resolves(tip);
-        hub.resolveBtcNetwork   = async () => 'mainnet';
-        hub._resolveBtcIndexerUrl = async () => 'http://indexer.invalid/api';
-        axiosStub.post.resolves({ data: { result: directResult } });
-        return hub;
-    }
+function registerDirectTipHealthTests() {
 
     it('refuses a direct height that a halted stack has frozen past the terminal bound', async function () {
         // bitcoind stopped three hours ago: the pushed tip is frozen, and the direct
@@ -111,6 +115,9 @@ describe('XChainHub direct-tip staleness gate', function () {
         const hub = hubWith({ blockHeight: HEIGHT, blockTime: 0 }, { block_index: HEIGHT, lag: 0 });
         expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
+}
+
+function registerDirectTipBoundTests() {
 
     it('takes the terminal bound from MAX_DIRECT_TIP_AGE_S, not from MAX_TIP_AGE_S', async function () {
         // Raising the pushed-tip bound must not raise the terminal one: they answer
@@ -126,4 +133,4 @@ describe('XChainHub direct-tip staleness gate', function () {
         const hub = hubWith(tipAged(HEIGHT, 10800), { block_index: HEIGHT, lag: 0 });
         expect(await hub._resolveBtcLatestBlock()).to.equal(HEIGHT);
     });
-});
+}
