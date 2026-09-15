@@ -14,31 +14,11 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-describe('CapabilitySnapshot', function () {
+let axiosStub, CapabilitySnapshot, logStub;
 
-    let axiosStub, CapabilitySnapshot, logStub;
-
-    beforeEach(function () {
-        axiosStub = { post: sinon.stub() };
-        // The module logs through the observability singleton, so the logger is
-        // injected rather than spied: proxyquire hands other suites their own
-        // copy of that module, and a spy on this file's copy then sees nothing.
-        logStub = { debug: sinon.stub(), info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
-        CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', {
-            axios: axiosStub,
-            // @global so the monitor module this one loads logs to the same stub;
-            // its auth and ALERT lines are half of what these tests assert on.
-            '../observability': { getLogger: () => logStub, '@global': true }
-        });
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
-    // Fake hub: resolves an indexer URL and (optionally) exposes a registry that
-    // serves the authoritative MIN_STAKE for a capability.
-    function makeHub(registry) {
+// Fake hub: resolves an indexer URL and (optionally) exposes a registry that
+// serves the authoritative MIN_STAKE for a capability.
+function makeHub(registry) {
         return {
             capabilityRegistry: registry,
             _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
@@ -49,13 +29,79 @@ describe('CapabilitySnapshot', function () {
         };
     }
 
-    function okResult() {
+function okResult() {
         return { data: { result: { capability: 'attestation', block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }] } } };
     }
 
-    describe('getQuorum()', function () {
+function installSuiteHooks1() {
+    beforeEach(function () {
+            axiosStub = { post: sinon.stub() };
+            // The module logs through the observability singleton, so the logger is
+            // injected rather than spied: proxyquire hands other suites their own
+            // copy of that module, and a spy on this file's copy then sees nothing.
+            logStub = { debug: sinon.stub(), info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
+            CapabilitySnapshot = proxyquire('../../src/validators/capability_snapshot', {
+                axios: axiosStub,
+                // @global so the monitor module this one loads logs to the same stub;
+                // its auth and ALERT lines are half of what these tests assert on.
+                '../observability': { getLogger: () => logStub, '@global': true }
+            });
+        });
+    afterEach(function () {
+            sinon.restore();
+        });
+}
 
-        it('coerces a STRING count instead of string-concatenating it (DoS guard)', function () {
+// A governance MIN_STAKE change must not be served a snapshot that was cached
+// under the old threshold: the threshold controls which validators qualify, so
+// two hubs caching contradictory sets for the same (capability, blockIndex)
+// would lock different PBFT quorums for the same round. The fix folds the
+// resolved min_stake into the cache key AND flushes the capability's entries
+// when the threshold changes (XChainHub does this on 'proposal:finalized').
+
+// okResult with a controllable validator set so old vs new is observable.
+function resultWith(validators) {
+            return { data: { result: { capability: 'attestation', block_index: 100, count: validators.length, validators } } };
+        }
+
+// -----------------------------------------------------------------
+// L4 determinism: capability validator set (spec §6 / validator-test-spec)
+//
+// The validator-specific risk is quiet divergence: two hubs resolving the
+// SAME (capability, block_index) with the SAME governed MIN_STAKE must lock
+// the SAME qualified validator set (members AND order) and derive the SAME
+// quorum N, or their PBFT rounds fork. getcapabilityvalidators is the
+// federation source of truth for that set; these pin the contract across two
+// independently-constructed CapabilitySnapshot instances (the capability-set
+// half of spec §6 "Determinism (L4)" item 1).
+// -----------------------------------------------------------------
+
+// A fixed, ordered qualified set. Both hubs query the same deterministic
+// indexer, modelling identical on-chain stake state at the block boundary.
+const QUALIFIED = [
+            { pubkey: 'aa', amount: '90000' },
+            { pubkey: 'bb', amount: '60000' },
+            { pubkey: 'cc', amount: '30000' }
+        ];
+
+function deterministicIndexer() {
+            // Echoes the requested (buried) block and returns the same ordered set
+            // on every call, with FRESH copies so matching output proves content
+            // determinism, not a shared object reference.
+            axiosStub.post.callsFake(async (url, body) => ({
+                data: { result: {
+                    capability:  body.params.capability,
+                    block_index: body.params.block_index,
+                    count:       QUALIFIED.length,
+                    validators:  QUALIFIED.map(v => ({ ...v }))
+                } }
+            }));
+        }
+
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('getQuorum()', function () {
+it('coerces a STRING count instead of string-concatenating it (DoS guard)', function () {
             // Regression: `Math.ceil((N + 1) / 2)` with N a string "5" concatenates
             // ("5" + 1 -> "51"), exploding quorum to 26-of-5 -> permanent halt. A
             // string count must coerce identically to the numeric one.
@@ -65,19 +111,20 @@ describe('CapabilitySnapshot', function () {
             expect(asString).to.equal(numeric);
             expect(asString).to.equal(3); // max(2*floor(4/3)+1, ceil(6/2)) = max(3,3)
         });
-
-        it('falls back to the membership-set size when count is non-numeric (no single-node bypass)', function () {
+it('falls back to the membership-set size when count is non-numeric (no single-node bypass)', function () {
             // A malformed/absent count must NOT silently drop quorum to 0 (which
             // would bypass consensus). Derive N from the actual validator set.
             let snap = new CapabilitySnapshot(makeHub(null));
             let validators = [1,2,3,4].map(i => ({ pubkey: 'k' + i }));
             expect(snap.getQuorum({ count: 'garbage', validators })).to.equal(3);
         });
-    });
+});
+});
 
-    describe('getSnapshot()', function () {
-
-        it('passes the hub registry MIN_STAKE as min_stake in the RPC payload', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('getSnapshot()', function () {
+it('passes the hub registry MIN_STAKE as min_stake in the RPC payload', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
@@ -94,8 +141,7 @@ describe('CapabilitySnapshot', function () {
             expect(body.params.min_stake).to.equal('25000');
             expect(registry.getMinStake.calledWith('attestation')).to.equal(true);
         });
-
-        it('rejects a snapshot whose echoed block_index differs from the request (freshness guard)', async function () {
+it('rejects a snapshot whose echoed block_index differs from the request (freshness guard)', async function () {
             // The indexer fail-closes on an un-indexed block and echoes the requested
             // block on success, so a mismatch means it answered for a different height.
             // Locking that snapshot would let two hubs use different validator sets for
@@ -111,8 +157,7 @@ describe('CapabilitySnapshot', function () {
             let result = await snap.getSnapshot('attestation', 106);
             expect(result).to.equal(null);
         });
-
-        it('rejects a snapshot whose echoed capability differs from the request (#6125)', async function () {
+it('rejects a snapshot whose echoed capability differs from the request (#6125)', async function () {
             // The other half of the request key. `capability` selects which stake rows
             // the indexer filters, so a mismatched echo is a validator set for the wrong
             // POPULATION - cached under the requested key for the full TTL and consumed
@@ -128,8 +173,13 @@ describe('CapabilitySnapshot', function () {
             expect(await snap.getSnapshot('attestation', 106)).to.equal(null);
             expect(snap.cache.size, 'a rejected snapshot is never cached').to.equal(0);
         });
+});
+});
 
-        it('rejects a snapshot with NO capability field at all (#6125)', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('getSnapshot()', function () {
+it('rejects a snapshot with NO capability field at all (#6125)', async function () {
             // A stripped field is indistinguishable from a wrong one at this seam, so
             // the guard is strict about absence the way the block echo already is.
             axiosStub.post.resolves({ data: { result: {
@@ -141,8 +191,7 @@ describe('CapabilitySnapshot', function () {
 
             expect(await snap.getSnapshot('attestation', 106)).to.equal(null);
         });
-
-        it('rejects a WEIGHT snapshot whose echoed capability differs from the request (#6125)', async function () {
+it('rejects a WEIGHT snapshot whose echoed capability differs from the request (#6125)', async function () {
             axiosStub.post.resolves({ data: { result: {
                 capability: 'oracle_publish', block_index: 100, count: 1, source_count: 1,
                 validators: [{ pubkey: 'ab', source: 'src1', weight: '50000' }]
@@ -153,8 +202,7 @@ describe('CapabilitySnapshot', function () {
 
             expect(await snap.getWeightSnapshot('attestation', 106)).to.equal(null);
         });
-
-        it('accepts a snapshot whose capability echo matches (#6125)', async function () {
+it('accepts a snapshot whose capability echo matches (#6125)', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
@@ -163,8 +211,7 @@ describe('CapabilitySnapshot', function () {
             expect(result).to.not.equal(null);
             expect(result.capability).to.equal('attestation');
         });
-
-        it('coerces a numeric MIN_STAKE to a string', async function () {
+it('coerces a numeric MIN_STAKE to a string', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(25000) };
             let snap = new CapabilitySnapshot(makeHub(registry));
@@ -173,8 +220,7 @@ describe('CapabilitySnapshot', function () {
 
             expect(axiosStub.post.firstCall.args[1].params.min_stake).to.equal('25000');
         });
-
-        it('omits min_stake when the registry is not ready (pre-startCapabilities)', async function () {
+it('omits min_stake when the registry is not ready (pre-startCapabilities)', async function () {
             axiosStub.post.resolves(okResult());
             let snap = new CapabilitySnapshot(makeHub(null));
 
@@ -183,8 +229,13 @@ describe('CapabilitySnapshot', function () {
             let body = axiosStub.post.firstCall.args[1];
             expect(Object.prototype.hasOwnProperty.call(body.params, 'min_stake')).to.equal(false);
         });
+});
+});
 
-        it('fails CLOSED when a LIVE registry has no threshold for the capability (#S-F3 fork guard)', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('getSnapshot()', function () {
+it('fails CLOSED when a LIVE registry has no threshold for the capability (#S-F3 fork guard)', async function () {
             // A wired registry that resolves NO threshold means the capability was
             // never put in HUB_CAPABILITY_CONFIG. Omitting min_stake would let each
             // indexer apply its own local threshold and fork the qualifying set, so
@@ -200,8 +251,7 @@ describe('CapabilitySnapshot', function () {
             expect(axiosStub.post.called).to.equal(false);
             expect(errStub.calledWithMatch(/NO configured MIN_STAKE/)).to.equal(true);
         });
-
-        it('fails CLOSED in getWeightSnapshot too when a live registry has no threshold', async function () {
+it('fails CLOSED in getWeightSnapshot too when a live registry has no threshold', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(null) };
             let snap = new CapabilitySnapshot(makeHub(registry));
@@ -212,22 +262,13 @@ describe('CapabilitySnapshot', function () {
             expect(result).to.equal(null);
             expect(axiosStub.post.called).to.equal(false);
         });
-    });
+});
+});
 
-    // A governance MIN_STAKE change must not be served a snapshot that was cached
-    // under the old threshold: the threshold controls which validators qualify, so
-    // two hubs caching contradictory sets for the same (capability, blockIndex)
-    // would lock different PBFT quorums for the same round. The fix folds the
-    // resolved min_stake into the cache key AND flushes the capability's entries
-    // when the threshold changes (XChainHub does this on 'proposal:finalized').
-    describe('MIN_STAKE change invalidation', function () {
-
-        // okResult with a controllable validator set so old vs new is observable.
-        function resultWith(validators) {
-            return { data: { result: { capability: 'attestation', block_index: 100, count: validators.length, validators } } };
-        }
-
-        it('does NOT serve a snapshot cached under a different min_stake', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('MIN_STAKE change invalidation', function () {
+it('does NOT serve a snapshot cached under a different min_stake', async function () {
             // Mutable threshold: simulates a governance change between the two reads.
             let threshold = '25000';
             let registry = { getMinStake: () => threshold };
@@ -247,8 +288,7 @@ describe('CapabilitySnapshot', function () {
             expect(axiosStub.post.calledTwice).to.equal(true);
             expect(second.validators[0].pubkey).to.equal('new');
         });
-
-        it('flushCapability drops both count- and weight-keyed entries, forcing a re-fetch', async function () {
+it('flushCapability drops both count- and weight-keyed entries, forcing a re-fetch', async function () {
             let registry = { getMinStake: () => '25000' };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
@@ -280,8 +320,13 @@ describe('CapabilitySnapshot', function () {
             await snap.getSnapshot('attestation', 106);
             expect(axiosStub.post.calledOnce).to.equal(true);
         });
+});
+});
 
-        it('end-to-end: a MIN_STAKE governance change yields the new validator set, not the stale one', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('MIN_STAKE change invalidation', function () {
+it('end-to-end: a MIN_STAKE governance change yields the new validator set, not the stale one', async function () {
             // Registry whose threshold is mutated by the governance apply path.
             let threshold = '25000';
             let registry = { getMinStake: () => threshold };
@@ -303,44 +348,13 @@ describe('CapabilitySnapshot', function () {
             let after = await snap.getSnapshot('attestation', 106);
             expect(after.validators[0].pubkey).to.equal('new');
         });
-    });
+});
+});
 
-    // -----------------------------------------------------------------
-    // L4 determinism: capability validator set (spec §6 / validator-test-spec)
-    //
-    // The validator-specific risk is quiet divergence: two hubs resolving the
-    // SAME (capability, block_index) with the SAME governed MIN_STAKE must lock
-    // the SAME qualified validator set (members AND order) and derive the SAME
-    // quorum N, or their PBFT rounds fork. getcapabilityvalidators is the
-    // federation source of truth for that set; these pin the contract across two
-    // independently-constructed CapabilitySnapshot instances (the capability-set
-    // half of spec §6 "Determinism (L4)" item 1).
-    // -----------------------------------------------------------------
-    describe('L4 determinism: capability validator set', function () {
-
-        // A fixed, ordered qualified set. Both hubs query the same deterministic
-        // indexer, modelling identical on-chain stake state at the block boundary.
-        const QUALIFIED = [
-            { pubkey: 'aa', amount: '90000' },
-            { pubkey: 'bb', amount: '60000' },
-            { pubkey: 'cc', amount: '30000' }
-        ];
-
-        function deterministicIndexer() {
-            // Echoes the requested (buried) block and returns the same ordered set
-            // on every call, with FRESH copies so matching output proves content
-            // determinism, not a shared object reference.
-            axiosStub.post.callsFake(async (url, body) => ({
-                data: { result: {
-                    capability:  body.params.capability,
-                    block_index: body.params.block_index,
-                    count:       QUALIFIED.length,
-                    validators:  QUALIFIED.map(v => ({ ...v }))
-                } }
-            }));
-        }
-
-        it('two independent hubs at the same block lock an identical qualified set and quorum N', async function () {
+describe('CapabilitySnapshot', function () {
+    installSuiteHooks1();
+describe('L4 determinism: capability validator set', function () {
+it('two independent hubs at the same block lock an identical qualified set and quorum N', async function () {
             deterministicIndexer();
             const registry = { getMinStake: () => '25000' };
             const a = new CapabilitySnapshot(makeHub(registry));
@@ -354,8 +368,7 @@ describe('CapabilitySnapshot', function () {
             expect(a.getQuorum(sa)).to.equal(b.getQuorum(sb));    // same 2f+1
             expect(a.getQuorum(sa)).to.equal(2);                  // N=3: max(2*floor(2/3)+1, ceil(4/2)) = max(1,2)
         });
-
-        it('quorum N over the locked set is order-independent (depends only on |set|)', async function () {
+it('quorum N over the locked set is order-independent (depends only on |set|)', async function () {
             deterministicIndexer();
             const registry = { getMinStake: () => '25000' };
             const snap = new CapabilitySnapshot(makeHub(registry));
@@ -365,8 +378,7 @@ describe('CapabilitySnapshot', function () {
             const reversed = Object.assign({}, s, { validators: s.validators.slice().reverse() });
             expect(snap.getQuorum(reversed)).to.equal(snap.getQuorum(s));
         });
-
-        it('the qualified set is driven by the hub-governed MIN_STAKE, not the indexer local config', async function () {
+it('the qualified set is driven by the hub-governed MIN_STAKE, not the indexer local config', async function () {
             deterministicIndexer();
             // Two hubs whose registries resolve the SAME governed threshold send the
             // SAME min_stake param, so the indexer can never be the divergence point.
@@ -378,408 +390,5 @@ describe('CapabilitySnapshot', function () {
                 .to.equal(axiosStub.post.getCall(1).args[1].params.min_stake);
             expect(axiosStub.post.getCall(0).args[1].params.min_stake).to.equal('25000');
         });
-    });
-
-    // Finding #4136/#4220: a 401 (hub BTC_INDEXER_API_KEY != indexer
-    // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot; that
-    // makes an auth misconfig indistinguishable from a dead indexer and silently
-    // collapses every attestation + config-change quorum.
-    describe('indexer auth failure (401/403)', function () {
-
-        function err401(status) {
-            let e = new Error('Request failed with status code ' + status);
-            e.response = { status: status };
-            return e;
-        }
-
-        it('returns null AND logs a distinct auth warning on a 401', async function () {
-            axiosStub.post.rejects(err401(401));
-            // The auth and alert lines are written through the logger now.
-            let spy = logStub.error;
-            let snap = new CapabilitySnapshot(makeHub(null));
-
-            let result = await snap.getSnapshot('attestation', 106);
-
-            expect(result).to.equal(null);
-            expect(spy.calledOnce).to.equal(true);
-            let msg = spy.firstCall.args[0];
-            expect(msg).to.contain('BTC_INDEXER_API_KEY');
-            expect(msg).to.contain('INDEXER_API_KEY');
-            expect(msg).to.contain('401');
-        });
-
-        it('throttles repeated auth warnings (one per cache TTL window)', async function () {
-            axiosStub.post.rejects(err401(401));
-            let spy = logStub.error;
-            let snap = new CapabilitySnapshot(makeHub(null));
-
-            // Distinct keys/methods so the 60s snapshot cache never short-circuits the call.
-            await snap.getSnapshot('attestation', 106);
-            await snap.getWeightSnapshot('attestation', 101);
-            await snap.getActiveValidatorSnapshot(102);
-
-            // One throttled auth line inside the TTL window. The third failure
-            // also crosses the alert threshold, which escalates ONCE per
-            // outage; that line is the alert, not a repeat of the auth warning.
-            let authLines  = spy.getCalls().filter(c => String(c.args[0]).indexOf('(auth)') !== -1);
-            let alertLines = spy.getCalls().filter(c => String(c.args[0]).indexOf('ALERT:') === 0);
-            expect(authLines.length).to.equal(1);
-            expect(alertLines.length).to.equal(1);
-        });
-
-        it('logs a transport error as unreachable, NOT as auth', async function () {
-            // A transport error used to be the silent case: it returned
-            // null with no log at all, so an unreachable indexer looked exactly
-            // like a healthy hub with nothing to do. It must now be surfaced,
-            // and still be distinguishable from an auth mismatch.
-            axiosStub.post.rejects(new Error('ECONNREFUSED'));
-            let spy = logStub.error;
-            let snap = new CapabilitySnapshot(makeHub(null));
-
-            let result = await snap.getSnapshot('attestation', 106);
-
-            expect(result).to.equal(null);                     // still falls back
-            expect(spy.callCount).to.equal(1);
-            let msg = spy.firstCall.args[0];
-            expect(msg).to.contain('(unreachable)');
-            expect(msg).to.contain('ECONNREFUSED');
-            expect(msg).to.not.contain('BTC_INDEXER_API_KEY');
-            expect(snap.monitor.byReason.unreachable).to.equal(1);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Malformed result → null (FINDING #5334)
-    //
-    // A bad-shape `validators` field must return null (routing the consensus
-    // caller through its fail-closed gate), NOT { validators: [] } which would
-    // collapse to quorum=0 and look like single-node. A LEGITIMATE empty or
-    // truncated array still yields a real snapshot.
-    // -----------------------------------------------------------------
-
-    describe('malformed indexer result (#5334)', function () {
-
-        function dataResult(result) {
-            return { data: { result: result } };
-        }
-
-        // Each fetch method paired with a base valid result for its RPC, and with a
-        // row of the shape THAT RPC actually returns: the count RPCs answer
-        // {pubkey, amount}, the source-keyed weight RPCs answer {pubkey, source,
-        // weight}. The distinction matters: a weight RPC row carrying
-        // no `weight` is rejected as malformed rather than read as zero stake.
-        let countRow  = { pubkey: 'ab', amount: '50000' };
-        let weightRow = { pubkey: 'ab', source: 'bc1qsource', weight: '50000' };
-        let methods = [
-            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 106),    base: { capability: 'attestation', block_index: 100, count: 1 }, row: countRow },
-            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 }, row: weightRow },
-            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(106),     base: { block_index: 100, count: 1 }, row: countRow },
-            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(106),        base: { block_index: 100, count: 1, source_count: 1 }, row: weightRow }
-        ];
-
-        // (d) malformed shapes return null on every fetch path.
-        let badShapes = [
-            { label: 'missing validators field', validators: undefined },
-            { label: 'validators is an object',  validators: { 0: { pubkey: 'ab' } } },
-            { label: 'validators is a string',   validators: 'ab,cd' },
-            { label: 'validators is a number',   validators: 3 }
-        ];
-
-        for (let m of methods) {
-            for (let bad of badShapes) {
-                it(m.name + ' returns null when ' + bad.label, async function () {
-                    let result = Object.assign({}, m.base);
-                    if (bad.validators === undefined) delete result.validators;
-                    else result.validators = bad.validators;
-                    axiosStub.post.resolves(dataResult(result));
-                    let snap = new CapabilitySnapshot(makeHub(null));
-                    expect(await m.call(snap)).to.equal(null);
-                });
-            }
-
-            it(m.name + ' returns a real snapshot for a VALID validators array', async function () {
-                let result = Object.assign({}, m.base, { validators: [m.row] });
-                axiosStub.post.resolves(dataResult(result));
-                let snap = new CapabilitySnapshot(makeHub(null));
-                let out = await m.call(snap);
-                expect(out).to.not.equal(null);
-                expect(out.validators).to.be.an('array').with.lengthOf(1);
-            });
-
-            it(m.name + ' keeps a LEGITIMATE empty validators array (not null)', async function () {
-                // Empty-after-filter (no qualifying stakers at this block) is a real
-                // snapshot the consensus layer treats as valid, not a parse failure.
-                let result = Object.assign({}, m.base, { count: 0, validators: [] });
-                axiosStub.post.resolves(dataResult(result));
-                let snap = new CapabilitySnapshot(makeHub(null));
-                let out = await m.call(snap);
-                expect(out).to.not.equal(null);
-                expect(out.validators).to.be.an('array').with.lengthOf(0);
-            });
-        }
-    });
-
-    // -----------------------------------------------------------------
-    // Weightless row on a WEIGHT snapshot
-    //
-    // stake_weighted_quorum fails closed on a row with no weight, but it never
-    // sees one: every consumer re-maps the snapshot through
-    // `String(v.weight != null ? v.weight : '0')`, which turns the missing
-    // weight into a real zero. The source then sits in the quorum's dedupe map
-    // carrying no stake, so the denominator S shrinks while a signer keeps the
-    // full numerator, and a smaller real stake clears 3*tally > 2*S. The
-    // rejection therefore has to happen where the wire row enters the hub.
-    // A live regtest sweep (BTC/LTC/DOGE, every capability, several block
-    // boundaries) found zero weightless rows, so this can only fire on a
-    // corrupt or hostile indexer answer.
-    // -----------------------------------------------------------------
-
-    describe('weightless weight-snapshot row', function () {
-
-        function dataResult(result) { return { data: { result: result } }; }
-
-        let weightMethods = [
-            { name: 'getWeightSnapshot',       call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 2, source_count: 2 } },
-            { name: 'getActiveWeightSnapshot', call: (s) => s.getActiveWeightSnapshot(106),          base: { block_index: 100, count: 2, source_count: 2 } }
-        ];
-        // Each bad second row is one way a weight can go missing on the wire.
-        let badWeights = [
-            { label: 'weight is absent',   row: { pubkey: 'cd', source: 'src2' } },
-            { label: 'weight is null',     row: { pubkey: 'cd', source: 'src2', weight: null } },
-            { label: 'weight is empty',    row: { pubkey: 'cd', source: 'src2', weight: '' } },
-            { label: 'weight is blank',    row: { pubkey: 'cd', source: 'src2', weight: '   ' } },
-            { label: 'weight is garbage',  row: { pubkey: 'cd', source: 'src2', weight: 'lots' } },
-            { label: 'weight is NaN-ish',  row: { pubkey: 'cd', source: 'src2', weight: 'NaN' } }
-        ];
-        let good = { pubkey: 'ab', source: 'src1', weight: '50000' };
-
-        for (let m of weightMethods) {
-            for (let bad of badWeights) {
-                it(m.name + ' returns null when ' + bad.label, async function () {
-                    axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, bad.row] })));
-                    let snap = new CapabilitySnapshot(makeHub(null));
-                    expect(await m.call(snap)).to.equal(null);
-                });
-            }
-
-            it(m.name + ' rejects the WHOLE snapshot, never just the bad row', async function () {
-                // Dropping the row instead of refusing the snapshot shrinks S by
-                // exactly the amount the missing weight would have contributed -
-                // the same defect wearing a different hat.
-                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2' }] })));
-                let snap = new CapabilitySnapshot(makeHub(null));
-                expect(await m.call(snap)).to.equal(null);
-            });
-
-            it(m.name + ' still accepts a LEGITIMATE zero weight', async function () {
-                // A source qualified at MIN_STAKE 0 really can weigh 0. That is a
-                // value, not an absence, and the predicate handles it.
-                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2', weight: '0' }] })));
-                let snap = new CapabilitySnapshot(makeHub(null));
-                let out = await m.call(snap);
-                expect(out).to.not.equal(null);
-                expect(out.validators).to.be.an('array').with.lengthOf(2);
-            });
-
-            it(m.name + ' accepts a decimal weight', async function () {
-                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2', weight: '12345.67890000' }] })));
-                let snap = new CapabilitySnapshot(makeHub(null));
-                expect(await m.call(snap)).to.not.equal(null);
-            });
-        }
-
-        it('leaves the COUNT snapshot lenient (it carries amount, not weight)', async function () {
-            // getSnapshot feeds the count quorum, which never reads a weight, so
-            // holding it to the weight contract would halt the count path for no
-            // safety gain.
-            axiosStub.post.resolves(dataResult({ capability: 'attestation', block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }] }));
-            let snap = new CapabilitySnapshot(makeHub(null));
-            let out = await snap.getSnapshot('attestation', 106);
-            expect(out).to.not.equal(null);
-            expect(out.validators).to.be.an('array').with.lengthOf(1);
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // Reorg-depth buffer
-    //
-    // Callers pass a tip-derived height, but stake state AT tip is not
-    // reorg-safe: a shallow reorg can rewrite it while the 60s cache keeps
-    // serving the pre-reorg set. Every getter must therefore resolve the
-    // snapshot at (requested - buffer), clamped at 0, and label the snapshot
-    // with the buried height it truly represents.
-    // -----------------------------------------------------------------
-
-    describe('reorg-depth buffer (#S-F7)', function () {
-
-        function echoingIndexer() {
-            // Indexer stub that echoes back whatever block was requested, like
-            // the real one does on success.
-            axiosStub.post.callsFake(async (url, body) => ({
-                data: { result: {
-                    capability:  body.params.capability || '*',
-                    block_index: body.params.block_index,
-                    count:       1,
-                    validators:  [{ pubkey: 'ab', amount: '50000' }]
-                } }
-            }));
-        }
-
-        afterEach(function () {
-            delete process.env.HUB_SNAPSHOT_REORG_BUFFER;
-        });
-
-        it('defaults to a 6-block buffer', function () {
-            let snap = new CapabilitySnapshot(makeHub(null));
-            expect(snap.reorgBufferBlocks).to.equal(6);
-        });
-
-        it('resolves getSnapshot at (tip - buffer), not at tip', async function () {
-            echoingIndexer();
-            let snap = new CapabilitySnapshot(makeHub(null));
-            let out = await snap.getSnapshot('attestation', 100);
-            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(94);
-            expect(out.blockIndex).to.equal(94);
-        });
-
-        it('applies the buffer on every getter (weight, active, active-weight)', async function () {
-            echoingIndexer();
-            let snap = new CapabilitySnapshot(makeHub(null));
-            await snap.getWeightSnapshot('attestation', 100);
-            await snap.getActiveValidatorSnapshot(100);
-            await snap.getActiveWeightSnapshot(100);
-            for (let call of axiosStub.post.getCalls()) {
-                expect(call.args[1].params.block_index).to.equal(94);
-            }
-        });
-
-        it('clamps the buried height at 0 near genesis', async function () {
-            echoingIndexer();
-            let snap = new CapabilitySnapshot(makeHub(null));
-            await snap.getSnapshot('attestation', 3);
-            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(0);
-        });
-
-        it('honors a HUB_SNAPSHOT_REORG_BUFFER override', async function () {
-            process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
-            echoingIndexer();
-            let snap = new CapabilitySnapshot(makeHub(null));
-            expect(snap.reorgBufferBlocks).to.equal(12);
-            await snap.getSnapshot('attestation', 100);
-            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(88);
-        });
-
-        it('allows a 0 buffer (regtest opt-out)', async function () {
-            process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-            echoingIndexer();
-            let snap = new CapabilitySnapshot(makeHub(null));
-            await snap.getSnapshot('attestation', 100);
-            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(100);
-        });
-
-        it('rejects a malformed override loudly and falls back to the default', function () {
-            process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
-            let errStub = logStub.error;
-            let snap = new CapabilitySnapshot(makeHub(null));
-            expect(snap.reorgBufferBlocks).to.equal(6);
-            expect(errStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
-        });
-
-        it('rejects a negative override', function () {
-            process.env.HUB_SNAPSHOT_REORG_BUFFER = '-3';
-            logStub.error;
-            let snap = new CapabilitySnapshot(makeHub(null));
-            expect(snap.reorgBufferBlocks).to.equal(6);
-        });
-
-        // #4167: a VALID but non-canonical buffer is the dangerous case. It is
-        // subtracted before the cache key and the indexer RPC are formed, so a
-        // hub carrying its own value locks a different block than its peers for
-        // the same round and quorum N forks with nothing logged.
-        describe('canonical-value assertion (#4167)', function () {
-
-            function networkedHub(network) {
-                let hub = makeHub(null);
-                hub.network = network;
-                return hub;
-            }
-
-            afterEach(function () {
-                delete process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT;
-            });
-
-            for (let network of ['mainnet', 'testnet']) {
-                it('refuses to construct on ' + network + ' when the buffer diverges', function () {
-                    process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                    let thrown = null;
-                    try { new CapabilitySnapshot(networkedHub(network)); } catch (e) { thrown = e; }
-                    expect(thrown).to.be.an('error');
-                    expect(thrown.code).to.equal('REORG_BUFFER_MISMATCH');
-                });
-            }
-
-            it('accepts the canonical 6 stated explicitly on mainnet', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = '6';
-                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
-                expect(snap.reorgBufferBlocks).to.equal(6);
-            });
-
-            it('accepts an unset buffer on mainnet', function () {
-                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
-                expect(snap.reorgBufferBlocks).to.equal(6);
-            });
-
-            it('warns and accepts on regtest so venues can run deliberate depths', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                let warnStub = logStub.warn;
-                let snap = new CapabilitySnapshot(networkedHub('regtest'));
-                expect(snap.reorgBufferBlocks).to.equal(0);
-                expect(warnStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
-            });
-
-            it('warns and accepts in standalone mode (no network declared)', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
-                logStub.warn;
-                let snap = new CapabilitySnapshot(makeHub(null));
-                expect(snap.reorgBufferBlocks).to.equal(12);
-            });
-
-            it('honors the loud one-off bypass on mainnet', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
-                let warnStub = logStub.warn;
-                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
-                expect(snap.reorgBufferBlocks).to.equal(0);
-                expect(warnStub.calledWithMatch(/XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT/)).to.equal(true);
-            });
-
-            it('still falls back to the canonical default on a typo, without throwing', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
-                logStub.error;
-                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
-                expect(snap.reorgBufferBlocks).to.equal(6);
-            });
-        });
-
-        it('still returns null for a null/undefined/non-numeric height', async function () {
-            let snap = new CapabilitySnapshot(makeHub(null));
-            expect(await snap.getSnapshot('attestation', null)).to.equal(null);
-            expect(await snap.getSnapshot('attestation', undefined)).to.equal(null);
-            expect(await snap.getSnapshot('attestation', 'tip')).to.equal(null);
-            expect(axiosStub.post.called).to.equal(false);
-        });
-
-        it('two tip heights burying to the same block share one cache entry', async function () {
-            // The cache is keyed on the BURIED height, so distinct tip reads that
-            // resolve to the same buried block must not double-fetch.
-            echoingIndexer();
-            process.env.HUB_SNAPSHOT_REORG_BUFFER = '6';
-            let snap = new CapabilitySnapshot(makeHub(null));
-            let a = await snap.getSnapshot('attestation', 100.4); // floors to 100 -> 94
-            let b = await snap.getSnapshot('attestation', 100);   // -> 94
-            expect(axiosStub.post.callCount).to.equal(1);
-            expect(a.blockIndex).to.equal(94);
-            expect(b.blockIndex).to.equal(94);
-        });
-    });
+});
 });
