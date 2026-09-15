@@ -38,10 +38,10 @@ const METHOD_MIX = [
     { weight:  5, value: { method: 'getvalidators',      params: {} } }
 ];
 
-describe('Performance: API Query Saturation', function () {
-    this.timeout(120000);
 
-    let cluster;
+
+let cluster;
+function registerBeforeHook() {
 
     before(async function () {
         try {
@@ -67,12 +67,18 @@ describe('Performance: API Query Saturation', function () {
             proposals: 10
         });
     });
+}
+
+function registerAfterHook() {
 
     after(async function () {
         if (cluster) await cluster.stop();
         mockApi.teardown();
         await testDb.teardown();
     });
+}
+
+function registerSingleMethodBaselinesTests() {
 
     // ─── Individual Method Baselines ────────────────────────────────
 
@@ -109,6 +115,9 @@ describe('Performance: API Query Saturation', function () {
             });
         }
     });
+}
+
+function registerConcurrentBlastTests() {
 
     // ─── Concurrent Blast Tests ─────────────────────────────────────
 
@@ -152,6 +161,9 @@ describe('Performance: API Query Saturation', function () {
             expect(histogram.p95).to.be.below(5000, 'p95 should be < 5s');
         });
     });
+}
+
+function registerRampUpConcurrencyTests() {
 
     // ─── Ramp Test ──────────────────────────────────────────────────
 
@@ -179,6 +191,9 @@ describe('Performance: API Query Saturation', function () {
             expect(histograms[10].p95).to.be.below(1000, 'p95 at concurrency=10 should be < 1s');
         });
     });
+}
+
+function registerLargeResultSetsTests() {
 
     // ─── Large Result Set Performance ───────────────────────────────
 
@@ -196,6 +211,9 @@ describe('Performance: API Query Saturation', function () {
             expect(errors).to.equal(0);
         });
     });
+}
+
+function registerWriteMethodThroughputTests() {
 
     // ─── Write Method Performance ───────────────────────────────────
 
@@ -231,4 +249,14 @@ describe('Performance: API Query Saturation', function () {
             expect(errors).to.equal(0);
         });
     });
+}
+describe('Performance: API Query Saturation', function () {
+    this.timeout(120000);
+    registerBeforeHook();
+    registerAfterHook();
+    registerSingleMethodBaselinesTests();
+    registerConcurrentBlastTests();
+    registerRampUpConcurrencyTests();
+    registerLargeResultSetsTests();
+    registerWriteMethodThroughputTests();
 });
