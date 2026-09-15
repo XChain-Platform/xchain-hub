@@ -117,10 +117,22 @@ describe('SpendGuard: an absent state file is not always a first run', function 
  * These tests drive a REAL read-only state path, not a stubbed fs, and assert the
  * behaviour that follows from it: no token, no consumed budget, no broadcast.
  */
-describe('SpendGuard: a reservation that cannot be persisted refuses the broadcast', function () {
-    const made = [];
-    let root, store, statePath, guard;
+const made = [];
+let root, store, statePath, guard;
 
+// Turn the armed store read-only and drop anything already written, which is what
+// a disk remounted read-only under a running hub looks like from here.
+function breakTheStore() {
+    try { fs.rmSync(statePath, { force: true }); } catch (e) { /* not written yet */ }
+    fs.chmodSync(store, 0o500);
+    expect(() => fs.accessSync(store, fs.constants.W_OK)).to.throw();
+}
+
+function healTheStore() {
+    fs.chmodSync(store, 0o700);
+}
+
+describe('SpendGuard: a reservation that cannot be persisted refuses the broadcast', function () {
     beforeEach(function () {
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'spendguard-rw2ro-'));
         made.push(root);
@@ -141,16 +153,11 @@ describe('SpendGuard: a reservation that cannot be persisted refuses the broadca
         }
     });
 
-    // Turn the armed store read-only and drop anything already written, which is what
-    // a disk remounted read-only under a running hub looks like from here.
-    function breakTheStore() {
-        try { fs.rmSync(statePath, { force: true }); } catch (e) { /* not written yet */ }
-        fs.chmodSync(store, 0o500);
-        expect(() => fs.accessSync(store, fs.constants.W_OK)).to.throw();
-    }
-    function healTheStore() {
-        fs.chmodSync(store, 0o700);
-    }
+    registerUnwritableReservationTests();
+    registerUnwritableRecoveryTests();
+});
+
+function registerUnwritableReservationTests() {
 
     it('reserve() returns null when the write fails, instead of a token', function () {
         breakTheStore();
@@ -193,6 +200,9 @@ describe('SpendGuard: a reservation that cannot be persisted refuses the broadca
         expect(s.persistBroken).to.equal(true);
         expect(s.persistError).to.be.a('string').and.not.empty;
     });
+}
+
+function registerUnwritableRecoveryTests() {
 
     it('resumes on its own when the store accepts writes again', function () {
         breakTheStore();
@@ -234,4 +244,4 @@ describe('SpendGuard: a reservation that cannot be persisted refuses the broadca
         expect(guard.spentInWindow(Date.now()),
             'the in-memory ceiling still binds this process').to.equal(100);
     });
-});
+}
