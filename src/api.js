@@ -69,7 +69,7 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 // identically, or a consumer that switches between the two feeds sees the same value
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
-const { parseCorsOrigin } = require('./lib/cors_origin.js');
+const { parseCorsOrigin } = require('./api/cors_origin.js');
 const { parseExemptLocal } = require('./lib/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
