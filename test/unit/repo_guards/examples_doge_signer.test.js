@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC = path.join(__dirname, '..', '..', 'examples', 'doge-signer.example.js');
+const SRC = path.join(__dirname, '..', '..', '..', 'examples', 'doge-signer.example.js');
 const source = fs.readFileSync(SRC, 'utf8').replace(/^#!.*\n/, '');
 
 describe('examples/doge-signer (static contract)', function () {

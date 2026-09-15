@@ -45,7 +45,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const REPO_ROOT    = path.join(__dirname, '..', '..');
+const REPO_ROOT    = path.join(__dirname, '..', '..', '..');
 const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');
 const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 

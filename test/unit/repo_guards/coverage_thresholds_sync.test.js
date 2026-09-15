@@ -10,7 +10,7 @@ const path = require('node:path');
 // coverage:check script that did not exist in that repo at all, a job that could only
 // ever exit 1, and the missing-script case is asserted here for that reason.
 describe('coverage ratchet floors', () => {
-  const repoRoot = path.join(__dirname, '..', '..');
+  const repoRoot = path.join(__dirname, '..', '..', '..');
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const declared = JSON.parse(
     fs.readFileSync(path.join(repoRoot, 'bin', 'coverage-thresholds.json'), 'utf8'),

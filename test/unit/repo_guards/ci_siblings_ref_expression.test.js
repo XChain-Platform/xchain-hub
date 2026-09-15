@@ -31,7 +31,7 @@ const { expect } = require('chai');
 const fs         = require('fs');
 const path       = require('path');
 
-const CI_YML = path.join(__dirname, '..', '..', '.github', 'workflows', 'ci.yml');
+const CI_YML = path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'ci.yml');
 
 // Every `${{ ... }}` on a line whose key selects which branch a companion repo is
 // read at: the shared workflow call, the coverage job's checkout-siblings step,

@@ -44,7 +44,7 @@ const {
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const REPO_ROOT = path.join(__dirname, '..', '..');
+const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const SCRIPT = path.join(REPO_ROOT, 'bin', 'sync-observability.sh');
 const CANONICAL_DIR = path.join(REPO_ROOT, 'src', 'observability');
 const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');

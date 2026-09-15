@@ -21,8 +21,8 @@ const { expect } = require('chai');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const BIN  = path.resolve(__dirname, '../../bin/consensus-identity.js');
-const REPO = path.resolve(__dirname, '../..');
+const BIN  = path.resolve(__dirname, '../../../bin/consensus-identity.js');
+const REPO = path.resolve(__dirname, '../../..');
 
 function run(args) {
     return spawnSync(process.execPath, [BIN, ...args], { cwd: REPO, encoding: 'utf8' });

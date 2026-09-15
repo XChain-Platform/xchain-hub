@@ -19,7 +19,7 @@
 // cannot silently start flagging the legitimate shapes.
 
 const { expect } = require('chai');
-const { scan, blindSleepSites } = require('../../bin/check-blind-sleeps');
+const { scan, blindSleepSites } = require('../../../bin/check-blind-sleeps');
 
 describe('blind-sleep ratchet', function () {
 
