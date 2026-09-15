@@ -16,10 +16,10 @@ const Database   = require('../../../src/db');
 const { runExperiment }      = require('../helpers/chaosRunner');
 const { expectCircuitState } = require('../helpers/steadyStateChecker');
 
-describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
-    this.timeout(30000);
 
-    let db, poolStub;
+
+let db, poolStub;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         db = Object.create(Database.prototype);
@@ -39,10 +39,16 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerPoolTimeoutErrorsCountTowardCircuitTest() {
 
     it('pool timeout errors count toward circuit breaker', async function () {
         let err;
@@ -56,6 +62,9 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         expectCircuitState(db, 'open');
         expect(db.circuitFailures).to.be.gte(db.circuitThreshold);
     });
+}
+
+function registerPoolRecoversAfterBriefExhaustionTest() {
 
     it('pool recovers after brief exhaustion', async function () {
         let mockConn = { release: sinon.stub(), query: sinon.stub().resolves([]) };
@@ -70,6 +79,9 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         expectCircuitState(db, 'closed');
         expect(db.circuitFailures).to.equal(0);
     });
+}
+
+function registerPoolExhaustionFollowedByCompleteFailureTest() {
 
     it('pool exhaustion followed by complete failure opens circuit', async function () {
         let err;
@@ -82,6 +94,9 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         expect(err).to.exist;
         expectCircuitState(db, 'open');
     });
+}
+
+function registerReleasedConnectionsRestorePoolAvailabilityTest() {
 
     it('released connections restore pool availability', async function () {
         let releaseCount = 0;
@@ -99,6 +114,9 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         expect(releaseCount).to.equal(3);
         expectCircuitState(db, 'closed');
     });
+}
+
+function registerMaxAttemptsReachedBeforeCircuitThresholdTest() {
 
     it('max attempts reached before circuit threshold', async function () {
         db.circuitThreshold = 50; // Higher than max attempts (30)
@@ -114,4 +132,14 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
         expect(err.message).to.include('Could not connect to MariaDB after 30 attempts');
         expect(db.circuitFailures).to.equal(30);
     });
+}
+describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
+    this.timeout(30000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerPoolTimeoutErrorsCountTowardCircuitTest();
+    registerPoolRecoversAfterBriefExhaustionTest();
+    registerPoolExhaustionFollowedByCompleteFailureTest();
+    registerReleasedConnectionsRestorePoolAvailabilityTest();
+    registerMaxAttemptsReachedBeforeCircuitThresholdTest();
 });
