@@ -117,101 +117,81 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+let me, p1, p2, hub, c;
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
+const hookAt61754 = () => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
     };
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
+const hookAt61916 = () => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
         sinon.restore();
     };
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+const RID  = 'a1'.repeat(16);
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+const BODY = Buffer.from('body');
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+async function raceRound() {
+            let release;
+            let reg = makeRealProviderRegistry(
+                () => new Promise((resolve) => { release = () => resolve({ body: BODY, meta: '' }); }),
+                'judge_model');
+            c = new AttestationConsensus(hub, reg);
+            await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 3));
+            await flush();
+            // p1 fetched the same body; p2's own fetch failed, so its proposal is an
+            // error report. That is what makes the round advance on two ok bodies
+            // while p2 still has standing to send a signed no_quorum PREPARE.
+            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+            await flush();
+            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+            await flush();
+            let pending = c.pending.get(RID);
+            expect(pending._agreeing).to.equal(true);   // judge call in flight
+            expect(pending.winner).to.equal(null);
 
-const PEER = '11'.repeat(32);
+            // The race: a responsible peer's signed no_quorum PREPARE is adopted.
+            c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'no_quorum'));
+            await flush();
+            expect(pending.status).to.equal('no_quorum');
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
+            release();
+            await flush();
+            return pending;
+        }
 
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
-
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
+// A judge_model round is the only one with a real await window: agree() is an
+    // API call, and PBFT messages land on the event loop while it runs. If the
+    // resumed leader overwrote a winner established during that window, the
+    // signatures collected over the OLD canonical would stay in the map and be
+    // emitted alongside signatures over the new one, and the indexer rejects a
+    // response whose signature count over its own canonical is below redundancy.
+    // Every signature in the map must verify over the round's FINAL canonical.
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('lets the raced outcome stand rather than overwriting it', async function () {
+            let pending = await raceRound();
+            expect(pending.status).to.equal('no_quorum');
+            expect(pending.winner.body.length).to.equal(0);
+            expect(pending.winner.meta).to.equal('');
         }); }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
-
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
+// A judge_model round is the only one with a real await window: agree() is an
+    // API call, and PBFT messages land on the event loop while it runs. If the
+    // resumed leader overwrote a winner established during that window, the
+    // signatures collected over the OLD canonical would stay in the map and be
+    // emitted alongside signatures over the new one, and the indexer rejects a
+    // response whose signature count over its own canonical is below redundancy.
+    // Every signature in the map must verify over the round's FINAL canonical.
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('emits no signature that fails over the round canonical', async function () {
+            let pending = await raceRound();
+            let canonical = c._buildCanonical(RID, pending.providerId, pending.winner.body,
+                pending.status, pending.winner.meta,
+                Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
+            let bad = [...pending.signatures].filter(
+                ([pubkey, sig]) => !ValidatorIdentity.verify(canonical, String(sig), pubkey));
+            expect(bad.map(([pubkey]) => pubkey)).to.deep.equal([]);
         }); }); });
 }

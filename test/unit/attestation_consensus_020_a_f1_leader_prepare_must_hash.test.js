@@ -117,101 +117,93 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+let me, p1, p2, hub, c;
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
+const hookAt96861 = () => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'judge_model'));
     };
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
+const hookAt97120 = () => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
         sinon.restore();
     };
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
+const RID = 'c3'.repeat(16);
+
+// Follower round: p1 is leader; everyone has proposed, so the A-F1 check runs.
+    async function seedFullProposals() {
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        return c.pending.get(RID);
     }
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected proposal', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('rejects a leader PREPARE whose body matches NO collected proposal (fabricated winner)', async function () {
+        let pending = await seedFullProposals();
+        expect(pending.proposals.size).to.equal(3);
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('fabricated-never-proposed')));
+        await flush();
+        expect(pending.winner, 'a fabricated leader body must not be adopted').to.equal(null);
+        expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
+    }); });
 
-const PEER = '11'.repeat(32);
+describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected proposal', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('rejects a leader PREPARE whose body matches a proposal but whose meta diverges', async function () {
+        let pending = await seedFullProposals();
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'tampered-meta'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+    }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
+describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected proposal', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('buffers a too-early leader PREPARE and adopts it once proposals catch up', async function () {
+        // Only OUR proposal is in (1 of 3 needed): the leader PREPARE cannot be
+        // hash-checked yet and must be buffered, not adopted on faith.
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
 
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body')));
+        expect(pending.winner, 'not adopted before the proposal set can vouch').to.equal(null);
+        expect(c.earlyMessages.get(RID), 'held for replay').to.have.lengthOf(1);
 
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
+        // Remaining PROPOSEs land; the drain replays the buffered PREPARE, which
+        // now hash-matches p1's own proposal and is adopted.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('p1-body');
+        // And our vote was re-signed over the adopted canonical.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+    }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
+describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected proposal', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('rejects a leader PREPARE that only hash-matches a peer ERROR proposal (AF1-R1: empty-body ok-winner)', async function () {
+        // p2's fetch failed: provider_error with the canonical EMPTY body. A
+        // Byzantine leader then announces status='ok' with an empty body, which
+        // hash-matches that error proposal. Only OK proposals may vouch.
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.proposals.size).to.equal(3);
 
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.alloc(0)));
+        await flush();
+        expect(pending.winner, 'an empty-body ok winner vouched only by an error proposal must not latch').to.equal(null);
+        expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
+    }); });
 }

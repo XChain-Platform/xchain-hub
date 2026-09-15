@@ -117,101 +117,57 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+const hookAt9307 = () => sinon.restore();
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
-    };
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('start() is a no-op when there is no peer manager', async function () {
+        let hub = createMockHub();
+        let c = new AttestationConsensus(hub, makeProviderRegistry());
+        c.peerManager = null;
+        await c.start();
+        expect(c._messageHandler).to.equal(null);
+    }); });
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
-        sinon.restore();
-    };
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('start() subscribes to peer messages and stop() unsubscribes + clears state', async function () {
+        let hub = createMockHub();
+        let c = new AttestationConsensus(hub, makeProviderRegistry());
+        await c.start();
+        expect(c._messageHandler).to.be.a('function');
+        expect(hub._peerManager.listenerCount('message')).to.equal(1);
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+        // Seed some state to confirm stop() clears it.
+        c.pending.set('x', { timer: setTimeout(() => {}, 60000) });
+        c.earlyMessages.set('x', []);
+        c.earlyCommits.set('x', []);
+        await c.stop();
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+        expect(c._messageHandler).to.equal(null);
+        expect(hub._peerManager.listenerCount('message')).to.equal(0);
+        expect(c.pending.size).to.equal(0);
+        expect(c.earlyMessages.size).to.equal(0);
+        expect(c.earlyCommits.size).to.equal(0);
+    }); });
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('_handleMessage ignores unknown message types', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        expect(() => c._handleMessage({ type: 'NOT_AN_ATTEST_MESSAGE', data: {} })).to.not.throw();
+    }); });
 
-const PEER = '11'.repeat(32);
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('a NEGATIVE ATTESTATION_ROUND_TIMEOUT_MS falls back rather than firing every round on the next tick (#6175)', function () {
+        // setTimeout with a negative delay fires immediately, so a negative that
+        // survived `parseInt(cfg) || DEFAULT` tore every round down before any peer
+        // PROPOSE/PREPARE/COMMIT could arrive. The ring caps in this same constructor
+        // already went through positiveIntConfig for exactly this reason.
+        let warn = sinon.stub(console, 'warn');
+        let c = new AttestationConsensus(
+            createMockHub({ p2pConfig: { ATTESTATION_ROUND_TIMEOUT_MS: '-120000' } }), makeProviderRegistry());
+        expect(c.roundTimeoutMs).to.be.greaterThan(0);
+        expect(warn.getCalls().filter(x => String(x.args[0]).includes('ATTESTATION_ROUND_TIMEOUT_MS')).length)
+            .to.be.greaterThan(0);
+    }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
-
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
-
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: lifecycle', function () { afterEach(hookAt9307); it('a POSITIVE ATTESTATION_ROUND_TIMEOUT_MS is honoured exactly (#6175)', function () {
+        let c = new AttestationConsensus(
+            createMockHub({ p2pConfig: { ATTESTATION_ROUND_TIMEOUT_MS: '30000' } }), makeProviderRegistry());
+        expect(c.roundTimeoutMs).to.equal(30000);
+    }); });
 }

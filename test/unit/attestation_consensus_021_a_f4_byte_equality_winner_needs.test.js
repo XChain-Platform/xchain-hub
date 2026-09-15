@@ -117,101 +117,92 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+let me, p1, p2, hub, c;
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
+const hookAt101470 = () => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'byte_equality'));
     };
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
+const hookAt101731 = () => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
         sinon.restore();
     };
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+const RID = 'f6'.repeat(16);
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('a single foreign PREPARE that diverges from our own body does NOT latch the winner', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('honest-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('byzantine-body')));
+        await flush();
+        expect(pending.winner, 'one uncorroborated divergent PREPARE must not wedge the round').to.equal(null);
+        expect(pending.signatures.has(pub(p1)), 'its sig is held as a candidate, not credited').to.equal(false);
+    }); });
 
-const PEER = '11'.repeat(32);
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('two distinct responsible signers corroborating the same body DO latch it (and both sigs carry over)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+        const BODY = Buffer.from('agreed-body');
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        expect(pending.winner).to.equal(null);
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        await flush();
 
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
+        expect(pending.winner, 'corroborated by 2 responsible signers').to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('agreed-body');
+        let canon = buildCanonical(RID, 'http_get', BODY, 'ok', '');
+        for (let pk of [pub(p1), pub(p2)]) {
+            expect(pending.signatures.has(pk), pk + ' sig credited on latch').to.equal(true);
+            expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pk), pk)).to.equal(true);
+        }
+        // Our own divergent body still abstains from co-signing.
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    }); });
 
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('an own-matching PREPARE still adopts immediately (no corroboration needed)', async function () {
+        const BODY = Buffer.from('shared-body');
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        await flush();
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('shared-body');
+    }); });
 
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('a sender re-announcing a different body REPLACES its previous candidate (AF4-R1: bounded per sender)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
 
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+        // p1 streams three distinct bodies: only the LAST may remain live.
+        for (let i = 0; i < 3; i++) {
+            c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('spam-body-' + i)));
+        }
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.prepareCandidates.size, 'one live candidate entry per sender').to.equal(1);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
+        // The stale first body can no longer be corroborated into a winner:
+        // p2 matching p1's ABANDONED body finds no partner (p1 moved on), so
+        // it holds as p2's own single candidate instead of latching.
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-0')));
+        await flush();
+        expect(pending.winner, 'an abandoned body must not latch off one remaining signer').to.equal(null);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+        // Corroboration on a sender's CURRENT body still works.
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-2')));
+        await flush();
+        expect(pending.winner, 'both senders currently on the same body latches').to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('spam-body-2');
+    }); });
 }

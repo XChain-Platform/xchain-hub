@@ -117,101 +117,60 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+const hookAt16579 = () => sinon.restore();
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
-    };
+describe('AttestationConsensus: nonOkPublished ring buffer', function () { afterEach(hookAt16579); it('defaults nonOkPublishedMax independently of finalizedMax and reads the knob', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        expect(c.nonOkPublishedMax).to.equal(40000);
+        expect(c.nonOkPublishedMax).to.be.greaterThan(c.finalizedMax);
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
-        sinon.restore();
-    };
+        let hub = createMockHub();
+        hub.p2pConfig = Object.assign({}, hub.p2pConfig, { ATTESTATION_NONOK_PUBLISHED_MAX: '123' });
+        let c2 = new AttestationConsensus(hub, makeProviderRegistry());
+        expect(c2.nonOkPublishedMax).to.equal(123);
+    }); });
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+describe('AttestationConsensus: nonOkPublished ring buffer', function () { afterEach(hookAt16579); it('caps the ring by nonOkPublishedMax, not finalizedMax', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.finalizedMax      = 1;   // would evict immediately under the old sizing
+        c.nonOkPublishedMax = 3;
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('b', 'no_quorum');
+        c.recordNonOkPublished('c', 'provider_error');
+        expect(c.nonOkPublished.size).to.equal(3);   // finalizedMax=1 no longer evicts
+        c.recordNonOkPublished('d', 'provider_error');
+        expect(c.nonOkPublished.has('a')).to.equal(false);
+        expect(c.nonOkPublished.has('d')).to.equal(true);
+        expect(c._nonOkPublishedOrder).to.deep.equal(['b', 'c', 'd']);
+    }); });
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+describe('AttestationConsensus: nonOkPublished ring buffer', function () { afterEach(hookAt16579); it('accumulates statuses per rid without growing the ring', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('a', 'no_quorum');
+        expect(c._nonOkPublishedOrder).to.deep.equal(['a']);
+        expect(c.nonOkPublished.get('a').has('provider_error')).to.equal(true);
+        expect(c.nonOkPublished.get('a').has('no_quorum')).to.equal(true);
+    }); });
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+describe('AttestationConsensus: nonOkPublished ring buffer', function () { afterEach(hookAt16579); it('warns and counts when a still-pending (never ok-finalized) entry is evicted', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        let warn = sinon.stub(console, 'warn');
+        c.nonOkPublishedMax = 1;
+        c.recordNonOkPublished('a', 'provider_error');
+        c.recordNonOkPublished('b', 'provider_error');   // evicts 'a', still pending
+        expect(c.nonOkEvictedWhilePendingCount).to.equal(1);
+        expect(warn.getCalls().some(call => /still-pending request a/.test(call.args[0]))).to.equal(true);
+        expect(warn.getCalls().some(call => /ATTESTATION_NONOK_PUBLISHED_MAX/.test(call.args[0]))).to.equal(true);
+    }); });
 
-const PEER = '11'.repeat(32);
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
-
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
-
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: nonOkPublished ring buffer', function () { afterEach(hookAt16579); it('does not count eviction of an entry whose request later finalized ok', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        sinon.stub(console, 'warn');
+        c.nonOkPublishedMax = 1;
+        c.recordNonOkPublished('a', 'provider_error');
+        c.markFinalized('a');                            // retry round later succeeded
+        c.recordNonOkPublished('b', 'provider_error');   // evicts 'a', now terminal
+        expect(c.nonOkEvictedWhilePendingCount).to.equal(0);
+    }); });
 }

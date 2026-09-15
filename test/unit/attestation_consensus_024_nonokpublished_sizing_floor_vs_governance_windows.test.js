@@ -117,101 +117,67 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
-
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
-    };
-
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
-        sinon.restore();
-    };
-
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
-
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
-
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
-
-const PEER = '11'.repeat(32);
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
-
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
-
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
+function registryWithWindows(windows) {
+        const providers = new Map(Object.entries(windows).map(
+            ([id, w]) => [id, { deadline_window_blocks: w, consensus_strategy: 'byte_equality' }]));
+        return {
+            getDef:  (id) => providers.get(id) || null,
+            getModule: () => ({ agree: (p) => p[0] }),
+            maxDeadlineWindowBlocks() {
+                let blocks = 0, providerId = null;
+                for (const [id, def] of providers) {
+                    const w = Number(def.deadline_window_blocks);
+                    if (Number.isFinite(w) && w > blocks) { blocks = w; providerId = id; }
+                }
+                return { blocks, providerId };
             }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
+        };
+    }
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+const hookAt118158 = () => sinon.restore();
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () { afterEach(hookAt118158); it('is satisfied by the shipped default at the 100-block http_get window', function () {
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 100, llm: 20 }));
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(true);
+        expect(r.blocks).to.equal(100);
+        expect(r.providerId).to.equal('http_get');
+        expect(r.floor).to.equal(40000);   // the default is sized exactly to this
+        expect(r.cap).to.equal(40000);
+    }); });
+
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () { afterEach(hookAt118158); it('warns, naming the provider, once governance widens a window past the floor', function () {
+        const warn = sinon.stub(console, 'warn');
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 100, slow_oracle: 250 }));
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(false);
+        expect(r.blocks).to.equal(250);          // the WIDEST def wins, not http_get
+        expect(r.providerId).to.equal('slow_oracle');
+        expect(r.floor).to.equal(100000);
+        expect(warn.called).to.equal(true);
+        const msg = warn.getCalls().map(x => String(x.args[0])).join(' ');
+        expect(msg).to.include('slow_oracle');
+        expect(msg).to.include('100000');
+    }); });
+
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () { afterEach(hookAt118158); it('stays quiet when the operator has raised the cap to cover the wider window', function () {
+        const warn = sinon.stub(console, 'warn');
+        const hub  = createMockHub();
+        hub.p2pConfig = Object.assign({}, hub.p2pConfig, { ATTESTATION_NONOK_PUBLISHED_MAX: '120000' });
+        const c = new AttestationConsensus(hub, registryWithWindows({ slow_oracle: 250 }));
+        expect(c.nonOkPublishedMax).to.equal(120000);
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(true);
+        expect(warn.called).to.equal(false);
+    }); });
+
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () { afterEach(hookAt118158); it('returns null rather than guessing when no def declares a usable window', function () {
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 'not-a-number' }));
+        expect(c.checkNonOkSizingFloor()).to.equal(null);
+    }); });
+
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () { afterEach(hookAt118158); it('is a no-op against a registry that predates the accessor', function () {
+        const c = new AttestationConsensus(createMockHub(), { getDef: () => null, getModule: () => null });
+        expect(c.checkNonOkSizingFloor()).to.equal(null);
+    }); });
 }

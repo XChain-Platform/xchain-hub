@@ -117,101 +117,96 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+let me, p1, p2, hub, c, finalized;
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
+const hookAt84542 = () => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        finalized = [];
     };
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
+const hookAt84728 = () => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
         sinon.restore();
     };
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
+// judge_model registry whose agree() picks the proposal whose body matches
+    // `winnerText`: modelling the judge selecting one of N byte-divergent but
+    // semantically-equivalent proposals as canonical.
+    function judgeRegistry(winnerText) {
+        return makeRealProviderRegistry(
+            (proposals) => proposals.find(p => p.body.toString() === winnerText),
+            'judge_model'
+        );
     }
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+describe('AttestationConsensus: judge_model re-signs the canonical winner', function () { beforeEach(hookAt84542); afterEach(hookAt84728); it('redundancy=3: every responsible validator re-signs the judge-selected body so the round finalizes with REDUNDANCY sigs', async function () {
+        const RID    = 'd4'.repeat(16);
+        const MINE   = Buffer.from('answer-alpha');   // my divergent body
+        const P1BODY = Buffer.from('answer-beta');    // judge picks THIS one
+        const P2BODY = Buffer.from('answer-gamma');   // p2's divergent body
+        const WINNER = P1BODY;
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+        c = new AttestationConsensus(hub, judgeRegistry('answer-beta'));
+        c.on('request:finalized', e => finalized.push(e));
 
-const PEER = '11'.repeat(32);
+        // me proposes its own (divergent) body.
+        await c.propose(RID, roundState(me, [me, p1, p2], MINE, 'llm', 3));
+        await flush();
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
+        // Peers propose their own divergent bodies → 3 proposals → judge_model
+        // agree() selects p1's body as canonical.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1BODY));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, P2BODY));
+        await flush();
 
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
+        let pending = c.pending.get(RID);
+        expect(pending.winner.body.toString()).to.equal('answer-beta');
 
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
+        // THE FIX: even though my body diverged from the winner, I re-signed the
+        // canonical winning body; so I hold a verifying signature for it.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+        let myCanonical = buildCanonical(RID, 'llm', WINNER, 'ok', '').toString('utf8');
+        expect(ValidatorIdentity.verify(myCanonical, pending.signatures.get(pub(me)), pub(me))).to.equal(true);
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
+        // Peers re-sign the winner too and contribute it on PREPARE/COMMIT.
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, WINNER));
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, WINNER));
+        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, WINNER));
+        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, WINNER));
+        await flush();
 
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
+        // Three genuine signatures over the single canonical body → finalizes,
+        // and the on-chain response carries exactly REDUNDANCY (3) signatures.
+        expect(pending.signatures.size).to.equal(3);
+        expect(finalized).to.have.length(1);
+        expect(finalized[0].responseBody.toString()).to.equal('answer-beta');
+        expect(finalized[0].signatures).to.have.length(3);
+        let pubkeys = finalized[0].signatures.map(s => s.pubkey).sort();
+        expect(pubkeys).to.deep.equal([pub(me), pub(p1), pub(p2)].sort());
+        // Every emitted signature verifies against the canonical winner.
+        let canonical = buildCanonical(RID, 'llm', WINNER, 'ok', '').toString('utf8');
+        for (let s of finalized[0].signatures) {
+            expect(ValidatorIdentity.verify(canonical, s.sig, s.pubkey)).to.equal(true);
+        }
+    }); });
 
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: judge_model re-signs the canonical winner', function () { beforeEach(hookAt84542); afterEach(hookAt84728); it('redundancy=1: single-validator judge_model still finalizes with one valid signature', async function () {
+        const RID  = 'e5'.repeat(16);
+        const BODY = Buffer.from('the-only-answer');
+        c = new AttestationConsensus(hub, judgeRegistry('the-only-answer'));
+        c.on('request:finalized', e => finalized.push(e));
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
+        await c.propose(RID, roundState(me, [me], BODY, 'llm', 1));
+        await flush();
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+        expect(finalized).to.have.length(1);
+        expect(finalized[0].signatures).to.have.length(1);
+        expect(finalized[0].signatures[0].pubkey).to.equal(pub(me));
+        let canonical = buildCanonical(RID, 'llm', BODY, 'ok', '').toString('utf8');
+        expect(ValidatorIdentity.verify(canonical, finalized[0].signatures[0].sig, pub(me))).to.equal(true);
+    }); });
 }

@@ -117,101 +117,40 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+const hookAt12026 = () => sinon.restore();
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
-    };
+describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('_buildCanonical hashes the body and concatenates the fields deterministically', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        let body = Buffer.from('payload');
+        let out = c._buildCanonical('rid1', 'http_get', body, 'ok', 'm');
+        let expected = 'rid1' + 'http_get' +
+            crypto.createHash('sha256').update(body, 'utf8').digest('hex') + 'ok' + 'm';
+        expect(out.toString('utf8')).to.equal(expected);
+        // Empty meta normalises to ''.
+        let out2 = c._buildCanonical('rid1', 'http_get', body, 'ok', null);
+        expect(out2.toString('utf8')).to.equal('rid1http_get' +
+            crypto.createHash('sha256').update(body, 'utf8').digest('hex') + 'ok');
+    }); });
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
-        sinon.restore();
-    };
+describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null when there is no identity', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.identity = null;
+        expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
+    }); });
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical returns null (not throw) when identity.sign throws', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.identity = { sign: () => { throw new Error('hsm offline'); } };
+        expect(c.signCanonical('rid', 'p', Buffer.from('b'), 'ok', '')).to.equal(null);
+    }); });
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
-
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
-
-const PEER = '11'.repeat(32);
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
-
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
-
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: _buildCanonical / signCanonical', function () { afterEach(hookAt12026); it('signCanonical produces a verifiable signature with a real identity', function () {
+        let id = mkIdentity();
+        let hub = createMockHub({ identity: id });
+        let c = new AttestationConsensus(hub, makeProviderRegistry());
+        let body = Buffer.from('b');
+        let sig = c.signCanonical('rid', 'p', body, 'ok', 'm');
+        let canonical = buildCanonical('rid', 'p', body, 'ok', 'm').toString('utf8');
+        expect(ValidatorIdentity.verify(canonical, sig, pub(id))).to.equal(true);
+    }); });
 }

@@ -117,101 +117,80 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let hub, consensus;
+let me, p1, p2, hub, c;
 
-const hookAt3893 = function () {
-        hub = createMockHub();
-        consensus = new AttestationConsensus(hub, makeProviderRegistry());
+const hookAt69734 = () => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry());
     };
 
-const hookAt4037 = function () {
-        for (let [, p] of consensus.pending) {
-            if (p.timer) clearTimeout(p.timer);
-        }
+const hookAt69969 = () => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
         sinon.restore();
     };
 
-// Build a `pending` in the post-PROPOSE / pre-winner window: the round
-    // exists but provider.agree() (async) hasn't yet set a winner. This is the
-    // exact window in which a fast peer's COMMIT can arrive.
-    function seedPendingNoWinner(rid, peerPubkey) {
-        let pending = {
-            requestId:   rid,
-            providerId:  'http_get',
-            redundancy:  3,
-            quorum:      3,
-            responsible: [{ pubkey: peerPubkey }],
-            commits:     new Set(),
-            prepares:    new Set(),
-            signatures:  new Map(),
-            winner:      null,
-            status:      'ok',
-            finalized:   false,
-            timer:       null
-        };
-        consensus.pending.set(rid, pending);
-        return pending;
-    }
+const RID  = 'b2'.repeat(16);
 
-// Unsigned COMMIT envelope: omitting `sig` skips signature verification in
-    // _handleCommit, so the test asserts vote-counting (commits.add) without
-    // needing real validator crypto. The buffering decision under test happens
-    // before any signature check regardless.
-    function commitEnvelope(rid, peerPubkey) {
-        return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
-    }
+const BODY = Buffer.from('leader-body');
 
-const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('adopts the leader body as the winner from a PREPARE when none is set yet', async function () {
+        // redundancy 3 so propose() does not establish a winner from one proposal.
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner).to.equal(null);
 
-const PEER = '11'.repeat(32);
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('leader-body');
+        // My own matching proposal contributes its signature on adoption.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+        expect(pending.prepares.has(pub(p1))).to.equal(true);
+    }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('buffers an early COMMIT instead of silently dropping it', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('buffers a PREPARE that arrives before the round exists', function () {
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        expect(c.earlyMessages.get(RID)).to.have.lengthOf(1);
+    }); });
 
-            // Route through the public dispatch path, mirroring the drain.
-            consensus._handleMessage(commitEnvelope(RID, PEER));
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('ignores a PREPARE from outside the responsible set', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let outsider = mkIdentity();
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', outsider, BODY));
+        expect(c.pending.get(RID).prepares.has(pub(outsider))).to.equal(false);
+    }); });
 
-            // The vote is held, NOT applied yet (winner not known) and, the
-            // regression this guards, NOT discarded.
-            expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
-            expect(pending.commits.size).to.equal(0);
-        }); }); });
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('rejects a PREPARE with a bad signature', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
+        env.data.sig = 'ee'.repeat(64);
+        c._handleMessage(env);
+        expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(false);
+    }); });
 
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('counts the buffered COMMIT once the winner is established and drained', function () {
-            let pending = seedPendingNoWinner(RID, PEER);
-            consensus._handleCommit(commitEnvelope(RID, PEER));
-            expect(pending.commits.size).to.equal(0);
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('rejects an unsigned PREPARE in the no-winner path (item 4559: must not set the winner)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
+        delete env.data.sig; // unsigned: must not establish the winner or count as a vote
+        c._handleMessage(env);
+        let pending = c.pending.get(RID);
+        expect(pending.prepares.has(pub(p1))).to.equal(false);
+        expect(pending.signatures.has(pub(p1))).to.equal(false);
+        expect(!!pending.winner).to.equal(false);
+    }); });
 
-            // Winner gets established (provider.agree() resolved); drain replays
-            // the buffered COMMIT so the peer's vote now counts toward quorum.
-            pending.winner = { body: Buffer.from('winning-body'), meta: '' };
-            consensus.drainEarlyCommits(RID);
-
-            expect(pending.commits.has(PEER)).to.equal(true);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('caps the per-request early-commit buffer', function () {
-            seedPendingNoWinner(RID, PEER);
-            let over = consensus.earlyCommitMaxPerRid + 5;
-            for (let i = 0; i < over; i++) {
-                consensus._handleCommit(commitEnvelope(RID, PEER));
-            }
-            expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            let env = commitEnvelope(RID, PEER);
-            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
-            consensus._handleCommit(env);
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
-
-describe('AttestationConsensus', function () { beforeEach(hookAt3893); afterEach(hookAt4037); describe('_handleCommit: early COMMIT (before winner is set)', function () { it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
-            seedPendingNoWinner(RID, PEER);
-            const OUTSIDER = '99'.repeat(32);
-            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
-            expect(consensus.earlyCommits.has(RID)).to.equal(false);
-        }); }); });
+describe('AttestationConsensus: handlePrepare adoption + guards', function () { beforeEach(hookAt69734); afterEach(hookAt69969); it('rejects an oversized PREPARE body before decoding', async function () {
+        c.providerRegistry = makeRealProviderRegistry((p) => p[0], 'byte_equality', 4);
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let big = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('way-too-large-body'));
+        c._handleMessage(big);
+        expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(false);
+    }); });
 }
