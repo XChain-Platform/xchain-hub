@@ -11,24 +11,36 @@
 const { expect } = require('chai');
 const swq = require('../../src/stake_weighted_quorum.js');
 
+// S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
+// S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
+const V = [
+    { pubkey: 'a', source: 'S1', weight: '6000' },
+    { pubkey: 'b', source: 'S1', weight: '6000' },
+    { pubkey: 'c', source: 'S2', weight: '3000' },
+    { pubkey: 'd', source: 'S3', weight: '3000' },
+];
+
 // CONSENSUS-CRITICAL: this predicate decides every cross-chain settlement under
 // STAKE_WEIGHTED_QUORUM. The indexer keeps a byte-equivalent copy
 // (xchain-indexer/src/stake_weighted_quorum.js): the cross-service regression
 // suite asserts they agree.
 describe('stake_weighted_quorum', function () {
 
-    // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
-    // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
-    const V = [
-        { pubkey: 'a', source: 'S1', weight: '6000' },
-        { pubkey: 'b', source: 'S1', weight: '6000' },
-        { pubkey: 'c', source: 'S2', weight: '3000' },
-        { pubkey: 'd', source: 'S3', weight: '3000' },
-    ];
+    registerStakeThresholdTests();
+    registerStakeUtilityTests();
+});
+
+function registerStakeThresholdTests() {
 
     describe('meetsStakeThreshold', function () {
+        registerStakeThresholdCoreTests();
+        registerStakeThresholdEdgeTests();
+    });
+}
 
-        it('returns false for an empty signer set', function () {
+function registerStakeThresholdCoreTests() {
+
+    it('returns false for an empty signer set', function () {
             expect(swq.meetsStakeThreshold(V, [])).to.equal(false);
         });
 
@@ -58,8 +70,11 @@ describe('stake_weighted_quorum', function () {
             // a + b are both S1 → 6000, not 12000. 3·6000 = 18000 !> 2·12000 = 24000.
             expect(swq.meetsStakeThreshold(V, ['a', 'b'])).to.equal(false);
         });
+}
 
-        it('exactly 2/3 of stake is NOT enough (strictly greater required)', function () {
+function registerStakeThresholdEdgeTests() {
+
+    it('exactly 2/3 of stake is NOT enough (strictly greater required)', function () {
             // Two equal sources of 3750 each, S = 7500; one source = exactly 2/3? No.
             // use P=5000 of S=7500 = 2/3 exactly → false.
             const D = [
@@ -99,7 +114,9 @@ describe('stake_weighted_quorum', function () {
         it('is case-insensitive on signer pubkeys', function () {
             expect(swq.meetsStakeThreshold(V, ['A', 'C'])).to.equal(true);
         });
-    });
+}
+
+function registerStakeUtilityTests() {
 
     describe('totalStake', function () {
         it('sums weight over DISTINCT sources (not keys)', function () {
@@ -141,4 +158,4 @@ describe('stake_weighted_quorum', function () {
             expect(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION).to.deep.equal(canonical);
         });
     });
-});
+}
