@@ -35,42 +35,8 @@ const TWINS = [
     'token_policy_activation.js'
 ];
 
-describe('bridge/token/policy activation twin parity (hub <-> indexer) @regression', function () {
-    for (const name of TWINS) {
-        const hubCopy     = path.join(__dirname, '../../src/' + name);
-        const indexerCopy = path.join(__dirname, '../../../xchain-indexer/src/' + name);
-
-        it(name + ' is byte-identical to the indexer canonical', function () {
-            if (!fs.existsSync(indexerCopy)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin is absent at ' + indexerCopy);
-                this.skip();
-                return;
-            }
-            assert.ok(fs.existsSync(hubCopy), 'xchain-hub/src/' + name + ' has not been vendored');
-            assert.strictEqual(
-                fs.readFileSync(hubCopy, 'utf8'),
-                fs.readFileSync(indexerCopy, 'utf8'),
-                'xchain-hub/src/' + name + ' drifted from the indexer canonical');
-        });
-    }
-
-    it('the hub can require each twin and resolve its activation predicate', function () {
-        const bridge = require('../../src/xchain_bridge_activation.js');
-        const token  = require('../../src/token_bridge_activation.js');
-        const policy = require('../../src/token_policy_activation.js');
-        assert.strictEqual(typeof bridge.isXchainBridgeActive, 'function');
-        assert.strictEqual(typeof token.isTokenBridgeActive, 'function');
-        assert.strictEqual(typeof policy.isTokenPolicyInheritanceActive, 'function');
-    });
-
-    // Row 28: the bridge twin is keyed '<COIN>:<network>' because the three chains reach the
-    // flag day at three heights. The engine calls the predicate with a third argument, so a
-    // twin whose predicate still took two would silently read the bare network key for every
-    // chain and open the bridge on LTC and DOGE the moment BTC crossed. Byte-equality to the
-    // indexer (above) does not catch that on its own: it would only prove the hub is running
-    // whatever the indexer runs, including the wrong arity. This drives the hub's own copy.
-    it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare network key', function () {
+function registerActivationTwinGateTests() {
+it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare network key', function () {
         const { XCHAIN_BRIDGE_ACTIVATION, isXchainBridgeActive } = require('../../src/xchain_bridge_activation.js');
         const saved = XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'];
         XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'] = 700;
@@ -108,4 +74,46 @@ describe('bridge/token/policy activation twin parity (hub <-> indexer) @regressi
             assert.ok(checked >= 2, 'not vacuous: ' + name + ' declares no live-network slot');
         }
     });
+}
+
+function registerActivationTwinParityTests() {
+for (const name of TWINS) {
+        const hubCopy     = path.join(__dirname, '../../src/' + name);
+        const indexerCopy = path.join(__dirname, '../../../xchain-indexer/src/' + name);
+
+        it(name + ' is byte-identical to the indexer canonical', function () {
+            if (!fs.existsSync(indexerCopy)) {
+                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin is absent at ' + indexerCopy);
+                this.skip();
+                return;
+            }
+            assert.ok(fs.existsSync(hubCopy), 'xchain-hub/src/' + name + ' has not been vendored');
+            assert.strictEqual(
+                fs.readFileSync(hubCopy, 'utf8'),
+                fs.readFileSync(indexerCopy, 'utf8'),
+                'xchain-hub/src/' + name + ' drifted from the indexer canonical');
+        });
+    }
+
+    it('the hub can require each twin and resolve its activation predicate', function () {
+        const bridge = require('../../src/xchain_bridge_activation.js');
+        const token  = require('../../src/token_bridge_activation.js');
+        const policy = require('../../src/token_policy_activation.js');
+        assert.strictEqual(typeof bridge.isXchainBridgeActive, 'function');
+        assert.strictEqual(typeof token.isTokenBridgeActive, 'function');
+        assert.strictEqual(typeof policy.isTokenPolicyInheritanceActive, 'function');
+    });
+}
+
+describe('bridge/token/policy activation twin parity (hub <-> indexer) @regression', function () {
+    registerActivationTwinParityTests();
+
+    // Row 28: the bridge twin is keyed '<COIN>:<network>' because the three chains reach the
+    // flag day at three heights. The engine calls the predicate with a third argument, so a
+    // twin whose predicate still took two would silently read the bare network key for every
+    // chain and open the bridge on LTC and DOGE the moment BTC crossed. Byte-equality to the
+    // indexer (above) does not catch that on its own: it would only prove the hub is running
+    // whatever the indexer runs, including the wrong arity. This drives the hub's own copy.
+    registerActivationTwinGateTests();
 });
