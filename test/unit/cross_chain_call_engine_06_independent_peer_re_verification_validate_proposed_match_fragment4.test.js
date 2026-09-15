@@ -230,61 +230,90 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+// An honest leader's effective_time: now + the gating chain's forward relay
+// margin, never the bare clock second. A follower refuses a row that is not at
+// least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+// arrival forks the injecting indexers' action-index counters (#4202).
+function feature4independentPeerReVerificationValidateProposedMatchFragment4HonestEffectiveTime() {
+  return Math.floor(Date.now() / 1000) + 240;
+}
+function feature4independentPeerReVerificationValidateProposedMatchFragment4DispatchRow(overrides) {
+  return Object.assign({
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment4HonestEffectiveTime() // leader-choice field, clock-bounded by validation
+  }, overrides);
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment4Part1() {
+  it('refuses a result row whose inherited reorg-fence metadata diverges from the local dispatch row', async function () {
     const {
       engine,
       db
     } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
+    db.rows.push(Object.assign(feature4independentPeerReVerificationValidateProposedMatchFragment4DispatchRow(), {
       status: 'finalized',
-      target_chain: 'DOGE',
+      source_action_index: 41,
+      push_generation: 3
+    }));
+    const baseResult = {
+      round_id: sha256('XCALLROUND|result|' + CALL_ID),
+      call_id: CALL_ID,
+      phase: 'result',
+      snapshot_block: 160,
+      network: 'regtest',
       source_chain: 'BTC',
-      source_action_index: 41
+      target_chain: 'DOGE',
+      source_action_index: 41,
+      push_generation: 3,
+      result_status: 'ok',
+      return_payload_b64: 'cGF5bG9hZA',
+      effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment4HonestEffectiveTime()
+    };
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      latest_block_index: 600,
+      executed_block_index: 500,
+      status: 'ok',
+      return_payload_b64: 'cGF5bG9hZA'
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    // Honest inherited metadata is accepted.
+    expect(await engine.validateProposedMatch(baseResult)).to.equal(true);
+    // A forged source_action_index is rejected.
+    expect(await engine.validateProposedMatch(Object.assign({}, baseResult, {
+      source_action_index: 42
+    }))).to.equal(false);
+    // An inflated push_generation is rejected.
+    expect(await engine.validateProposedMatch(Object.assign({}, baseResult, {
+      push_generation: 9
+    }))).to.equal(false);
   });
+
+  // The push_generation pin is driven against the REAL indexer response literal,
+  // never a hand-built `call:` stub. See compileIndexerCallResponse() above: the
+  // previous version of this block stubbed `call: pendingCall({push_generation: 4})`,
+  // a shape the production handler could not emit, so it went green for months
+  // while the pin was permanently unsatisfiable on any chain that had reorged.
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment4() {
+  describe('independent peer re-verification (validateProposedMatch)', function () {
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment4Part1();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature4independentPeerReVerificationValidateProposedMatchFragment4();
 });

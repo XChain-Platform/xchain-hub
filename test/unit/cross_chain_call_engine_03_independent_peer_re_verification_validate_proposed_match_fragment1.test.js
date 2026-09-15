@@ -230,61 +230,131 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+// An honest leader's effective_time: now + the gating chain's forward relay
+// margin, never the bare clock second. A follower refuses a row that is not at
+// least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+// arrival forks the injecting indexers' action-index counters (#4202).
+function feature4independentPeerReVerificationValidateProposedMatchFragment1HonestEffectiveTime() {
+  return Math.floor(Date.now() / 1000) + 240;
+}
+function feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow(overrides) {
+  return Object.assign({
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment1HonestEffectiveTime() // leader-choice field, clock-bounded by validation
+  }, overrides);
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment1Part1() {
+  it('signs a dispatch only when its OWN source indexer confirms every field at depth', async function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 200,
+      call: pendingCall()
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow())).to.equal(true);
+    // A single diverging field must refuse the signature.
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      gas_limit: 60000
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      params_json: '["y"]'
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      cross_hops: 2
+    }))).to.equal(false);
+  });
+  it('refuses a dispatch below confirmation depth or on the wrong network', async function () {
+    const {
+      engine
+    } = makeEngine();
+    const stub = sinon.stub(engine, '_indexerCall');
+    stub.resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 103,
+      call: pendingCall()
+    }); // depth 4 < 6
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow())).to.equal(false);
+    stub.resolves({
+      exists: true,
+      network: 'mainnet',
+      latest_block_index: 200,
+      call: pendingCall()
+    });
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow())).to.equal(false);
+  });
+  it('refuses a round id that does not derive from (phase, call_id)', async function () {
+    const {
+      engine
+    } = makeEngine();
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      round_id: sha256('bogus')
+    }))).to.equal(false);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment1Part2() {
+  it('bounds the leader-choice fields: stale effective_time / pinned snapshot_block are refused', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 200,
+      call: pendingCall()
+    });
+    // baseline passes
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow())).to.equal(true);
+    // a clock more than an hour off is refused (Byzantine leader-choice)
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      effective_time: 1700000000
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      effective_time: Math.floor(Date.now() / 1000) + 7200
+    }))).to.equal(false);
+    // a snapshot_block pinned far from OUR tip view (150) selects a stale
+    // validator set for indexer-side sig verification; refused
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      snapshot_block: 1
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment1DispatchRow({
+      snapshot_block: 1000
+    }))).to.equal(false);
+  });
+
+  // #4202. The old bound was symmetric (|effective_time - now| > 3600), so a row
+  // stamped AT or BEHIND the follower's clock sailed through. Such a row is
+  // eligible the instant it finalizes: the indexer that already holds it injects
+  // at block N while one still receiving it injects at N+1, and since
+  // EMITTER_ACTION_INDEX feeds the call_id preimage their ledgers fork for good.
+  // The bound is now asymmetric, and a leader whose own producer floor was
+  // bypassed (XCALL_RELAY_MARGIN_BLOCKS=0, or a Byzantine one) is refused here.
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment1() {
+  describe('independent peer re-verification (validateProposedMatch)', function () {
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment1Part1();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment1Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature4independentPeerReVerificationValidateProposedMatchFragment1();
 });

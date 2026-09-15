@@ -230,61 +230,136 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+// The snapshot persist is a PRECONDITION of the finalized row, not a
+// best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
+// validator_signatures no local capability_snapshot can verify is the exact
+// state the persist-before-insert ordering exists to prevent. Mirrors the
+// CrossChainDexEngine.writeFinalizedMatch guards (item 2385).
+function feature5persistenceRetractionFragment3FinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+function feature5persistenceRetractionFragment3PendingFinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    push_generation: 3,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+
+// A retraction for a round whose row is not inserted yet matches nothing in SQL and
+// returns at the empty select, so the in-process fence is the only thing that can
+// stop the parked write from inserting and mirroring an executable dispatch the
+// reorg already removed.
+function registerFeature5persistenceRetractionFragment3Part1() {
+  it('_persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
+    engine.resolveCapabilityValidators = async () => [{
+      pubkey: 'a'.repeat(64),
+      source: 's1',
+      weight: '1',
+      amount: '1'
+    }, {
+      pubkey: 'b'.repeat(64),
+      source: 's2',
+      weight: '1',
+      amount: '1'
+    }];
+    expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(2);
+    const capped = [{
+      pubkey: 'c'.repeat(64),
+      source: 's3',
+      weight: '1',
+      amount: '1'
+    }];
+    capped.truncated = true;
+    engine.resolveCapabilityValidators = async () => capped;
+    expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(0);
   });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+}
+function registerFeature5persistenceRetractionFragment3Part2() {
+  it('re-discovers a dispatch whose only result row is retracted (#4478)', async function () {
     const {
       engine,
       db
     } = makeEngine();
+    // A finalized dispatch targeting DOGE plus a 'retracted' result row left
+    // by a deep reorg. The unfiltered join treated r.id IS NOT NULL and never
+    // re-relayed; the AND r.status <> 'retracted' predicate re-opens it.
     db.rows.push({
+      id: 1,
       call_id: CALL_ID,
       phase: 'dispatch',
       status: 'finalized',
       target_chain: 'DOGE',
       source_chain: 'BTC',
       source_action_index: 41
+    }, {
+      id: 2,
+      call_id: CALL_ID,
+      phase: 'result',
+      status: 'retracted',
+      target_chain: 'DOGE',
+      source_chain: 'BTC',
+      source_action_index: 41
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    const seen = [];
+    sinon.stub(engine, 'maybeRelayResult').callsFake(async (coin, d) => {
+      seen.push(d.call_id);
+    });
+    await engine.pollTargetResults('DOGE');
+    expect(seen).to.deep.equal([CALL_ID]);
+
+    // A live (non-retracted) result row still suppresses re-discovery.
+    db.rows[1].status = 'finalized';
+    seen.length = 0;
+    await engine.pollTargetResults('DOGE');
+    expect(seen).to.deep.equal([]);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature5persistenceRetractionFragment3() {
+  describe('persistence + retraction', function () {
+    registerFeature5persistenceRetractionFragment3Part1();
+    registerFeature5persistenceRetractionFragment3Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature5persistenceRetractionFragment3();
 });

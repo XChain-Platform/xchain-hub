@@ -230,61 +230,145 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+// The snapshot persist is a PRECONDITION of the finalized row, not a
+// best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
+// validator_signatures no local capability_snapshot can verify is the exact
+// state the persist-before-insert ordering exists to prevent. Mirrors the
+// CrossChainDexEngine.writeFinalizedMatch guards (item 2385).
+function feature5persistenceRetractionFragment1FinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+function feature5persistenceRetractionFragment1PendingFinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    push_generation: 3,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+
+// A retraction for a round whose row is not inserted yet matches nothing in SQL and
+// returns at the empty select, so the in-process fence is the only thing that can
+// stop the parked write from inserting and mirroring an executable dispatch the
+// reorg already removed.
+function registerFeature5persistenceRetractionFragment1Part1() {
+  it('writeFinalizedRow upserts (ON DUPLICATE KEY UPDATE) and mirrors the stored row', async function () {
     const {
       engine,
-      db
+      db,
+      broadcaster
     } = makeEngine();
-    db.rows.push({
+    const row = {
+      round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
       call_id: CALL_ID,
       phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
+      snapshot_block: 150,
+      network: 'regtest',
       source_chain: 'BTC',
-      source_action_index: 41
+      source_action_index: 41,
+      source_contract_index: 5,
+      target_chain: 'DOGE',
+      target_contract_index: 99,
+      method: 'onArrival',
+      params_json: '["x"]',
+      gas_limit: 50000,
+      cross_hops: 1,
+      effective_time: 1700000000,
+      result_status: null,
+      return_payload_b64: null
+    };
+    // The persisted-row COUNT is the money-path precondition signal, so the
+    // stub has to answer with one; a bare resolve() now means "degraded set".
+    const persist = sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+    await engine.writeFinalizedRow({
+      row,
+      signatures: [{
+        pubkey: 'a'.repeat(64),
+        sig: '1'.repeat(128)
+      }]
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    expect(db.rows.length).to.equal(1);
+    // EVERY hub (followers included) must persist the snapshot the
+    // indexers verify against. Leader-only persistence left follower
+    // DBs without it (live finding: DOGE XEXEC deferred forever when
+    // hub2/3 led the round but the indexers mirror hub1's DB).
+    expect(persist.calledWith('cross_chain', 150)).to.equal(true);
+    expect(db.rows[0].validator_signatures).to.contain('a'.repeat(64));
+    expect(broadcaster.broadcastRow.calledOnce).to.equal(true);
+    expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('cross_chain_calls');
+  });
+
+  // The snapshot persist is a PRECONDITION of the finalized row, not a
+  // best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
+  // validator_signatures no local capability_snapshot can verify is the exact
+  // state the persist-before-insert ordering exists to prevent. Mirrors the
+  // CrossChainDexEngine.writeFinalizedMatch guards (item 2385).
+}
+function registerFeature5persistenceRetractionFragment1Part2() {
+  it('writeFinalizedRow fails closed and defers when the snapshot persist THROWS', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    const row = feature5persistenceRetractionFragment1FinalizeRow();
+    const forget = engine.consensus.forgetFinalized;
+    engine._inflight.add(row.round_id);
+    sinon.stub(engine, '_persistCapabilitySnapshot').rejects(new Error('db down'));
+    await engine.writeFinalizedRow({
+      row,
+      signatures: [{
+        pubkey: 'a'.repeat(64),
+        sig: '1'.repeat(128)
+      }]
+    });
+    expect(db.rows.length, 'no unverifiable row may be committed').to.equal(0);
+    expect(broadcaster.broadcastRow.called, 'nothing may be broadcast').to.equal(false);
+    expect(engine._inflight.has(row.round_id), 'the in-flight slot must be released').to.equal(false);
+    expect(forget.calledWith(row.round_id), 'the round must be re-proposable').to.equal(true);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature5persistenceRetractionFragment1() {
+  describe('persistence + retraction', function () {
+    registerFeature5persistenceRetractionFragment1Part1();
+    registerFeature5persistenceRetractionFragment1Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature5persistenceRetractionFragment1();
 });

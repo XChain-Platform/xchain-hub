@@ -230,61 +230,94 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+// carrying the flag is only half the guard. capability_snapshots has no
+// column for it, so a truncated set that gets MIRRORED reaches the off-BTC
+// cross_chain verifiers as a COMPLETE one and finalizes over an under-counted stake
+// denominator this hub itself rejects. Persist has to refuse the write.
+function feature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationCountSnapshotWrites(engine) {
+  const inner = engine.db.doQuery.bind(engine.db);
+  const seen = {
+    n: 0
+  };
+  engine.db.doQuery = async (sql, params) => {
+    if (/INSERT IGNORE INTO capability_snapshots/.test(sql)) seen.n++;
+    return inner(sql, params);
+  };
+  return seen;
+}
+function registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart1() {
+  it('carries truncated=true through the .map when the weighted snapshot overflowed the cap', async function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
+    engine.capSnapshot.getWeightSnapshot = async () => ({
+      validators: [{
+        pubkey: 'a'.repeat(64),
+        source: 's1',
+        weight: '1'
+      }],
+      count: 1,
+      truncated: true
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    const vals = await engine.resolveCapabilityValidators('cross_chain', 100, 'regtest');
+    // The consensus fails closed only when the flag survives the map (meetsStakeThreshold).
+    expect(vals.truncated).to.equal(true);
+  });
+  it('does NOT mark truncated for a complete weighted snapshot', async function () {
+    const {
+      engine
+    } = makeEngine();
+    const vals = await engine.resolveCapabilityValidators('cross_chain', 100, 'regtest');
+    expect(vals.truncated).to.not.equal(true);
+  });
+
+  // carrying the flag is only half the guard. capability_snapshots has no
+  // column for it, so a truncated set that gets MIRRORED reaches the off-BTC
+  // cross_chain verifiers as a COMPLETE one and finalizes over an under-counted stake
+  // denominator this hub itself rejects. Persist has to refuse the write.
+
+  it('persist writes NO capability_snapshots row for a truncated set (#4175)', async function () {
+    const {
+      engine
+    } = makeEngine();
+    const capped = [{
+      pubkey: 'a'.repeat(64),
+      source: 's1',
+      weight: '1',
+      amount: '1'
+    }];
+    capped.truncated = true;
+    engine.resolveCapabilityValidators = async () => capped;
+    const seen = feature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationCountSnapshotWrites(engine);
+    await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+    expect(seen.n, 'a truncated snapshot must not reach the mirrored table').to.equal(0);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart2() {
+  it('persist still writes an untruncated set (the #4175 guard is not a blanket refusal)', async function () {
+    const {
+      engine
+    } = makeEngine();
+    engine.resolveCapabilityValidators = async () => [{
+      pubkey: 'a'.repeat(64),
+      source: 's1',
+      weight: '1',
+      amount: '1'
+    }];
+    const seen = feature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationCountSnapshotWrites(engine);
+    await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+    expect(seen.n).to.equal(1);
+  });
+}
+function registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagation() {
+  describe('resolveCapabilityValidators (SWQ-TRUNC flag propagation)', function () {
+    registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart1();
+    registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagationPart2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature7resolveCapabilityValidatorsSWQTRUNCFlagPropagation();
 });

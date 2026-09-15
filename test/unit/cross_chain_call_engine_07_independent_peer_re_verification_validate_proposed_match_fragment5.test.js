@@ -230,61 +230,171 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
+// An honest leader's effective_time: now + the gating chain's forward relay
+// margin, never the bare clock second. A follower refuses a row that is not at
+// least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+// arrival forks the injecting indexers' action-index counters (#4202).
+function feature4independentPeerReVerificationValidateProposedMatchFragment5HonestEffectiveTime() {
+  return Math.floor(Date.now() / 1000) + 240;
+}
+function feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow(overrides) {
+  return Object.assign({
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment5HonestEffectiveTime() // leader-choice field, clock-bounded by validation
+  }, overrides);
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part1() {
+  it('the getcrosschaincall response actually carries push_generation', function () {
+    const res = buildIndexerCallResponse({
+      row: xcallsRow(),
+      latest: 200,
+      pushGeneration: 4,
+      network: 'regtest'
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    expect(res.call).to.have.property('push_generation', 4, 'getcrosschaincall must stamp the source-reorg fence generation; without it every ' + 'follower re-derives 0 and CrossChainCallEngine.js:validateDispatch refuses every ' + 'honest dispatch once the source chain has rolled back once');
+  });
+  it('co-signs when the leader\'s generation matches what our own indexer reports', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+      row: xcallsRow(),
+      latest: 200,
+      pushGeneration: 4,
+      network: 'regtest'
+    }));
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+      push_generation: 4
+    }))).to.equal(true);
+  });
+  it('refuses a forged (inflated) generation', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+      row: xcallsRow(),
+      latest: 200,
+      pushGeneration: 4,
+      network: 'regtest'
+    }));
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+      push_generation: 7
+    }))).to.equal(false);
+  });
+
+  // The regression itself: a chain that has rolled back at least once. Pre-fix the
+  // response carried no generation, the follower re-derived 0, and this returned
+  // false for a wholly honest round - no PBFT round on that chain could ever reach
+  // 2f+1 again.
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part2() {
+  // The regression itself: a chain that has rolled back at least once. Pre-fix the
+  // response carried no generation, the follower re-derived 0, and this returned
+  // false for a wholly honest round - no PBFT round on that chain could ever reach
+  // 2f+1 again.
+  it('post-rollback (generation >= 1) an honest dispatch still reaches quorum', async function () {
+    const {
+      engine
+    } = makeEngine();
+    for (const gen of [1, 2, 9]) {
+      sinon.restore();
+      sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+        row: xcallsRow(),
+        latest: 200,
+        pushGeneration: gen,
+        network: 'regtest'
+      }));
+      expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+        push_generation: gen
+      })), 'honest dispatch refused at push_generation=' + gen).to.equal(true);
+    }
+  });
+
+  // A generation-0 chain is the accidentally-passing case; keep it covered so a
+  // future change cannot "fix" the pin by making it vacuous again.
+  it('generation 0 (never-rolled-back chain) still binds, and a non-zero forgery is refused', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+      row: xcallsRow(),
+      latest: 200,
+      pushGeneration: 0,
+      network: 'regtest'
+    }));
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+      push_generation: 0
+    }))).to.equal(true);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+      push_generation: 1
+    }))).to.equal(false);
+  });
+
+  // Every other field the pin compares must also survive the round trip through the
+  // real literal, so a future whitelist edit that drops one of THEM fails here too.
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part3() {
+  // Every other field the pin compares must also survive the round trip through the
+  // real literal, so a future whitelist edit that drops one of THEM fails here too.
+  it('every field validateDispatch pins is present in the real response', async function () {
+    const {
+      engine
+    } = makeEngine();
+    const divergent = {
+      action_index: 42,
+      contract_index: 6,
+      target_chain: 'LTC',
+      target_contract_index: 100,
+      method: 'other',
+      params_json: '["y"]',
+      gas_limit: 60000,
+      cross_hops: 2
+    };
+    for (const [field, value] of Object.entries(divergent)) {
+      sinon.restore();
+      sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+        row: xcallsRow({
+          [field]: value
+        }),
+        latest: 200,
+        pushGeneration: 4,
+        network: 'regtest'
+      }));
+      expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment5DispatchRow({
+        push_generation: 4
+      })), 'a diverging ' + field + ' must refuse the signature').to.equal(false);
+    }
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1() {
+  describe('push_generation pin, driven against the real indexer response (item 2367)', function () {
+    before(requireIndexerSource);
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part1();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part2();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1Part3();
+  });
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment5() {
+  describe('independent peer re-verification (validateProposedMatch)', function () {
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment5Nested1();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature4independentPeerReVerificationValidateProposedMatchFragment5();
 });

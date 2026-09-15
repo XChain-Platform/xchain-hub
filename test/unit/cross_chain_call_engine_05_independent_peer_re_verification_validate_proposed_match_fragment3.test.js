@@ -230,61 +230,129 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+// An honest leader's effective_time: now + the gating chain's forward relay
+// margin, never the bare clock second. A follower refuses a row that is not at
+// least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+// arrival forks the injecting indexers' action-index counters (#4202).
+function feature4independentPeerReVerificationValidateProposedMatchFragment3HonestEffectiveTime() {
+  return Math.floor(Date.now() / 1000) + 240;
+}
+function feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow(overrides) {
+  return Object.assign({
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment3HonestEffectiveTime() // leader-choice field, clock-bounded by validation
+  }, overrides);
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part1() {
+  // #4204. Number()-based field equality accepts '041' against indexer value 41,
+  // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
+  // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
+  // different bytes, reject the quorum, and strand the call permanently (the
+  // finalized row still satisfies rowExists, so it is never re-relayed).
+  it('refuses a noncanonical integer spelling on any signed field', async function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 200,
+      call: pendingCall()
+    });
+    // Canonical spellings of the same values, as a number or as a string, pass.
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+      source_action_index: 41
+    }))).to.equal(true);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+      source_action_index: '41'
+    }))).to.equal(true);
+    // Every equivalent spelling a Byzantine leader could reach for is refused.
+    for (const spelling of ['041', '+41', ' 41', '41 ', '4.1e1', '0041']) {
+      expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+        source_action_index: spelling
+      })), 'signed a dispatch spelling source_action_index as ' + JSON.stringify(spelling)).to.equal(false);
+    }
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+      gas_limit: '050000'
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+      target_contract_index: '099'
+    }))).to.equal(false);
+    // cross_hops signs String(r.cross_hops) but compares (Number(x) || 0), so a
+    // null would sign the literal 'null' and persist as 0. Refused too.
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow({
+      cross_hops: null
+    }))).to.equal(false);
   });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part2() {
+  it('signs a result only when its OWN target indexer reports the identical outcome at depth, for a KNOWN dispatch', async function () {
     const {
       engine,
       db
     } = makeEngine();
-    db.rows.push({
+    db.rows.push(Object.assign(feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow(), {
+      status: 'finalized'
+    }));
+    const resultRow = {
+      round_id: sha256('XCALLROUND|result|' + CALL_ID),
       call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
+      phase: 'result',
+      snapshot_block: 160,
+      network: 'regtest',
       source_chain: 'BTC',
-      source_action_index: 41
+      target_chain: 'DOGE',
+      // Dispatch-inherited reorg-fence metadata (must match the local dispatch row).
+      source_action_index: 41,
+      push_generation: 0,
+      result_status: 'ok',
+      return_payload_b64: 'cGF5bG9hZA',
+      effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment3HonestEffectiveTime()
+    };
+    const stub = sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      latest_block_index: 600,
+      executed_block_index: 500,
+      // depth 101 >= DOGE 60
+      status: 'ok',
+      return_payload_b64: 'cGF5bG9hZA'
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    expect(await engine.validateProposedMatch(resultRow)).to.equal(true);
+    stub.resolves({
+      exists: true,
+      latest_block_index: 600,
+      executed_block_index: 500,
+      status: 'reverted',
+      return_payload_b64: ''
+    });
+    expect(await engine.validateProposedMatch(resultRow)).to.equal(false);
+    // Unknown dispatch → never vouch for its result.
+    db.rows.length = 0;
+    expect(await engine.validateProposedMatch(resultRow)).to.equal(false);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3() {
+  describe('independent peer re-verification (validateProposedMatch)', function () {
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part1();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature4independentPeerReVerificationValidateProposedMatchFragment3();
 });

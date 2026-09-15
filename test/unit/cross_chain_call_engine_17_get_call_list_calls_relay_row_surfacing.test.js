@@ -230,61 +230,140 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
+function feature8getCallListCallsRelayRowSurfacingSeed(db) {
+  db.rows.push({
+    id: 1,
+    call_id: 'a'.repeat(64),
+    phase: 'dispatch',
+    status: 'finalized',
+    source_chain: 'BTC',
+    target_chain: 'DOGE',
+    result_status: null
+  }, {
+    id: 2,
+    call_id: 'a'.repeat(64),
+    phase: 'result',
+    status: 'finalized',
+    source_chain: 'BTC',
+    target_chain: 'DOGE',
+    result_status: 'ok'
+  }, {
+    id: 3,
+    call_id: 'b'.repeat(64),
+    phase: 'dispatch',
+    status: 'finalized',
+    source_chain: 'LTC',
+    target_chain: 'BTC',
+    result_status: null
+  }, {
+    id: 4,
+    call_id: 'c'.repeat(64),
+    phase: 'dispatch',
+    status: 'retracted',
+    source_chain: 'BTC',
+    target_chain: 'LTC',
+    result_status: null
   });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+}
+function registerFeature8getCallListCallsRelayRowSurfacingPart1() {
+  it('getCall returns both phases of one call keyed as {call_id, dispatch, result}', async function () {
     const {
       engine,
       db
     } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
-    });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    feature8getCallListCallsRelayRowSurfacingSeed(db);
+    const call = await engine.getCall('a'.repeat(64));
+    expect(call.call_id).to.equal('a'.repeat(64));
+    expect(call.dispatch.phase).to.equal('dispatch');
+    expect(call.result.phase).to.equal('result');
+    expect(call.result.result_status).to.equal('ok');
+  });
+  it('getCall returns null when the call_id is unknown or missing', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    feature8getCallListCallsRelayRowSurfacingSeed(db);
+    expect(await engine.getCall('z'.repeat(64))).to.equal(null);
+    expect(await engine.getCall('')).to.equal(null);
+  });
+  it('getCall leaves the missing phase null (dispatched, not yet relayed back)', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    feature8getCallListCallsRelayRowSurfacingSeed(db);
+    const call = await engine.getCall('b'.repeat(64));
+    expect(call.dispatch.phase).to.equal('dispatch');
+    expect(call.result).to.equal(null);
+  });
+  it('listCalls returns rows newest-first, unfiltered', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    feature8getCallListCallsRelayRowSurfacingSeed(db);
+    const rows = await engine.listCalls();
+    expect(rows.map(r => r.id)).to.deep.equal([4, 3, 2, 1]);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature8getCallListCallsRelayRowSurfacingPart2() {
+  it('listCalls filters by source_chain, target_chain, status, and phase', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    feature8getCallListCallsRelayRowSurfacingSeed(db);
+    expect((await engine.listCalls({
+      sourceChain: 'BTC'
+    })).map(r => r.id)).to.deep.equal([4, 2, 1]);
+    expect((await engine.listCalls({
+      targetChain: 'BTC'
+    })).map(r => r.id)).to.deep.equal([3]);
+    expect((await engine.listCalls({
+      status: 'retracted'
+    })).map(r => r.id)).to.deep.equal([4]);
+    expect((await engine.listCalls({
+      phase: 'result'
+    })).map(r => r.id)).to.deep.equal([2]);
+    expect((await engine.listCalls({
+      sourceChain: 'BTC',
+      phase: 'dispatch'
+    })).map(r => r.id)).to.deep.equal([4, 1]);
+  });
+  it('listCalls clamps a non-positive or oversized limit into range', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    for (let i = 1; i <= 60; i++) db.rows.push({
+      id: i,
+      call_id: String(i),
+      phase: 'dispatch',
+      status: 'finalized',
+      source_chain: 'BTC',
+      target_chain: 'DOGE'
+    });
+    expect((await engine.listCalls({
+      limit: 0
+    })).length).to.equal(50); // default 50
+    expect((await engine.listCalls({
+      limit: 5
+    })).length).to.equal(5);
+    expect((await engine.listCalls({
+      limit: 999999
+    })).length).to.equal(60); // clamp, not error
+  });
+}
+function registerFeature8getCallListCallsRelayRowSurfacing() {
+  describe('getCall / listCalls (relay-row surfacing)', function () {
+    registerFeature8getCallListCallsRelayRowSurfacingPart1();
+    registerFeature8getCallListCallsRelayRowSurfacingPart2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature8getCallListCallsRelayRowSurfacing();
 });

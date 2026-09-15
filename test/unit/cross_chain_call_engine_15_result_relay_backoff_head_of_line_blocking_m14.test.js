@@ -230,61 +230,98 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+function registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part1() {
+  it('parks a result-less dispatch so a newer dispatch is no longer starved', async function () {
     const {
-      engine
+      engine,
+      db
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
+    // One older result-less dispatch (id 1) and one newer (id 2), both targeting DOGE.
+    db.rows.push({
+      id: 1,
+      call_id: 'a'.repeat(64),
+      phase: 'dispatch',
+      status: 'finalized',
+      target_chain: 'DOGE',
+      source_chain: 'BTC',
+      source_action_index: 1
+    }, {
+      id: 2,
+      call_id: 'b'.repeat(64),
+      phase: 'dispatch',
+      status: 'finalized',
+      target_chain: 'DOGE',
+      source_chain: 'BTC',
+      source_action_index: 2
+    });
+    // No result exists on the target for either call: maybeRelayResult returns false.
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: false
+    });
+
+    // First poll: both are attempted and parked (result-less).
+    await engine.pollTargetResults('DOGE');
+    expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
+    expect(engine._resultBackoff.has('b'.repeat(64))).to.equal(true);
+
+    // Second poll: both are inside their backoff window, so both are excluded
+    // from the hot query. The window is free for whatever arrives next.
+    const spy = sinon.spy(engine, 'maybeRelayResult');
+    await engine.pollTargetResults('DOGE');
+    expect(spy.called).to.equal(false, 'parked rows must not be re-polled while backed off');
   });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+}
+function registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part2() {
+  it('clears backoff once the result becomes available', async function () {
     const {
       engine,
       db
     } = makeEngine();
     db.rows.push({
-      call_id: CALL_ID,
+      id: 1,
+      call_id: 'a'.repeat(64),
       phase: 'dispatch',
       status: 'finalized',
       target_chain: 'DOGE',
       source_chain: 'BTC',
-      source_action_index: 41
+      source_action_index: 1
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    const relay = sinon.stub(engine, 'maybeRelayResult');
+    relay.onFirstCall().resolves(false); // result absent -> park
+    relay.onSecondCall().resolves(true); // result arrived -> round proposed
+
+    await engine.pollTargetResults('DOGE');
+    expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
+
+    // Force the backoff window to have elapsed, then poll again.
+    engine._resultBackoff.get('a'.repeat(64)).nextAt = Date.now() - 1;
+    await engine.pollTargetResults('DOGE');
+    expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(false, 'a delivered result clears backoff');
+  });
+  it('exponential backoff grows and is capped', function () {
+    const {
+      engine
+    } = makeEngine();
+    const id = 'a'.repeat(64);
+    const t0 = Date.now();
+    engine.parkResult(id);
+    const first = engine._resultBackoff.get(id).nextAt - t0;
+    engine.parkResult(id);
+    const second = engine._resultBackoff.get(id).nextAt - Date.now();
+    expect(second).to.be.greaterThan(first - 5); // second delay >= first (allow scheduling slack)
+    for (let i = 0; i < 40; i++) engine.parkResult(id);
+    expect(engine._resultBackoff.get(id).nextAt - Date.now()).to.be.at.most(60 * 60 * 1000 + 5);
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature6resultRelayBackoffHeadOfLineBlockingM14() {
+  describe('result-relay backoff (head-of-line blocking, M-14)', function () {
+    registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part1();
+    registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature6resultRelayBackoffHeadOfLineBlockingM14();
 });

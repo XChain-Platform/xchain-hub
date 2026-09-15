@@ -230,61 +230,58 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+function registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWidePart1() {
+  it('dispatch canonical matches the indexer/recovery verifiers', function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
+    const row = {
       phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
+      call_id: CALL_ID,
+      snapshot_block: 150,
+      network: 'regtest',
       source_chain: 'BTC',
-      source_action_index: 41
-    });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+      source_action_index: 41,
+      source_contract_index: 5,
+      target_chain: 'DOGE',
+      target_contract_index: 99,
+      method: 'onArrival',
+      params_json: '["x"]',
+      gas_limit: 50000,
+      cross_hops: 1,
+      effective_time: 1700000000
+    };
+    // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|dispatch|'+call_id), VIEW=0.
+    const raw = ['XCALL', 'DISPATCH', CALL_ID, '150', 'regtest', 'BTC', '41', '5', 'DOGE', '99', 'onArrival', sha256('["x"]'), '50000', '1', '1700000000'].join('|');
+    expect(engine._canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|dispatch|' + CALL_ID), 0, raw));
+  });
+  it('result canonical hashes the payload and binds result_status', function () {
+    const {
+      engine
+    } = makeEngine();
+    const row = {
+      phase: 'result',
+      call_id: CALL_ID,
+      snapshot_block: 160,
+      network: 'regtest',
+      target_chain: 'DOGE',
+      result_status: 'ok',
+      return_payload_b64: 'cGF5bG9hZA',
+      effective_time: 1700000050
+    };
+    // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|result|'+call_id), VIEW=0.
+    const raw = ['XCALL', 'RESULT', CALL_ID, '160', 'regtest', 'DOGE', 'ok', sha256('cGF5bG9hZA'), '1700000050'].join('|');
+    expect(engine._canonicalMatch(row)).to.equal(eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|result|' + CALL_ID), 0, raw));
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWide() {
+  describe('canonical strings (consensus-critical, byte-matched fleet-wide)', function () {
+    registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWidePart1();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature3canonicalStringsConsensusCriticalByteMatchedFleetWide();
 });

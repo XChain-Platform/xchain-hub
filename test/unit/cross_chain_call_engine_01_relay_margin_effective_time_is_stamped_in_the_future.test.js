@@ -230,61 +230,124 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
+function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart1() {
+  // Regression guard for the live/replay fork: a relayed row's effective_time
+  // must be ahead of the finalization instant by a margin sized to the gating
+  // chain, so the row propagates everywhere before any chain reaches the block
+  // it applies at. With margin 0 (the pre-fix behavior) effective_time = now and
+  // a node already at the tip injects late, shifting its action-index counter and
+  // forking from a replaying node (EMITTER_ACTION_INDEX is in the call_id preimage).
+
+  it('stamps effective_time a gating-chain margin into the future (never the bare clock second)', function () {
     const {
       engine
     } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
+    const now = Math.floor(Date.now() / 1000);
+    // Default 4 blocks. DOGE 60s → +240s; LTC 150s → +600s; BTC 600s → +2400s.
+    expect(engine._relayEffectiveTime('DOGE') - now).to.be.at.least(240);
+    expect(engine._relayEffectiveTime('LTC') - now).to.be.at.least(600);
+    expect(engine._relayEffectiveTime('BTC') - now).to.be.at.least(2400);
+    // Always strictly in the future of the finalization instant (that is the whole point).
+    expect(engine._relayEffectiveTime('DOGE')).to.be.greaterThan(now);
   });
-  it('never dispatches an expired request or a same-chain target', async function () {
+  it('keeps every chain’s margin under the follower clock-skew bound (3600s)', function () {
     const {
       engine
     } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
-    });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
+    const now = Math.floor(Date.now() / 1000);
+    for (const chain of ['BTC', 'LTC', 'DOGE']) {
+      expect(engine._relayEffectiveTime(chain) - now).to.be.lessThan(3600);
+    }
   });
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart2() {
+  it('a margined dispatch row still passes a follower’s own re-verification', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 200,
+      call: pendingCall()
+    });
+    // The dispatch targets DOGE → margin sized to DOGE; the source (BTC) follower
+    // adopts the leader-choice effective_time, bounded to within an hour of its clock.
+    const row = {
+      round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+      call_id: CALL_ID,
+      phase: 'dispatch',
+      snapshot_block: 150,
+      network: 'regtest',
+      source_chain: 'BTC',
+      source_action_index: 41,
+      source_contract_index: 5,
+      target_chain: 'DOGE',
+      target_contract_index: 99,
+      method: 'onArrival',
+      params_json: '["x"]',
+      gas_limit: 50000,
+      cross_hops: 1,
+      effective_time: engine._relayEffectiveTime('DOGE')
+    };
+    expect(await engine.validateProposedMatch(row)).to.equal(true);
+  });
+  it('honors XCALL_RELAY_MARGIN_BLOCKS and caps a huge value under the clock-skew bound', function () {
+    const prev = process.env.XCALL_RELAY_MARGIN_BLOCKS;
+    try {
+      process.env.XCALL_RELAY_MARGIN_BLOCKS = '0';
+      expect(makeEngine().engine.relayMarginBlocks).to.equal(0);
+      process.env.XCALL_RELAY_MARGIN_BLOCKS = '999999';
+      const {
+        engine
+      } = makeEngine();
+      const now = Math.floor(Date.now() / 1000);
+      // Even an absurd block count is capped below 3600s on every chain.
+      expect(engine._relayEffectiveTime('BTC') - now).to.be.at.most(3000);
+      expect(engine._relayEffectiveTime('DOGE') - now).to.be.at.most(3000);
+    } finally {
+      if (prev === undefined) delete process.env.XCALL_RELAY_MARGIN_BLOCKS;else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;
+    }
+  });
+
+  // The config is tunable UPWARD only. XCALL_RELAY_MARGIN_BLOCKS=0 once made
+  // _relayEffectiveTime return the bare clock second, which is precisely the
+  // live/replay fork the margin exists to prevent - a misconfiguration could
+  // re-open a consensus hole (#4202). The default margin is now a hard floor.
+}
+function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart3() {
+  // The config is tunable UPWARD only. XCALL_RELAY_MARGIN_BLOCKS=0 once made
+  // _relayEffectiveTime return the bare clock second, which is precisely the
+  // live/replay fork the margin exists to prevent - a misconfiguration could
+  // re-open a consensus hole (#4202). The default margin is now a hard floor.
+  it('floors the margin at the default: XCALL_RELAY_MARGIN_BLOCKS=0 cannot stamp the bare clock second', function () {
+    const prev = process.env.XCALL_RELAY_MARGIN_BLOCKS;
+    try {
+      for (const blocks of ['0', '-5', '1']) {
+        process.env.XCALL_RELAY_MARGIN_BLOCKS = blocks;
+        const {
+          engine
+        } = makeEngine();
+        const now = Math.floor(Date.now() / 1000);
+        expect(engine._relayEffectiveTime('DOGE') - now, 'DOGE margin floor breached at XCALL_RELAY_MARGIN_BLOCKS=' + blocks).to.be.at.least(240);
+        expect(engine._relayEffectiveTime('LTC') - now).to.be.at.least(600);
+        expect(engine._relayEffectiveTime('BTC') - now).to.be.at.least(2400);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.XCALL_RELAY_MARGIN_BLOCKS;else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;
+    }
+  });
+}
+function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTURE() {
+  describe('relay margin (effective_time is stamped in the FUTURE)', function () {
+    registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart1();
+    registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart2();
+    registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart3();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTURE();
 });

@@ -230,61 +230,149 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
+// The snapshot persist is a PRECONDITION of the finalized row, not a
+// best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
+// validator_signatures no local capability_snapshot can verify is the exact
+// state the persist-before-insert ordering exists to prevent. Mirrors the
+// CrossChainDexEngine.writeFinalizedMatch guards (item 2385).
+function feature5persistenceRetractionFragment5FinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+function feature5persistenceRetractionFragment5PendingFinalizeRow() {
+  return {
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: 1700000000,
+    push_generation: 3,
+    result_status: null,
+    return_payload_b64: null
+  };
+}
+
+// A retraction for a round whose row is not inserted yet matches nothing in SQL and
+// returns at the empty select, so the in-process fence is the only thing that can
+// stop the parked write from inserting and mirroring an executable dispatch the
+// reorg already removed.
+function registerFeature5persistenceRetractionFragment5Part1() {
+  it('retractCallsForReorg gen-fences: a re-finalized relay row at a RECYCLED source index survives (item 5308)', async function () {
     const {
       engine,
-      db
+      db,
+      broadcaster
     } = makeEngine();
+    // Both rows at the SAME recycled source_action_index = 41 (inside [40,75]); only the
+    // generation differs. The pre-bump retraction generation is 5.
     db.rows.push({
       call_id: CALL_ID,
       phase: 'dispatch',
       status: 'finalized',
-      target_chain: 'DOGE',
       source_chain: 'BTC',
-      source_action_index: 41
+      source_action_index: 41,
+      push_generation: 5
+    },
+    // orphan
+    {
+      call_id: 'f'.repeat(64),
+      phase: 'dispatch',
+      status: 'finalized',
+      source_chain: 'BTC',
+      source_action_index: 41,
+      push_generation: 6
+    } // re-finalized post-reorg
+    );
+    await engine.retractCallsForReorg('BTC', 40, 75, 5);
+    expect(db.rows.find(r => r.call_id === CALL_ID).status).to.equal('retracted', 'gen-5 orphan retracted');
+    expect(db.rows.find(r => r.call_id === 'f'.repeat(64)).status).to.equal('finalized', 'gen-6 re-finalize at the recycled index must survive');
+    expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include({
+      table: 'cross_chain_calls',
+      source_chain: 'BTC',
+      from_action_index: 40,
+      to_action_index: 75,
+      retraction_generation: 5
     });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
   });
+
+  // a supplied-but-malformed bound must ABORT, not fall through to the
+  // absent-bound branch. Fail-open here retracted every finalized call on the chain
+  // (raw lower bound, MariaDB coerces a nonnumeric to 0) or dropped the range/fence.
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function registerFeature5persistenceRetractionFragment5Part2() {
+  // a supplied-but-malformed bound must ABORT, not fall through to the
+  // absent-bound branch. Fail-open here retracted every finalized call on the chain
+  // (raw lower bound, MariaDB coerces a nonnumeric to 0) or dropped the range/fence.
+  it('retractCallsForReorg aborts on a supplied-but-malformed bound instead of widening', async function () {
+    for (const args of [['BTC', 'abc'], ['BTC', 40, 'abc'], ['BTC', 40, 75, 'abc'], ['BTC', 40, 10]]) {
+      const {
+        engine,
+        db,
+        broadcaster
+      } = makeEngine();
+      db.rows.push({
+        call_id: CALL_ID,
+        phase: 'dispatch',
+        status: 'finalized',
+        source_chain: 'BTC',
+        source_action_index: 41
+      }, {
+        call_id: CALL_ID,
+        phase: 'result',
+        status: 'finalized',
+        source_chain: 'BTC',
+        source_action_index: 41
+      });
+      let threw = false;
+      try {
+        await engine.retractCallsForReorg(...args);
+      } catch (e) {
+        threw = /^invalid /.test(e.message);
+      }
+      expect(threw).to.equal(true, 'expected abort for ' + JSON.stringify(args));
+      expect(db.rows.filter(r => r.status === 'retracted').length).to.equal(0);
+      expect(broadcaster.broadcastDeletion.called).to.equal(false);
+    }
+  });
+
+  // The absent-bound contract (older indexers omit to/generation) must survive the guard.
+}
+function registerFeature5persistenceRetractionFragment5() {
+  describe('persistence + retraction', function () {
+    registerFeature5persistenceRetractionFragment5Part1();
+    registerFeature5persistenceRetractionFragment5Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature5persistenceRetractionFragment5();
 });

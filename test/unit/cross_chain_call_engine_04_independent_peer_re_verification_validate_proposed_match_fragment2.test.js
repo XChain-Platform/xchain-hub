@@ -230,61 +230,126 @@ function pendingCall(overrides) {
     }, overrides);
 }
 
-function registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1() {
-  it('proposes a dispatch row only once the request is at confirmation depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    // BTC threshold is 6: block 100 at latest 104 = depth 5 → hold.
-    await engine.maybeDispatch('BTC', 'regtest', 104, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-    // latest 105 = depth 6 → dispatch.
-    await engine.maybeDispatch('BTC', 'regtest', 105, pendingCall());
-    expect(engine.consensus.propose.calledOnce).to.equal(true);
-    const [roundId, ctx] = engine.consensus.propose.firstCall.args;
-    expect(roundId).to.equal(sha256('XCALLROUND|dispatch|' + CALL_ID));
-    expect(ctx.row.phase).to.equal('dispatch');
-    expect(ctx.row.source_chain).to.equal('BTC');
-    expect(ctx.row.snapshot_block).to.equal(150);
-    expect(ctx.row.cross_hops).to.equal(1);
-  });
-  it('never dispatches an expired request or a same-chain target', async function () {
-    const {
-      engine
-    } = makeEngine();
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      deadline_block: 400
-    }));
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall({
-      target_chain: 'BTC'
-    }));
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
-  it('dedupes against an already-finalized dispatch row', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.rows.push({
-      call_id: CALL_ID,
-      phase: 'dispatch',
-      status: 'finalized',
-      target_chain: 'DOGE',
-      source_chain: 'BTC',
-      source_action_index: 41
-    });
-    await engine.maybeDispatch('BTC', 'regtest', 500, pendingCall());
-    expect(engine.consensus.propose.called).to.equal(false);
-  });
+// An honest leader's effective_time: now + the gating chain's forward relay
+// margin, never the bare clock second. A follower refuses a row that is not at
+// least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+// arrival forks the injecting indexers' action-index counters (#4202).
+function feature4independentPeerReVerificationValidateProposedMatchFragment2HonestEffectiveTime() {
+  return Math.floor(Date.now() / 1000) + 240;
 }
-function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
-  describe('dispatch discovery gating (maybeDispatch)', function () {
-    registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
+function feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow(overrides) {
+  return Object.assign({
+    round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+    call_id: CALL_ID,
+    phase: 'dispatch',
+    snapshot_block: 150,
+    network: 'regtest',
+    source_chain: 'BTC',
+    source_action_index: 41,
+    source_contract_index: 5,
+    target_chain: 'DOGE',
+    target_contract_index: 99,
+    method: 'onArrival',
+    params_json: '["x"]',
+    gas_limit: 50000,
+    cross_hops: 1,
+    effective_time: feature4independentPeerReVerificationValidateProposedMatchFragment2HonestEffectiveTime() // leader-choice field, clock-bounded by validation
+  }, overrides);
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment2Part1() {
+  // #4202. The old bound was symmetric (|effective_time - now| > 3600), so a row
+  // stamped AT or BEHIND the follower's clock sailed through. Such a row is
+  // eligible the instant it finalizes: the indexer that already holds it injects
+  // at block N while one still receiving it injects at N+1, and since
+  // EMITTER_ACTION_INDEX feeds the call_id preimage their ledgers fork for good.
+  // The bound is now asymmetric, and a leader whose own producer floor was
+  // bypassed (XCALL_RELAY_MARGIN_BLOCKS=0, or a Byzantine one) is refused here.
+  it('refuses a dispatch that is effective on arrival (no propagation window)', async function () {
+    const {
+      engine
+    } = makeEngine();
+    sinon.stub(engine, '_indexerCall').resolves({
+      exists: true,
+      network: 'regtest',
+      latest_block_index: 200,
+      call: pendingCall()
+    });
+    const now = Math.floor(Date.now() / 1000);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
+      effective_time: now
+    })), 'a row effective at the finalization instant must not be co-signed').to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
+      effective_time: now - 30
+    }))).to.equal(false);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
+      effective_time: now + 5
+    }))).to.equal(false);
+    // ...while the margin an honest leader stamps still passes, on every chain.
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
+      effective_time: engine._relayEffectiveTime('DOGE')
+    }))).to.equal(true);
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
+      effective_time: engine._relayEffectiveTime('BTC')
+    }))).to.equal(true);
+  });
+
+  // #4199. The leader path polls getpendingcrosschaincalls (SQL-filtered to
+  // request_status='pending') and refuses to start a round once the deadline is
+  // reached; the follower re-fetches by call_id through getcrosschaincall, which
+  // serves the row whatever its lifecycle state. Without the mirror below, a round
+  // begun just before expiry finalizes after it: the target executes the dispatch
+  // while the source has already delivered the terminal 'expired' callback.
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment2Part2() {
+  // #4199. The leader path polls getpendingcrosschaincalls (SQL-filtered to
+  // request_status='pending') and refuses to start a round once the deadline is
+  // reached; the follower re-fetches by call_id through getcrosschaincall, which
+  // serves the row whatever its lifecycle state. Without the mirror below, a round
+  // begun just before expiry finalizes after it: the target executes the dispatch
+  // while the source has already delivered the terminal 'expired' callback.
+  it('refuses a dispatch whose source request has expired or gone terminal', async function () {
+    const { engine } = makeEngine();
+    const stub = sinon.stub(engine, '_indexerCall');
+
+    // Deadline already reached at OUR tip: refused (mirrors maybeDispatch's gate).
+    stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+      call: pendingCall({ deadline_block: 200 }) });
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow())).to.equal(false);
+    stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+      call: pendingCall({ deadline_block: 150 }) });
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow())).to.equal(false);
+
+    // A deadline still ahead of our tip is fine.
+    stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+      call: pendingCall({ deadline_block: 201 }) });
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow())).to.equal(true);
+
+    // A non-pending lifecycle is refused whatever the deadline says.
+    for (const status of ['expired', 'completed']) {
+      stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+        call: pendingCall({ request_status: status }) });
+      expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow()), 'co-signed a dispatch for a request the source reports as ' + status).to.equal(false);
+    }
+    stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+      call: pendingCall({ request_status: 'pending' }) });
+    expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow())).to.equal(true);
+  });
+
+  // #4204. Number()-based field equality accepts '041' against indexer value 41,
+  // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
+  // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
+  // different bytes, reject the quorum, and strand the call permanently (the
+  // finalized row still satisfies rowExists, so it is never re-relayed).
+}
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment2() {
+  describe('independent peer re-verification (validateProposedMatch)', function () {
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment2Part1();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment2Part2();
   });
 }
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
-  registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerFeature4independentPeerReVerificationValidateProposedMatchFragment2();
 });
