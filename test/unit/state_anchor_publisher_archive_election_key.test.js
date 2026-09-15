@@ -48,6 +48,13 @@ function mkPub(nextSeqRow){
 
 describe('StateAnchorPublisher: wrapper-anchored archive election key', function () {
 
+    registerArchiveElectionKeyTests();
+    registerArchiveSequenceFloorTests();
+    registerArchiveSequenceRefusalTests();
+});
+
+function registerArchiveElectionKeyTests() {
+
     describe('_archiveElectionKey', function () {
 
         it('is a function of the wrapper identity alone, never of the hub-local batch seq', function () {
@@ -87,6 +94,9 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
             expect(atOneSeq).to.deep.equal(atOtherSeq);
         });
     });
+}
+
+function registerArchiveSequenceFloorTests() {
 
     describe('_getNextBatchSeq floor', function () {
 
@@ -126,6 +136,9 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
             expect(pub._observedConsumedBatchSeq).to.equal(-1);
         });
     });
+}
+
+function registerArchiveSequenceRefusalTests() {
 
     describe('seqRefusalCanonical', function () {
 
@@ -144,4 +157,4 @@ describe('StateAnchorPublisher: wrapper-anchored archive election key', function
             expect(pub.seqRefusalCanonical(38, 40)).to.not.equal(pub.seqRefusalCanonical(38, 41));
         });
     });
-});
+}
