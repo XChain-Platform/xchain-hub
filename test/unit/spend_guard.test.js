@@ -166,6 +166,14 @@ function registerLegacySpendCeilingTests() {
 }
 
 function registerReservationSuite() {
+    // allow()/record() alone leave a gap: a caller can pass allow(), start an
+    // async send, and a second caller can pass allow() too before the first
+    // ever calls record(), so the window undercounts in-flight spend and a
+    // burst of concurrent callers can clear the cap together. reserve()
+    // closes that gap by consuming budget at the moment of the call, before
+    // any await; commit() settles it to the real cost once known, and
+    // release() gives it back only if the reservation never became a real
+    // spend, split into its own suite because both halves matter on their own.
 
     describe('reserve()/commit()/release()', function () {
         registerReservationLifecycleTests();
