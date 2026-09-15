@@ -66,17 +66,16 @@ async function post(app, body) {
 
 const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: i, method: 'getprice' }));
 
-describe('JSON-RPC batch cap', function () {
-    this.timeout(10000);
+{
 
-    it('reproduces the fan-out WITHOUT the guard (21 calls dispatch 21 handlers)', async () => {
+    const reproducesTheFanOutWithoutTheTest2 = async () => {
         const counter = { calls: 0 };
         const r = await post(buildApp(false, counter), batch(CAP + 1));
         assert.strictEqual(r.status, 200, 'unguarded router should have served the oversize batch');
         assert.strictEqual(counter.calls, CAP + 1, 'every element should have reached a handler without the guard');
-    });
+    };
 
-    it('rejects an over-cap batch with 400 / -32600 and dispatches nothing', async () => {
+    const rejectsAnOverCapBatchWithTest3 = async () => {
         const counter = { calls: 0 };
         const r = await post(buildApp(true, counter), batch(CAP + 1));
         assert.strictEqual(r.status, 400);
@@ -84,25 +83,25 @@ describe('JSON-RPC batch cap', function () {
         assert.strictEqual(body.error.code, -32600);
         assert.match(body.error.message, /Batch too large \(max 20 requests per call\)/);
         assert.strictEqual(counter.calls, 0, 'no handler may run once the batch is refused');
-    });
+    };
 
-    it('passes an at-cap batch through to the dispatcher', async () => {
+    const passesAnAtCapBatchThroughTest4 = async () => {
         const counter = { calls: 0 };
         const r = await post(buildApp(true, counter), batch(CAP));
         assert.strictEqual(r.status, 200);
         assert.strictEqual(counter.calls, CAP);
         assert.strictEqual(JSON.parse(r.text).length, CAP);
-    });
+    };
 
-    it('leaves a single (non-array) call untouched', async () => {
+    const leavesASingleNonArrayCallTest5 = async () => {
         const counter = { calls: 0 };
         const r = await post(buildApp(true, counter), { jsonrpc: '2.0', id: 1, method: 'getprice' });
         assert.strictEqual(r.status, 200);
         assert.deepStrictEqual(JSON.parse(r.text).result, { price: 1 });
         assert.strictEqual(counter.calls, 1);
-    });
+    };
 
-    it('leaves a bodiless GET to the req.body shim (no 500, no 400)', async () => {
+    const leavesABodilessGetToTheTest6 = async () => {
         const server = http.createServer(buildApp(true, { calls: 0 }));
         await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
         const port = server.address().port;
@@ -113,24 +112,52 @@ describe('JSON-RPC batch cap', function () {
         } finally {
             await new Promise((resolve) => server.close(resolve));
         }
-    });
+    };
 
-    describe('resolveMaxBatch', () => {
-        it('keeps the default for missing, unparseable and non-positive values', () => {
+    let registerresolvemaxbatch7;
+
+    {
+
+        const keepsTheDefaultForMissingUnparseableTest9 = () => {
             for (const raw of [undefined, null, '', 'abc', '0', '-5'])
                 assert.strictEqual(resolveMaxBatch(raw, 20), 20, `raw=${JSON.stringify(raw)}`);
-        });
-        it('takes an explicit positive override', () => {
-            assert.strictEqual(resolveMaxBatch('50', 20), 50);
-        });
-    });
+        };
 
-    it('src/api.js mounts the guard before the jsonRouter mount', () => {
+        const takesAnExplicitPositiveOverrideTest10 = () => {
+            assert.strictEqual(resolveMaxBatch('50', 20), 50);
+        };
+
+        const resolvemaxbatchSuite8 = () => {
+            it('keeps the default for missing, unparseable and non-positive values', keepsTheDefaultForMissingUnparseableTest9);
+            it('takes an explicit positive override', takesAnExplicitPositiveOverrideTest10);
+        }
+
+        registerresolvemaxbatch7 = function registerSuite() {
+            describe('resolveMaxBatch', resolvemaxbatchSuite8);
+        };
+
+    }
+
+    const srcApiJsMountsTheGuardTest11 = () => {
         const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
         const guardIdx = src.indexOf('makeRpcBatchGuard(');
         const routerIdx = src.indexOf('jsonRouter({');
         assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from src/api.js');
         assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from src/api.js');
         assert.ok(guardIdx < routerIdx, 'the batch guard must be registered before the jsonRouter mount');
-    });
-});
+    };
+
+    function jsonRpcBatchCapSuite1() {
+        this.timeout(10000);
+        it('reproduces the fan-out WITHOUT the guard (21 calls dispatch 21 handlers)', reproducesTheFanOutWithoutTheTest2);
+        it('rejects an over-cap batch with 400 / -32600 and dispatches nothing', rejectsAnOverCapBatchWithTest3);
+        it('passes an at-cap batch through to the dispatcher', passesAnAtCapBatchThroughTest4);
+        it('leaves a single (non-array) call untouched', leavesASingleNonArrayCallTest5);
+        it('leaves a bodiless GET to the req.body shim (no 500, no 400)', leavesABodilessGetToTheTest6);
+        registerresolvemaxbatch7();
+        it('src/api.js mounts the guard before the jsonRouter mount', srcApiJsMountsTheGuardTest11);
+    }
+
+    describe('JSON-RPC batch cap', jsonRpcBatchCapSuite1);
+
+}
