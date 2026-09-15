@@ -36,16 +36,21 @@ function makeValidator() {
     };
 }
 
-describe('PriceAggregator batch landing clock (batch_block_time)', function () {
+{
 
     const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
 
     const FIRST_ROUND  = 200;
+
     const LAST_ROUND   = 201;
+
     const BATCH_ANCHOR = 799101;
-    const BLOCK_INDEX  = 800500;      // landing block height on the landing chain
+
+    const BLOCK_INDEX  = 800500;     // landing block height on the landing chain
+
     const ACTION_INDEX = 91;
-    const BLOCK_TIME   = 1700009000;  // the landing block's own clock
+
+    const BLOCK_TIME   = 1700009000; // the landing block's own clock
 
     function makeRounds() {
         let out = [];
@@ -123,18 +128,7 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         return log;
     }
 
-    beforeEach(function () {
-        hub = createMockHub();
-        agg = new PriceAggregator(hub);
-        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(snapshotOf(V)) };
-        sinon.stub(console, 'log');
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
-    it('writes the LANDING block clock, not the round clock and not the landing height', async function () {
+    async function writesTheLandingBlockClockNotTest2() {
         let log    = stubDb([]);
         let events = [];
         agg.on('row:inserted', e => events.push(e));
@@ -155,9 +149,9 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         expect(events[0].row.batch_block_time).to.equal(BLOCK_TIME);
         expect(events[0].row.block_timestamp).to.equal(1700000000);
         expect(events[0].row.batch_block_time).to.not.equal(events[0].row.block_timestamp);
-    });
+    }
 
-    it('stamps a round that was ALREADY finalized here, which is the validator case', async function () {
+    async function stampsARoundThatWasAlreadyTest3() {
         let stamped = [
             { round_number: FIRST_ROUND, coin_pair: 'BTC/USD', price: '50000',
               status: 'finalized', batch_block_time: BLOCK_TIME }
@@ -186,9 +180,9 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         expect(events[0].table).to.equal('price_snapshots');
         expect(events[0].row.round_number).to.equal(FIRST_ROUND);
         expect(events[0].row.batch_block_time).to.equal(BLOCK_TIME);
-    });
+    }
 
-    it('re-emits nothing when an earlier batch already stamped the round lower', async function () {
+    async function reEmitsNothingWhenAnEarlierTest4() {
         // The re-read finds no row carrying THIS clock, because the stored one is lower.
         let log    = stubDb([FIRST_ROUND, LAST_ROUND], []);
         let events = [];
@@ -199,9 +193,9 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         expect(log.updates.length).to.equal(2);
         expect(log.selects.length).to.equal(2);
         expect(events.length).to.equal(0);
-    });
+    }
 
-    it('a stamp failure never rejects the batch', async function () {
+    async function aStampFailureNeverRejectsTheTest5() {
         stubDb([FIRST_ROUND, LAST_ROUND]);
         hub.db.doQuery.withArgs(sinon.match(/^UPDATE price_snapshots SET batch_block_time/))
             .rejects(new Error('ER_LOCK_WAIT_TIMEOUT'));
@@ -210,13 +204,33 @@ describe('PriceAggregator batch landing clock (batch_block_time)', function () {
         let result = await agg.receiveValidatedBatch('DOGE', makeBatch());
         expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 2, rejected: 0 });
         expect(console.error.called).to.equal(true);
-    });
+    }
 
-    it('stampBatchLanding refuses a clock that is not a positive integer', async function () {
+    async function stampbatchlandingRefusesAClockThatIsTest6() {
         let log = stubDb([]);
         expect(await agg.stampBatchLanding(FIRST_ROUND, 0)).to.equal(0);
         expect(await agg.stampBatchLanding(FIRST_ROUND, -1)).to.equal(0);
         expect(await agg.stampBatchLanding(FIRST_ROUND, 'later')).to.equal(0);
         expect(log.updates.length).to.equal(0);
-    });
-});
+    }
+
+    function priceaggregatorBatchLandingClockBatchBlockSuite1() {
+        beforeEach(function () {
+            hub = createMockHub();
+            agg = new PriceAggregator(hub);
+            hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(snapshotOf(V)) };
+            sinon.stub(console, 'log');
+        });
+        afterEach(function () {
+            sinon.restore();
+        });
+        it('writes the LANDING block clock, not the round clock and not the landing height', writesTheLandingBlockClockNotTest2);
+        it('stamps a round that was ALREADY finalized here, which is the validator case', stampsARoundThatWasAlreadyTest3);
+        it('re-emits nothing when an earlier batch already stamped the round lower', reEmitsNothingWhenAnEarlierTest4);
+        it('a stamp failure never rejects the batch', aStampFailureNeverRejectsTheTest5);
+        it('stampBatchLanding refuses a clock that is not a positive integer', stampbatchlandingRefusesAClockThatIsTest6);
+    }
+
+    describe('PriceAggregator batch landing clock (batch_block_time)', priceaggregatorBatchLandingClockBatchBlockSuite1);
+
+}
