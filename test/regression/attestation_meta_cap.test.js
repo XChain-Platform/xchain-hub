@@ -27,15 +27,17 @@ const { createMockHub }    = require('../helpers/mockHub');
 // the body_b64 cap (REG-ATT-001).
 // -----------------------------------------------------------------
 
-describe('Regression: Attestation meta size cap', function () {
+const PROVIDER_ID  = 'http_get';
 
-    const PROVIDER_ID  = 'http_get';
-    const MAX_RESP     = 32768;
-    const META_MAX     = 256;                         // ATTEST_META_MAX_LENGTH
-    const SENDER_PK    = 'cd'.repeat(32);
+const MAX_RESP     = 32768;
 
-    let hub, consensus;
+const META_MAX     = 256;
+                     // ATTEST_META_MAX_LENGTH
+const SENDER_PK    = 'cd'.repeat(32);
 
+let hub, consensus;
+
+function registerSuitePart1() {
     beforeEach(function () {
         hub = createMockHub();
         let providerRegistry = {
@@ -57,28 +59,32 @@ describe('Regression: Attestation meta size cap', function () {
             finalized:   false
         });
     });
+}
 
+function registerSuitePart2() {
     afterEach(function () {
         for (let [, p] of consensus.pending) { if (p.timer) clearTimeout(p.timer); }
         sinon.restore();
     });
+}
 
-    // A legitimately-sized body so the meta guard is the only gate exercised.
-    function envelope(type, metaLen) {
-        return {
-            type,
-            data: {
-                requestId:  'rid',
-                providerId: PROVIDER_ID,
-                body_b64:   'A'.repeat(16),
-                meta:       'x'.repeat(metaLen),
-                status:     'ok',
-                sig_pubkey: SENDER_PK,
-                sig:        'ee'.repeat(64)
-            }
-        };
-    }
+// A legitimately-sized body so the meta guard is the only gate exercised.
+function envelope(type, metaLen) {
+    return {
+        type,
+        data: {
+            requestId:  'rid',
+            providerId: PROVIDER_ID,
+            body_b64:   'A'.repeat(16),
+            meta:       'x'.repeat(metaLen),
+            status:     'ok',
+            sig_pubkey: SENDER_PK,
+            sig:        'ee'.repeat(64)
+        }
+    };
+}
 
+function registerSuitePart3() {
     describe('_handlePropose()', function () {
         it('rejects an oversized meta before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -95,7 +101,9 @@ describe('Regression: Attestation meta size cap', function () {
             expect(verify.calledOnce).to.equal(true);
         });
     });
+}
 
+function registerSuitePart4() {
     describe('handlePrepare()', function () {
         it('rejects an oversized meta before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
@@ -110,4 +118,12 @@ describe('Regression: Attestation meta size cap', function () {
             expect(verify.calledOnce).to.equal(true);
         });
     });
+}
+
+describe('Regression: Attestation meta size cap', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+
 });
