@@ -23,8 +23,7 @@ const { ORACLE_DEVIATION_THRESHOLD } = require('../../src/constants');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
-describe('deviation_band helper (shared band)', function () {
-
+function registerDeviationTests() {
     describe('deviationFrom / exceedsBand', function () {
         it('computes |value - reference| / reference symmetrically in sign', function () {
             expect(bcmath.bcstr(devband.deviationFrom('105', '100', 18))).to.equal('0.05');
@@ -43,7 +42,9 @@ describe('deviation_band helper (shared band)', function () {
             expect(devband.exceedsBand('105.0000001', '100', 0.05, 18)).to.be.true;
         });
     });
+}
 
+function registerSpreadTests() {
     describe('twoSourceSpread', function () {
         it('equals each submitter\'s mean-relative deviation ((hi-lo)/(hi+lo))', function () {
             // lo=100, hi=110.4: mean=105.2, per-submitter deviation 5.2/105.2
@@ -64,7 +65,9 @@ describe('deviation_band helper (shared band)', function () {
             expect(devband.twoSourceSpreadExceeds('100', '110.6', 0.05, 8)).to.be.true;
         });
     });
+}
 
+function registerCosignAlignmentTests() {
     // The seq-2400 divergence window itself, end to end through _handlePropose:
     // leader's 2-source gate accepts {100000, 110400} (spread 0.04943 <= 0.05) and
     // proposes the mean 105200; the low-side follower (local 100000) must now
@@ -123,7 +126,9 @@ describe('deviation_band helper (shared band)', function () {
             expect(oc.pendingRounds.has(ROUND)).to.be.false;
         });
     });
+}
 
+function registerSlashAlignmentTests() {
     describe('SlashDetector alignment (behavior-preserving)', function () {
         it('slash band formula matches devband.deviationFrom against the finalized price', function () {
             // The same 105200-finalized round: the 100000 submitter is INSIDE the 5%
@@ -134,4 +139,11 @@ describe('deviation_band helper (shared band)', function () {
             expect(devband.exceedsBand('110600', '105200', ORACLE_DEVIATION_THRESHOLD, 18)).to.be.true;
         });
     });
+}
+
+describe('deviation_band helper (shared band)', function () {
+    registerDeviationTests();
+    registerSpreadTests();
+    registerCosignAlignmentTests();
+    registerSlashAlignmentTests();
 });
