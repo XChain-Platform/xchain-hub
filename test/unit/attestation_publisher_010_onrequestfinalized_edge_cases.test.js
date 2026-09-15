@@ -107,88 +107,31 @@ function readQueue(file) {
 // request, which is the longest provider deadline_window_blocks.
 
 {
-const hookAt2846 = function () { sinon.restore(); };
+const hookAt42857 = function () {
+        sinon.restore();
+    };
 
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('reads failover tuning from p2pConfig', function () {
-        const hub = makeHub(MY_PUB, {
-            p2pConfig: {
-                ATTESTATION_FAILOVER_WINDOW_BLOCKS: '5',
-                ATTESTATION_FAILOVER_POLL_MS:       '15000',
-                ATTESTATION_LEADER_RETRY_MS:        '45000',
-                ATTESTATION_BLOCK_MS:               '120000',
-                ATTESTATION_QUEUE_PATH:             '/tmp/test-queue.jsonl'
-            }
-        });
-        const pub = new AttestationPublisher(hub);
-        expect(pub.failoverWindowBlocks).to.equal(5);
-        expect(pub.failoverPollMs).to.equal(15000);
-        expect(pub.leaderRetryMs).to.equal(45000);
-        expect(pub.approxBlockMs).to.equal(120000);
-        expect(pub.queuePath).to.equal('/tmp/test-queue.jsonl');
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('falls back to env vars for tuning', function () {
-        process.env.ATTESTATION_FAILOVER_WINDOW_BLOCKS = '7';
-        process.env.ATTESTATION_FAILOVER_POLL_MS       = '20000';
-        process.env.ATTESTATION_LEADER_RETRY_MS        = '90000';
-        process.env.ATTESTATION_BLOCK_MS               = '300000';
-        process.env.ATTESTATION_QUEUE_PATH             = '/tmp/env-queue.jsonl';
-        try {
-            const pub = new AttestationPublisher(makeHub(MY_PUB));
-            expect(pub.failoverWindowBlocks).to.equal(7);
-            expect(pub.failoverPollMs).to.equal(20000);
-            expect(pub.leaderRetryMs).to.equal(90000);
-            expect(pub.approxBlockMs).to.equal(300000);
-            expect(pub.queuePath).to.equal('/tmp/env-queue.jsonl');
-        } finally {
-            delete process.env.ATTESTATION_FAILOVER_WINDOW_BLOCKS;
-            delete process.env.ATTESTATION_FAILOVER_POLL_MS;
-            delete process.env.ATTESTATION_LEADER_RETRY_MS;
-            delete process.env.ATTESTATION_BLOCK_MS;
-            delete process.env.ATTESTATION_QUEUE_PATH;
-        }
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('wires up encoder from env vars when BTC_ENCODER_URL is set', function () {
-        process.env.BTC_ENCODER_URL     = 'http://encoder.local:3000';
-        process.env.BTC_ENCODER_API_KEY = 'key123';
-        process.env.BTC_ADDRESS         = '1ABCaddress';
-        process.env.BTC_PUBKEY_HEX      = 'ab'.repeat(33);
-        try {
-            const pub = new AttestationPublisher(makeHub(MY_PUB));
-            expect(pub.encoder).to.not.be.null;
-            expect(pub.btcAddress).to.equal('1ABCaddress');
-            expect(pub.btcPubkeyHex).to.equal('ab'.repeat(33));
-        } finally {
-            delete process.env.BTC_ENCODER_URL;
-            delete process.env.BTC_ENCODER_API_KEY;
-            delete process.env.BTC_ADDRESS;
-            delete process.env.BTC_PUBKEY_HEX;
-        }
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('leaves encoder null when no BTC_ENCODER_URL is configured', function () {
-        const pub = makePublisher();
-        expect(pub.encoder).to.be.null;
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('assigns identity from hub.getIdentity()', function () {
+describe('AttestationPublisher: onRequestFinalized edge cases', function () { afterEach(hookAt42857); it('computes responsible set from block_index when available', async function () {
         const pub = makePublisher(MY_PUB);
-        expect(pub.identity).to.exist;
-        expect(pub.identity.getPubkeyHex()).to.equal(MY_PUB);
-    }); });
+        pub.queuePath = path.join(os.tmpdir(), 'attest-blk-' + process.pid + '.jsonl');
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'tx-blk' });
+        pub.setBroadcastHook(bcast);
 
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('sets identity to null when hub has no getIdentity method', function () {
-        const hub = { p2pConfig: {}, attestationConsensus: null };
-        const pub = new AttestationPublisher(hub);
-        expect(pub.identity).to.be.null;
-    }); });
+        const computeStub = sinon.stub(pub, '_computeResponsible').resolves([MY_PUB, LEADER_PUB]);
 
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('uses empty p2pConfig when hub.p2pConfig is undefined (hub.p2pConfig || {} branch)', function () {
-        // This exercises the `hub.p2pConfig || {}` fallback on line 75.
-        const hub = { getIdentity: () => null, attestationConsensus: null };
-        // p2pConfig deliberately omitted
-        const pub = new AttestationPublisher(hub);
-        expect(pub.queuePath).to.be.a('string');
+        await pub.onRequestFinalized({
+            requestId:    '77'.repeat(32),
+            providerId:   'http_get',
+            responseBody: Buffer.from('ok'),
+            status:       'ok',
+            meta:         '',
+            signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
+            request:      { block_index: 42, redundancy: 2 }
+            // no leaderPubkey, uses responsible[0]
+        });
+
+        expect(computeStub.calledOnce).to.equal(true);
+        try { fs.unlinkSync(pub.queuePath); } catch (_) {}
     }); });
 }

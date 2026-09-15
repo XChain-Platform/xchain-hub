@@ -107,88 +107,42 @@ function readQueue(file) {
 // request, which is the longest provider deadline_window_blocks.
 
 {
-const hookAt2846 = function () { sinon.restore(); };
+// A hub can be closed and reopened inside one process (every multi-hub test venue
+    // does it). The publisher subscribes to 'request:finalized' in start(), so if that
+    // subscription cannot be removed, each cycle leaves the previous lifetime's
+    // publisher listening and one finalized response fans out to all of them, every
+    // copy racing for the same spend reservation.
+    const { EventEmitter } = require('events');
 
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('reads failover tuning from p2pConfig', function () {
-        const hub = makeHub(MY_PUB, {
-            p2pConfig: {
-                ATTESTATION_FAILOVER_WINDOW_BLOCKS: '5',
-                ATTESTATION_FAILOVER_POLL_MS:       '15000',
-                ATTESTATION_LEADER_RETRY_MS:        '45000',
-                ATTESTATION_BLOCK_MS:               '120000',
-                ATTESTATION_QUEUE_PATH:             '/tmp/test-queue.jsonl'
-            }
-        });
+function hubWithConsensus() {
+        const consensus = new EventEmitter();
+        return { hub: makeHub(MY_PUB, { attestationConsensus: consensus }), consensus };
+    }
+
+describe('AttestationPublisher: the finalized subscription is detachable', function () { it('start subscribes once and stop removes exactly that subscription', async function () {
+        const { hub, consensus } = hubWithConsensus();
         const pub = new AttestationPublisher(hub);
-        expect(pub.failoverWindowBlocks).to.equal(5);
-        expect(pub.failoverPollMs).to.equal(15000);
-        expect(pub.leaderRetryMs).to.equal(45000);
-        expect(pub.approxBlockMs).to.equal(120000);
-        expect(pub.queuePath).to.equal('/tmp/test-queue.jsonl');
+        pub.queuePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'attest-pub-')), 'queue.jsonl');
+
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
+        await pub.start();
+        expect(consensus.listenerCount('request:finalized')).to.equal(1);
+        await pub.stop();
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
     }); });
 
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('falls back to env vars for tuning', function () {
-        process.env.ATTESTATION_FAILOVER_WINDOW_BLOCKS = '7';
-        process.env.ATTESTATION_FAILOVER_POLL_MS       = '20000';
-        process.env.ATTESTATION_LEADER_RETRY_MS        = '90000';
-        process.env.ATTESTATION_BLOCK_MS               = '300000';
-        process.env.ATTESTATION_QUEUE_PATH             = '/tmp/env-queue.jsonl';
-        try {
-            const pub = new AttestationPublisher(makeHub(MY_PUB));
-            expect(pub.failoverWindowBlocks).to.equal(7);
-            expect(pub.failoverPollMs).to.equal(20000);
-            expect(pub.leaderRetryMs).to.equal(90000);
-            expect(pub.approxBlockMs).to.equal(300000);
-            expect(pub.queuePath).to.equal('/tmp/env-queue.jsonl');
-        } finally {
-            delete process.env.ATTESTATION_FAILOVER_WINDOW_BLOCKS;
-            delete process.env.ATTESTATION_FAILOVER_POLL_MS;
-            delete process.env.ATTESTATION_LEADER_RETRY_MS;
-            delete process.env.ATTESTATION_BLOCK_MS;
-            delete process.env.ATTESTATION_QUEUE_PATH;
+describe('AttestationPublisher: the finalized subscription is detachable', function () { it('leaves no subscription behind across repeated start and stop cycles', async function () {
+        const { hub, consensus } = hubWithConsensus();
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-pub-'));
+
+        for (let i = 0; i < 3; i++) {
+            const pub = new AttestationPublisher(hub);
+            pub.queuePath = path.join(dir, 'queue-' + i + '.jsonl');
+            await pub.start();
+            await pub.stop();
         }
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('wires up encoder from env vars when BTC_ENCODER_URL is set', function () {
-        process.env.BTC_ENCODER_URL     = 'http://encoder.local:3000';
-        process.env.BTC_ENCODER_API_KEY = 'key123';
-        process.env.BTC_ADDRESS         = '1ABCaddress';
-        process.env.BTC_PUBKEY_HEX      = 'ab'.repeat(33);
-        try {
-            const pub = new AttestationPublisher(makeHub(MY_PUB));
-            expect(pub.encoder).to.not.be.null;
-            expect(pub.btcAddress).to.equal('1ABCaddress');
-            expect(pub.btcPubkeyHex).to.equal('ab'.repeat(33));
-        } finally {
-            delete process.env.BTC_ENCODER_URL;
-            delete process.env.BTC_ENCODER_API_KEY;
-            delete process.env.BTC_ADDRESS;
-            delete process.env.BTC_PUBKEY_HEX;
-        }
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('leaves encoder null when no BTC_ENCODER_URL is configured', function () {
-        const pub = makePublisher();
-        expect(pub.encoder).to.be.null;
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('assigns identity from hub.getIdentity()', function () {
-        const pub = makePublisher(MY_PUB);
-        expect(pub.identity).to.exist;
-        expect(pub.identity.getPubkeyHex()).to.equal(MY_PUB);
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('sets identity to null when hub has no getIdentity method', function () {
-        const hub = { p2pConfig: {}, attestationConsensus: null };
-        const pub = new AttestationPublisher(hub);
-        expect(pub.identity).to.be.null;
-    }); });
-
-describe('AttestationPublisher: constructor', function () { afterEach(hookAt2846); it('uses empty p2pConfig when hub.p2pConfig is undefined (hub.p2pConfig || {} branch)', function () {
-        // This exercises the `hub.p2pConfig || {}` fallback on line 75.
-        const hub = { getIdentity: () => null, attestationConsensus: null };
-        // p2pConfig deliberately omitted
-        const pub = new AttestationPublisher(hub);
-        expect(pub.queuePath).to.be.a('string');
+        // A leak shows as a rising count, which is why this loops rather than
+        // asserting one cycle: the first cycle passes even when stop() detaches nothing.
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
     }); });
 }
