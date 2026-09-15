@@ -22,6 +22,7 @@ const proxyquire = require('proxyquire');
 
 const { ConsensusInputMonitor, REASONS, classifyFetchError } =
     require('../../../src/validators/consensus_input_monitor.js');
+const { _resetObservability } = require('../../../src/observability');
 
 // Injected clock + log sink: the monitor's throttle and streak are
 // time-based, and a real clock would make these tests either slow or flaky.
@@ -339,6 +340,14 @@ function registerAlertThresholdTests() {
 
 describe('CapabilitySnapshot consensus-input alarms', function () {
     beforeEach(function () {
+        // Any earlier suite that loads src/api.js after scrubbing process.env
+        // takes XCHAIN_LOG_PATCH=0 away from the bootstrap, so api.js runs
+        // patchConsole() for the whole process and nothing puts it back. The
+        // shim then prefixes every line with a timestamp and level, and the
+        // assertions below anchor 'ALERT:' at index 0, so a real alert reads as
+        // a miss. Drop the process-wide handles first: this suite asserts on
+        // stock console output and must not depend on which file ran before it.
+        _resetObservability();
         axiosStub = { post: sinon.stub() };
         CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', { axios: axiosStub });
         // Silence the loud operator lines; the assertions read the monitor.
