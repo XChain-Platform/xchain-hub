@@ -27,6 +27,12 @@ const repeat = (n, value) => Array.from({ length: n }, () => ({ value }));
 
 describe('utxo_balance', function () {
 
+    registerUtxoConversionTests();
+    registerUtxoPrecisionTests();
+});
+
+function registerUtxoConversionTests() {
+
     it('converts a tracker UTXO from satoshis to whole coins', function () {
         // The tracker emits both fields off one amount: value is the satoshi
         // integer, amount is satoshiToDecimalString(value).
@@ -70,6 +76,9 @@ describe('utxo_balance', function () {
         // which cleared every floor an operator would ever configure.
         expect(sumUtxosCoins([{ value: '400000000', amount: '4.00000000' }])).to.equal(4);
     });
+}
+
+function registerUtxoPrecisionTests() {
 
     it('does not drift a wallet sitting exactly on the default floor below it', function () {
         // 100 outputs of 0.1 DOGE is exactly the default 10 DOGE floor. Summed as
@@ -116,4 +125,4 @@ describe('utxo_balance', function () {
         expect(utxoToCoins({ amount: '2.123456789' })).to.equal(2.12345678);
         expect(utxoToCoins({ amount: '2' })).to.equal(2);
     });
-});
+}
