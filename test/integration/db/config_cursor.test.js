@@ -38,10 +38,14 @@ function countLeaves(configs) {
     return n;
 }
 
+let db;
+
 describe('Integration: getallconfigs cursor (since_updated_at)', function () {
+    registerCursorHooks();
+    registerCursorTests();
+});
 
-    let db;
-
+function registerCursorHooks() {
     before(async function () {
         try {
             await testDb.setup();
@@ -59,90 +63,97 @@ describe('Integration: getallconfigs cursor (since_updated_at)', function () {
     after(async function () {
         await testDb.teardown();
     });
+}
 
-    it('returns a delta against a prior watermark, then nothing once caught up', async function () {
-        this.timeout(20000);
+function registerCursorTests() {
+    it('returns a delta against a prior watermark, then nothing once caught up', testDeltaCursor);
+    it('delivers a same-second write to a delta poll at the racing watermark', testSameSecondWrite);
+    it('treats a zero / missing cursor as a full fetch', testMissingCursor);
+}
 
-        // Seed 120 rows in a single batch (all share one updated_at second).
-        let rows = [];
-        for (let i = 0; i < 120; i++) {
-            rows.push({
-                coin:       'BTC',
-                network:    'mainnet',
-                module:     'mod' + Math.floor(i / 10),
-                paramName:  'p' + (i % 10),
-                paramValue: 'v' + i
-            });
-        }
-        await db.setParams(rows);
+async function testDeltaCursor() {
+    this.timeout(20000);
 
-        // Full fetch (no cursor): all rows + a watermark W0.
-        let all = await db.getAllConfigs();
-        let w0  = await db.getConfigWatermark();
-        expect(countLeaves(all)).to.equal(120);
-        expect(w0).to.be.a('number').and.be.above(0);
+    // Seed 120 rows in a single batch (all share one updated_at second).
+    let rows = [];
+    for (let i = 0; i < 120; i++) {
+        rows.push({
+            coin:       'BTC',
+            network:    'mainnet',
+            module:     'mod' + Math.floor(i / 10),
+            paramName:  'p' + (i % 10),
+            paramValue: 'v' + i
+        });
+    }
+    await db.setParams(rows);
 
-        // A cursor at the current watermark re-delivers the watermark second's
-        // rows (inclusive boundary, #2265) - here that is the whole seed batch.
-        let boundary = await db.getAllConfigs(w0);
-        expect(countLeaves(boundary)).to.equal(120);
+    // Full fetch (no cursor): all rows + a watermark W0.
+    let all = await db.getAllConfigs();
+    let w0  = await db.getConfigWatermark();
+    expect(countLeaves(all)).to.equal(120);
+    expect(w0).to.be.a('number').and.be.above(0);
 
-        // Cross a second boundary so the mutation lands in a fresh cursor second. The
-        // cursor is UNIX_TIMESTAMP(updated_at) on the SERVER, so poll the server clock
-        // rather than assuming 1100ms of local wall time covers it.
-        await waitUntil(async () => {
-            let rows = await db.doQuery('SELECT UNIX_TIMESTAMP() AS now');
-            return Number(rows[0].now) > w0;
-        }, { timeoutMs: 5000, intervalMs: 25, label: 'the DB clock to cross into a fresh cursor second' });
+    // A cursor at the current watermark re-delivers the watermark second's
+    // rows (inclusive boundary, #2265) - here that is the whole seed batch.
+    let boundary = await db.getAllConfigs(w0);
+    expect(countLeaves(boundary)).to.equal(120);
 
-        // Mutate exactly one row.
-        await db.setParam('BTC', 'mainnet', 'mod0', 'p0', 'changed');
-        let w1 = await db.getConfigWatermark();
-        expect(w1).to.be.above(w0);
+    // Cross a second boundary so the mutation lands in a fresh cursor second. The
+    // cursor is UNIX_TIMESTAMP(updated_at) on the SERVER, so poll the server clock
+    // rather than assuming 1100ms of local wall time covers it.
+    await waitForDbClockAfter(w0, 'the DB clock to cross into a fresh cursor second');
 
-        // Delta since W1: only the mutated row lives in the new cursor second.
-        let delta = await db.getAllConfigs(w1);
-        expect(countLeaves(delta)).to.equal(1);
-        expect(delta.BTC.mainnet.mod0.p0).to.equal('changed');
+    // Mutate exactly one row.
+    await db.setParam('BTC', 'mainnet', 'mod0', 'p0', 'changed');
+    let w1 = await db.getConfigWatermark();
+    expect(w1).to.be.above(w0);
 
-        // Once a NEWER second holds a write, an advanced cursor no longer
-        // re-delivers the old seed batch.
-        await waitUntil(async () => {
-            let rows = await db.doQuery('SELECT UNIX_TIMESTAMP() AS now');
-            return Number(rows[0].now) > w1;
-        }, { timeoutMs: 5000, intervalMs: 25, label: 'the DB clock to cross past the delta second' });
-        await db.setParam('BTC', 'mainnet', 'mod0', 'p1', 'later');
-        let w2 = await db.getConfigWatermark();
-        expect(w2).to.be.above(w1);
-        let caughtUp = await db.getAllConfigs(w2);
-        expect(countLeaves(caughtUp)).to.equal(1);
-        expect(caughtUp.BTC.mainnet.mod0.p1).to.equal('later');
-    });
+    // Delta since W1: only the mutated row lives in the new cursor second.
+    let delta = await db.getAllConfigs(w1);
+    expect(countLeaves(delta)).to.equal(1);
+    expect(delta.BTC.mainnet.mod0.p0).to.equal('changed');
 
-    // Regression for #2265: a write committed AFTER the watermark read but
-    // stamped in the SAME epoch-second must still be delivered to a delta
-    // consumer polling with that watermark. Under the old strict `>` boundary
-    // it was silently dropped forever (until a full re-fetch).
-    it('delivers a same-second write to a delta poll at the racing watermark', async function () {
-        this.timeout(20000);
-        await db.setParam('BTC', 'mainnet', 'race', 'seed', 'v0');
-        let w0 = await db.getConfigWatermark();
-        // Written immediately after the watermark read: usually lands in the
-        // same second (the race this pins); if the clock ticks over it lands in
-        // a later second - the inclusive boundary delivers it either way.
-        await db.setParam('BTC', 'mainnet', 'race', 'late', 'v1');
-        let delta = await db.getAllConfigs(w0);
-        expect(delta.BTC && delta.BTC.mainnet && delta.BTC.mainnet.race
-            && delta.BTC.mainnet.race.late).to.equal('v1');
-    });
+    // Once a NEWER second holds a write, an advanced cursor no longer
+    // re-delivers the old seed batch.
+    await waitForDbClockAfter(w1, 'the DB clock to cross past the delta second');
+    await db.setParam('BTC', 'mainnet', 'mod0', 'p1', 'later');
+    let w2 = await db.getConfigWatermark();
+    expect(w2).to.be.above(w1);
+    let caughtUp = await db.getAllConfigs(w2);
+    expect(countLeaves(caughtUp)).to.equal(1);
+    expect(caughtUp.BTC.mainnet.mod0.p1).to.equal('later');
+}
 
-    it('treats a zero / missing cursor as a full fetch', async function () {
-        await db.setParam('LTC', 'testnet', 'decoder', 'host', 'dec-host');
-        await db.setParam('LTC', 'testnet', 'decoder', 'port', '3309');
+async function waitForDbClockAfter(watermark, label) {
+    await waitUntil(async () => {
+        let rows = await db.doQuery('SELECT UNIX_TIMESTAMP() AS now');
+        return Number(rows[0].now) > watermark;
+    }, { timeoutMs: 5000, intervalMs: 25, label });
+}
 
-        let viaZero    = await db.getAllConfigs(0);
-        let viaMissing = await db.getAllConfigs();
-        expect(countLeaves(viaZero)).to.equal(2);
-        expect(countLeaves(viaMissing)).to.equal(2);
-    });
-});
+// Regression for #2265: a write committed AFTER the watermark read but
+// stamped in the SAME epoch-second must still be delivered to a delta
+// consumer polling with that watermark. Under the old strict `>` boundary
+// it was silently dropped forever (until a full re-fetch).
+async function testSameSecondWrite() {
+    this.timeout(20000);
+    await db.setParam('BTC', 'mainnet', 'race', 'seed', 'v0');
+    let w0 = await db.getConfigWatermark();
+    // Written immediately after the watermark read: usually lands in the
+    // same second (the race this pins); if the clock ticks over it lands in
+    // a later second - the inclusive boundary delivers it either way.
+    await db.setParam('BTC', 'mainnet', 'race', 'late', 'v1');
+    let delta = await db.getAllConfigs(w0);
+    expect(delta.BTC && delta.BTC.mainnet && delta.BTC.mainnet.race
+        && delta.BTC.mainnet.race.late).to.equal('v1');
+}
+
+async function testMissingCursor() {
+    await db.setParam('LTC', 'testnet', 'decoder', 'host', 'dec-host');
+    await db.setParam('LTC', 'testnet', 'decoder', 'port', '3309');
+
+    let viaZero    = await db.getAllConfigs(0);
+    let viaMissing = await db.getAllConfigs();
+    expect(countLeaves(viaZero)).to.equal(2);
+    expect(countLeaves(viaMissing)).to.equal(2);
+}
