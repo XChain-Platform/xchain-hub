@@ -110,6 +110,10 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
         });
     }
 
+    registerMaxTokensBoundTests(anthropicMaxTokensFor);
+});
+
+function registerMaxTokensBoundTests(anthropicMaxTokensFor) {
     it('installs a valid positive-integer budget', async function () {
         expect(await anthropicMaxTokensFor({ max_completion_tokens: 2048 })).to.equal(2048);
     });
@@ -152,7 +156,7 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
         });
         expect(sent).to.equal(1024 + 2048);
     });
-});
+}
 
 // the Anthropic branch emitted `temperature` for every model, but the
 // Opus 4.7+ / Sonnet 5 / Fable 5 contract REMOVED the sampling parameters (HTTP 400,
@@ -176,6 +180,10 @@ describe('llm provider, anthropic sampling-parameter gate (#4464)', function () 
         });
     }
 
+    registerSamplingGateTests(withApiKey, anthropicBodyForModel);
+});
+
+function registerSamplingGateTests(withApiKey, anthropicBodyForModel) {
     it('classifies the sampling-free Anthropic families, bare and dated', function () {
         const llm = _reloadProvider();
         for (const id of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
@@ -221,7 +229,7 @@ describe('llm provider, anthropic sampling-parameter gate (#4464)', function () 
         expect(captured.model).to.equal('claude-opus-4-7');
         expect(captured).to.not.have.property('temperature');
     });
-});
+}
 
 // item 3890: max_tokens and temperature are requester-supplied numerics that used to
 // reach the vendor body unvalidated. The damage was not a uniform 400 - it forked three
@@ -241,6 +249,11 @@ describe('llm provider, envelope numeric bounds', function () {
         return err;
     }
 
+    registerEnvelopeRejectTests(rejects);
+    registerEnvelopeTemperatureTests(rejects);
+});
+
+function registerEnvelopeRejectTests(rejects) {
     it('rejects a negative max_tokens instead of clamping it', async function () {
         expect((await rejects({ max_tokens: -1 })).message).to.match(/max_tokens must be a positive integer/);
     });
@@ -278,7 +291,9 @@ describe('llm provider, envelope numeric bounds', function () {
         expect((await rejects({ temperature: 5 })).message).to.match(/temperature must be a number in \[0, 2\]/);
         expect((await rejects({ temperature: -3 })).message).to.match(/temperature must be a number in \[0, 2\]/);
     });
+}
 
+function registerEnvelopeTemperatureTests(rejects) {
     // Anthropic caps at 1 where OpenAI chat allows 2, so the bound is vendor-resolved
     // once the model is pinned. Same pinned model + pinned vendor map on every validator,
     // so the split verdict is still deterministic.
@@ -311,7 +326,7 @@ describe('llm provider, envelope numeric bounds', function () {
             expect(capturedBody.temperature).to.equal(0);
         });
     });
-});
+}
 
 // The vendor bound on an explicit envelope.temperature never covered the GOVERNANCE
 // default, which fetch() falls back to whenever the envelope omits the field. An
@@ -401,6 +416,16 @@ describe('llm provider, fetch via anthropic_api', function () {
         }
     }
 
+    registerApiFetchResponseTests(withApiKey);
+    registerApiFetchEnvelopeTests(withApiKey);
+    registerApiFetchAuditAndSystemTests(withApiKey);
+    registerApiFetchErrorTests(withApiKey);
+    registerApiFetchEmptyAndEnvTests(withApiKey);
+    registerApiFetchModelPinTests(withApiKey);
+    registerApiJudgePinTests(withApiKey);
+});
+
+function registerApiFetchResponseTests(withApiKey) {
     it('returns { body, meta } from a successful Anthropic API call', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -446,7 +471,9 @@ describe('llm provider, fetch via anthropic_api', function () {
             expect(err.transient).to.equal(false);
         });
     }
+}
 
+function registerApiFetchEnvelopeTests(withApiKey) {
     it('still returns a complete Anthropic response whose stop_reason is end_turn', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -496,7 +523,9 @@ describe('llm provider, fetch via anthropic_api', function () {
 
         expect(capturedBody.temperature).to.equal(0.7);
     });
+}
 
+function registerApiFetchAuditAndSystemTests(withApiKey) {
     // - the audit wraps the dispatch, so it must cover the HTTP
     // transports too, not only the CLI branch its own tests live in.
     it('writes an intent/settle pair carrying real usage on the API transport', async function () {
@@ -543,7 +572,9 @@ describe('llm provider, fetch via anthropic_api', function () {
 
         expect(capturedBody.system).to.equal('You are helpful.');
     });
+}
 
+function registerApiFetchErrorTests(withApiKey) {
     it('rejects when the Anthropic API returns an error payload', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -594,7 +625,9 @@ describe('llm provider, fetch via anthropic_api', function () {
         expect(err).to.exist;
         expect(err.message).to.match(/request error/);
     });
+}
 
+function registerApiFetchEmptyAndEnvTests(withApiKey) {
     it('throws when the API returns empty text (no text content items)', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -638,7 +671,9 @@ describe('llm provider, fetch via anthropic_api', function () {
         expect(result).to.exist;
         expect(capturedBody.model).to.equal('claude-sonnet-4-6');  // pinnedModel wins, env disregarded
     });
+}
 
+function registerApiFetchModelPinTests(withApiKey) {
     it('fetch() uses options.pinnedModel for the request model', async function () {
         const llm = _reloadProvider();
         let capturedBody;
@@ -682,7 +717,9 @@ describe('llm provider, fetch via anthropic_api', function () {
         );
         expect(capturedBody.model).to.equal('claude-sonnet-4-6');  // default APPROVED_MODELS[0]
     });
+}
 
+function registerApiJudgePinTests(withApiKey) {
     it('agree() uses options.pinnedJudgeModel for the judge call', async function () {
         const llm = _reloadProvider();
         let capturedBody;
@@ -730,7 +767,7 @@ describe('llm provider, fetch via anthropic_api', function () {
         const health = await withApiKey(() => llm.healthCheck({ defaultConfigDir: require('path').join(require('os').tmpdir(), 'noexist') }));
         expect(health.tokenUsage.calls).to.be.at.least(2);
     });
-});
+}
 
 // ---- agree() multi-proposal judge paths via anthropic_api -----------------
 
@@ -764,6 +801,15 @@ describe('llm provider, agree judge_model paths', function () {
         }
     }
 
+    registerJudgeVerdictTests(withApiKey);
+    registerJudgeParseFailureTests(withApiKey);
+    registerJudgeEdgeTests(withApiKey);
+    registerJudgeBodyTests(withApiKey);
+    registerJudgeTruncationTests(withApiKey);
+    registerJudgeFramingTests(withApiKey);
+});
+
+function registerJudgeVerdictTests(withApiKey) {
     it('returns the canonical proposal when judge says equivalent=true', async function () {
         const llm = _reloadProvider();
         // Judge returns equivalent=true, canonical_index=1 (1-indexed)
@@ -801,7 +847,9 @@ describe('llm provider, agree judge_model paths', function () {
         const result = await withApiKey(() => llm.agree(proposals));
         expect(result).to.be.null;
     });
+}
 
+function registerJudgeParseFailureTests(withApiKey) {
     it('returns null when judge returns JSON wrapped in markdown prose (extraction fails)', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -860,7 +908,9 @@ describe('llm provider, agree judge_model paths', function () {
         const result = await withApiKey(() => llm.agree(proposals));
         expect(result).to.be.null;
     });
+}
 
+function registerJudgeEdgeTests(withApiKey) {
     it('returns null when judge returns equivalent=true but out-of-range canonical_index', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
@@ -911,7 +961,9 @@ describe('llm provider, agree judge_model paths', function () {
         const result = await withApiKey(() => llm.agree(proposals));
         expect(result).to.be.null;
     });
+}
 
+function registerJudgeBodyTests(withApiKey) {
     it('returns null when judge returns empty text (judgeText falsy branch)', async function () {
         // Line 145: `if (!judgeText) return null`
         // Simulate judge returning a response with NO text content items → empty string → falsy
@@ -952,7 +1004,9 @@ describe('llm provider, agree judge_model paths', function () {
         // canonical_index=1 → proposals[0], which has null body, returned as-is
         expect(result).to.not.be.null;
     });
+}
 
+function registerJudgeTruncationTests(withApiKey) {
     it('fails closed to no_quorum when the judge selects a truncated candidate', async function () {
         // A candidate longer than MAX_JUDGE_CANDIDATE_CHARS (4096) is only
         // partially shown to the judge; finalizing its full untruncated body
@@ -997,7 +1051,9 @@ describe('llm provider, agree judge_model paths', function () {
         expect(result).to.not.be.null;
         expect(result.body.toString('utf8')).to.equal(atCap);
     });
+}
 
+function registerJudgeFramingTests(withApiKey) {
     it('carries the judge rubric and SECURITY framing in the system role, candidates only in the user turn', async function () {
         const llm = _reloadProvider();
         let capturedBody = null;
@@ -1025,7 +1081,7 @@ describe('llm provider, agree judge_model paths', function () {
         expect(userMsg).to.include('The capital is Paris.');
         expect(userMsg).to.not.include('You are an evaluator');
     });
-});
+}
 
 // ---- callAnthropic error format edge cases --------------------------------
 
@@ -1058,6 +1114,10 @@ describe('llm provider, callAnthropic error format edge cases', function () {
         }
     }
 
+    registerErrorFormatTests(withApiKey);
+});
+
+function registerErrorFormatTests(withApiKey) {
     it('rejects with JSON.stringify of error payload when json.error has no message field', async function () {
         // Line 264: `json.error.message ? json.error.message : JSON.stringify(json)`. The stringify branch
         const llm = _reloadProvider();
@@ -1102,7 +1162,7 @@ describe('llm provider, callAnthropic error format edge cases', function () {
         expect(err).to.exist;
         expect(err.message).to.match(/Anthropic API/);
     });
-});
+}
 
 // ---- Multi-vendor fallback chain (Phase 4) ---------------------------------
 
@@ -1110,6 +1170,11 @@ describe('llm provider, vendor inference', function () {
 
     afterEach(function () { sinon.restore(); });
 
+    registerVendorMapTests();
+    registerVendorPinningTests();
+});
+
+function registerVendorMapTests() {
     it('maps claude-* to anthropic and gpt-*/o-series to openai', function () {
         const llm = _reloadProvider();
         expect(llm._vendorOfModel('claude-sonnet-4-6')).to.equal('anthropic');
@@ -1149,7 +1214,9 @@ describe('llm provider, vendor inference', function () {
         expect(() => llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' }))
             .to.throw(/cannot infer vendor/);
     });
+}
 
+function registerVendorPinningTests() {
     // #7167: the divergence the exclusivity rule exists to stop. Same block-anchored
     // request, two hubs at different hotReload states; without exclusivity the reloaded
     // one routes claude-sonnet-4-6 to OpenAI and the laggard to Anthropic, prompting two
@@ -1191,7 +1258,7 @@ describe('llm provider, vendor inference', function () {
             expect(err.message).to.match(/cannot infer vendor/);
         });
     });
-});
+}
 
 // #7168: the HTTP status decides whether a response is a completion; the body's
 // shape only says which vendor wrote the error. Both transports asked the second
@@ -1328,6 +1395,16 @@ describe('llm provider, judge fallback chain', function () {
         { body: Buffer.from('answer A.'), meta: 'claude-sonnet-4-6' }
     ];
 
+    registerJudgeChainFallbackTests(PROPOSALS);
+    registerJudgeChainUnreachableTests(PROPOSALS);
+    registerSpentBudgetSuite(PROPOSALS);
+    registerJudgeChainOutcomeTests(PROPOSALS);
+    registerJudgeChainTruncationTests(PROPOSALS);
+    registerJudgeChainHardErrorTests(PROPOSALS);
+    registerJudgeChainBudgetTests(PROPOSALS);
+});
+
+function registerJudgeChainFallbackTests(PROPOSALS) {
     it('falls back to an alternate-vendor judge when the pinned judge vendor is down', async function () {
         await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
             const llm = _reloadProvider();
@@ -1380,7 +1457,9 @@ describe('llm provider, judge fallback chain', function () {
             expect(winner.body.toString('utf8')).to.equal('answer A');
         });
     });
+}
 
+function registerJudgeChainUnreachableTests(PROPOSALS) {
     it('marks options.outcome as inconclusive (not a real verdict) when the whole judge chain is unreachable', async function () {
         await _withEnv({}, async () => {
             const llm = _reloadProvider();
@@ -1392,7 +1471,9 @@ describe('llm provider, judge fallback chain', function () {
             expect(outcome.reason).to.equal('unreachable');
         });
     });
+}
 
+function registerSpentBudgetSuite(PROPOSALS) {
     // A spent per-window budget is hub-global (one SpendGuard for every model and
     // vendor), so the fallback chain must stop before dialing anything and record a
     // budget reason rather than walking every model and stamping 'unreachable'.
@@ -1436,7 +1517,9 @@ describe('llm provider, judge fallback chain', function () {
             });
         });
     });
+}
 
+function registerJudgeChainOutcomeTests(PROPOSALS) {
     it('marks options.outcome as inconclusive on a truncated-candidate fail-closed pick', async function () {
         await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
             const llm = _reloadProvider();
@@ -1474,7 +1557,9 @@ describe('llm provider, judge fallback chain', function () {
             expect(seenBudget).to.equal(2048);
         });
     });
+}
 
+function registerJudgeChainTruncationTests(PROPOSALS) {
     // #2489: a finish_reason 'length' with empty content is budget exhaustion, a
     // reached-judge outcome. It must be classified (not returned as an empty
     // verdict), defer to no_quorum, and NOT advance the chain to a fallback model.
@@ -1519,7 +1604,9 @@ describe('llm provider, judge fallback chain', function () {
             expect(outcome.reason).to.equal('judge_truncation');
         });
     });
+}
 
+function registerJudgeChainHardErrorTests(PROPOSALS) {
     // item 3481: a reached judge can also fail hard for reasons that are NOT a model
     // refusal (a 4xx from a retired model id, an auth misconfiguration, a non-zero
     // claude CLI exit). Those arrive with err.transient false and err.kind undefined.
@@ -1555,7 +1642,9 @@ describe('llm provider, judge fallback chain', function () {
             expect(outcome.reason).to.equal('judge_refusal');
         });
     });
+}
 
+function registerJudgeChainBudgetTests(PROPOSALS) {
     // #2746: the judge budget is a single deadline shared across the whole fallback
     // chain, not a per-attempt allowance. With no budget left, the chain must stop
     // advancing rather than fire another full-budget attempt (k+1 x timeoutMs).
@@ -1589,12 +1678,16 @@ describe('llm provider, judge fallback chain', function () {
             expect(outcome.inconclusive).to.not.equal(true);
         });
     });
-});
+}
 
 describe('llm provider, multi-vendor healthCheck', function () {
 
     afterEach(function () { sinon.restore(); });
 
+    registerMultiVendorHealthTests();
+});
+
+function registerMultiVendorHealthTests() {
     it('is ok with primary-vendor creds; missing fallback vendors are reported, not fatal', async function () {
         const result = await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
             const llm = _reloadProvider();
@@ -1651,7 +1744,7 @@ describe('llm provider, multi-vendor healthCheck', function () {
         expect(result.ok).to.equal(false);
         expect(result.vendors).to.deep.equal({ anthropic: false, openai: true });
     });
-});
+}
 
 // ---- hub-credentials vendor resolution -------------------------------------
 
