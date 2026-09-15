@@ -23,7 +23,7 @@ const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/
 const diagnostics       = require('../../src/consensus/diagnostics');
 const observability     = require('../../src/observability');
 
-describe('consensus diagnostics: silent PBFT drops become records (AT2)', function () {
+{
 
     let hub, oc, oracleRound, sink;
 
@@ -60,37 +60,7 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         return line ? Number(line.trim().split(' ').pop()) : 0;
     }
 
-    beforeEach(function () {
-        observability._resetObservability();
-        diagnostics.resetDiagnostics();
-        sink = { lines: [] };
-        const push = (m) => sink.lines.push(m);
-        observability.installObservability(null, {
-            service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
-        });
-
-        hub = createMockHub({ validatorAddr: VALSET[1].addr });   // we are val-b, a follower
-        // A real federated hub always resolves a BTC tip of its own, and the follower
-        // now bounds the leader-stamped btcBlockHeight against it, so the fixture has
-        // to model one. Same height the PROPOSE carries: an honest round in lockstep.
-        hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
-        oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
-        // A federated hub refuses a round with no deterministic capability snapshot, so the
-        // harness models one over the same validators: these cases are about something else,
-        // not about the snapshot being unreachable.
-        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALSET);
-        oc = new OracleConsensus(hub, oracleRound);
-        oc.setValidatorSet(VALSET);
-        oc._lastFinalizedPrices = new Map([['BTC/USD', '100.00000000']]);
-    });
-
-    afterEach(function () {
-        oc.stop();
-        sinon.restore();
-        observability._resetObservability();
-        diagnostics.resetDiagnostics();
-    });
-
+function registerDigestDropTests() {
     it('records a PREPARE whose digest disagrees with the pending round', async function () {
         const digest = oc._digest(ROUND, PRICES);
         await oc._handlePropose(proposeEnvelope(digest));
@@ -121,7 +91,9 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         expect(drops('unknown_sender')).to.have.lengthOf(1);
         expect(counterValue('unknown_sender', 'prepare')).to.equal(1);
     });
+}
 
+function registerBufferDropTests() {
     it('records an early-buffer entry that ages out unread, with how many votes were lost', function () {
         const digest = oc._digest(ROUND, PRICES);
         oc.handlePrepare(voteEnvelope('ORACLE_PREPARE', VALSET[2].addr, digest));
@@ -146,7 +118,9 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         expect(drops('early_capacity')).to.have.lengthOf(3);
         expect(counterValue('early_capacity', 'buffer')).to.equal(3);
     });
+}
 
+function registerDistinctDropTest() {
     it('gives the three AT2 reasons distinct records and distinct counter series', async function () {
         hub._peerManager.validatorPubkeys = new Map(VALSET.map(v => [v.addr, v.pubkey]));
         const digest = oc._digest(ROUND, PRICES);
@@ -164,12 +138,9 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         expect(counterValue('unknown_sender', 'prepare')).to.equal(1);
         expect(counterValue('early_ttl', 'buffer')).to.equal(1);
     });
-});
+}
 
-describe('consensus diagnostics: unknown-sender throttling', function () {
-    const { noteDrop, stampRemoteIp, remoteIpOf, DEDUPE_MAX_KEYS, REMOTE_IP } = diagnostics;
-    let sink;
-
+describe('consensus diagnostics: silent PBFT drops become records (AT2)', function () {
     beforeEach(function () {
         observability._resetObservability();
         diagnostics.resetDiagnostics();
@@ -178,12 +149,37 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
         observability.installObservability(null, {
             service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
         });
+        hub = createMockHub({ validatorAddr: VALSET[1].addr });   // we are val-b, a follower
+        // A real federated hub always resolves a BTC tip of its own, and the follower
+        // now bounds the leader-stamped btcBlockHeight against it, so the fixture has
+        // to model one. Same height the PROPOSE carries: an honest round in lockstep.
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
+        oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators: these cases are about something else,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALSET);
+        oc = new OracleConsensus(hub, oracleRound);
+        oc.setValidatorSet(VALSET);
+        oc._lastFinalizedPrices = new Map([['BTC/USD', '100.00000000']]);
     });
     afterEach(function () {
+        oc.stop();
+        sinon.restore();
         observability._resetObservability();
         diagnostics.resetDiagnostics();
     });
+    registerDigestDropTests();
+    registerBufferDropTests();
+    registerDistinctDropTest();
+});
+}
 
+{
+    const { noteDrop, stampRemoteIp, remoteIpOf, DEDUPE_MAX_KEYS, REMOTE_IP } = diagnostics;
+    let sink;
+
+function registerThrottleBehaviorTests() {
     it('throttles a flood from one IP to one line while still counting every drop', function () {
         const env = stampRemoteIp({ sender: 'ws://x:1' }, '203.0.113.9');
         for (let i = 0; i < 50; i++) noteDrop({ reason: 'unknown_sender', phase: 'prepare', envelope: env });
@@ -224,7 +220,9 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
             .find(l => l.startsWith('xchain_pbft_drop_dedupe_evictions_total')) || '0 0').trim().split(' ').pop());
         expect(evicted).to.be.greaterThan(0);
     });
+}
 
+function registerThrottleSafetyTests() {
     it('never lets the stamped IP reach a serialized envelope', function () {
         // The stamp is a non-enumerable Symbol key precisely so it cannot ride
         // into a persisted row, a re-broadcast payload or a signature preimage.
@@ -244,10 +242,9 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
         noteDrop({ reason: 'not_a_real_reason', phase: 'prepare' });
         expect(observability.getRegistry().render()).to.include('reason="unknown_reason"');
     });
-});
+}
 
-describe('consensus diagnostics: checkpoint cadence stalls', function () {
-    let sink;
+describe('consensus diagnostics: unknown-sender throttling', function () {
     beforeEach(function () {
         observability._resetObservability();
         diagnostics.resetDiagnostics();
@@ -261,7 +258,14 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         observability._resetObservability();
         diagnostics.resetDiagnostics();
     });
+    registerThrottleBehaviorTests();
+    registerThrottleSafetyTests();
+});
+}
 
+{
+    let sink;
+function registerStallCountTest() {
     it('records every stalled tick, not one in sixty', function () {
         // The prose line beside this is throttled so a persistent stall does not
         // flood an operator's tail. The record must NOT share that throttle: a
@@ -282,7 +286,9 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         expect(records[0]).to.include('reason="no qualified oracle_publish validator set"');
         expect(records[4]).to.include('stalls=5');
     });
+}
 
+function registerStallContextTests() {
     it('carries the block it could not lead, and says unknown rather than dropping the field', function () {
         const StateCheckpointEngine = require('../../src/anchor/checkpoint_engine');
         const engine = Object.create(StateCheckpointEngine.prototype);
@@ -315,4 +321,23 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         expect(rec).to.not.include('BTC');
         expect(rec).to.not.include('seq=');
     });
+}
+
+describe('consensus diagnostics: checkpoint cadence stalls', function () {
+    beforeEach(function () {
+        observability._resetObservability();
+        diagnostics.resetDiagnostics();
+        sink = { lines: [] };
+        const push = (m) => sink.lines.push(m);
+        observability.installObservability(null, {
+            service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
+        });
+    });
+    afterEach(function () {
+        observability._resetObservability();
+        diagnostics.resetDiagnostics();
+    });
+    registerStallCountTest();
+    registerStallContextTests();
 });
+}
