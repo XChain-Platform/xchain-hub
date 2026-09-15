@@ -42,6 +42,58 @@ function makeMockEncoder() {
     };
 }
 
+
+function utxoSet(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push({ txid: 'a'.repeat(64), vout: i, value: 100000 });
+    return out;
+}
+
+function oraclePublisherWith(utxos) {
+    const pub = new OraclePublisher({});
+    const encoder = makeMockEncoder();
+    encoder.getUtxos = sinon.stub().resolves(utxos);
+    pub.encoder       = encoder;
+    pub.walletSignFn  = () => Promise.resolve('00'.repeat(32));
+    pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
+    pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
+    return { pub, encoder };
+}
+
+// Same stub, answering the way the real create_tx answers a P2SH build.
+function faithfulP2shEncoder() {
+    const encoder = makeMockEncoder();
+    const inner = encoder.createTx;
+    encoder.createTx = function (args) {
+        return inner.call(this, args).then(() => ({
+            psbt: 'deadbeef', encoding: 'P2SH', carrierScripts: ['00ff', '11ee']
+        }));
+    };
+    return encoder;
+}
+
+// A create_tx answer shaped the way the real encoder answers: `reservation` rides on
+// every successful build, whatever the encoding.
+function reservingEncoder(over) {
+    const encoder = makeMockEncoder();
+    const inner = encoder.createTx;
+    encoder.createTx = function (args) {
+        return inner.call(this, args).then(() => Object.assign({
+            psbt: 'deadbeef', reservation: { id: 'f'.repeat(32) }
+        }, over || {}));
+    };
+    encoder.releaseInputs = sinon.stub().resolves({ found: true });
+    return encoder;
+}
+
+function oraclePub(encoder, walletSign) {
+    const pub = new OraclePublisher({});
+    pub.encoder       = encoder;
+    pub.walletSignFn  = walletSign || sinon.stub().resolves('00'.repeat(32));
+    pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
+    pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
+    return pub;
+}
 describe('Publisher defaultBroadcast: pubkey field carries base58check address', function () {
 
     afterEach(function () {
@@ -81,6 +133,7 @@ describe('Publisher defaultBroadcast: pubkey field carries base58check address',
         expect(encoder.createTxArgs.pubkey).to.not.equal(pub.dogePubkeyHex);
         expect(result.txid).to.equal('broadcast-txid');
     });
+
 });
 
 // The encoder rejects a CALLER-SUPPLIED utxos array longer than MAX_UTXO_COUNT
@@ -93,23 +146,6 @@ describe('Publisher defaultBroadcast: oversized UTXO sets route to the encoder s
     afterEach(function () {
         sinon.restore();
     });
-
-    function utxoSet(n) {
-        const out = [];
-        for (let i = 0; i < n; i++) out.push({ txid: 'a'.repeat(64), vout: i, value: 100000 });
-        return out;
-    }
-
-    function oraclePublisherWith(utxos) {
-        const pub = new OraclePublisher({});
-        const encoder = makeMockEncoder();
-        encoder.getUtxos = sinon.stub().resolves(utxos);
-        pub.encoder       = encoder;
-        pub.walletSignFn  = () => Promise.resolve('00'.repeat(32));
-        pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
-        pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
-        return { pub, encoder };
-    }
 
     it('forwards the array unchanged at the cap', async function () {
         const { pub, encoder } = oraclePublisherWith(utxoSet(500));
@@ -154,7 +190,9 @@ describe('Publisher defaultBroadcast: oversized UTXO sets route to the encoder s
         expect(encoder.createTxArgs.utxos).to.equal(undefined);
         expect(encoder.createTxArgs.pubkey).to.equal(pub.btcAddress);
     });
+
 });
+
 
 // The encoder's P2SH lane is a TWO-transaction contract: the funding tx creates the
 // carrier outputs and a later reveal tx spends them, and only the reveal carries the
@@ -170,18 +208,6 @@ describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encod
     afterEach(function () {
         sinon.restore();
     });
-
-    // Same stub, answering the way the real create_tx answers a P2SH build.
-    function faithfulP2shEncoder() {
-        const encoder = makeMockEncoder();
-        const inner = encoder.createTx;
-        encoder.createTx = function (args) {
-            return inner.call(this, args).then(() => ({
-                psbt: 'deadbeef', encoding: 'P2SH', carrierScripts: ['00ff', '11ee']
-            }));
-        };
-        return encoder;
-    }
 
     it('OraclePublisher refuses to sign or broadcast a P2SH funding transaction', async function () {
         const pub = new OraclePublisher({});
@@ -220,6 +246,14 @@ describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encod
         expect(encoder.broadcastTx.called).to.equal(false, 'no funding transaction may reach the chain');
     });
 
+});
+
+describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encoding', function () {
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
     it('still publishes when the encoder answers a single-transaction encoding', async function () {
         // The guard reads the encoder's ANSWER, not the requested encoding, so a build
         // the encoder downgraded to OP_RETURN goes through untouched.
@@ -237,7 +271,9 @@ describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encod
         const result = await pub.defaultBroadcast('PRICE|0|...');
         expect(result.txid).to.equal('broadcast-txid');
     });
+
 });
+
 
 // Review board #7752: an abandoned build kept the encoder's input reservation.
 //
@@ -255,29 +291,6 @@ describe('Publisher defaultBroadcast: refuses phase 1 of a two-transaction encod
 describe('Publisher defaultBroadcast: releases the encoder reservation of an abandoned build', function () {
 
     afterEach(function () { sinon.restore(); });
-
-    // A create_tx answer shaped the way the real encoder answers: `reservation` rides on
-    // every successful build, whatever the encoding.
-    function reservingEncoder(over) {
-        const encoder = makeMockEncoder();
-        const inner = encoder.createTx;
-        encoder.createTx = function (args) {
-            return inner.call(this, args).then(() => Object.assign({
-                psbt: 'deadbeef', reservation: { id: 'f'.repeat(32) }
-            }, over || {}));
-        };
-        encoder.releaseInputs = sinon.stub().resolves({ found: true });
-        return encoder;
-    }
-
-    function oraclePub(encoder, walletSign) {
-        const pub = new OraclePublisher({});
-        pub.encoder       = encoder;
-        pub.walletSignFn  = walletSign || sinon.stub().resolves('00'.repeat(32));
-        pub.dogeAddress   = 'DAaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
-        pub.dogePubkeyHex = '02' + 'cd'.repeat(32);
-        return pub;
-    }
 
     it('hands the ticket back when the two-phase guard refuses the build', async function () {
         const encoder = reservingEncoder({ encoding: 'P2SH', carrierScripts: ['00ff'] });
@@ -328,6 +341,12 @@ describe('Publisher defaultBroadcast: releases the encoder reservation of an aba
                'a send that may have landed must not have its inputs freed for a second build').to.equal(false);
     });
 
+});
+
+describe('Publisher defaultBroadcast: releases the encoder reservation of an abandoned build', function () {
+
+    afterEach(function () { sinon.restore(); });
+
     it('is inert when the encoder minted no reservation (older encoder)', async function () {
         const encoder = reservingEncoder({ encoding: 'P2SH', carrierScripts: ['00ff'], reservation: undefined });
         const pub = oraclePub(encoder);
@@ -349,4 +368,5 @@ describe('Publisher defaultBroadcast: releases the encoder reservation of an aba
 
         expect(threw.message, 'best effort: the TTL is the backstop').to.contain('two-transaction');
     });
+
 });
