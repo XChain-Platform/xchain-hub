@@ -69,7 +69,15 @@ describe('Integration: Governance (SC-7.x)', function () {
     });
     afterEach(function () { sinon.restore(); });
 
-    // SC-7.1: Proposal creation to passage
+    registerProposalPassageTests();
+    registerProposalRejectionTests();
+    registerChangeBoundsTests();
+    registerCooldownTests();
+    registerNonValidatorTests();
+});
+
+// SC-7.1: Proposal creation to passage
+function registerProposalPassageTests() {
     describe('SC-7.1: Proposal passage', function () {
         it('passes proposal with 2/3+ approval', async function () {
             let db = testDb.getDb();
@@ -122,8 +130,10 @@ describe('Integration: Governance (SC-7.x)', function () {
             expect(votes).to.have.lengthOf(3);
         });
     });
+}
 
-    // SC-7.2: Proposal rejection (insufficient approval)
+// SC-7.2: Proposal rejection (insufficient approval)
+function registerProposalRejectionTests() {
     describe('SC-7.2: Proposal rejection', function () {
         it('fails proposal with insufficient approval', async function () {
             let db = testDb.getDb();
@@ -161,8 +171,10 @@ describe('Integration: Governance (SC-7.x)', function () {
             expect(result[0].status).to.equal('failed');
         });
     });
+}
 
-    // SC-7.3: Change bound validation
+// SC-7.3: Change bound validation
+function registerChangeBoundsTests() {
     describe('SC-7.3: Change bounds', function () {
         it('rejects proposal exceeding 50% increase', async function () {
             let db = testDb.getDb();
@@ -210,8 +222,10 @@ describe('Integration: Governance (SC-7.x)', function () {
             expect(proposal.status).to.equal('voting');
         });
     });
+}
 
-    // SC-7.4: Cooldown enforcement
+// SC-7.4: Cooldown enforcement
+function registerCooldownTests() {
     describe('SC-7.4: Cooldown after rejection', function () {
         it('blocks re-proposal within 14-day cooldown', async function () {
             let db = testDb.getDb();
@@ -240,8 +254,10 @@ describe('Integration: Governance (SC-7.x)', function () {
             }
         });
     });
+}
 
-    // SC-7.5: Non-validator proposal attempt
+// SC-7.5: Non-validator proposal attempt
+function registerNonValidatorTests() {
     describe('SC-7.5: Non-validator proposal', function () {
         it('rejects proposal from non-validator', async function () {
             let db = testDb.getDb();
@@ -278,4 +294,4 @@ describe('Integration: Governance (SC-7.x)', function () {
             }
         });
     });
-});
+}
