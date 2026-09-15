@@ -33,17 +33,16 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-describe('Regression: validator setup/run fixes', function () {
-
-    // -----------------------------------------------------------------
-    // REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
-    // ESM-only, and the platform now pins it deliberately: the invariant
-    // moved from "stay below 3.5" to "run on a Node that can require() ESM".
-    // That is Node 22.12.0, not Node 22: unflagged require(esm) landed in
-    // 22.12, so 22.0-22.11 still throw ERR_REQUIRE_ESM, which is exactly the
-    // F1 crash on a fresh build under the wrong runtime. Assert the MINOR,
-    // or the gate stays green on a floor that admits a dozen failing minors.
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
+// ESM-only, and the platform now pins it deliberately: the invariant
+// moved from "stay below 3.5" to "run on a Node that can require() ESM".
+// That is Node 22.12.0, not Node 22: unflagged require(esm) landed in
+// 22.12, so 22.0-22.11 still throw ERR_REQUIRE_ESM, which is exactly the
+// F1 crash on a fresh build under the wrong runtime. Assert the MINOR,
+// or the gate stays green on a floor that admits a dozen failing minors.
+// -----------------------------------------------------------------
+function registerSuitePart1() {
     describe('REG-VAL-001: mariadb is require()-loadable on the supported runtime', function () {
         it('require("mariadb") loads without ERR_REQUIRE_ESM @regression-p0', function () {
             expect(() => require('mariadb')).to.not.throw();
@@ -66,14 +65,16 @@ describe('Regression: validator setup/run fixes', function () {
             expect(() => require('../../src/db')).to.not.throw();
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-VAL-002 (F3): api.js must wire startCapabilities() into bring-up.
-    // The bug was that it was never called, so HUB_CAPABILITY_CONFIG self-test
-    // config never loaded and every config-bearing capability silently failed.
-    // A static guard is the right level: fully booting api.js stands up a
-    // server, but the regression is purely "is the call present in start-up".
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-VAL-002 (F3): api.js must wire startCapabilities() into bring-up.
+// The bug was that it was never called, so HUB_CAPABILITY_CONFIG self-test
+// config never loaded and every config-bearing capability silently failed.
+// A static guard is the right level: fully booting api.js stands up a
+// server, but the regression is purely "is the call present in start-up".
+// -----------------------------------------------------------------
+function registerSuitePart2() {
     describe('REG-VAL-002: api.js wires startCapabilities into bring-up', function () {
         it('src/api.js calls hub.startCapabilities(...) @regression-p0', function () {
             const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
@@ -83,15 +84,17 @@ describe('Regression: validator setup/run fixes', function () {
                 'api.js no longer calls startCapabilities; capability self-tests will not run');
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-VAL-003 (F4): qualification is FAIL-CLOSED. A capability with no
-    // configured MIN_STAKE must leave the node NOT qualified, regardless of
-    // stake; never default the threshold to 0. The old behavior qualified an
-    // unstaked (or any) node for every capability and diverged from the
-    // indexer's authoritative governance threshold used to lock quorum N.
-    // Drives the REAL XChainHub.refreshOwnQualification + CapabilityRegistry.
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-VAL-003 (F4): qualification is FAIL-CLOSED. A capability with no
+// configured MIN_STAKE must leave the node NOT qualified, regardless of
+// stake; never default the threshold to 0. The old behavior qualified an
+// unstaked (or any) node for every capability and diverged from the
+// indexer's authoritative governance threshold once locked quorum N.
+// Drives the REAL XChainHub.refreshOwnQualification + CapabilityRegistry.
+// -----------------------------------------------------------------
+function registerSuitePart3() {
     describe('REG-VAL-003: capability qualification is fail-closed', function () {
         const XChainHub         = require('../../src/XChainHub');
         const CapabilityRegistry = require('../../src/validators/capability_registry');
@@ -147,13 +150,15 @@ describe('Regression: validator setup/run fixes', function () {
             expect(verdict(b.setQual, 'price'), 'one satoshi short does not qualify').to.equal(false);
         });
     });
+}
 
-    // -----------------------------------------------------------------
-    // REG-VAL-004 (F5): DB credential/privilege errors fail FAST. They are not
-    // transient, so the connect loop must surface them immediately instead of
-    // retrying forever (which hung validator startup). Transient errors
-    // (connection refused, DB still booting) must NOT be treated as fatal.
-    // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// REG-VAL-004 (F5): DB credential/privilege errors fail FAST. They are not
+// transient, so the connect loop must surface them immediately instead of
+// retrying forever (which hung validator startup). Transient errors
+// (connection refused, DB still booting) must NOT be treated as fatal.
+// -----------------------------------------------------------------
+function registerSuitePart4() {
     describe('REG-VAL-004: DB privilege errors fail fast, transient errors do not', function () {
         let Database;
         beforeEach(function () {
@@ -188,4 +193,12 @@ describe('Regression: validator setup/run fixes', function () {
             }
         });
     });
+}
+
+describe('Regression: validator setup/run fixes', function () {
+    registerSuitePart1();
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+
 });
