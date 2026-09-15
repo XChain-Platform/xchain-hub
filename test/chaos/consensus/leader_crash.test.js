@@ -41,18 +41,23 @@ function wireFederationSnapshot(hub, quorum) {
     return snapshot;
 }
 
-describe('Chaos: PBFT Leader Crash (CON-1)', function () {
-    this.timeout(15000);
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
+
+function registerFollowerDetectsLeaderTimeoutAndInitiatesTest() {
 
     it('follower detects leader timeout and initiates view change', async function () {
         // Validator-2 is a follower; leader (validator-1) will crash
@@ -86,6 +91,9 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+
+function registerViewChangeProducesNewLeaderTest() {
 
     it('view change produces new leader', async function () {
         // Validator-1 proposes and times out; view change rotates leader
@@ -116,6 +124,9 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+
+function registerViewChangeQuorumAchievedNewLeaderTest() {
 
     it('view change quorum achieved → new leader broadcasts NEW_VIEW', async function () {
         // Validator-3 (index 2) becomes new leader after view change
@@ -150,6 +161,9 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+
+function registerNEWVIEWUpdatesFollowersViewNumberTest() {
 
     it('NEW_VIEW updates followers view number', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[3].addr });
@@ -169,6 +183,9 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+
+function registerConfigWriteCompletesUnderNewLeaderTest() {
 
     // #4168: the two experiments below already fail at HEAD on a pre-existing
     // race (the PREPARE is emitted synchronously before propose() awaits its
@@ -221,6 +238,9 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+
+function registerNoDoubleApplyWhenLateCOMMITsTest() {
 
     it('no double-apply when late COMMITs arrive after finalization', async function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
@@ -269,4 +289,15 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
 
         con.stop();
     });
+}
+describe('Chaos: PBFT Leader Crash (CON-1)', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerFollowerDetectsLeaderTimeoutAndInitiatesTest();
+    registerViewChangeProducesNewLeaderTest();
+    registerViewChangeQuorumAchievedNewLeaderTest();
+    registerNEWVIEWUpdatesFollowersViewNumberTest();
+    registerConfigWriteCompletesUnderNewLeaderTest();
+    registerNoDoubleApplyWhenLateCOMMITsTest();
 });
