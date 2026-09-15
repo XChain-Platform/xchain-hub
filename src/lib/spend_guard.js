@@ -189,7 +189,7 @@ class SpendGuard {
     }
     // Normalize a per-broadcast cost to a positive USD-cents integer, defaulting
     // to the configured estimate when the caller supplies nothing usable.
-    _cost(cost){
+    computeCost(cost){
         let c = Number(cost);
         if (!Number.isFinite(c) || c <= 0) return this.estSpendUsdCents;
         return c;
@@ -243,7 +243,7 @@ class SpendGuard {
             return { ok: false, reason: this.ceiling.noteBlocked(now) };
         }
 
-        let cost = this._cost(opts.cost);
+        let cost = this.computeCost(opts.cost);
         if (this.spentInWindow(now) + cost > this.maxSpendUsdCents){
             this.blocked.spend++;
             return { ok: false, reason: this.label + ': rolling per-window spend ceiling reached ($' +
@@ -259,7 +259,7 @@ class SpendGuard {
         let now = Date.now();
         this.ceiling.record(now);
         this.prune(now);
-        this._spends.push({ t: now, cost: this._cost(cost) });
+        this._spends.push({ t: now, cost: this.computeCost(cost) });
         this.persist();
     }
 
@@ -272,7 +272,7 @@ class SpendGuard {
         if (!this.storeUsable()) return false;
         let now = Date.now();
         if (!this.ceiling.allow(now)) return false;
-        return this.spentInWindow(now) + this._cost(cost) <= this.maxSpendUsdCents;
+        return this.spentInWindow(now) + this.computeCost(cost) <= this.maxSpendUsdCents;
     }
     // Actionable skip message matching whichever gate tripped.
     noteBlocked(now){

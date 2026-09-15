@@ -37,7 +37,7 @@ module.exports = {
         if (this.paused){ this.blocked.pause++; return null; }
         let now = Date.now();
         if (!this.ceiling.allow(now)){ this.blocked.spend++; return null; }
-        let c = this._cost(cost);
+        let c = this.computeCost(cost);
         if (this.spentInWindow(now) + c > this.maxSpendUsdCents){ this.blocked.spend++; return null; }
 
         this._reserveSeq = (this._reserveSeq || 0) + 1;
