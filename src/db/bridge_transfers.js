@@ -119,7 +119,7 @@ module.exports = {
     },
 
     // The transfer_id of this hub's persisted, non-retracted record for one source leg, or
-    // null when it holds none. A follower's _validateTransfer reads this rather than
+    // null when it holds none. A follower's validateTransfer reads this rather than
     // bridgeTransferExistsForSource's boolean because it has to tell "this row IS the
     // persisted record" (same id, a legitimate re-validation) from "a record for this leg
     // already exists under a DIFFERENT id" (a preimage the honest derivation never yields,

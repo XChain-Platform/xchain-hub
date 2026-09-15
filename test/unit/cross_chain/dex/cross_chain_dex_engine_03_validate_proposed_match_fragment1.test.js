@@ -124,7 +124,7 @@ function makeOrderPair() {
 function feature10validateProposedMatchFragment1OrderRow(eng, a, b, block) {
   let d = eng.tryMatch(a, b);
   return {
-    match_id: eng._deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
+    match_id: eng.deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
     snapshot_block: block,
     network: d.network,
     a_chain: d.lo.home_coin,
@@ -168,7 +168,7 @@ function registerFeature10validateProposedMatchFragment1Part1() {
       b
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.true;
   });
   it('returns false when a leg is no longer open', async function () {
@@ -178,7 +178,7 @@ function registerFeature10validateProposedMatchFragment1Part1() {
       b
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : null);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : null);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when the proposed fill amount differs from our re-derivation', async function () {
@@ -189,7 +189,7 @@ function registerFeature10validateProposedMatchFragment1Part1() {
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
     row.a_amount = '19'; // tampered fill
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when the proposed match_id is tampered', async function () {
@@ -200,7 +200,7 @@ function registerFeature10validateProposedMatchFragment1Part1() {
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
     row.match_id = 'f'.repeat(64);
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
 
@@ -216,7 +216,7 @@ function registerFeature10validateProposedMatchFragment1Part2() {
     } = makeOrderPair();
     a.payout_legs = feature10validateProposedMatchFragment1LEGS;
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.true;
   });
   it('returns false when the leader STRIPS the royalty legs', async function () {
@@ -230,7 +230,7 @@ function registerFeature10validateProposedMatchFragment1Part2() {
     // a is home_coin LTC → canonical-HIGHER vs DOGE ('DOGE' < 'LTC'), so a's legs
     // ride the B side of the row
     row.b_payout_legs = null;
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when the leader REWRITES the royalty legs', async function () {
@@ -245,7 +245,7 @@ function registerFeature10validateProposedMatchFragment1Part2() {
       to: 'attacker',
       bps: 500
     }]);
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when the row claims legs our own view does not have', async function () {
@@ -256,7 +256,7 @@ function registerFeature10validateProposedMatchFragment1Part2() {
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
     row.b_payout_legs = feature10validateProposedMatchFragment1LEGS;
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
 }
@@ -272,7 +272,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
     // pushed far into the future. Without the bound the follower would sign it and
     // the finalized match would never settle, locking both escrows.
     row.effective_time = eng._nowSeconds() + 30 * 24 * 3600; // +30 days
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when effective_time is non-numeric', async function () {
@@ -283,7 +283,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
     row.effective_time = 'not-a-time';
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
 
@@ -307,7 +307,7 @@ function registerFeature10validateProposedMatchFragment1Part3() {
       a,
       b
     } = makeOrderPair();
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     for (const delta of [0, -30, 5]) {
       let row = feature10validateProposedMatchFragment1OrderRow(eng, a, b, 100);
       row.effective_time = eng._nowSeconds() + delta;

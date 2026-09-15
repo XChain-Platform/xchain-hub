@@ -36,12 +36,12 @@ module.exports = {
     // stake-weighted quorum of equal validators every round needs every hub, so the leg
     // died at the round lifetime, every time, until a restart aligned the first polls.
     // The height is a leader-choice field now: the followers adopt it through the
-    // consensus' snapshot rebind and _validateTransfer bounds it to their own view.
+    // consensus' snapshot rebind and validateTransfer bounds it to their own view.
     //
     // A retracted row keeps this id for the re-mined leg, which is what the revive branch
     // of db.insertBridgeTransfer is for. The id is hub-internal: the indexer verifies the
     // signatures over the mirrored row and never re-derives it.
-    _deriveTransferId(network, srcChain, srcActionIndex, destChain, destAddress){
+    deriveTransferId(network, srcChain, srcActionIndex, destChain, destAddress){
         let s = 'XBRIDGE' +
                 '|' + String(network || '') +
                 '|' + String(srcChain) + ':' + String(srcActionIndex) +
@@ -50,7 +50,7 @@ module.exports = {
     },
 
     // sha256(network | origin_chain:tick | policy_seq | snapshot_block).
-    _deriveSnapshotId(network, originChain, tick, policySeq, snapshotBlock){
+    deriveSnapshotId(network, originChain, tick, policySeq, snapshotBlock){
         let s = String(network || '') +
                 '|' + String(originChain) + ':' + String(tick) +
                 '|' + String(policySeq) +
@@ -89,13 +89,13 @@ module.exports = {
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_BLOCK_TOLERANCE) return false;
         // The snapshot block is a BTC height (the anchor that selects the validator set), so
         // it is judged against the BTC key. The source chain's own flag day is checked in
-        // _validateTransfer, at the height the leg was mined.
+        // validateTransfer, at the height the leg was mined.
         if(!this.gateActive('bridge', Number(row.snapshot_block), 'BTC')) return false;
 
-        return hasTransfer ? await this._validateTransfer(row) : await this.validatePolicy(row);
+        return hasTransfer ? await this.validateTransfer(row) : await this.validatePolicy(row);
     },
 
-    async _validateTransfer(row){
+    async validateTransfer(row){
         if(!(await this.transferGuardsHold(row))) return false;
 
         let res;
@@ -109,7 +109,7 @@ module.exports = {
 
         // Our OWN depth judgement, at the MIN_DEPTH our own indexer reports the lock stamped.
         let depth = latest - Number(leg.block_index) + 1;
-        if(!Number.isFinite(depth) || depth < this._effectiveDepth(row.src_chain, leg.min_depth)) return false;
+        if(!Number.isFinite(depth) || depth < this.effectiveDepth(row.src_chain, leg.min_depth)) return false;
 
         // The SOURCE CHAIN's own flag day, at the height the leg was mined: the mirror of the
         // proposer's gate in maybeFinalizeTransfer, on the same (block, coin) pair, so a leg
@@ -132,7 +132,7 @@ module.exports = {
 
         // The id re-derives from the leg alone; the leader's snapshot_block was bounded to
         // this hub's own tip window in validateProposedMatch and is otherwise adopted.
-        let derived = this._deriveTransferId(row.network, row.src_chain, Number(row.src_action_index),
+        let derived = this.deriveTransferId(row.network, row.src_chain, Number(row.src_action_index),
                                              row.dest_chain, row.dest_address);
         return String(derived).toLowerCase() === String(row.transfer_id).toLowerCase();
     },
@@ -195,7 +195,7 @@ module.exports = {
 
         let shaped = this.shapePolicy(policy);
         if(!shaped || shaped.oversized) return false;
-        let hash = this._policyHash(shaped.allow, shaped.block, shaped.sleeping);
+        let hash = this.policyHash(shaped.allow, shaped.block, shaped.sleeping);
         if(hash !== String(row.policy_hash).toLowerCase()) return false;
 
         // The transport arrays must hash to the hash we just agreed on, or every destination
@@ -209,9 +209,9 @@ module.exports = {
         let block = asArray(row.block_list);
         if(allow === undefined || block === undefined) return false;
         if(!this.isCanonicalOrder(allow) || !this.isCanonicalOrder(block)) return false;
-        if(this._policyHash(allow, block, Number(row.sleeping) === 1) !== hash) return false;
+        if(this.policyHash(allow, block, Number(row.sleeping) === 1) !== hash) return false;
 
-        let derived = this._deriveSnapshotId(row.network, row.origin_chain, row.tick,
+        let derived = this.deriveSnapshotId(row.network, row.origin_chain, row.tick,
                                              Number(row.policy_seq), Number(row.snapshot_block));
         return String(derived).toLowerCase() === String(row.snapshot_id).toLowerCase();
     },

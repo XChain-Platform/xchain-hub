@@ -243,8 +243,8 @@ function registerFeature5tryOrderMatchPartialFillsPart1() {
     });
     let d2 = feature5tryOrderMatchPartialFillsEng.tryMatch(a, c);
     expect(d2.hiFilledBefore).to.equal('40'); // A already filled 40 LTCT
-    let id1 = feature5tryOrderMatchPartialFillsEng._deriveMatchId(d1.lo, d1.hi, 100, d1.loFilledBefore, d1.hiFilledBefore);
-    let id2 = feature5tryOrderMatchPartialFillsEng._deriveMatchId(d2.lo, d2.hi, 100, d2.loFilledBefore, d2.hiFilledBefore);
+    let id1 = feature5tryOrderMatchPartialFillsEng.deriveMatchId(d1.lo, d1.hi, 100, d1.loFilledBefore, d1.hiFilledBefore);
+    let id2 = feature5tryOrderMatchPartialFillsEng.deriveMatchId(d2.lo, d2.hi, 100, d2.loFilledBefore, d2.hiFilledBefore);
     expect(id1).to.not.equal(id2);
   });
 }

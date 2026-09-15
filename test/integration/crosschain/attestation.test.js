@@ -224,7 +224,7 @@ async function createMultiValidatorEngine(db) {
     // seq 1, so the leader is index 1, not index 0.
     let leaderIdx = 1 % VALIDATORS_4.length;
     let peerIdxs  = VALIDATORS_4.map((_, i) => i).filter(i => i !== leaderIdx).slice(0, 2);
-    // CrossChainEngine._resolveQuorum fails CLOSED for a federated hub with no
+    // CrossChainEngine.resolveQuorum fails CLOSED for a federated hub with no
     // deterministic cross_chain snapshot, so a validator set alone is not
     // enough fixture: it needs a snapshot at a real block height too.
     let hub = createTestHub(db, VALIDATORS_4[leaderIdx].addr, {

@@ -61,7 +61,7 @@ module.exports = {
             : null;
 
         // Single-node fallback
-        let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+        let quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);
         if (quorum === 0) {
             return await this.finalizeSingleNode(attestationId, sourceChain, sourceActionIndex,
                 destChain, confirmations, btcBlockHeight);
@@ -247,9 +247,9 @@ module.exports = {
         // the indexer is unreachable or the envelope predates this field.
         let quorum;
         try {
-            quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+            quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);
         } catch (err) {
-            // Fail closed: _resolveQuorum throws when federated but no
+            // Fail closed: resolveQuorum throws when federated but no
             // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
             // rather than PREPARE over a locally-derived quorum peers aren't using.
             logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);

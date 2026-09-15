@@ -54,7 +54,7 @@ module.exports = {
         // Is the ledger above trustworthy? Only a FAILED rebuild falsifies it: an engine
         // that has never rebuilt has no poll timer and no consensus subscription, so it
         // can neither propose nor co-sign, and starting out true keeps a construct-only
-        // engine behaving exactly as before. While false, _discoverAndMatch proposes
+        // engine behaving exactly as before. While false, discoverAndMatch proposes
         // nothing and validateProposedMatch refuses to sign, because effectiveRemaining
         // subtracts this ledger from the full offer amount and an under-counted ledger
         // re-offers escrow that finalized matches already reserved.

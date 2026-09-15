@@ -127,35 +127,35 @@ function registerFeature6deriveMatchIdPart1() {
       a,
       b
     } = makePair();
-    expect(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0')).to.match(/^[0-9a-f]{64}$/);
+    expect(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0')).to.match(/^[0-9a-f]{64}$/);
   });
   it('is deterministic for the same inputs', function () {
     let {
       a,
       b
     } = makePair();
-    expect(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0')).to.equal(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0'));
+    expect(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0')).to.equal(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0'));
   });
   it('differs when snapshot block changes', function () {
     let {
       a,
       b
     } = makePair();
-    expect(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng._deriveMatchId(a, b, 101, '0', '0'));
+    expect(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng.deriveMatchId(a, b, 101, '0', '0'));
   });
   it('differs when a filled-before offset changes (sequential fills)', function () {
     let {
       a,
       b
     } = makePair();
-    expect(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '40', '0'));
+    expect(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '40', '0'));
   });
   it('treats 0 and 0.00000000 offsets as the same id', function () {
     let {
       a,
       b
     } = makePair();
-    expect(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0', '0')).to.equal(feature6deriveMatchIdEng._deriveMatchId(a, b, 100, '0.00000000', '0'));
+    expect(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0', '0')).to.equal(feature6deriveMatchIdEng.deriveMatchId(a, b, 100, '0.00000000', '0'));
   });
   it('differs for different networks at same block (no collision)', function () {
     let {
@@ -168,11 +168,11 @@ function registerFeature6deriveMatchIdPart1() {
     } = makePair();
     a2.home_network = 'testnet';
     b2.home_network = 'testnet';
-    expect(feature6deriveMatchIdEng._deriveMatchId(a1, b1, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng._deriveMatchId(a2, b2, 100, '0', '0'));
+    expect(feature6deriveMatchIdEng.deriveMatchId(a1, b1, 100, '0', '0')).to.not.equal(feature6deriveMatchIdEng.deriveMatchId(a2, b2, 100, '0', '0'));
   });
 }
 function registerFeature6deriveMatchId() {
-  describe('_deriveMatchId()', function () {
+  describe('deriveMatchId()', function () {
     before(function () {
       loadModule();
       feature6deriveMatchIdEng = new CrossChainDexEngine(makeDexHub());

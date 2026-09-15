@@ -76,7 +76,7 @@ module.exports = {
     },
 
     // The LEADER's pick, made once at proposal time: the same shape as the relay's
-    // CrossChainCallEngine._relayEffectiveTime, differing only in which margin it
+    // CrossChainCallEngine.relayEffectiveTime, differing only in which margin it
     // adds (see lib/attest_response_timing.js for why 120 and not 2400).
     chooseEffectiveTime(){
         return this._nowSeconds() + this.forwardSeconds();

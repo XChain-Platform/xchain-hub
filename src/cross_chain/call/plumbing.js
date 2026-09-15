@@ -78,7 +78,7 @@ module.exports = {
     // operator tunes the margin up; the floor is not tunable, because followers
     // enforce a fixed floor of their own and a hub stamping under it would never
     // collect a quorum.
-    _relayEffectiveTime(gatingChain){
+    relayEffectiveTime(gatingChain){
         return this._nowSeconds() + relayMarginS(gatingChain, this.relayMarginBlocks);
     },
 };

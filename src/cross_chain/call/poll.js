@@ -165,7 +165,7 @@ module.exports = {
             params_json:           String(call.params_json || '[]'),
             gas_limit:             Number(call.gas_limit),
             cross_hops:            Number(call.cross_hops) || 0,
-            effective_time:        this._relayEffectiveTime(String(call.target_chain)),
+            effective_time:        this.relayEffectiveTime(String(call.target_chain)),
             result_status:         null,
             return_payload_b64:    null,
             // Source-chain reorg fence: the source indexer's generation
@@ -271,7 +271,7 @@ module.exports = {
             params_json:           String(dispatch.params_json),
             gas_limit:             Number(dispatch.gas_limit),
             cross_hops:            Number(dispatch.cross_hops) || 0,
-            effective_time:        this._relayEffectiveTime(String(dispatch.source_chain)),
+            effective_time:        this.relayEffectiveTime(String(dispatch.source_chain)),
             result_status:         resultStatus,
             return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64),
             // Inherit the source generation from the dispatch row so the source-keyed

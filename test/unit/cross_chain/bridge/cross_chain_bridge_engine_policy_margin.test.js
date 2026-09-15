@@ -100,7 +100,7 @@ describe('CrossChainBridgeEngine: the policy snapshot propagation margin', funct
             if(method === 'getlatestblock')  return { block_index: 500 };
             if(method === 'gettokenpolicy')  return {
                 allow_list: null, block_list: null, sleeping: false,
-                policy_hash: engine._policyHash(null, null, false)
+                policy_hash: engine.policyHash(null, null, false)
             };
             return null;
         };

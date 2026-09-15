@@ -135,7 +135,7 @@ function feature7policySnapshotsWithPolicy(engine, over) {
     bridged: true,
     origin_block: 900
   }, over || {});
-  if (policy.policy_hash === undefined) policy.policy_hash = engine._policyHash(policy.allow_list, policy.block_list, policy.sleeping);
+  if (policy.policy_hash === undefined) policy.policy_hash = engine.policyHash(policy.allow_list, policy.block_list, policy.sleeping);
   engine._indexerCall = sinon.stub().callsFake(async (coin, method) => {
     if (method === 'getlatestblock') return {
       block_index: 906
@@ -255,7 +255,7 @@ function registerFeature7policySnapshotsPart3() {
 }
 function feature7policySnapshotsNested7ProposedPolicy(engine, over) {
   const now = Math.floor(Date.now() / 1000);
-  const hash = engine._policyHash(feature7policySnapshotsALLOW, feature7policySnapshotsBLOCK, false);
+  const hash = engine.policyHash(feature7policySnapshotsALLOW, feature7policySnapshotsBLOCK, false);
   const row = Object.assign({
     snapshot_block: 150,
     network: 'regtest',
@@ -269,7 +269,7 @@ function feature7policySnapshotsNested7ProposedPolicy(engine, over) {
     sleeping: 0,
     effective_time: now + 2400
   }, over);
-  row.snapshot_id = over && over.snapshot_id ? over.snapshot_id : engine._deriveSnapshotId(row.network, row.origin_chain, row.tick, row.policy_seq, row.snapshot_block);
+  row.snapshot_id = over && over.snapshot_id ? over.snapshot_id : engine.deriveSnapshotId(row.network, row.origin_chain, row.tick, row.policy_seq, row.snapshot_block);
   return row;
 }
 function registerFeature7policySnapshotsNested7Part1() {

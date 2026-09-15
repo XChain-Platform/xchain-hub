@@ -17,7 +17,7 @@ const { createMockHub }  = require('../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../../helpers/fixtures');
 const { waitUntil }      = require('../../helpers/waitUntil');
 
-// #1223: _resolveQuorum now fails closed when federated with no deterministic
+// #1223: resolveQuorum now fails closed when federated with no deterministic
 // capability snapshot (the live-validator-set fallback forked N/quorum across
 // hubs). Federated flow tests must therefore wire a snapshot resolver. This one
 // mirrors the live set at call time (quorum is still frozen into pending at round
@@ -273,7 +273,7 @@ function registerFeature11snapshotGatedPBFTTallyPart3() {
     expect(stored.called).to.be.true;
   });
   it('degrades to the legacy raw tally when no snapshot population resolved', async function () {
-    // Single-node / bootstrap: _resolveQuorum falls back to the live set, so there
+    // Single-node / bootstrap: resolveQuorum falls back to the live set, so there
     // is no snapshot population to gate against and the filter must stay off.
     rootSuiteHub.capabilitySnapshot = null;
     rootSuiteEngine.setValidatorSet(feature11snapshotGatedPBFTTallyMEMBERS);

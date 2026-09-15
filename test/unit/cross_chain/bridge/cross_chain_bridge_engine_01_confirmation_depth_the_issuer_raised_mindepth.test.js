@@ -131,9 +131,9 @@ function registerFeature3confirmationDepthTheIssuerRaisedMINDEPTHPart1() {
       engine
     } = makeEngine();
     expect(engine.confirmations.BTC).to.equal(6);
-    expect(engine._effectiveDepth('BTC', 0)).to.equal(6); // unset
-    expect(engine._effectiveDepth('BTC', 3)).to.equal(6); // below platform: no lowering
-    expect(engine._effectiveDepth('BTC', 20)).to.equal(20); // above platform: raised
+    expect(engine.effectiveDepth('BTC', 0)).to.equal(6); // unset
+    expect(engine.effectiveDepth('BTC', 3)).to.equal(6); // below platform: no lowering
+    expect(engine.effectiveDepth('BTC', 20)).to.equal(20); // above platform: raised
   });
   it('holds a leg below its effective depth and proposes at it', async function () {
     const {

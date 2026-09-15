@@ -104,7 +104,7 @@ module.exports = {
             if(held && String(held.policy_hash).toLowerCase() === hash) return;
         }
         let policySeq = lastSeq + 1;
-        let snapshotId = this._deriveSnapshotId(network, originChain, pair.tick, policySeq, snapshotBlock);
+        let snapshotId = this.deriveSnapshotId(network, originChain, pair.tick, policySeq, snapshotBlock);
         if(this._inflight.has(snapshotId)) return;
 
         let row = {
@@ -169,7 +169,7 @@ module.exports = {
         // Membership arrays are TRANSPORT and are verified against the hash on apply, so a
         // snapshot whose own indexer answer does not hash to its own policy_hash would be
         // refused by every destination. Recompute rather than trust the read.
-        let hash = this._policyHash(shaped.allow, shaped.block, shaped.sleeping);
+        let hash = this.policyHash(shaped.allow, shaped.block, shaped.sleeping);
         if(String(policy.policy_hash || '').toLowerCase() !== hash){
             logger.warn('CrossChainBridge: gettokenpolicy for ' + originChain + ':' + pair.tick +
                          ' returned a policy_hash that does not match its own membership; not signing');
@@ -235,7 +235,7 @@ module.exports = {
     // `-` means the origin row has no such list, `0` means it has an EMPTY one. The two are
     // not the same thing: isActionAllowed denies everyone on an empty allow list, so a copy
     // must be able to tell "no policy" from "allow nobody".
-    _policyHash(allow, block, sleeping){
+    policyHash(allow, block, sleeping){
         let part = (label, list) => {
             if(list === null) return [label, '-'];
             return [label, String(list.length)].concat(list.map(a => String(a)));

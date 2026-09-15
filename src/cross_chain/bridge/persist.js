@@ -39,7 +39,7 @@ module.exports = {
         // between the source-leg guard being set and its release, and this handler runs from
         // an event .catch that only logs. A throw outside the try would leave
         // the leg guarded forever, which now also makes this hub refuse to CO-SIGN any later
-        // transfer for it (_validateTransfer's in-flight half), so the leak would outlive the
+        // transfer for it (validateTransfer's in-flight half), so the leak would outlive the
         // round it belongs to. Deferring instead matches the fail-closed rule below.
         try {
             row.btc_chain_id = await this.resolveBtcChainId(row.network);

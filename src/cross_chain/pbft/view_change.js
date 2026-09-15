@@ -78,7 +78,7 @@ module.exports = {
         let votes = pending.viewChanges.get(view);
         if(!votes || !this.meetsQuorum(pending, votes)) return;
         if(view > pending.view) pending.view = view;
-        let newLeader = this._leaderFor(rid, pending.validators, view);
+        let newLeader = this.leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
             // Rebuild the round canonical for the NEW view before signing (H-8):
             // once the EQUIV header is active the view is folded into the
@@ -200,7 +200,7 @@ module.exports = {
         // Announcer must be the designated leader for the CLAIMED view, and prove it
         // with a valid signature (mirrors Consensus.handleNewView's leader-identity
         // guard: a Byzantine node can only announce views in which it is the leader).
-        let expected = this._leaderFor(rid, pending.validators, view);
+        let expected = this.leaderFor(rid, pending.validators, view);
         if(!expected || announcer !== expected) {
             logger.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
             return;

@@ -35,9 +35,9 @@ module.exports = {
 
         // SOURCE LEG guard: at most one in-flight round per (network, src_chain,
         // src_action_index). transfer_id is now a pure function of the source leg (no
-        // snapshot_block in the preimage, see _deriveTransferId), so this key and the
+        // snapshot_block in the preimage, see deriveTransferId), so this key and the
         // _inflight key above name the same round; the guard is kept as the independent
-        // refusal the follower path (_validateTransfer) consults, and so that a transfer_id
+        // refusal the follower path (validateTransfer) consults, and so that a transfer_id
         // whose preimage ever widens again cannot silently reopen the double-round window.
         // A leg is guarded from propose through finalize/abandon/defer.
         this._inflightSourceLegs  = new Set();
@@ -177,7 +177,7 @@ module.exports = {
     // at its own block (token spec section 7, D24). Stamped rather than re-read at poll
     // time, so a later edit of the origin row can never make an accepted lock un-signable
     // and two followers can never disagree. Nothing is signed for it.
-    _effectiveDepth(coin, minDepth){
+    effectiveDepth(coin, minDepth){
         let platform = Number(this.confirmations[coin]);
         if(!Number.isFinite(platform) || platform <= 0) platform = 1;
         let raised = Number(minDepth);
@@ -287,7 +287,7 @@ module.exports = {
         // keyed '<COIN>:<network>' and the three chains arm at three heights, so the
         // BTC-anchored gate in _poll cannot speak for a leg mined on LTC or DOGE: without
         // this the hub would sign an LTC leg the moment BTC crossed its instant. The
-        // follower re-applies the identical test in _validateTransfer, so proposer and
+        // follower re-applies the identical test in validateTransfer, so proposer and
         // validator refuse on the same height rather than disagreeing across the boundary.
         if(!this.gateActive('bridge', Number(t.block_index), coin))
             return this.logHeld(coin, t, 'bridge not active on ' + coin + ' at block ' + t.block_index);
@@ -299,20 +299,20 @@ module.exports = {
         // applied mint is final on a destination that did not reorg (D16), so the depth is
         // the attacker's price for that loss.
         let depth = latestBlock - Number(t.block_index) + 1;
-        if(!Number.isFinite(depth) || depth < this._effectiveDepth(coin, t.min_depth))
+        if(!Number.isFinite(depth) || depth < this.effectiveDepth(coin, t.min_depth))
             // The reason carries the floor, never the current depth: a depth that grows by one
             // per block would defeat the once-per-reason memo and log every block until it clears.
-            return this.logHeld(coin, t, 'below depth ' + this._effectiveDepth(coin, t.min_depth));
+            return this.logHeld(coin, t, 'below depth ' + this.effectiveDepth(coin, t.min_depth));
 
         // The origin chain of this tick, learned from the leg's own kind: a lock is mined on
         // the chain the token is native to, a burn on a chain that holds a copy.
         this._tickOrigin.set(network + '|' + tick, kind === 'lock' ? coin : destChain);
 
-        let transferId = this._deriveTransferId(network, coin, srcActionIndex, destChain, String(t.dest_address || ''));
+        let transferId = this.deriveTransferId(network, coin, srcActionIndex, destChain, String(t.dest_address || ''));
         if(this._inflight.has(transferId)) return this.logHeld(coin, t, 'round ' + transferId.substring(0, 16) + '... still in flight');
         // Source-leg guard, the proposer's own refusal of a second round for one lock
         // (DEFECT 1: BTC action 95 finalized at both 1017 and 1018 when the id still moved
-        // with the snapshot height); _validateTransfer below is the follower's independent
+        // with the snapshot height); validateTransfer below is the follower's independent
         // one, so a proposer that skipped this cannot get a duplicate signed either.
         let sourceLegKey = network + '|' + coin + ':' + srcActionIndex;
         if(this._inflightSourceLegs.has(sourceLegKey)) return this.logHeld(coin, t, 'source leg guarded by an open round');

@@ -17,7 +17,7 @@ const { createMockHub }  = require('../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../../helpers/fixtures');
 const { waitUntil }      = require('../../helpers/waitUntil');
 
-// #1223: _resolveQuorum now fails closed when federated with no deterministic
+// #1223: resolveQuorum now fails closed when federated with no deterministic
 // capability snapshot (the live-validator-set fallback forked N/quorum across
 // hubs). Federated flow tests must therefore wire a snapshot resolver. This one
 // mirrors the live set at call time (quorum is still frozen into pending at round
@@ -98,7 +98,7 @@ function registerFeature3resolveQuorumFailClosed1223Part1() {
     rootSuiteHub.capabilitySnapshot = null;
     let threw = false;
     try {
-      await rootSuiteEngine._resolveQuorum('BTC', 'LTC', 100);
+      await rootSuiteEngine.resolveQuorum('BTC', 'LTC', 100);
     } catch (e) {
       threw = true;
       expect(e.message).to.match(/deterministic cross_chain snapshot while federated/);
@@ -108,7 +108,7 @@ function registerFeature3resolveQuorumFailClosed1223Part1() {
   it('single-node hub (live quorum 0) keeps the live fallback, no throw', async function () {
     rootSuiteEngine.setValidatorSet([makeValidator(1)]); // N=1 -> getQuorum()===0
     rootSuiteHub.capabilitySnapshot = null;
-    let q = await rootSuiteEngine._resolveQuorum('BTC', 'LTC', 100);
+    let q = await rootSuiteEngine.resolveQuorum('BTC', 'LTC', 100);
     expect(q).to.equal(0);
   });
   it('returns the snapshot quorum when a deterministic snapshot resolves', async function () {
@@ -119,7 +119,7 @@ function registerFeature3resolveQuorumFailClosed1223Part1() {
       }),
       getQuorum: () => 2
     };
-    let q = await rootSuiteEngine._resolveQuorum('BTC', 'LTC', 100);
+    let q = await rootSuiteEngine.resolveQuorum('BTC', 'LTC', 100);
     expect(q).to.equal(2);
   });
   it('treats block height 0 as a real height (not absent) and resolves a snapshot', async function () {
@@ -134,13 +134,13 @@ function registerFeature3resolveQuorumFailClosed1223Part1() {
       },
       getQuorum: () => 2
     };
-    let q = await rootSuiteEngine._resolveQuorum('BTC', 'LTC', 0);
+    let q = await rootSuiteEngine.resolveQuorum('BTC', 'LTC', 0);
     expect(seenBlock).to.equal(0);
     expect(q).to.equal(2);
   });
 }
 function registerFeature3resolveQuorumFailClosed1223() {
-  describe('_resolveQuorum() fail-closed (#1223)', function () {
+  describe('resolveQuorum() fail-closed (#1223)', function () {
     registerFeature3resolveQuorumFailClosed1223Part1();
   });
 }

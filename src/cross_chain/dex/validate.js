@@ -34,8 +34,8 @@ module.exports = {
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
         if(!this.proposedMatchInBounds(row)) return false;
-        let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
-        let b = await this._findOpenOffer(row.b_chain, Number(row.b_action_index));
+        let a = await this.findOpenOffer(row.a_chain, Number(row.a_action_index));
+        let b = await this.findOpenOffer(row.b_chain, Number(row.b_action_index));
         if(!a || !b) return false;
         if((a.home_network || '') !== String(row.network || '')) return false;
         if((b.home_network || '') !== String(row.network || '')) return false;
@@ -65,7 +65,7 @@ module.exports = {
         // the effective_time bound above).
         if((Number(row.a_push_generation) || 0) !== (Number(desc.lo.push_generation) || 0)) return false;
         if((Number(row.b_push_generation) || 0) !== (Number(desc.hi.push_generation) || 0)) return false;
-        let derivedId = this._deriveMatchId(desc.lo, desc.hi, Number(row.snapshot_block), desc.loFilledBefore, desc.hiFilledBefore);
+        let derivedId = this.deriveMatchId(desc.lo, desc.hi, Number(row.snapshot_block), desc.loFilledBefore, desc.hiFilledBefore);
         if(String(derivedId).toLowerCase() !== String(row.match_id).toLowerCase()) return false;
         return true;
     },

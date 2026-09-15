@@ -41,7 +41,7 @@ module.exports = {
     // The vote sets now hold proven signing keys directly, so this only intersects
     // them with the round's snapshot membership. One degradation remains: a null
     // memberPubkeys means no snapshot population resolved (single-node / bootstrap),
-    // the same state _resolveQuorum falls back to the live set in. The old
+    // the same state resolveQuorum falls back to the live set in. The old
     // empty-registry degradation is gone with the registry lookup it protected: a
     // key that no longer needs resolving through the registry cannot be un-resolvable
     // because the registry is empty.

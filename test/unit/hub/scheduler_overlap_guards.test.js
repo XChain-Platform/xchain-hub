@@ -49,7 +49,7 @@ function flush() {
     return new Promise((res) => setImmediate(res));
 }
 
-// ── CrossChainDexEngine._discoverAndMatch ───────────────────────────────────
+// ── CrossChainDexEngine.discoverAndMatch ───────────────────────────────────
 
 {
 
@@ -94,9 +94,9 @@ function flush() {
             return book(coin);
         };
 
-        const a = eng._discoverAndMatch();
+        const a = eng.discoverAndMatch();
         await flush();
-        const b = eng._discoverAndMatch();      // fires while a is parked on the gate
+        const b = eng.discoverAndMatch();      // fires while a is parked on the gate
         await b;
         expect(finalize.callCount, 'the guarded pass proposed nothing').to.equal(0);
 
@@ -106,7 +106,7 @@ function flush() {
         expect(eng._matching, 'flag released in finally').to.equal(false);
 
         // And the loop still works on the next poll.
-        await eng._discoverAndMatch();
+        await eng.discoverAndMatch();
         expect(finalize.callCount, 'a later poll runs normally').to.equal(2);
     }
 
@@ -119,12 +119,12 @@ function flush() {
         const boom = sinon.stub(eng, 'findMatches').throws(new Error('matcher blew up'));
 
         let threw = false;
-        try { await eng._discoverAndMatch(); } catch (e) { threw = true; }
+        try { await eng.discoverAndMatch(); } catch (e) { threw = true; }
         expect(threw, 'the poll wrapper swallows this, the method still rejects').to.equal(true);
         expect(eng._matching, 'a rejected pass must not wedge the poll').to.equal(false);
 
         boom.restore();
-        await eng._discoverAndMatch();
+        await eng.discoverAndMatch();
         expect(finalize.callCount, 'the next poll matches normally').to.equal(1);
     }
 
@@ -134,7 +134,7 @@ function flush() {
         it('a rejected book fetch does not wedge matching forever', aRejectedBookFetchDoesNotTest3);
     }
 
-    describe('CrossChainDexEngine._discoverAndMatch overlap guard', crosschaindexengineDiscoverandmatchOverlapGuardSuite1);
+    describe('CrossChainDexEngine.discoverAndMatch overlap guard', crosschaindexengineDiscoverandmatchOverlapGuardSuite1);
 
 }
 

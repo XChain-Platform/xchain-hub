@@ -118,7 +118,7 @@ class CrossChainDexEngine extends EventEmitter {
         });
 
         this._pollTimer = null;
-        this._matching  = false;   // poll self-overlap guard, see _discoverAndMatch()
+        this._matching  = false;   // poll self-overlap guard, see discoverAndMatch()
     }
 
     async start(){
@@ -142,7 +142,7 @@ class CrossChainDexEngine extends EventEmitter {
         await this.rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
         this._pollTimer = setInterval(() => {
-            this._discoverAndMatch().catch(err => logger.error(nodeUtil.format('CrossChainDex: tick error:', err && err.message)));
+            this.discoverAndMatch().catch(err => logger.error(nodeUtil.format('CrossChainDex: tick error:', err && err.message)));
         }, this.pollMs);
         logger.info('Cross-chain DEX engine started (poll ' + this.pollMs + 'ms)');
     }

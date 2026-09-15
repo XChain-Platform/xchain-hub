@@ -68,7 +68,7 @@ function assertHubSurface() {
 /**
  * A capability-snapshot stand-in that seats an exact validator set at any block.
  *
- * CrossChainEngine._resolveQuorum fails CLOSED without one: a federated hub
+ * CrossChainEngine.resolveQuorum fails CLOSED without one: a federated hub
  * (live quorum > 0) that cannot resolve a deterministic cross_chain snapshot
  * refuses to attest rather than fork N against its peers. Multi-validator
  * integration tests must therefore supply this, not just a validator set.

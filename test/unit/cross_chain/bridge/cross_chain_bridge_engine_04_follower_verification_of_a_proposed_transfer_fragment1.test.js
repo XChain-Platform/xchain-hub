@@ -141,7 +141,7 @@ function feature6followerVerificationOfAProposedTransferFragment1ProposedRow(eng
     effective_time: now + 240,
     push_generation: 0
   }, over);
-  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine._deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
+  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine.deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
   return row;
 }
 function feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, leg) {
@@ -162,13 +162,13 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part1()
     expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine))).to.equal(true);
   });
 
-  // DEFECT 1's follower half (row 15 drive 11): _validateTransfer had NO
+  // DEFECT 1's follower half (row 15 drive 11): validateTransfer had NO
   // source-uniqueness test, so a mesh that already finalized one transfer for a source
   // leg would co-sign a SECOND one for the same leg under another id without
   // hesitation, which is how BTC action 95 minted twice on the destination. An honest
   // hub can no longer derive a second id for a leg, so the shape is a persisted record
   // under an id the proposed row does not carry: refused before the leg is even read.
-  // DEFECT 1's follower half (row 15 drive 11): _validateTransfer had NO
+  // DEFECT 1's follower half (row 15 drive 11): validateTransfer had NO
   // source-uniqueness test, so a mesh that already finalized one transfer for a source
   // leg would co-sign a SECOND one for the same leg under another id without
   // hesitation, which is how BTC action 95 minted twice on the destination. An honest
@@ -181,7 +181,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part1()
     } = makeEngine();
     feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
     db.state.sourceTransferId = 'e'.repeat(64);
-    expect(await engine._validateTransfer(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine, {
+    expect(await engine.validateTransfer(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine, {
       snapshot_block: 1018
     }))).to.equal(false);
     expect(engine._indexerCall.called, 'the persisted-record refusal comes before the leg read').to.equal(false);
@@ -201,7 +201,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part1()
     feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
     const row = feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine);
     db.state.sourceTransferId = row.transfer_id;
-    expect(await engine._validateTransfer(row)).to.equal(true);
+    expect(await engine.validateTransfer(row)).to.equal(true);
   });
 
   // The two-hub race DEFECT 1 also opens, which the persisted-row read alone cannot
@@ -232,7 +232,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part2()
       snapshot_block: 151,
       transfer_id: 'e'.repeat(64)
     });
-    expect(await engine._validateTransfer(peerRow), 'must not co-sign a second transfer for a leg this hub already has a round open for').to.equal(false);
+    expect(await engine.validateTransfer(peerRow), 'must not co-sign a second transfer for a leg this hub already has a round open for').to.equal(false);
     expect(engine._indexerCall.called, 'the in-flight refusal comes before the leg read').to.equal(false);
   });
 
@@ -309,7 +309,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part4()
     const ownRow = engine.transferConsensus.propose.firstCall.args[1].row;
     expect(engine._inflightSourceLegs.has('regtest|BTC:41')).to.equal(true);
     feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
-    expect(await engine._validateTransfer(ownRow)).to.equal(true);
+    expect(await engine.validateTransfer(ownRow)).to.equal(true);
   });
   it('refuses a record whose signed fields do not match its own view', async function () {
     const {

@@ -167,7 +167,7 @@ function registerFeature4proposingATransferRecordPart1() {
   });
 
   // DEFECT 1 (row 15 drive 11, 2026-09-12): BTC action 95 finalized at BOTH snapshot
-  // blocks 1017 and 1018 when _deriveTransferId still folded snapshot_block into the
+  // blocks 1017 and 1018 when deriveTransferId still folded snapshot_block into the
   // id, so the SAME source leg polled a cycle later derived a DIFFERENT id and slipped
   // past both the plain _inflight set and the persisted-rows-only db check. The id is
   // snapshot-free now, so the two guards name the same round; the shape is kept as the
@@ -176,7 +176,7 @@ function registerFeature4proposingATransferRecordPart1() {
 }
 function registerFeature4proposingATransferRecordPart2() {
   // DEFECT 1 (row 15 drive 11, 2026-09-12): BTC action 95 finalized at BOTH snapshot
-  // blocks 1017 and 1018 when _deriveTransferId still folded snapshot_block into the
+  // blocks 1017 and 1018 when deriveTransferId still folded snapshot_block into the
   // id, so the SAME source leg polled a cycle later derived a DIFFERENT id and slipped
   // past both the plain _inflight set and the persisted-rows-only db check. The id is
   // snapshot-free now, so the two guards name the same round; the shape is kept as the

@@ -36,9 +36,9 @@ function registerAttestationIdTests(getEngine) {
         sinon.stub(engine, 'verifySourceAction').resolves(true);
         // A follower also refuses to PREPARE over a 0 quorum (empty cross_chain
         // snapshot / bootstrap fail-closed guard). The mock has no chain-pair set
-        // or peers, so _resolveQuorum would return 0; stub a real federation
+        // or peers, so resolveQuorum would return 0; stub a real federation
         // quorum so this test exercises the accept branch, not the 0-quorum guard.
-        sinon.stub(engine, '_resolveQuorum').resolves(3);
+        sinon.stub(engine, 'resolveQuorum').resolves(3);
         let attestationId = 'BTC:1:LTC';
         let digest = engine._digest(attestationId, 3);
         let envelope = {

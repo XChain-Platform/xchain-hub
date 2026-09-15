@@ -222,7 +222,7 @@ function registerFeature2rebuildCommittedPart2() {
       orders: []
     });
     await eng.rebuildCommitted();
-    await eng._discoverAndMatch();
+    await eng.discoverAndMatch();
     expect(fetch.called, 'a not-ready tick must not even read the books').to.equal(false);
     expect(await eng.validateProposedMatch({
       a_chain: 'LTC',
@@ -254,7 +254,7 @@ function registerFeature2rebuildCommittedPart3() {
     });
     await eng.rebuildCommitted();
     expect(eng._committedReady).to.equal(false);
-    await eng._discoverAndMatch(); // retries the rebuild on the poll tick
+    await eng.discoverAndMatch(); // retries the rebuild on the poll tick
     expect(eng._committedReady).to.equal(true);
     expect(eng.committed.get('DOGE:7')).to.deep.equal({
       give: '20',

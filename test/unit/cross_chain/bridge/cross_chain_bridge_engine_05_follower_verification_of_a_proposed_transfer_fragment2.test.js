@@ -141,7 +141,7 @@ function feature6followerVerificationOfAProposedTransferFragment2ProposedRow(eng
     effective_time: now + 240,
     push_generation: 0
   }, over);
-  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine._deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
+  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine.deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
   return row;
 }
 function feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, leg) {

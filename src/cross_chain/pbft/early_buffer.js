@@ -26,7 +26,7 @@ const { positiveIntConfig } = require('../../lib/config_int.js');
 module.exports = {
     initEarlyBuffer(){
         // Early-arrival buffer: a PROPOSE/PREPARE/COMMIT/VIEW_CHANGE can reach a
-        // peer before that peer's own _discoverAndMatch created the round. Buffer
+        // peer before that peer's own discoverAndMatch created the round. Buffer
         // by match_id and drain in propose(). Bounded TTL prevents leaks if the
         // round never starts locally. Map<match_id, Array<envelope>>.
         this.earlyMessages    = new Map();

@@ -146,7 +146,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
     // Sort the snapshot validators by pubkey so every node agrees on ordering,
     // then index by (matchIdInt + view) % N. Mirrors Consensus._getLeader.
-    _leaderFor(matchId, validators, view){
+    leaderFor(matchId, validators, view){
         if(!validators || validators.length === 0) return null;
         let sorted = validators.map(v => String(v.pubkey).toLowerCase()).sort();
         let mInt   = parseInt(String(matchId).slice(0, 8), 16) || 0;

@@ -32,7 +32,7 @@ module.exports = {
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
         let lo = desc.lo, hi = desc.hi;
-        let matchId       = this._deriveMatchId(lo, hi, snapshotBlock, desc.loFilledBefore, desc.hiFilledBefore);
+        let matchId       = this.deriveMatchId(lo, hi, snapshotBlock, desc.loFilledBefore, desc.hiFilledBefore);
         if(this._inflight.has(matchId)) return;        // already in a round this poll
         // Forward propagation margin (#4202). A match settles on BOTH legs at the
         // first block whose block_time reaches effective_time, so stamping the bare
@@ -197,7 +197,7 @@ module.exports = {
         let res = await this.db.createCrossChainMatch(row, btcChainId);
         let inserted = !!(res && Number(res.affectedRows) > 0);
         // A retracted row keeps its (unique) match_id. When a reorg retracts a crossing and the
-        // SAME crossing re-forms at the same BTC snapshot_block, _deriveMatchId yields the
+        // SAME crossing re-forms at the same BTC snapshot_block, deriveMatchId yields the
         // identical id, so the INSERT IGNORE above no-ops against the stale 'retracted' row and
         // the re-formed match would be stranded (never settled, committed capacity never
         // re-applied) until the BTC tip advances and yields a new snapshot_block/id. Revive the
@@ -295,7 +295,7 @@ module.exports = {
     // cumulative-filled-before offset, so two sequential partial fills of the SAME order
     // pair at the SAME snapshot_block produce DISTINCT ids (offsets normalized so
     // "0" == "0.00000000").
-    _deriveMatchId(lo, hi, snapshotBlock, loFilledBefore, hiFilledBefore){
+    deriveMatchId(lo, hi, snapshotBlock, loFilledBefore, hiFilledBefore){
         let s = (lo.home_network || '') +
                 '|' + lo.home_coin + ':' + lo.action_index + ':' + this.normalizeAmount(loFilledBefore) +
                 '|' + hi.home_coin + ':' + hi.action_index + ':' + this.normalizeAmount(hiFilledBefore) +

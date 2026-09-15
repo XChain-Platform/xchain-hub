@@ -140,7 +140,7 @@ let tipCalls;
             source_chain: 'BTC', source_action_index: 41, source_contract_index: 5,
             target_chain: 'DOGE', target_contract_index: 99, method: 'onArrival',
             params_json: '["x"]', gas_limit: 50000, cross_hops: 1,
-            effective_time: engine._relayEffectiveTime('DOGE')
+            effective_time: engine.relayEffectiveTime('DOGE')
         }, extra || {});
     }
 

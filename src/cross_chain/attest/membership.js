@@ -100,7 +100,7 @@ module.exports = {
 
     // Pubkey set of the round's locked cross_chain snapshot, or null when no usable
     // snapshot resolved. Null DISABLES the membership filter, which preserves the
-    // bootstrap / single-node path _resolveQuorum already keeps (there the quorum came
+    // bootstrap / single-node path resolveQuorum already keeps (there the quorum came
     // from the live validator set, not from a snapshot, so there is no snapshot
     // population to gate against). Mirrors OracleConsensus.memberPubkeySet.
     memberPubkeySet(snapshot) {
@@ -112,12 +112,12 @@ module.exports = {
         return set.size > 0 ? set : null;
     },
 
-    // Resolve the member-pubkey set for a round at the same block boundary _resolveQuorum
-    // sized N from. Read separately (rather than by widening _resolveQuorum's return) so
+    // Resolve the member-pubkey set for a round at the same block boundary resolveQuorum
+    // sized N from. Read separately (rather than by widening resolveQuorum's return) so
     // the quorum contract callers and tests depend on is untouched; CapabilitySnapshot
     // caches per (capability, block), so this is a cache hit behind the quorum resolve.
     // Never throws: a failure here degrades to the legacy unfiltered tally, exactly as an
-    // unresolved snapshot already does, and _resolveQuorum has already refused the round
+    // unresolved snapshot already does, and resolveQuorum has already refused the round
     // outright in the federated case.
     async resolveMemberPubkeys(btcBlockHeight) {
         if (!this.hub.capabilitySnapshot || btcBlockHeight == null) return null;
@@ -168,7 +168,7 @@ module.exports = {
     // peers) have no peer to diverge from, so they keep the live fallback for
     // bootstrap. btcBlockHeight is compared `!= null` (not truthiness) so a genuine
     // block height of 0 still resolves a snapshot instead of being treated as absent.
-    async _resolveQuorum(sourceChain, destChain, btcBlockHeight) {
+    async resolveQuorum(sourceChain, destChain, btcBlockHeight) {
         let snapshot = (this.hub.capabilitySnapshot && btcBlockHeight != null)
             ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
             : null;

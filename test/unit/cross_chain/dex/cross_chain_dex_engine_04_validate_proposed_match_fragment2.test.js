@@ -124,7 +124,7 @@ function makeOrderPair() {
 function feature10validateProposedMatchFragment2OrderRow(eng, a, b, block) {
   let d = eng.tryMatch(a, b);
   return {
-    match_id: eng._deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
+    match_id: eng.deriveMatchId(d.lo, d.hi, block, d.loFilledBefore, d.hiFilledBefore),
     snapshot_block: block,
     network: d.network,
     a_chain: d.lo.home_coin,
@@ -171,7 +171,7 @@ function registerFeature10validateProposedMatchFragment2Part1() {
       a,
       b
     } = makeOrderPair();
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
 
     // The canonical spelling of the same value, as a number or a string, passes.
     let ok = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
@@ -207,7 +207,7 @@ function registerFeature10validateProposedMatchFragment2Part1() {
     let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
     row.a_push_generation = 3;
     row.b_push_generation = 5;
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.true;
   });
 }
@@ -225,7 +225,7 @@ function registerFeature10validateProposedMatchFragment2Part2() {
     // honest retraction_generation can reach, escaping retraction forever.
     row.a_push_generation = 9007199254740992; // 2^53
     row.b_push_generation = 5;
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('returns false when the leader inflates b_push_generation', async function () {
@@ -239,7 +239,7 @@ function registerFeature10validateProposedMatchFragment2Part2() {
     let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100);
     row.a_push_generation = 3;
     row.b_push_generation = 42; // does not match a.push_generation (5)
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.false;
   });
   it('treats absent generations as 0 on both sides (legacy indexer parity)', async function () {
@@ -249,7 +249,7 @@ function registerFeature10validateProposedMatchFragment2Part2() {
       b
     } = makeOrderPair();
     let row = feature10validateProposedMatchFragment2OrderRow(eng, a, b, 100); // no push_generation set anywhere → 0 === 0
-    sinon.stub(eng, '_findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
+    sinon.stub(eng, 'findOpenOffer').callsFake(async coin => coin === 'DOGE' ? b : a);
     expect(await eng.validateProposedMatch(row)).to.be.true;
   });
 }

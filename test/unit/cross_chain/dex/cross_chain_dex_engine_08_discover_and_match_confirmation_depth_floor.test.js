@@ -146,7 +146,7 @@ function registerFeature16discoverAndMatchConfirmationDepthFloorPart1() {
       captured = obc;
       return [];
     });
-    await eng._discoverAndMatch();
+    await eng.discoverAndMatch();
     let seen = (captured.BTC || []).map(o => o.action_index);
     expect(seen).to.include(1);
     expect(seen).to.not.include(2);
@@ -177,12 +177,12 @@ function registerFeature16discoverAndMatchConfirmationDepthFloorPart2() {
       captured = obc;
       return [];
     });
-    await eng._discoverAndMatch();
+    await eng.discoverAndMatch();
     expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
   });
 }
 function registerFeature16discoverAndMatchConfirmationDepthFloor() {
-  describe('_discoverAndMatch(): confirmation-depth floor', function () {
+  describe('discoverAndMatch(): confirmation-depth floor', function () {
     registerFeature16discoverAndMatchConfirmationDepthFloorPart1();
     registerFeature16discoverAndMatchConfirmationDepthFloorPart2();
   });
@@ -321,7 +321,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part3() {
   });
 }
 function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part4() {
-  it('_discoverAndMatch pages the book and matches an offer beyond the first page', async function () {
+  it('discoverAndMatch pages the book and matches an offer beyond the first page', async function () {
     let eng = new CrossChainDexEngine(makeDexHub());
     eng.minConfirmations = {
       BTC: 1,
@@ -355,7 +355,7 @@ function registerFeature17fetchOpenOffersKeysetCursorPagingXCC2Part4() {
       captured = obc;
       return [];
     });
-    await eng._discoverAndMatch();
+    await eng.discoverAndMatch();
     // Both pages' offers reach the matcher; the confirmation-depth tip is the first page's.
     expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
   });

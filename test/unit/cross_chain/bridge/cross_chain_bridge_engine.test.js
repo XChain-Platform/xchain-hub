@@ -190,19 +190,19 @@ function registerFeature1signedCanonicalsAndIdPreimagesPart2() {
     const {
       engine
     } = makeEngine();
-    expect(engine._deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDest')).to.equal(sha256('XBRIDGE|regtest|BTC:41|DOGE:nDest'));
-    expect(engine._deriveSnapshotId('regtest', 'BTC', 'FUFU', 2, 150)).to.equal(sha256('regtest|BTC:FUFU|2|150'));
+    expect(engine.deriveTransferId('regtest', 'BTC', 41, 'DOGE', 'nDest')).to.equal(sha256('XBRIDGE|regtest|BTC:41|DOGE:nDest'));
+    expect(engine.deriveSnapshotId('regtest', 'BTC', 'FUFU', 2, 150)).to.equal(sha256('regtest|BTC:FUFU|2|150'));
   });
   it('hashes a policy membership, telling "no list" apart from "an empty list"', function () {
     const {
       engine
     } = makeEngine();
-    expect(engine._policyHash(null, null, false)).to.equal(sha256('ALLOW|-|BLOCK|-|SLEEP|0'));
-    expect(engine._policyHash([], null, false)).to.equal(sha256('ALLOW|0|BLOCK|-|SLEEP|0'));
+    expect(engine.policyHash(null, null, false)).to.equal(sha256('ALLOW|-|BLOCK|-|SLEEP|0'));
+    expect(engine.policyHash([], null, false)).to.equal(sha256('ALLOW|0|BLOCK|-|SLEEP|0'));
     // The two must differ: an empty ALLOW list denies everyone under isActionAllowed,
     // while no list at all denies nobody, and a copy has to be able to tell them apart.
-    expect(engine._policyHash([], null, false)).to.not.equal(engine._policyHash(null, null, false));
-    expect(engine._policyHash(['mA', 'mB'], ['nC'], true)).to.equal(sha256('ALLOW|2|mA|mB|BLOCK|1|nC|SLEEP|1'));
+    expect(engine.policyHash([], null, false)).to.not.equal(engine.policyHash(null, null, false));
+    expect(engine.policyHash(['mA', 'mB'], ['nC'], true)).to.equal(sha256('ALLOW|2|mA|mB|BLOCK|1|nC|SLEEP|1'));
   });
   it('reads canonical membership order as BYTES, not UTF-16 code units', function () {
     const {
@@ -329,7 +329,7 @@ function registerFeature2activationGatesPart3() {
       })]
     });
     const row = {
-      transfer_id: engine._deriveTransferId('regtest', 'DOGE', 41, 'BTC', 'nDestAddress'),
+      transfer_id: engine.deriveTransferId('regtest', 'DOGE', 41, 'BTC', 'nDestAddress'),
       snapshot_block: 150,
       tick: 'XCHAIN',
       decimals: 8,
@@ -343,13 +343,13 @@ function registerFeature2activationGatesPart3() {
       network: 'regtest',
       push_generation: 0
     };
-    expect(await engine._validateTransfer(row)).to.equal(false);
+    expect(await engine.validateTransfer(row)).to.equal(false);
 
     // The positive control, without which the refusal above would pass against a
     // row rejected for some entirely different reason: arm DOGE at its own height
     // and the identical row validates.
     engine.activation.bridge = () => true;
-    expect(await engine._validateTransfer(row)).to.equal(true);
+    expect(await engine.validateTransfer(row)).to.equal(true);
   });
   it('holds a non-XCHAIN leg behind the token gate while XCHAIN rides the bridge gate', async function () {
     const {

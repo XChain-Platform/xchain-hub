@@ -244,11 +244,11 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart1() {
     } = makeEngine();
     const now = Math.floor(Date.now() / 1000);
     // Default 4 blocks. DOGE 60s → +240s; LTC 150s → +600s; BTC 600s → +2400s.
-    expect(engine._relayEffectiveTime('DOGE') - now).to.be.at.least(240);
-    expect(engine._relayEffectiveTime('LTC') - now).to.be.at.least(600);
-    expect(engine._relayEffectiveTime('BTC') - now).to.be.at.least(2400);
+    expect(engine.relayEffectiveTime('DOGE') - now).to.be.at.least(240);
+    expect(engine.relayEffectiveTime('LTC') - now).to.be.at.least(600);
+    expect(engine.relayEffectiveTime('BTC') - now).to.be.at.least(2400);
     // Always strictly in the future of the finalization instant (that is the whole point).
-    expect(engine._relayEffectiveTime('DOGE')).to.be.greaterThan(now);
+    expect(engine.relayEffectiveTime('DOGE')).to.be.greaterThan(now);
   });
   it('keeps every chain’s margin under the follower clock-skew bound (3600s)', function () {
     const {
@@ -256,7 +256,7 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart1() {
     } = makeEngine();
     const now = Math.floor(Date.now() / 1000);
     for (const chain of ['BTC', 'LTC', 'DOGE']) {
-      expect(engine._relayEffectiveTime(chain) - now).to.be.lessThan(3600);
+      expect(engine.relayEffectiveTime(chain) - now).to.be.lessThan(3600);
     }
   });
 }
@@ -288,7 +288,7 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart2() {
       params_json: '["x"]',
       gas_limit: 50000,
       cross_hops: 1,
-      effective_time: engine._relayEffectiveTime('DOGE')
+      effective_time: engine.relayEffectiveTime('DOGE')
     };
     expect(await engine.validateProposedMatch(row)).to.equal(true);
   });
@@ -303,21 +303,21 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart2() {
       } = makeEngine();
       const now = Math.floor(Date.now() / 1000);
       // Even an absurd block count is capped below 3600s on every chain.
-      expect(engine._relayEffectiveTime('BTC') - now).to.be.at.most(3000);
-      expect(engine._relayEffectiveTime('DOGE') - now).to.be.at.most(3000);
+      expect(engine.relayEffectiveTime('BTC') - now).to.be.at.most(3000);
+      expect(engine.relayEffectiveTime('DOGE') - now).to.be.at.most(3000);
     } finally {
       if (prev === undefined) delete process.env.XCALL_RELAY_MARGIN_BLOCKS;else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;
     }
   });
 
   // The config is tunable UPWARD only. XCALL_RELAY_MARGIN_BLOCKS=0 once made
-  // _relayEffectiveTime return the bare clock second, which is precisely the
+  // relayEffectiveTime return the bare clock second, which is precisely the
   // live/replay fork the margin exists to prevent - a misconfiguration could
   // re-open a consensus hole (#4202). The default margin is now a hard floor.
 }
 function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart3() {
   // The config is tunable UPWARD only. XCALL_RELAY_MARGIN_BLOCKS=0 once made
-  // _relayEffectiveTime return the bare clock second, which is precisely the
+  // relayEffectiveTime return the bare clock second, which is precisely the
   // live/replay fork the margin exists to prevent - a misconfiguration could
   // re-open a consensus hole (#4202). The default margin is now a hard floor.
   it('floors the margin at the default: XCALL_RELAY_MARGIN_BLOCKS=0 cannot stamp the bare clock second', function () {
@@ -329,9 +329,9 @@ function registerFeature2relayMarginEffectiveTimeIsStampedInTheFUTUREPart3() {
           engine
         } = makeEngine();
         const now = Math.floor(Date.now() / 1000);
-        expect(engine._relayEffectiveTime('DOGE') - now, 'DOGE margin floor breached at XCALL_RELAY_MARGIN_BLOCKS=' + blocks).to.be.at.least(240);
-        expect(engine._relayEffectiveTime('LTC') - now).to.be.at.least(600);
-        expect(engine._relayEffectiveTime('BTC') - now).to.be.at.least(2400);
+        expect(engine.relayEffectiveTime('DOGE') - now, 'DOGE margin floor breached at XCALL_RELAY_MARGIN_BLOCKS=' + blocks).to.be.at.least(240);
+        expect(engine.relayEffectiveTime('LTC') - now).to.be.at.least(600);
+        expect(engine.relayEffectiveTime('BTC') - now).to.be.at.least(2400);
       }
     } finally {
       if (prev === undefined) delete process.env.XCALL_RELAY_MARGIN_BLOCKS;else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;

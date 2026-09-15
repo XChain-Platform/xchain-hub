@@ -76,7 +76,7 @@ module.exports = {
         if(view < pending.view) return;                                   // stale leader
 
         // Sender must be the designated leader for the claimed (matchId, view).
-        if(senderPubkey !== this._leaderFor(rid, pending.validators, view)) return;
+        if(senderPubkey !== this.leaderFor(rid, pending.validators, view)) return;
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
 
         // The proposed row must hash to this round's id.

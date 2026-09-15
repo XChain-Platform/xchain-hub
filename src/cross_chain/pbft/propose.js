@@ -65,7 +65,7 @@ module.exports = {
 
         // If we are the round leader, persist the capability snapshot (so indexers
         // can verify) and broadcast PROPOSE. Followers just wait (+ hold the timer).
-        let leader = this._leaderFor(rid, pending.validators, pending.view);
+        let leader = this.leaderFor(rid, pending.validators, pending.view);
         if(leader === myPubkey){
             await this.broadcastPropose(pending);
         }

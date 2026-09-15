@@ -27,7 +27,7 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 module.exports = {
-    async _discoverAndMatch(){
+    async discoverAndMatch(){
         // Poll self-overlap guard (house convention: FullNodeChallengeRound._tick,
         // AttestationRound.pollPending). The poll is a bare setInterval at 15s while one
         // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
@@ -87,7 +87,7 @@ module.exports = {
             let net = res && res.network ? String(res.network) : '';
             let latest = Number(res && res.latest_block_index);
             // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
-            // only the follower's validateProposedMatch (_findOpenOffer): the single-node
+            // only the follower's validateProposedMatch (findOpenOffer): the single-node
             // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
             // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
             // is silently inert on a single operator and a match can settle against a
@@ -309,8 +309,8 @@ module.exports = {
     },
 
     // Look up a single still-open cross-chain offer on `coin` by action_index, gated on
-    // minConfirmations. Returns the offer (tagged like _discoverAndMatch) or null.
-    async _findOpenOffer(coin, actionIndex){
+    // minConfirmations. Returns the offer (tagged like discoverAndMatch) or null.
+    async findOpenOffer(coin, actionIndex){
         if(!this.indexers[coin] || !this.indexers[coin].url) return null;
         let res;
         // Page the full book (XCC-2): a one-shot limit:500 silently fails to re-confirm any

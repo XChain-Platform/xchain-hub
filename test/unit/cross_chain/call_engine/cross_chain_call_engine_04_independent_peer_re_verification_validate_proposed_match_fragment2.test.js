@@ -286,10 +286,10 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     }))).to.equal(false);
     // ...while the margin an honest leader stamps still passes, on every chain.
     expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
-      effective_time: engine._relayEffectiveTime('DOGE')
+      effective_time: engine.relayEffectiveTime('DOGE')
     }))).to.equal(true);
     expect(await engine.validateProposedMatch(feature4independentPeerReVerificationValidateProposedMatchFragment2DispatchRow({
-      effective_time: engine._relayEffectiveTime('BTC')
+      effective_time: engine.relayEffectiveTime('BTC')
     }))).to.equal(true);
   });
 
