@@ -14,13 +14,14 @@
 // PEER-led rounds too, not only on the rounds this hub leads.
 //
 // `_loadLastCheckpointLatch` seeds the latch fleet-wide (MAX(snapshot_block)
-// over rows written by ANY leader), but at runtime it used to be written only in
-// the leader branch of `_tick`. With N validators and leader = btcBlock % N,
-// every hub's latch was stale on the N-1 blocks it did not lead, so each hub
-// re-led at its own residue and the FEDERATION produced a checkpoint roughly
-// every intervalBlocks / N blocks: checkpoint_seq (and with it
-// ANCHOR_CHECKPOINT_EVERY_N, defined against seq % N) ran N times faster than
-// CHECKPOINT_INTERVAL_BLOCKS configured, burning DOGE on the extra anchors.
+// over rows written by ANY leader), and at runtime `_tick` must write it in
+// the follower branch as well as the leader branch. With N validators and
+// leader = btcBlock % N, a latch written only by the leader is stale on the
+// N-1 blocks a hub does not lead, so each hub re-leads at its own residue and
+// the FEDERATION produces a checkpoint roughly every intervalBlocks / N
+// blocks: checkpoint_seq (and with it ANCHOR_CHECKPOINT_EVERY_N, defined
+// against seq % N) runs N times faster than CHECKPOINT_INTERVAL_BLOCKS
+// configured, burning DOGE on the extra anchors.
 
 const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine');

@@ -12,10 +12,10 @@
 
 // the checkpoint cadence must never fail silently.
 //
-// Every pre-leadership bail in `_tick` used to be a bare `return`. A hub whose
-// oracle_publish capability had gone unqualified therefore produced zero
-// checkpoints, zero log lines, and a getcheckpointstats payload that looked
-// perfectly healthy (round_timeouts 0). The live mainnet hub sat in exactly that
+// A pre-leadership bail in `_tick` that is a bare `return` leaves a hub whose
+// oracle_publish capability has gone unqualified producing zero checkpoints,
+// zero log lines, and a getcheckpointstats payload that looks perfectly
+// healthy (round_timeouts 0). The live mainnet hub sat in exactly that
 // state for 18 days: last checkpoint 2026-07-10 at BTC snapshot_block 957439
 // against a tip of 960028, because its capability config still carried a
 // placeholder DOGE address and the oracle_publish self-test refused to qualify.

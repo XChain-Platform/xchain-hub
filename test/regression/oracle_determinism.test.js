@@ -97,10 +97,10 @@ function registerSuitePart3() {
         const build = (order) => oc._buildPriceV0Payload(round, ts, oc._aggregateAll(submissions(ENTRIES, order)));
         const fwd = build(FWD), rev = build(REV), mix = build(MIX);
         // Sanity: the payload sort must still absorb a genuinely out-of-order
-        // input, so feed it one explicitly. (The sanity check used to read this
-        // divergence straight off _aggregateAll; that method now emits canonical
-        // order itself, so the un-canonical array has to be built by hand or the
-        // assertion below would be a tautology.)
+        // input, so feed it one explicitly. (_aggregateAll emits canonical order
+        // itself, so reading the divergence straight off it would make the
+        // assertion below a tautology; the un-canonical array has to be built by
+        // hand.)
         const agg = oc._aggregateAll(submissions(ENTRIES, FWD));
         assert.ok(agg.length > 1, 'need >1 pair for the sort to be observable');
         const scrambled = oc._buildPriceV0Payload(round, ts, agg.slice().reverse());
