@@ -91,8 +91,36 @@ function assertNoGuessedGrid() {
 const FIXTURE = path.join(__dirname, '../fixtures/dex-fill-quantization-vectors.json');
 const vectors = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
 
-describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier1', function () {
+function registerGivingLegGridTest() {
+    it('quantizes each derived amount on the GIVING leg\'s own reported decimals', function () {
+        // The one shape that matters and that no unit-level bcround test covers: which
+        // decimals go with which amount. takerGive is denominated in the taker's give
+        // tick, takerGet in the MAKER's give tick, and each value comes from that leg's
+        // own home indexer. Swapping them would quantize a DOGE-side fill on an
+        // LTC-side grid, which reads plausible and settles wrong.
+        const eng = new CrossChainDexEngine(makeDexHub());
+        // Maker (earlier block) gives 100 LTCT at 8dp; taker gives 20 DOGT on a
+        // 0-decimal (NFT-style) tick. Price 1 LTCT per 0.5 DOGT crosses.
+        const maker = { kind: 'order', action_index: 1, home_coin: 'LTC', home_network: 'regtest',
+            block_index: 10, give_coin: 'LTC', give_tick: 'LTCT', give_amount: '100',
+            get_coin: 'DOGE', get_tick: 'DOGT', get_amount: '50', give_ownership: 0,
+            get_ownership: 0, get_address: 'Laddr', give_decimals: 8 };
+        const taker = { kind: 'order', action_index: 7, home_coin: 'DOGE', home_network: 'regtest',
+            block_index: 20, give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '21',
+            get_coin: 'LTC', get_tick: 'LTCT', get_amount: '42', give_ownership: 0,
+            get_ownership: 0, get_address: 'Daddr', give_decimals: 0 };
+        const d = eng.tryOrderMatch(maker, taker);
+        assert.ok(d, 'the pair crosses');
+        // DOGE leg (0 decimals) settles a whole number; LTC leg (8) keeps its grid.
+        const dogeFill = (d.lo.home_coin === 'DOGE') ? d.loFill : d.hiFill;
+        const ltcFill  = (d.lo.home_coin === 'LTC')  ? d.loFill : d.hiFill;
+        assert.doesNotMatch(String(dogeFill), /\./,
+            'a 0-decimal give side must settle an integer quantity');
+        assert.ok(Number(ltcFill) > 0);
+    });
+}
 
+function registerPrecisionAlignmentTests() {
     describe('precision alignment', function () {
         for (const v of vectors.precision_alignment) {
             it(`${v.label}: derives at precision 64, not 18`, function () {
@@ -145,7 +173,9 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             }
         });
     });
+}
 
+function registerRoundingTests() {
     describe('bcround is present and faithful', function () {
         it('is exported (it was missing entirely, which made the parity claim false)', function () {
             assert.strictEqual(typeof bc.bcround, 'function',
@@ -168,7 +198,9 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             assert.strictEqual(String(bc.bcround('2.5', 0)), '3', 'banker\'s rounding would give 2');
         });
     });
+}
 
+function registerEngineGridTests() {
     describe('the engine applies the grid, and never guesses it', function () {
         // KEPT from the pre-parity suite, deliberately: a fallback default is still the
         // wrong way to close this, and it is the edit someone would reach for first.
@@ -186,32 +218,7 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             }
         });
 
-        it('quantizes each derived amount on the GIVING leg\'s own reported decimals', function () {
-            // The one shape that matters and that no unit-level bcround test covers: which
-            // decimals go with which amount. takerGive is denominated in the taker's give
-            // tick, takerGet in the MAKER's give tick, and each value comes from that leg's
-            // own home indexer. Swapping them would quantize a DOGE-side fill on an
-            // LTC-side grid, which reads plausible and settles wrong.
-            const eng = new CrossChainDexEngine(makeDexHub());
-            // Maker (earlier block) gives 100 LTCT at 8dp; taker gives 20 DOGT on a
-            // 0-decimal (NFT-style) tick. Price 1 LTCT per 0.5 DOGT crosses.
-            const maker = { kind: 'order', action_index: 1, home_coin: 'LTC', home_network: 'regtest',
-                block_index: 10, give_coin: 'LTC', give_tick: 'LTCT', give_amount: '100',
-                get_coin: 'DOGE', get_tick: 'DOGT', get_amount: '50', give_ownership: 0,
-                get_ownership: 0, get_address: 'Laddr', give_decimals: 8 };
-            const taker = { kind: 'order', action_index: 7, home_coin: 'DOGE', home_network: 'regtest',
-                block_index: 20, give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '21',
-                get_coin: 'LTC', get_tick: 'LTCT', get_amount: '42', give_ownership: 0,
-                get_ownership: 0, get_address: 'Daddr', give_decimals: 0 };
-            const d = eng.tryOrderMatch(maker, taker);
-            assert.ok(d, 'the pair crosses');
-            // DOGE leg (0 decimals) settles a whole number; LTC leg (8) keeps its grid.
-            const dogeFill = (d.lo.home_coin === 'DOGE') ? d.loFill : d.hiFill;
-            const ltcFill  = (d.lo.home_coin === 'LTC')  ? d.loFill : d.hiFill;
-            assert.doesNotMatch(String(dogeFill), /\./,
-                'a 0-decimal give side must settle an integer quantity');
-            assert.ok(Number(ltcFill) > 0);
-        });
+        registerGivingLegGridTest();
 
         it('declines the match when an offer carries no decimals, rather than defaulting', function () {
             // Fail-closed: the only way to see this is a hub polling a pre-batch indexer,
@@ -241,4 +248,10 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
             assert.ok(eng.tryOrderMatch(maker, zeroDp), '0 decimals is valid, not absent');
         });
     });
+}
+
+describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier1', function () {
+    registerPrecisionAlignmentTests();
+    registerRoundingTests();
+    registerEngineGridTests();
 });
