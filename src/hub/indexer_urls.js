@@ -145,8 +145,9 @@ class IndexerUrls {
     // hub still reaches its indexers. Returns null when nothing is configured.
     async _resolveIndexerUrl(coin){
         coin = String(coin || '').toUpperCase();
-        if(process.env[coin + '_INDEXER_API_URL']) return process.env[coin + '_INDEXER_API_URL'];
-        if(process.env[coin + '_INDEXER_URL']) return process.env[coin + '_INDEXER_URL'];
+        const env = hubConfig.env();
+        if(env[coin + '_INDEXER_API_URL']) return env[coin + '_INDEXER_API_URL'];
+        if(env[coin + '_INDEXER_URL']) return env[coin + '_INDEXER_URL'];
         if(!this.db) return null;
         let configs;
         try { configs = await this.db.getAllConfigs(); }
