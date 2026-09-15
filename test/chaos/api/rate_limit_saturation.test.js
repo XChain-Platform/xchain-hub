@@ -16,10 +16,32 @@ const http       = require('http');
 const express    = require('express');
 const rateLimit  = require('express-rate-limit');
 
-describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
-    this.timeout(15000);
 
-    let app, server, port;
+
+let app, server, port;
+
+function sendRequest(id) {
+    return new Promise((resolve, reject) => {
+        let body = JSON.stringify({ jsonrpc: '2.0', method: 'getconfig', id: id });
+        let req = http.request({
+            hostname: '127.0.0.1',
+            port:     port,
+            path:     '/',
+            method:   'POST',
+            headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => {
+                resolve({ status: res.statusCode, headers: res.headers, body: data });
+            });
+        });
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+function registerBeforeEachHook() {
 
     beforeEach(function (done) {
         sinon.stub(console, 'log');
@@ -45,33 +67,17 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
             done();
         });
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function (done) {
         sinon.restore();
         server.close(done);
     });
+}
 
-    function sendRequest(id) {
-        return new Promise((resolve, reject) => {
-            let body = JSON.stringify({ jsonrpc: '2.0', method: 'getconfig', id: id });
-            let req = http.request({
-                hostname: '127.0.0.1',
-                port:     port,
-                path:     '/',
-                method:   'POST',
-                headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-            }, (res) => {
-                let data = '';
-                res.on('data', chunk => { data += chunk; });
-                res.on('end', () => {
-                    resolve({ status: res.statusCode, headers: res.headers, body: data });
-                });
-            });
-            req.on('error', reject);
-            req.write(body);
-            req.end();
-        });
-    }
+function registerRequestsWithinLimitSucceedWith200Test() {
 
     it('requests within limit succeed with 200', async function () {
         let results = [];
@@ -83,6 +89,9 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
             expect(r.status).to.equal(200);
         }
     });
+}
+
+function registerRequestsExceedingLimitReceive429Test() {
 
     it('requests exceeding limit receive 429', async function () {
         let results = [];
@@ -96,6 +105,9 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
         expect(successes.length).to.equal(10);
         expect(rejected.length).to.equal(5);
     });
+}
+
+function register429ResponseIncludesRateLimitHeadersTest() {
 
     it('429 response includes rate limit headers', async function () {
         // Exhaust limit
@@ -108,6 +120,9 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
         expect(result.headers).to.have.property('ratelimit-limit');
         expect(result.headers['ratelimit-limit']).to.equal('10');
     });
+}
+
+function registerConcurrentBurstRateLimiterHandlesParallelTest() {
 
     it('concurrent burst: rate limiter handles parallel requests', async function () {
         let promises = [];
@@ -123,6 +138,9 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
         expect(successes.length).to.be.lte(10);
         expect(rejected.length).to.be.gte(10);
     });
+}
+
+function registerRateLimiterDoesNotLeakMemoryTest() {
 
     it('rate limiter does not leak memory from rejected requests', async function () {
         let before = process.memoryUsage().heapUsed;
@@ -137,4 +155,14 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
         // Memory growth should be < 10MB for 50 tiny requests
         expect(growth).to.be.lt(10 * 1024 * 1024);
     });
+}
+describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
+    this.timeout(15000);
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerRequestsWithinLimitSucceedWith200Test();
+    registerRequestsExceedingLimitReceive429Test();
+    register429ResponseIncludesRateLimitHeadersTest();
+    registerConcurrentBurstRateLimiterHandlesParallelTest();
+    registerRateLimiterDoesNotLeakMemoryTest();
 });
