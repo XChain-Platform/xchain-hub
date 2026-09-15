@@ -15,7 +15,7 @@
 'use strict';
 
 const { expect }   = require('chai');
-const SpendCeiling = require('../../src/lib/spend_ceiling.js');
+const SpendCeiling = require('../../src/providers/effector_spend/spend_ceiling.js');
 
 describe('SpendCeiling (item 2676)', function () {
 

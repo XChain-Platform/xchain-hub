@@ -77,7 +77,7 @@
 
 const path = require('path');
 
-const SpendCeiling = require('./spend_ceiling.js');
+const SpendCeiling = require('../providers/effector_spend/spend_ceiling.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();

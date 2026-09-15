@@ -46,7 +46,7 @@
 
 'use strict';
 
-const hubConfig = require('../config');
+const hubConfig = require('../../config');
 
 const DEFAULT_WINDOW_MS = 3600000; // 1 hour
 
