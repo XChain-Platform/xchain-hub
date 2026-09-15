@@ -45,6 +45,13 @@ function rateLimitErr(retryAfter){
 
 describe('StateAnchorPublisher: encoder rate-limit waits', function () {
 
+    registerRateLimitDurationTests();
+    registerRateLimitBudgetTests();
+    registerRateLimitFallbackTests();
+});
+
+function registerRateLimitDurationTests() {
+
     it('honours the per-IP limiter Retry-After instead of the flat chunk retry delay', async function () {
         const pub = mkPub();
         let calls = 0;
@@ -96,6 +103,9 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
         expect(pub.waits).to.have.lengthOf(1);
         expect(pub.waits[0]).to.be.within(25000, 30000);
     });
+}
+
+function registerRateLimitBudgetTests() {
 
     it('falls back to the flat retry delay when the 429 carries no parseable Retry-After', async function () {
         const pub = mkPub();
@@ -139,6 +149,9 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
         expect(calls).to.equal(4);                       // 3 free waits, then give up
         expect(pub.waits).to.deep.equal([60000, 60000, 60000]);
     });
+}
+
+function registerRateLimitFallbackTests() {
 
     it('leaves the flat retry path untouched for an error with no status and no rpcCode', async function () {
         const pub = mkPub();
@@ -160,4 +173,4 @@ describe('StateAnchorPublisher: encoder rate-limit waits', function () {
         e.response = { status: 400, headers: { 'retry-after': '60' } };
         expect(pub.rateLimitWaitMs(e)).to.equal(null);
     });
-});
+}
