@@ -62,7 +62,7 @@ function submissionCountSkip(round, submissions) {
 function noteSourceDiversity(round, submissions) {
     let capablePairs   = this.oracleRound && this.oracleRound.priceFetcher
         ? this.oracleRound.priceFetcher.multiSourceCapablePairs() : null;
-    let minRoundSources = this._minRoundSources(submissions, capablePairs);
+    let minRoundSources = this.computeMinRoundSources(submissions, capablePairs);
     if (Number.isFinite(minRoundSources) && minRoundSources <= 1) {
         // Count it as well as logging it. The warn reaches one hub's stdout, which is
         // below every threshold the dashboard can act on, so a fleet-wide loss of the
@@ -280,7 +280,7 @@ module.exports = {
     // normally reach >=2 sources, so CoinGecko-only-by-design pairs (BTC/MXN, etc.,
     // which Kraken does not list) do not pin the minimum to 1 every healthy round.
     // Omitted -> no filtering (legacy behavior; relied on by unit tests).
-    _minRoundSources(submissions, capablePairs) {
+    computeMinRoundSources(submissions, capablePairs) {
         let min = Infinity;
         if (!submissions) return min;
         for (let sub of submissions.values()) {

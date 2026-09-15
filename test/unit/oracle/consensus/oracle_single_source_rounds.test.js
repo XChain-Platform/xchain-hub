@@ -76,7 +76,7 @@ function snapshotOf(validators, blockIndex) {
     }
 
     async function doesNotCountARoundItTest6() {
-        // _minRoundSources returns Infinity when no submission carries a count. An
+        // computeMinRoundSources returns Infinity when no submission carries a count. An
         // unassessable round is not a degraded one, and counting it would make the
         // series fire on every round from any hub running an older submitter.
         oracleRound.getSubmissions.returns(buildSubmissions([

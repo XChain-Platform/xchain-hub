@@ -219,7 +219,7 @@ function registerMinroundsources4Tests14() {
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 2 }, { coinPair: 'LTC/USD', price: '80', sources: 2 }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 2 }, { coinPair: 'LTC/USD', price: '82', sources: 2 }] }
             ]);
-            expect(oc._minRoundSources(subs)).to.equal(2);
+            expect(oc.computeMinRoundSources(subs)).to.equal(2);
         });
 
         it('drops to 1 when any submission reached a single upstream for a pair', function () {
@@ -227,19 +227,19 @@ function registerMinroundsources4Tests14() {
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 2 }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 1 }] }
             ]);
-            expect(oc._minRoundSources(subs)).to.equal(1);
+            expect(oc.computeMinRoundSources(subs)).to.equal(1);
         });
 
         it('returns Infinity when no per-pair source count is present (cannot assess)', function () {
             let subs = buildSubmissions([
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
-            expect(oc._minRoundSources(subs)).to.equal(Infinity);
+            expect(oc.computeMinRoundSources(subs)).to.equal(Infinity);
         });
 
         it('tolerates an empty / missing submission set', function () {
-            expect(oc._minRoundSources(new Map())).to.equal(Infinity);
-            expect(oc._minRoundSources(null)).to.equal(Infinity);
+            expect(oc.computeMinRoundSources(new Map())).to.equal(Infinity);
+            expect(oc.computeMinRoundSources(null)).to.equal(Infinity);
         });
 
         it('ignores CoinGecko-only-by-design pairs when a capable-pair set is supplied', function () {
@@ -251,9 +251,9 @@ function registerMinroundsources4Tests14() {
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 2 }, { coinPair: 'BTC/MXN', price: '1700100', sources: 1 }] }
             ]);
             let capable = new Set(['BTC/USD']);
-            expect(oc._minRoundSources(subs, capable)).to.equal(2);
+            expect(oc.computeMinRoundSources(subs, capable)).to.equal(2);
             // Without the filter the by-design single-source pair pins the minimum to 1.
-            expect(oc._minRoundSources(subs)).to.equal(1);
+            expect(oc.computeMinRoundSources(subs)).to.equal(1);
         });
 
         it('still flags a genuine degradation on a multi-source-capable pair', function () {
@@ -262,7 +262,7 @@ function registerMinroundsources4Tests14() {
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 1 }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 1 }] }
             ]);
-            expect(oc._minRoundSources(subs, new Set(['BTC/USD']))).to.equal(1);
+            expect(oc.computeMinRoundSources(subs, new Set(['BTC/USD']))).to.equal(1);
         });
 
 }
@@ -319,9 +319,9 @@ describe('OracleConsensus', function () {
 
 
     // -----------------------------------------------------------------
-    // _minRoundSources(): source-diversity health signal
+    // computeMinRoundSources(): source-diversity health signal
     // -----------------------------------------------------------------
-    describe('_minRoundSources()', function () {
+    describe('computeMinRoundSources()', function () {
         registerMinroundsources4Tests14();
     });
 
