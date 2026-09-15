@@ -20,7 +20,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
+const { waitUntil } = require('../../helpers/waitUntil');
 
 // The complete indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js).
 const FEED_METHODS = [
@@ -87,7 +87,7 @@ function restoreEnvironment(saved) {
 }
 
 function loadApi(mockExpress, mockServer, mockHub) {
-    proxyquire('../../src/api', {
+    proxyquire('../../../src/api', {
         'dotenv': { config: sinon.stub() },
         'express': mockExpress,
         'helmet': sinon.stub().returns(function helmetMw() {}),

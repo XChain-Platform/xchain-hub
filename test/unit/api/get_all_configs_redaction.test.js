@@ -20,8 +20,8 @@
 const sinon = require('sinon');
 const {expect} = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const {waitUntil} = require('../helpers/waitUntil');
-const redaction = require('../../src/api/config_redaction.js');
+const {waitUntil} = require('../../helpers/waitUntil');
+const redaction = require('../../../src/api/config_redaction.js');
 
 // The credential-bearing tree xchain-node pushes (HubService.buildHubModuleConfig).
 function configTree() {
@@ -66,7 +66,7 @@ async function bootController(env) {
   }
   Object.assign(process.env, {HUB_DB_HOST:'localhost',HUB_DB_PORT:'3306',HUB_DB_NAME:'testdb',HUB_DB_USER:'root',HUB_DB_PASS:'pass',HUB_PORT:'9998'}, env || {});
   try {
-    proxyquire('../../src/api', {
+    proxyquire('../../../src/api', {
       'dotenv': {
         config: sinon.stub()
       },

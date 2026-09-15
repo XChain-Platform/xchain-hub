@@ -20,14 +20,14 @@ const {
 const {
   installHubOracleMetrics,
   installHubStakeShareMetrics
-} = require('../../src/api/hub_metrics');
+} = require('../../../src/api/hub_metrics');
 const {
   StakeShareMonitor,
   evaluateStakeShare
-} = require('../../src/validators/stake_share_monitor.js');
+} = require('../../../src/validators/stake_share_monitor.js');
 const {
   installObservability
-} = require('../../src/observability');
+} = require('../../../src/observability');
 
 // Real registry from the observability module, not a stub: the claim under test
 // is that these series appear on the actual scrape surface.
@@ -61,7 +61,7 @@ const hubStakeShareMetricsSuite2Rows = spec => spec.map((s, i) => ({
 }));
 function registerHubStakeShareMetricsSuite2Part1() {
   afterEach(function () {
-    require('../../src/observability')._resetObservability();
+    require('../../../src/observability')._resetObservability();
   });
   it('renders the share, the headroom and the stakes-to-halt per chain and capability', function () {
     const observability = realObservability();

@@ -30,8 +30,8 @@ const express    = require('express');
 const rateLimit  = require('express-rate-limit');
 const http       = require('http');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
-const policy = require('../../src/api/rate_limit_policy.js');
+const { waitUntil } = require('../../helpers/waitUntil');
+const policy = require('../../../src/api/rate_limit_policy.js');
 const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
         RATE_LIMIT_RPC_ERROR_CODE } = policy;
 {
@@ -319,7 +319,7 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
                 HUB_API_KEY: 'test-hub-key'
             }, env);
             try {
-                proxyquire('../../src/api', {
+                proxyquire('../../../src/api', {
                     'dotenv': { config: sinon.stub() },
                     'express': mockExpress,
                     'helmet': sinon.stub().returns(function helmetMw() {}),

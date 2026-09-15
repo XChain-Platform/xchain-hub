@@ -19,7 +19,7 @@
 // These cases pin what may leave the hub without an authorized include_secrets.
 
 const { expect } = require('chai');
-const redaction  = require('../../src/api/config_redaction.js');
+const redaction  = require('../../../src/api/config_redaction.js');
 
 // The shape xchain-node actually pushes (HubService.buildHubModuleConfig /
 // buildCheckpointConfig), so the assertions below are about real params rather

@@ -20,13 +20,13 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
-const { evaluateAuthPosture } = require('../../src/api/auth_posture.js');
-const { ConsensusInputMonitor, REASONS } = require('../../src/validators/consensus_input_monitor.js');
-const { waitUntil } = require('../helpers/waitUntil');
-const { DB_METHODS } = require('../helpers/mockHub');
+const { evaluateAuthPosture } = require('../../../src/api/auth_posture.js');
+const { ConsensusInputMonitor, REASONS } = require('../../../src/validators/consensus_input_monitor.js');
+const { waitUntil } = require('../../helpers/waitUntil');
+const { DB_METHODS } = require('../../helpers/mockHub');
 // api.js boots through the logger, not bare console, so the boot lines are
 // observed where they are now written.
-const { getLogger } = require('../../src/observability');
+const { getLogger } = require('../../../src/observability');
 
 function makeAuthBootServer() {
     const mockApp = {
@@ -74,7 +74,7 @@ async function bootApi(env) {
 
     const exitStub = sinon.stub(process, 'exit').callsFake((code) => { captured.exits.push(code); });
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),

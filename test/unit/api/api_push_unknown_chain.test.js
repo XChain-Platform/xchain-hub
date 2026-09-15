@@ -27,7 +27,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
+const { waitUntil } = require('../../helpers/waitUntil');
 
 // Boot src/api.js with everything heavy stubbed and capture the JSON-RPC method table
 // handed to express-json-rpc-router, so each handler can be driven directly. Pattern
@@ -69,7 +69,7 @@ async function bootApi(hubOverrides) {
     });
 
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),

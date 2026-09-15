@@ -20,14 +20,14 @@ const {
 const {
   installHubOracleMetrics,
   installHubStakeShareMetrics
-} = require('../../src/api/hub_metrics');
+} = require('../../../src/api/hub_metrics');
 const {
   StakeShareMonitor,
   evaluateStakeShare
-} = require('../../src/validators/stake_share_monitor.js');
+} = require('../../../src/validators/stake_share_monitor.js');
 const {
   installObservability
-} = require('../../src/observability');
+} = require('../../../src/observability');
 
 // Real registry from the observability module, not a stub: the claim under test
 // is that these series appear on the actual scrape surface.
@@ -44,7 +44,7 @@ function registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part1() {
   // service), so a case asserting a series is ABSENT has to start from a
   // clean registry rather than inheriting the previous case's series.
   afterEach(function () {
-    require('../../src/observability')._resetObservability();
+    require('../../../src/observability')._resetObservability();
   });
   it('renders freshness, round number and skip streak from live oracle state', function () {
     const observability = realObservability();

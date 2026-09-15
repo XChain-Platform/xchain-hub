@@ -18,7 +18,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../helpers/waitUntil');
+const { waitUntil } = require('../../helpers/waitUntil');
 
 const KEY = 'test-hub-key';
 
@@ -68,7 +68,7 @@ function loadApi(env, doubles) {
     }, env);
 
     try {
-        proxyquire('../../src/api', {
+        proxyquire('../../../src/api', {
             'dotenv': { config: sinon.stub() },
             'express': mockExpress,
             'helmet': sinon.stub().returns(function helmetMw() {}),

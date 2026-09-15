@@ -25,11 +25,11 @@ const assert = require('assert');
 // The controller is merged from the route families under src/api/rpc/, each of which
 // declares its methods at the object-method indent the extraction below reads.
 function readRpcFamilies() {
-  const dir = path.join(__dirname, '../../src/api/rpc');
+  const dir = path.join(__dirname, '../../../src/api/rpc');
   return fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort().map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
 }
-const openrpcJsonMethodCoverageSuite1Src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
-const openrpcJsonMethodCoverageSuite1Spec = JSON.parse(fs.readFileSync(path.join(__dirname, '../../docs/openrpc.json'), 'utf8'));
+const openrpcJsonMethodCoverageSuite1Src = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+const openrpcJsonMethodCoverageSuite1Spec = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../docs/openrpc.json'), 'utf8'));
 const openrpcJsonMethodCoverageSuite1Block = readRpcFamilies();
 const openrpcJsonMethodCoverageSuite1ControllerMethods = [...openrpcJsonMethodCoverageSuite1Block.matchAll(/^\s{8}async\s+([a-z][a-z0-9_]*)\s*\(/gm)].map(m => m[1]);
 const openrpcJsonMethodCoverageSuite1WriteBlock = openrpcJsonMethodCoverageSuite1Src.slice(openrpcJsonMethodCoverageSuite1Src.indexOf('WRITE_METHODS'), openrpcJsonMethodCoverageSuite1Src.indexOf(']', openrpcJsonMethodCoverageSuite1Src.indexOf('WRITE_METHODS')));
