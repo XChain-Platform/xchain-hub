@@ -25,6 +25,12 @@ const V = (pubkey, addr) => ({ pubkey: pubkey, addr: addr });
 
 describe('validator_order.canonicalValidatorOrder', function () {
 
+    registerValidatorSortTests();
+    registerValidatorStabilityTests();
+});
+
+function registerValidatorSortTests() {
+
     it('sorts by pubkey ascending', function () {
         let out = canonicalValidatorOrder([V('cc', 'ws://3'), V('aa', 'ws://1'), V('bb', 'ws://2')]);
         expect(out.map(v => v.pubkey)).to.deep.equal(['aa', 'bb', 'cc']);
@@ -64,6 +70,9 @@ describe('validator_order.canonicalValidatorOrder', function () {
         expect(a).to.deep.equal(b);
         expect(a.map(v => v.addr)).to.deep.equal(['ws://a', 'ws://m', 'ws://z']);
     });
+}
+
+function registerValidatorStabilityTests() {
 
     // XChainHub.propagateValidatorSet hands ONE array to five engines; an
     // in-place sort would let the first engine's canonicalization rewrite the
@@ -105,4 +114,4 @@ describe('validator_order.canonicalValidatorOrder', function () {
         let obj = { not: 'an array' };
         expect(canonicalValidatorOrder(obj)).to.equal(obj);
     });
-});
+}
