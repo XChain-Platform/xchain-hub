@@ -29,63 +29,9 @@ const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-
 
 module.exports = {
     async handlePropose(envelope){
-        let proposal = await this.verifiedProposal(envelope);
+        let proposal = this.leaderProposal(envelope);
         if(!proposal) return;
-        let { d, rid, pending, senderPubkey, view, row, canonical } = proposal;
-
-        let adopted = false;
-        if(canonical !== pending.canonical){
-            adopted = await this.adoptLeaderRow(pending, rid, row, canonical, view, senderPubkey);
-            if(adopted === null) return;
-        }
-
-        if(view > pending.view) pending.view = view;
-        pending.signatures.set(senderPubkey, String(d.sig));             // leader's sig
-        pending.prepares.add(senderPubkey);
-
-        // Our own signature + PREPARE broadcast.
-        if(!pending.signatures.has(pending.myPubkey)){
-            let mySig = this.identity.sign(canonical);
-            pending.signatures.set(pending.myPubkey, mySig);
-            pending.prepares.add(pending.myPubkey);
-            if(this.peerManager){
-                this.peerManager.broadcast(this.types.PREPARE, {
-                    matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig
-                });
-            }
-        }
-        this.checkPrepareQuorum(rid);
-
-        // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
-        // verification against our stale canonical and were buffered; replay them
-        // now that the round canonical matches what they signed.
-        if(adopted) this.drainEarlyMessages(rid);
-    },
-
-    // Everything a PROPOSE proves before this hub votes on it: a live round, the designated
-    // leader's verifying signature, local validation and the admission bound.
-    async verifiedProposal(envelope){
-        let d = envelope.data;
-        let rid = String(d.matchId || '').toLowerCase();
-        if(!rid || this.finalized.has(rid)) return;
-        let pending = this.pending.get(rid);
-        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
-
-        let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
-        let view = Number(d.view) || 0;
-        if(view < pending.view) return;                                   // stale leader
-
-        // Sender must be the designated leader for the claimed (matchId, view).
-        if(senderPubkey !== this.leaderFor(rid, pending.validators, view)) return;
-        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
-
-        // The proposed row must hash to this round's id.
-        let row = d.row;
-        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
-        let canonical = this.engine.canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
-
-        // Verify the leader's signature over THEIR canonical.
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
+        let { rid, pending, view, row, canonical } = proposal;
 
         // INDEPENDENT confirmation: re-derive + validate against our own view of
         // the underlying data. This (not byte-equality with our locally pre-built
@@ -110,12 +56,54 @@ module.exports = {
         // the other. The cost is one getlatestblock per reading chain on a path that
         // already makes at least two indexer round trips per proposal.
         if(!(await this.admissionBoundHolds(row, rid))) return;
+
+        // Every await of the round sits in this function, so adopting the leader's row and
+        // writing the leader's and our own signature are one synchronous step.
+        let adopted = false;
+        if(canonical !== pending.canonical){
+            if(this.committedToOtherValue(pending, canonical, view)) return;
+            let rebound = await this.rebindSnapshot(pending, row);
+            if(!this.adoptLeaderRow(proposal, rebound)) return;
+            adopted = true;
+        }
+        this.countLeaderAndOwnPrepare(proposal);
+
+        // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
+        // verification against our stale canonical and were buffered; replay them
+        // now that the round canonical matches what they signed.
+        if(adopted) this.drainEarlyMessages(rid);
+    },
+
+    // The synchronous half of what a PROPOSE proves before this hub votes on it: a live round
+    // and the designated leader's verifying signature over a row that hashes to the round id.
+    // handlePropose then awaits local validation and the admission bound itself.
+    leaderProposal(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+
+        let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
+        let view = Number(d.view) || 0;
+        if(view < pending.view) return;                                   // stale leader
+
+        // Sender must be the designated leader for the claimed (matchId, view).
+        if(senderPubkey !== this.leaderFor(rid, pending.validators, view)) return;
+        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+
+        // The proposed row must hash to this round's id.
+        let row = d.row;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
+        let canonical = this.engine.canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
+
+        // Verify the leader's signature over THEIR canonical.
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
         return { d, rid, pending, senderPubkey, view, row, canonical };
     },
 
-    // Adopt a validated leader row whose canonical differs from the round's own, rebinding the
-    // membership it declares. Null when the round must not proceed, true once adopted.
-    async adoptLeaderRow(pending, rid, row, canonical, view, senderPubkey){
+    // True when the round already sent COMMIT for a different VALUE than the leader's row.
+    committedToOtherValue(pending, canonical, view){
         // Leader-choice fields (effective_time = the leader's clock second,
         // snapshot_block = the leader's chain-tip view) legitimately differ
         // from the row WE pre-built at discovery, so byte-equality here
@@ -130,7 +118,14 @@ module.exports = {
         // failover quorum (H-8). PBFT forbids committing to a different
         // value, not re-voting the same value under a new view.
         let sameValueNewView = (this.engine.canonicalMatch(pending.row, view) === canonical);
-        if(pending._commitSent && !sameValueNewView) return null;
+        return Boolean(pending._commitSent && !sameValueNewView);
+    },
+
+    // Adopt a validated leader row whose canonical differs from the round's own, under the
+    // membership handlePropose re-resolved for it (rebound). False when the round must not
+    // proceed, true once adopted. Synchronous: the caller writes its votes right after.
+    adoptLeaderRow(proposal, rebound){
+        let { rid, pending, senderPubkey, row, canonical } = proposal;
         // The MEMBERSHIP travels with the row. snapshot_block is a leader-choice
         // field, and the XCALL rail accepts a leader block within its confirmation
         // window of the local tip, so the adopted row can declare a different
@@ -140,18 +135,17 @@ module.exports = {
         // against the pre-adoption set can clear a threshold the declared snapshot
         // never authorised: across a stake activation or a membership change, four
         // signatures out of the old set finalize a row the new seven-member set
-        // needs five for. Rebind before a single vote is counted, and fail CLOSED
+        // needs five for. The caller rebinds before a single vote is counted; fail CLOSED
         // (leave the round to its timer and view change) when the set cannot be
         // resolved, rather than counting votes under a set nobody will accept.
-        let rebound = await this.rebindSnapshot(pending, row);
-        if(rebound === false) return null;
-        // The resolve above is a real await, so re-check the round is still the one
-        // we started on before mutating it.
-        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return null;
+        if(rebound === false) return false;
+        // The resolve the caller awaited is a real await, so re-check the round is still
+        // the one we started on before mutating it.
+        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return false;
         // The proposing leader has to be a member of the set the row declares. Its
         // signature is one of the ones the indexer will measure, and a signature
         // from outside the declared set is discarded there.
-        if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)) return null;
+        if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)) return false;
         pending.row       = row;
         pending.canonical = canonical;
         if(rebound){
@@ -165,6 +159,28 @@ module.exports = {
         pending._commitSent = false;
         logger.info('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
         return true;
+    },
+
+    // The leader's signature and this hub's own PREPARE for the round canonical, then the
+    // prepare-quorum check, in the same synchronous step as any adoption before it.
+    countLeaderAndOwnPrepare(proposal){
+        let { d, rid, pending, senderPubkey, view, canonical } = proposal;
+        if(view > pending.view) pending.view = view;
+        pending.signatures.set(senderPubkey, String(d.sig));             // leader's sig
+        pending.prepares.add(senderPubkey);
+
+        // Our own signature + PREPARE broadcast.
+        if(!pending.signatures.has(pending.myPubkey)){
+            let mySig = this.identity.sign(canonical);
+            pending.signatures.set(pending.myPubkey, mySig);
+            pending.prepares.add(pending.myPubkey);
+            if(this.peerManager){
+                this.peerManager.broadcast(this.types.PREPARE, {
+                    matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig
+                });
+            }
+        }
+        this.checkPrepareQuorum(rid);
     },
 
     handlePrepare(envelope){
