@@ -18,14 +18,18 @@ const { createMockHub } = require('../helpers/mockHub');
 const { makeValidator } = require('../helpers/fixtures');
 const gen               = require('./helpers/generators');
 
-describe('Fuzz: Consensus', function () {
 
-    let hub, consensus;
+
+let hub, consensus;
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         hub = createMockHub();
         consensus = new Consensus(hub);
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         // Clean up any pending proposal timers
@@ -35,12 +39,9 @@ describe('Fuzz: Consensus', function () {
         consensus.pendingProposals.clear();
         sinon.restore();
     });
+}
 
-    // -----------------------------------------------------------------
-    // _getLeader()
-    // -----------------------------------------------------------------
-
-    describe('_getLeader()', function () {
+function registerGetLeaderTestCases1() {
 
         it('always returns a validator from the set', function () {
             fc.assert(fc.property(
@@ -78,6 +79,9 @@ describe('Fuzz: Consensus', function () {
                 expect(leader === undefined || leader === null).to.be.true;
             }), { numRuns: 50 });
         });
+}
+
+function registerGetLeaderTestCases2() {
 
         it('view change rotates the leader', function () {
             fc.assert(fc.property(
@@ -100,7 +104,22 @@ describe('Fuzz: Consensus', function () {
                 }
             ), { numRuns: 100 });
         });
+
+}
+
+function registerGetLeaderTests() {
+
+    // -----------------------------------------------------------------
+    // _getLeader()
+    // -----------------------------------------------------------------
+
+    describe('_getLeader()', function () {
+        registerGetLeaderTestCases1();
+        registerGetLeaderTestCases2();
     });
+}
+
+function registerGetQuorumTests() {
 
     // -----------------------------------------------------------------
     // getQuorum()
@@ -137,6 +156,9 @@ describe('Fuzz: Consensus', function () {
             expect(consensus.getQuorum()).to.equal(0);
         });
     });
+}
+
+function registerDigestTests() {
 
     // -----------------------------------------------------------------
     // _digest()
@@ -169,6 +191,9 @@ describe('Fuzz: Consensus', function () {
             ), { numRuns: 200 });
         });
     });
+}
+
+function registerHandlePrePrepareMessageValidationTests() {
 
     // -----------------------------------------------------------------
     // _handlePrePrepare() message validation
@@ -227,4 +252,12 @@ describe('Fuzz: Consensus', function () {
             ), { numRuns: 50 });
         });
     });
+}
+describe('Fuzz: Consensus', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerGetLeaderTests();
+    registerGetQuorumTests();
+    registerDigestTests();
+    registerHandlePrePrepareMessageValidationTests();
 });
