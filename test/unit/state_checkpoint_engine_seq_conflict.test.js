@@ -77,9 +77,9 @@ function mkEngine(db, broadcaster) {
     return engine;
 }
 
-describe('StateCheckpointEngine: same-seq conflict fence', function () {
+let broadcaster;
 
-    let broadcaster;
+describe('StateCheckpointEngine: same-seq conflict fence', function () {
 
     beforeEach(function () {
         broadcaster = { broadcastRow: sinon.stub(), dropAllForResync: sinon.stub().returns(1) };
@@ -89,6 +89,12 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+
+    registerSequenceConflictTests();
+    registerSequenceConflictControlTests();
+});
+
+function registerSequenceConflictTests() {
 
     it('refuses a quorum-signed FINALIZED that names a different block at a seated sequence', async function () {
         const db     = mkDb(SEATED);
@@ -118,6 +124,9 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         await engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
         expect((await engine.getStats()).seq_conflicts).to.equal(1);
     });
+}
+
+function registerSequenceConflictControlTests() {
 
     // The control the fence must not break: a re-delivered FINALIZED for the SAME payload
     // is ordinary traffic (the broadcast is deliberately re-deliverable), and it must
@@ -169,4 +178,4 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
         expect(emitted, 'and still emits').to.not.equal(null);
         expect(engine._seqConflicts, 'nothing is counted: we could not tell').to.equal(0);
     });
-});
+}
