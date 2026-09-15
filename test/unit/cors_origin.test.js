@@ -64,8 +64,7 @@ const ANDROID = 'https://localhost'
 const WEB     = 'https://wallet.xchain.io'
 const HOSTILE = 'https://evil.example'
 
-describe('CORS_ORIGIN allowlist parsing', function () {
-
+function registerOriginParsingTests() {
     describe('parseCorsOrigin', function () {
 
         it('disables CORS when the var is unset, empty, blank, or only separators', function () {
@@ -89,70 +88,83 @@ describe('CORS_ORIGIN allowlist parsing', function () {
             assert.deepStrictEqual(parseCorsOrigin(`${IOS},,${WEB}`), [IOS, WEB])
         })
     })
+}
 
-    describe('what a caller actually receives', function () {
-
-        it('sends no ACAO at all when CORS is disabled', async function () {
-            const acao = await acaoFor(undefined, [IOS, WEB, HOSTILE])
-            assert.strictEqual(acao[IOS], null)
-            assert.strictEqual(acao[WEB], null)
-            assert.strictEqual(acao[HOSTILE], null)
-        })
-
-        // Pure assertion, not an end-to-end probe: mounting `cors` with a literal
-        // wildcard origin (even test-scoped) is itself a flagged pattern, so this
-        // case only proves parseCorsOrigin leaves '*' unchanged. That `cors` then
-        // echoes an unconditional '*' to every caller is the library's own
-        // documented behavior for a String origin, already covered end-to-end by
-        // the single-origin-echo case above.
-        it('passes `*` through unchanged for CORS_ORIGIN=*', function () {
-            assert.strictEqual(parseCorsOrigin('*'), '*')
-        })
-
-        // Measured, not assumed: given a String, `cors` does no matching at all -
-        // it names that origin to every caller, and the BROWSER is what refuses a
-        // mismatch. That is safe for one origin and is exactly why a comma list is
-        // not: the same unconditional echo produces a header nobody can accept.
-        it('names the single configured origin to every caller, leaving the browser to refuse', async function () {
-            const acao = await acaoFor(WEB, [WEB, IOS, HOSTILE])
-            assert.strictEqual(acao[WEB], WEB)
-            assert.strictEqual(acao[IOS], WEB)
-            assert.strictEqual(acao[HOSTILE], WEB)
-        })
-
-        // The allowlist form is strictly stronger: an unlisted origin is refused at
-        // the SERVER, without a header, rather than relying on the browser.
-        it('refuses an unlisted origin server-side once the value is a list', async function () {
-            const acao = await acaoFor(`${IOS},${WEB}`, [HOSTILE])
-            assert.strictEqual(acao[HOSTILE], null)
-        })
-
-        // THE REGRESSION. Before parseCorsOrigin every one of these read back the
-        // raw "a,b,c" string, including for HOSTILE.
-        it('echoes each allowlisted origin BACK TO ITSELF, never the raw list', async function () {
-            const raw  = `${IOS},${ANDROID},${WEB}`
-            const acao = await acaoFor(raw, [IOS, ANDROID, WEB, HOSTILE])
-
-            assert.strictEqual(acao[IOS], IOS)
-            assert.strictEqual(acao[ANDROID], ANDROID)
-            assert.strictEqual(acao[WEB], WEB)
-            assert.strictEqual(acao[HOSTILE], null)
-
-            // Stated separately because this is the exact shape of the old bug:
-            // a header that is present and populated and accepted by nothing.
-            for (const origin of [IOS, ANDROID, WEB]) {
-                assert.notStrictEqual(acao[origin], raw,
-                    'a multi-value ACAO is rejected by every browser; the header must name one origin')
-                assert.ok(!String(acao[origin]).includes(','),
-                    'ACAO must never contain a comma')
-            }
-        })
-
-        it('fails CLOSED on `*` mixed with real origins rather than silently opening up', async function () {
-            const acao = await acaoFor(`*,${WEB}`, [WEB, HOSTILE])
-            assert.strictEqual(acao[WEB], WEB)
-            assert.strictEqual(acao[HOSTILE], null,
-                'a stray `*` in a list must not widen the grant to every origin')
-        })
+function registerCallerBaselineTests() {
+    it('sends no ACAO at all when CORS is disabled', async function () {
+        const acao = await acaoFor(undefined, [IOS, WEB, HOSTILE])
+        assert.strictEqual(acao[IOS], null)
+        assert.strictEqual(acao[WEB], null)
+        assert.strictEqual(acao[HOSTILE], null)
     })
+
+    // Pure assertion, not an end-to-end probe: mounting `cors` with a literal
+    // wildcard origin (even test-scoped) is itself a flagged pattern, so this
+    // case only proves parseCorsOrigin leaves '*' unchanged. That `cors` then
+    // echoes an unconditional '*' to every caller is the library's own
+    // documented behavior for a String origin, already covered end-to-end by
+    // the single-origin-echo case above.
+    it('passes `*` through unchanged for CORS_ORIGIN=*', function () {
+        assert.strictEqual(parseCorsOrigin('*'), '*')
+    })
+
+    // Measured, not assumed: given a String, `cors` does no matching at all -
+    // it names that origin to every caller, and the BROWSER is what refuses a
+    // mismatch. That is safe for one origin and is exactly why a comma list is
+    // not: the same unconditional echo produces a header nobody can accept.
+    it('names the single configured origin to every caller, leaving the browser to refuse', async function () {
+        const acao = await acaoFor(WEB, [WEB, IOS, HOSTILE])
+        assert.strictEqual(acao[WEB], WEB)
+        assert.strictEqual(acao[IOS], WEB)
+        assert.strictEqual(acao[HOSTILE], WEB)
+    })
+
+    // The allowlist form is strictly stronger: an unlisted origin is refused at
+    // the SERVER, without a header, rather than relying on the browser.
+    it('refuses an unlisted origin server-side once the value is a list', async function () {
+        const acao = await acaoFor(`${IOS},${WEB}`, [HOSTILE])
+        assert.strictEqual(acao[HOSTILE], null)
+    })
+}
+
+function registerCallerAllowlistTests() {
+    // THE REGRESSION. Before parseCorsOrigin every one of these read back the
+    // raw "a,b,c" string, including for HOSTILE.
+    it('echoes each allowlisted origin BACK TO ITSELF, never the raw list', async function () {
+        const raw  = `${IOS},${ANDROID},${WEB}`
+        const acao = await acaoFor(raw, [IOS, ANDROID, WEB, HOSTILE])
+
+        assert.strictEqual(acao[IOS], IOS)
+        assert.strictEqual(acao[ANDROID], ANDROID)
+        assert.strictEqual(acao[WEB], WEB)
+        assert.strictEqual(acao[HOSTILE], null)
+
+        // Stated separately because this is the exact shape of the old bug:
+        // a header that is present and populated and accepted by nothing.
+        for (const origin of [IOS, ANDROID, WEB]) {
+            assert.notStrictEqual(acao[origin], raw,
+                'a multi-value ACAO is rejected by every browser; the header must name one origin')
+            assert.ok(!String(acao[origin]).includes(','),
+                'ACAO must never contain a comma')
+        }
+    })
+
+    it('fails CLOSED on `*` mixed with real origins rather than silently opening up', async function () {
+        const acao = await acaoFor(`*,${WEB}`, [WEB, HOSTILE])
+        assert.strictEqual(acao[WEB], WEB)
+        assert.strictEqual(acao[HOSTILE], null,
+            'a stray `*` in a list must not widen the grant to every origin')
+    })
+}
+
+function registerCallerTests() {
+    describe('what a caller actually receives', function () {
+        registerCallerBaselineTests()
+        registerCallerAllowlistTests()
+    })
+}
+
+describe('CORS_ORIGIN allowlist parsing', function () {
+    registerOriginParsingTests()
+    registerCallerTests()
 })
