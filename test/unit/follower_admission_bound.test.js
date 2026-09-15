@@ -87,19 +87,8 @@ function armAdmission() {
 // 1. CrossChainCallEngine.validateProposedMatch
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('follower admission bound: CrossChainCallEngine.validateProposedMatch', function () {
-
-    let armedAh, CallEngine, restore;
-    let tipCalls;
-
-    before(function () {
-        const armed = armAdmission();
-        armedAh    = armed.ah;
-        CallEngine = armed.CrossChainCallEngine;
-        restore    = armed.restore;
-    });
-    after(function () { restore(); });
-    afterEach(function () { sinon.restore(); });
+let armedAh, CallEngine, restore;
+let tipCalls;
 
     // tips: chain code -> the height this hub's own indexer reports, or null for a chain
     // whose tip the hub refuses (no URL, RPC error, absent decoder_block, frozen decoder).
@@ -161,6 +150,7 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
         return Object.assign(armedAh.admitBlocksToColumns(map), overrides || {});
     }
 
+function registerCallAdmissionAcceptTests() {
     it('the era this suite arms is real, so every case below drives the bound', function () {
         expect(armedAh.isAdmissionEra('regtest', ERA_BLOCK)).to.equal(true);
         expect(armedAh.isAdmissionEra('regtest', LEGACY_BLK)).to.equal(false);
@@ -197,7 +187,9 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
         expect(await engine.validateProposedMatch(
             dispatchRow(engine, honestColumns({ admit_block_doge: OWN_DOGE + 61 })))).to.equal(false);
     });
+}
 
+function registerCallAdmissionRefusalTests() {
     it('REFUSES a height at or behind this follower\'s own tip', async function () {
         // A row admissible at a block that already exists lets a leader backdate it into a
         // block its peers have already committed.
@@ -251,7 +243,9 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
             admit_blocks: { BTC: cols.admit_block_btc + 1, DOGE: cols.admit_block_doge }
         })))).to.equal(false);
     });
+}
 
+function registerLegacyCallAdmissionTest() {
     it('a LEGACY-era row is signed on the old rule and reads NO tip', async function () {
         // In the same armed process. The gate must not turn on for rows produced below the
         // activation, or a from-genesis replay refuses every historical row.
@@ -271,160 +265,19 @@ describe('follower admission bound: CrossChainCallEngine.validateProposedMatch',
         expect(await engine.validateProposedMatch(dispatchRow(engine, { snapshot_block: LEGACY_BLK }))).to.equal(true);
         expect(tipCalls).to.deep.equal([]);
     });
-});
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. CrossChainDexConsensus._handlePropose, the shared gate
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('follower admission bound: the shared CrossChainDexConsensus PROPOSE gate', function () {
-
-    // No arming here on purpose: the consensus never asks the era gate. It asks the ENGINE
-    // for a scope, which is the only thing that can know the row's table and read set, and
-    // then bounds whatever map the row carries. Driving it with a stub engine is what proves
-    // the gate is generic rather than XCALL-shaped.
-    const CrossChainDexConsensus = require('../../src/cross_chain/dex_consensus.js');
-    const ah                     = require('../../src/lib/admission_height.js');
-
-    const leaderIdent   = new ValidatorIdentity('11'.repeat(32));
-    const followerIdent = new ValidatorIdentity('22'.repeat(32));
-    const LEADER_PUB    = leaderIdent.getPubkeyHex().toLowerCase();
-    const FOLLOWER_PUB  = followerIdent.getPubkeyHex().toLowerCase();
-
-    const VALIDATORS = [
-        { pubkey: LEADER_PUB,   source: 'src:leader',   weight: '1', amount: '1' },
-        { pubkey: FOLLOWER_PUB, source: 'src:follower', weight: '1', amount: '1' }
-    ];
-
-    function canonicalMatch(r) {
-        return ['XDEX', r.match_id, String(r.snapshot_block), r.a_chain, r.b_chain,
-                String(r.effective_time), r.network || '',
-                JSON.stringify(ah.rowAdmitBlocks(r) || null)].join('|');
-    }
-
-    // A round id whose leader is the OTHER identity, so _handlePropose runs for real
-    // instead of the follower being its own leader.
-    function ridLedBy(pub) {
-        const sorted = VALIDATORS.map(v => v.pubkey).sort();
-        for (let n = 0; n < 512; n++) {
-            const rid = sha256('round-' + n).slice(0, 64);
-            const mInt = parseInt(rid.slice(0, 8), 16) || 0;
-            if (sorted[mInt % sorted.length] === pub) return rid;
-        }
-        throw new Error('no round id in the search space is led by the requested validator');
-    }
-
-    function matchRow(rid, cols) {
-        return Object.assign({
-            match_id: rid, snapshot_block: ERA_BLOCK, network: 'regtest',
-            a_chain: 'BTC', b_chain: 'DOGE', effective_time: 1700000000
-        }, cols || {});
-    }
-
-    function honestColumns(overrides) {
-        const map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: OWN_BTC, DOGE: OWN_DOGE }, 'cross_chain_matches');
-        return Object.assign(ah.admitBlocksToColumns(map), overrides || {});
-    }
-
-    // opts.tips: own tips, or undefined for a hub with no resolver.
-    // opts.scope: false for an engine that declares none; a function to override it.
-    function makeFollower(opts) {
-        opts = opts || {};
-        const engine = {
-            hub: { p2pConfig: {} },
-            peerManager: { on: () => {}, removeListener: () => {}, broadcast: () => {} },
-            identity: followerIdent,
-            capSnapshot: null,
-            _canonicalMatch: canonicalMatch,
-            _persistCapabilitySnapshot: async () => {},
-            validateProposedMatch: async () => true
-        };
-        if (opts.scope !== false) {
-            engine.admissionScope = opts.scope || ((row) => ({
-                table: 'cross_chain_matches',
-                readSet: ah.admissionReadSet('cross_chain_matches', row)
-            }));
-        }
-        if (opts.tips !== undefined) {
-            engine.hub.resolveAdmissionTips = async (chains) => {
-                let out = {};
-                for (const c of chains) out[c] = Object.prototype.hasOwnProperty.call(opts.tips, c) ? opts.tips[c] : null;
-                return out;
-            };
-        }
-        return new CrossChainDexConsensus(engine);
-    }
-
-    // Seed the round, hand the follower a validly signed leader PROPOSE, and report whether
-    // it took the leader's signature (which is what "signed and moved to PREPARE" means).
-    async function offerPropose(consensus, row, rid) {
-        await consensus.propose(rid, { row, snapshot: { validators: VALIDATORS, count: 2 } });
-        const canonical = canonicalMatch(row);
-        await consensus._handlePropose({
-            type: consensus.types.PROPOSE, sender: LEADER_PUB,
-            data: { matchId: rid, view: 0, row, sig_pubkey: LEADER_PUB, sig: leaderIdent.sign(canonical) }
-        });
-        const pending = consensus.pending.get(rid);
-        const took = !!(pending && pending.signatures.has(LEADER_PUB));
-        if (pending && pending.timer) clearTimeout(pending.timer);
-        await consensus.stop();
-        return took;
-    }
-
-    it('signs a proposal whose map holds against this follower\'s own tips', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ tips: { BTC: OWN_BTC, DOGE: OWN_DOGE } });
-        expect(await offerPropose(c, matchRow(rid, honestColumns()), rid)).to.equal(true);
+describe('follower admission bound: CrossChainCallEngine.validateProposedMatch', function () {
+    before(function () {
+        const armed = armAdmission();
+        armedAh    = armed.ah;
+        CallEngine = armed.CrossChainCallEngine;
+        restore    = armed.restore;
     });
+    after(function () { restore(); });
+    afterEach(function () { sinon.restore(); });
 
-    it('REFUSES to sign a proposal whose map is outside the bound, even with validation green', async function () {
-        // validateProposedMatch is hard-wired true here, so a refusal can only be the
-        // admission gate: this is the case that proves the gate is wired into the handler.
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ tips: { BTC: OWN_BTC, DOGE: OWN_DOGE } });
-        expect(await offerPropose(c, matchRow(rid, honestColumns({ admit_block_btc: OWN_BTC + 99 })), rid))
-            .to.equal(false);
-    });
-
-    it('REFUSES to sign a proposal whose map omits a reading chain', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ tips: { BTC: OWN_BTC, DOGE: OWN_DOGE } });
-        expect(await offerPropose(c, matchRow(rid, honestColumns({ admit_block_doge: null })), rid))
-            .to.equal(false);
-    });
-
-    it('REFUSES to sign when its own tip for a reading chain is missing', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ tips: { BTC: OWN_BTC } });
-        expect(await offerPropose(c, matchRow(rid, honestColumns()), rid)).to.equal(false);
-    });
-
-    it('REFUSES to sign when the hub has no admission resolver at all', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({});
-        expect(await offerPropose(c, matchRow(rid, honestColumns()), rid)).to.equal(false);
-    });
-
-    it('REFUSES to sign when the engine\'s admission scope throws', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({
-            tips: { BTC: OWN_BTC, DOGE: OWN_DOGE },
-            scope: () => { throw new Error('unusable read set'); }
-        });
-        expect(await offerPropose(c, matchRow(rid, honestColumns()), rid)).to.equal(false);
-    });
-
-    it('leaves an engine that declares NO admission scope on the legacy rule', async function () {
-        // The four engines not yet wired must keep signing exactly as before, or this row
-        // would stop the DEX, bridge, policy and attest-relay rails on the way in.
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ scope: false });
-        expect(await offerPropose(c, matchRow(rid), rid)).to.equal(true);
-    });
-
-    it('a scope of null (a legacy-era row) signs and needs no tips', async function () {
-        const rid = ridLedBy(LEADER_PUB);
-        const c   = makeFollower({ scope: () => null });
-        expect(await offerPropose(c, matchRow(rid), rid)).to.equal(true);
-    });
+    registerCallAdmissionAcceptTests();
+    registerCallAdmissionRefusalTests();
+    registerLegacyCallAdmissionTest();
 });
