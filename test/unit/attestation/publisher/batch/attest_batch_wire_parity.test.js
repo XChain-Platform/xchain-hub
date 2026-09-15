@@ -23,6 +23,10 @@
  * Byte-identity, not value-identity: neither copy carries a per-file self
  * reference (the module header names BOTH paths precisely so this comparison can
  * admit no exceptions), so comment drift is drift too.
+ *
+ * The wire is an entry plus a parts directory (attest_batch_wire/ beside the entry
+ * in both repos), and a part is as much the wire as the entry is, so every part is
+ * compared byte for byte and the two part SETS are compared as a whole.
  ********************************************************************/
 
 'use strict';
@@ -40,6 +44,21 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', '..', '..', '..', 'xchain-indexer');
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'actions', 'attest', 'attest_batch_wire.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', '..', '..', '..', 'src', 'lib', 'attest_batch_wire.js');
+const TWIN_PARTS  = path.join(INDEXER_DIR, 'src', 'actions', 'attest', 'attest_batch_wire');
+const LOCAL_PARTS = path.join(__dirname, '..', '..', '..', '..', '..', 'src', 'lib', 'attest_batch_wire');
+
+// The part count when the split landed. It only ever rises, so a new part needs no
+// edit here, while an emptied, renamed or unreadable parts directory compares
+// nothing and fails instead of reading green.
+const PARTS_FLOOR = 4;
+
+// Every .js file under one parts directory, sorted, relative to it. A read error
+// yields an empty list on purpose, which the floor turns into a failure.
+function listParts(dir){
+    let names;
+    try { names = fs.readdirSync(dir); } catch (e) { return []; }
+    return names.filter((n) => n.endsWith('.js')).sort();
+}
 
 // A window built to exercise everything the canonical normalizes: a null field, a
 // number and a string spelling of the same integer column, and rows in an order the
@@ -80,6 +99,20 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
                 .to.equal(fs.readFileSync(TWIN_PATH, 'utf8'),
                     'the hub copy has drifted from the indexer twin; the hub builds this wire and ' +
                     'the indexer parses it, so a one-sided edit publishes batches the fleet refuses');
+            // The parts ride inside this case rather than one case per part: the hub's
+            // suite-title pin freezes this suite's titles, and every part is still
+            // compared byte for byte with a failure that names it.
+            const parts = listParts(LOCAL_PARTS);
+            expect(parts.length, 'expected at least ' + PARTS_FLOOR + ' parts under src/lib/attest_batch_wire/')
+                .to.be.at.least(PARTS_FLOOR);
+            expect(parts).to.deep.equal(listParts(TWIN_PARTS),
+                'the hub and indexer disagree about which attest_batch_wire parts exist; a part on one ' +
+                'side only is wire code one service runs and the other cannot');
+            for (const part of parts) {
+                expect(fs.readFileSync(path.join(LOCAL_PARTS, part), 'utf8'))
+                    .to.equal(fs.readFileSync(path.join(TWIN_PARTS, part), 'utf8'),
+                        'attest_batch_wire/' + part + ' has drifted from the indexer twin; re-vendor every part');
+            }
         });
 
         it('produces identical wires and an identical canonical from identical input', function () {
