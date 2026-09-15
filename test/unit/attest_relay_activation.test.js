@@ -44,9 +44,38 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'attest_relay_activation.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'attest_relay_activation.js');
 
-describe('ATTEST relay flag-day: hub copy @regression', function () {
+function registerRelayGateSuite() {
+describe('the gate this hub will enforce', function () {
+        it('is armed on the ratified BTC anchor, genesis-on off mainnet', function () {
+            expect(local.ATTEST_RELAY_ACTIVATION.mainnet).to.equal(963000);
+            expect(local.ATTEST_RELAY_ACTIVATION.testnet).to.equal(0);
+            expect(local.ATTEST_RELAY_ACTIVATION.regtest).to.equal(0);
+        });
 
-    describe('byte-identity with the xchain-indexer twin', function () {
+        it('is INERT below the anchor and live at it', function () {
+            expect(local.isAttestRelayActive(962999, 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayActive(963000, 'mainnet')).to.equal(true);
+            expect(local.isAttestRelayActive(963001, 'mainnet')).to.equal(true);
+        });
+
+        it('is active from genesis on the test networks so regtest exercises the relay', function () {
+            expect(local.isAttestRelayActive(0, 'regtest')).to.equal(true);
+            expect(local.isAttestRelayActive(0, 'testnet')).to.equal(true);
+        });
+
+        // The hub broadcasts on this gate. An un-evaluatable snapshot must land OFF,
+        // never on, or the hub emits legs the fleet is still rejecting.
+        it('fails closed on anything it cannot evaluate', function () {
+            expect(local.isAttestRelayActive(5, 'bogusnet')).to.equal(false);
+            expect(local.isAttestRelayActive('not-a-number', 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayActive(null, 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayActive(undefined, 'mainnet')).to.equal(false);
+        });
+    });
+}
+
+function registerRelayTwinSuite() {
+describe('byte-identity with the xchain-indexer twin', function () {
         before(function () {
             if (!fs.existsSync(TWIN_PATH)) {
                 if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
@@ -76,32 +105,11 @@ describe('ATTEST relay flag-day: hub copy @regression', function () {
             }
         });
     });
+}
 
-    describe('the gate this hub will enforce', function () {
-        it('is armed on the ratified BTC anchor, genesis-on off mainnet', function () {
-            expect(local.ATTEST_RELAY_ACTIVATION.mainnet).to.equal(963000);
-            expect(local.ATTEST_RELAY_ACTIVATION.testnet).to.equal(0);
-            expect(local.ATTEST_RELAY_ACTIVATION.regtest).to.equal(0);
-        });
+describe('ATTEST relay flag-day: hub copy @regression', function () {
 
-        it('is INERT below the anchor and live at it', function () {
-            expect(local.isAttestRelayActive(962999, 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayActive(963000, 'mainnet')).to.equal(true);
-            expect(local.isAttestRelayActive(963001, 'mainnet')).to.equal(true);
-        });
+    registerRelayTwinSuite();
 
-        it('is active from genesis on the test networks so regtest exercises the relay', function () {
-            expect(local.isAttestRelayActive(0, 'regtest')).to.equal(true);
-            expect(local.isAttestRelayActive(0, 'testnet')).to.equal(true);
-        });
-
-        // The hub broadcasts on this gate. An un-evaluatable snapshot must land OFF,
-        // never on, or the hub emits legs the fleet is still rejecting.
-        it('fails closed on anything it cannot evaluate', function () {
-            expect(local.isAttestRelayActive(5, 'bogusnet')).to.equal(false);
-            expect(local.isAttestRelayActive('not-a-number', 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayActive(null, 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayActive(undefined, 'mainnet')).to.equal(false);
-        });
-    });
+    registerRelayGateSuite();
 });
