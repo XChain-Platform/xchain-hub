@@ -33,10 +33,15 @@ const { createMockHub } = require('../../helpers/mockHub');
 
 const PROPOSAL = 'gov:MIN_STAKE:seq';
 
+let db, gov, kp, idn;
+
 describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', function () {
+    registerVoteHooks();
+    registerSchemaAndReplayTests();
+    registerMonotonicVoteTests();
+});
 
-    let db, gov, kp, idn;
-
+function registerVoteHooks() {
     before(async function () {
         try {
             await testDb.setup();
@@ -60,18 +65,20 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
         if (gov && gov._tallyTimer) clearInterval(gov._tallyTimer);
         await testDb.teardown();
     });
+}
 
-    async function storedVote() {
-        let rows = await db.doQuery(
-            "SELECT vote, vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ?",
-            [PROPOSAL, kp.pubkeyHex]);
-        return rows.length ? { vote: rows[0].vote, seq: Number(rows[0].vote_seq) } : null;
-    }
+async function storedVote() {
+    let rows = await db.doQuery(
+        "SELECT vote, vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ?",
+        [PROPOSAL, kp.pubkeyHex]);
+    return rows.length ? { vote: rows[0].vote, seq: Number(rows[0].vote_seq) } : null;
+}
 
-    function sig(vote, seq) {
-        return idn.sign(Governance.voteSigningPayload(PROPOSAL, vote, kp.pubkeyHex, seq));
-    }
+function sig(vote, seq) {
+    return idn.sign(Governance.voteSigningPayload(PROPOSAL, vote, kp.pubkeyHex, seq));
+}
 
+function registerSchemaAndReplayTests() {
     it('the vote_seq column exists on the live table (schema drift migration applied it)', async function () {
         let cols = await db.doQuery(
             "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.columns " +
@@ -106,7 +113,9 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
         await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject',  sig('reject', 1001),  1001);
         expect(await storedVote()).to.deep.equal({ vote: 'reject', seq: 1001 });
     });
+}
 
+function registerMonotonicVoteTests() {
     it('a late-arriving loser cannot lower the stored seq (GREATEST keeps the bar up)', async function () {
         await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'reject', sig('reject', 5000), 5000);
         await gov.upsertVote(PROPOSAL, kp.pubkeyHex, 'approve', sig('approve', 10), 10);
@@ -144,4 +153,4 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
         expect(await storedVote(), 'highest seq wins regardless of interleaving')
             .to.deep.equal({ vote: 'reject', seq: 3000 });
     });
-});
+}
